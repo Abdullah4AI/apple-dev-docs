@@ -8,6 +8,32 @@ Search Apple Developer Documentation, frameworks, APIs, and WWDC videos directly
 - Score-based search across all indexed sessions
 - Topic and year filtering with 20 categories
 
+## Installation
+
+### ClawHub
+
+```bash
+clawhub install apple-dev-docs
+```
+
+### GitHub
+
+```bash
+git clone https://github.com/Abdullah4AI/apple-dev-docs.git
+```
+
+### OpenClaw (Manual)
+
+```bash
+cp -r apple-dev-docs ~/.openclaw/skills/
+```
+
+### Codex CLI
+
+```bash
+cp -r apple-dev-docs ~/.codex/skills/
+```
+
 ## Quick Start
 
 No setup required. Works out of the box with Node.js.
