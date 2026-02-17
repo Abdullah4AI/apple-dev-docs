@@ -1,68 +1,131 @@
 ---
 name: apple-docs
-description: "Search and browse Apple Developer Documentation, frameworks, APIs, WWDC videos, and sample code. USE WHEN: user asks about Apple APIs (SwiftUI, UIKit, Foundation, etc.), needs to look up documentation for iOS/macOS/watchOS/tvOS/visionOS development, wants WWDC session transcripts or code examples, needs to check API platform compatibility, or wants to explore Apple frameworks and sample projects. DON'T USE WHEN: user wants general coding help without needing Apple docs lookup, is asking about non-Apple platforms, or already has the information they need. EDGE CASES: 'how do I use NavigationStack' → this skill (API lookup). 'write me a SwiftUI view' → just write it, use this skill only if you need to verify an API. 'what's new in iOS 26' → this skill (documentation updates). 'find WWDC talks about concurrency' → this skill (WWDC search)."
+description: Query Apple Developer Documentation, APIs, and WWDC videos (2014-2025). Search SwiftUI, UIKit, Objective-C, Swift frameworks and watch sessions.
+metadata: {"clawdbot":{"emoji":"🍎","requires":{"bins":["node"]}}}
 ---
 
-# Apple Developer Documentation
+# Apple Docs Skill
 
-Search Apple docs, frameworks, APIs, WWDC videos, and sample code via CLI.
+Query Apple Developer Documentation, frameworks, APIs, and WWDC videos.
 
 ## Setup
 
-First run only:
+No installation required - works out of the box with native fetch.
+
+## Available Tools
+
+### Documentation Search
+
+| Command | Description |
+|---------|-------------|
+| `apple-docs search "query"` | Search Apple Developer Documentation |
+| `apple-docs symbols "UIView"` | Search framework classes, structs, protocols |
+| `apple-docs doc "/path/to/doc"` | Get detailed documentation by path |
+
+### API Exploration
+
+| Command | Description |
+|---------|-------------|
+| `apple-docs apis "UIViewController"` | Find inheritance and protocol conformances |
+| `apple-docs platform "UIScrollView"` | Check platform/version compatibility |
+| `apple-docs similar "UIPickerView"` | Find Apple's recommended alternatives |
+
+### Technology Browsing
+
+| Command | Description |
+|---------|-------------|
+| `apple-docs tech` | List all Apple technologies by category |
+| `apple-docs overview "SwiftUI"` | Get comprehensive technology guides |
+| `apple-docs samples "SwiftUI"` | Browse Swift/Objective-C sample projects |
+
+### WWDC Videos
+
+| Command | Description |
+|---------|-------------|
+| `apple-docs wwdc-search "async"` | Search WWDC sessions (2014-2025) |
+| `apple-docs wwdc-video 2024-100` | Get transcript, code examples, resources |
+| `apple-docs wwdc-topics` | List 20 WWDC topic categories |
+| `apple-docs wwdc-years` | List WWDC years with video counts |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--limit <n>` | Limit number of results |
+| `--category` | Filter by technology category |
+| `--framework` | Filter by framework name |
+| `--year` | Filter by WWDC year |
+| `--no-transcript` | Skip transcript for WWDC videos |
+| `--no-inheritance` | Skip inheritance info in apis command |
+| `--no-conformances` | Skip protocol conformances in apis command |
+
+## Examples
+
+### Search Documentation
+
 ```bash
-bash scripts/setup.sh
+# Search for SwiftUI animations
+apple-docs search "SwiftUI animation"
+
+# Find UITableView delegate methods
+apple-docs symbols "UITableViewDelegate"
 ```
 
-## CLI Reference
-
-The CLI is at `scripts/apple-docs.mjs`. All commands output formatted text.
-
-### Core Commands
-
-**Search docs:**
-```bash
-scripts/apple-docs.mjs search "SwiftUI List"
-scripts/apple-docs.mjs search "Core Data migration" --type documentation
-```
-
-**Get doc page content:**
-```bash
-scripts/apple-docs.mjs doc https://developer.apple.com/documentation/swiftui/navigationstack
-scripts/apple-docs.mjs doc https://developer.apple.com/documentation/uikit/uiviewcontroller --related --platform
-```
-
-**Browse frameworks and symbols:**
-```bash
-scripts/apple-docs.mjs technologies --category "App frameworks"
-scripts/apple-docs.mjs symbols SwiftUI --type struct --pattern "*View"
-```
-
-**Check platform compatibility:**
-```bash
-scripts/apple-docs.mjs compatibility https://developer.apple.com/documentation/swiftui/list
-```
-
-**Find alternatives/similar APIs:**
-```bash
-scripts/apple-docs.mjs similar https://developer.apple.com/documentation/uikit/uialertview
-```
-
-### WWDC Commands
+### Check Platform Compatibility
 
 ```bash
-scripts/apple-docs.mjs wwdc search "async await" --year 2024
-scripts/apple-docs.mjs wwdc video 2024 10101
-scripts/apple-docs.mjs wwdc code --framework SwiftUI --year 2025
-scripts/apple-docs.mjs wwdc topics
-scripts/apple-docs.mjs wwdc years
+# Check iOS version support for Vision framework
+apple-docs platform "VNRecognizeTextRequest"
+
+# Find all SwiftUI views that support iOS 15+
+apple-docs search "SwiftUI View iOS 15"
 ```
 
-### Typical Workflow
+### Explore APIs
 
-1. Search: `search "<API name>"` to find the right page
-2. Read: `doc <url> --platform` to get full details with platform info
-3. Explore: `related <url>` or `similar <url>` to discover connected APIs
-4. Learn: `wwdc search "<topic>"` to find WWDC sessions explaining the concept
+```bash
+# Get inheritance hierarchy for UIViewController
+apple-docs apis "UIViewController"
 
-For detailed flags and all command options, read `references/commands.md`.
+# Find alternatives to deprecated API
+apple-docs similar "UILabel"
+```
+
+### WWDC Videos
+
+```bash
+# Search for async/await sessions
+apple-docs wwdc-search "async await"
+
+# Get specific video details with transcript
+apple-docs wwdc-video 2024-100
+
+# List all available years
+apple-docs wwdc-years
+```
+
+### Browse Technologies
+
+```bash
+# List all Apple technologies
+apple-docs tech
+
+# Get SwiftUI overview guide
+apple-docs overview "SwiftUI"
+
+# Find Vision framework samples
+apple-docs samples "Vision"
+```
+
+## How It Works
+
+Direct integration with Apple's developer APIs. No external dependencies or third-party packages.
+Documentation is fetched live from developer.apple.com.
+WWDC data is indexed locally (1,260+ sessions from 2014-2025) for fast offline search.
+To rebuild the WWDC index: `node build-wwdc-index.js`
+
+## Resources
+
+- Apple Developer Documentation: https://developer.apple.com/documentation/
+- Apple Developer: https://developer.apple.com/
+- WWDC Videos: https://developer.apple.com/videos/

@@ -1,9 +1,6 @@
 {
-  "name": "apple-docs-skill",
-  "version": "1.0.0",
+  "name": "apple-dev-docs",
+  "version": "1.2.0",
   "private": true,
-  "type": "module",
-  "dependencies": {
-    "@kimsungwhee/apple-docs-mcp": "^1.0.26"
-  }
+  "type": "module"
 }
