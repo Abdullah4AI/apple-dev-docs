@@ -1,146 +1,108 @@
 ---
-name: apple-dev-docs
-description: "Apple Developer Tools - documentation search, WWDC videos, and App Store Connect management (TestFlight, builds, submissions, signing, analytics, subscriptions, and more). USE WHEN: user asks about Apple APIs, needs documentation lookup, wants to manage App Store Connect (TestFlight, builds, certificates, profiles, analytics, subscriptions, IAP, screenshots), automate iOS/macOS app workflows, or search WWDC sessions. DON'T USE WHEN: user wants general coding help without Apple docs, is asking about non-Apple platforms, or wants to build an iOS app from scratch (use coding-agent). EDGE CASES: 'how do I use NavigationStack' -> this skill. 'upload my build to TestFlight' -> this skill. 'list my certificates' -> this skill. 'build me a SwiftUI app' -> coding-agent."
-metadata: {"clawdbot":{"emoji":"🍎","requires":{"bins":["node"]}}}
+name: apple-developer-toolkit
+description: "Complete Apple developer toolkit: documentation search, WWDC videos (2014-2025), App Store Connect management (TestFlight, builds, signing, analytics, subscriptions), and autonomous iOS app builder with 50 SwiftUI/iOS best practice guides. USE WHEN: user asks about Apple APIs, needs docs lookup, manages App Store Connect, builds iOS apps from description, or searches WWDC sessions. DON'T USE WHEN: non-Apple platforms or general coding without Apple context."
+metadata: {"clawdbot":{"emoji":"🍎"}}
 ---
 
-# Apple Developer Tools
+# Apple Developer Toolkit
 
-Search Apple docs, frameworks, APIs, WWDC videos, and manage App Store Connect from CLI.
+Three tools in one skill: documentation search, App Store Connect management, and autonomous iOS app building.
 
 ## Setup
 
-```bash
-# Auto-install App Store Connect CLI (first run only)
-bash scripts/setup.sh
+All binaries are included. No external installs needed.
 
-# Authenticate with App Store Connect API
+```bash
+# Binaries are in bin/ directory
+export PATH="$SKILL_DIR/bin:$PATH"
+```
+
+For App Store Connect, authenticate:
+```bash
 appstore auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
 ```
 
-Generate API keys at: https://appstoreconnect.apple.com/access/integrations/api
-
 ## Part 1: Documentation Search
-
-The docs CLI is at `cli.js`. All commands output formatted text.
-
-### Search Documentation
 
 ```bash
 node cli.js search "NavigationStack"
-node cli.js search "SwiftUI animation" --limit 20
-```
-
-### Symbols & APIs
-
-```bash
 node cli.js symbols "UIView"
-node cli.js apis "UIViewController"
-node cli.js platform "UIScrollView"
-node cli.js similar "UIPickerView"
-```
-
-### Get Documentation Details
-
-```bash
 node cli.js doc "/documentation/swiftui/navigationstack"
-```
-
-### Technology Browsing
-
-```bash
-node cli.js tech
 node cli.js overview "SwiftUI"
 node cli.js samples "SwiftUI"
-node cli.js updates
-```
-
-### WWDC Videos
-
-```bash
 node cli.js wwdc-search "concurrency"
 node cli.js wwdc-year 2025
 node cli.js wwdc-topic "swiftui-ui-frameworks"
-node cli.js wwdc-topics
-node cli.js wwdc-video 2024-10169
-node cli.js wwdc-years
 ```
-
-Available topics: swiftui-ui-frameworks, swift, machine-learning-ai, developer-tools, privacy-security, visionos, accessibility, design, audio-video, networking, testing, graphics-games, health-fitness, maps-location, safari-web, system-services, app-store-distribution, extensions, augmented-reality, widgets-app-intents
 
 ## Part 2: App Store Connect
 
 Full reference: [references/app-store-connect.md](references/app-store-connect.md)
 
-All `appstore` commands output JSON by default. Use `--output table` for human-readable output.
-
-### Quick Reference
-
 | Task | Command |
 |------|---------|
 | List apps | `appstore apps` |
-| List builds | `appstore builds list --app "APP_ID"` |
 | Upload build | `appstore builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
-| Latest build | `appstore builds latest --app "APP_ID"` |
-| Expire old builds | `appstore builds expire-all --app "APP_ID" --older-than 90d --confirm` |
-| List TestFlight groups | `appstore testflight beta-groups list --app "APP_ID"` |
-| Add tester | `appstore testflight beta-testers add --app "APP_ID" --email "t@test.com" --group "Beta"` |
-| Publish to TestFlight | `appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
-| Submit to App Store | `appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
+| Publish TestFlight | `appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
+| Submit App Store | `appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
 | List certificates | `appstore certificates list` |
-| List profiles | `appstore profiles list` |
-| Create version | `appstore versions create --app "APP_ID" --version "1.0.0"` |
-| Check reviews | `appstore reviews --app "APP_ID" --output table` |
+| Reviews | `appstore reviews --app "APP_ID" --output table` |
 | Sales report | `appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
-| Xcode Cloud trigger | `appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
-| Notarize macOS app | `appstore notarization submit --file ./MyApp.zip --wait` |
-| Validate pre-submit | `appstore validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
+| Xcode Cloud | `appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
+| Notarize | `appstore notarization submit --file ./MyApp.zip --wait` |
+| Validate | `appstore validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
 
-### Categories
+Covers: TestFlight, Builds, Signing, Subscriptions, IAP, Analytics, Finance, Xcode Cloud, Notarization, Game Center, Webhooks, App Clips, Screenshots, Workflow automation, Migrate (Fastlane).
 
-**TestFlight**: feedback, crashes, beta groups, beta testers, sync, review, metrics
-**Builds**: list, upload, expire, test notes, groups, testers, metrics
-**App Store**: reviews, ratings, versions, localizations, screenshots, submissions
-**Signing**: certificates, profiles, bundle IDs, capabilities
-**Subscriptions**: groups, pricing, availability, offers, localizations
-**In-App Purchases**: create, pricing, localizations, availability
-**Analytics**: sales reports, analytics requests, downloads
-**Finance**: financial reports, regions
-**Xcode Cloud**: workflows, build runs, artifacts, test results, SCM
-**Notarization**: submit, status, logs
-**Game Center**: achievements, leaderboards, leaderboard sets, localizations
-**Webhooks**: create, deliveries, redeliver, ping
-**App Clips**: experiences, header images, invocations, domain status
-**Screenshots**: capture, frame, upload, sizes
-**Workflow**: multi-step automation via .appstore/workflow.json
-**Publish**: end-to-end TestFlight and App Store workflows
+## Part 3: iOS App Builder
 
-### Auth Environment Variables
+Build complete iOS apps from natural language descriptions.
 
-| Variable | Purpose |
-|----------|---------|
-| `ASC_KEY_ID` | API key ID |
-| `ASC_ISSUER_ID` | Issuer ID |
-| `ASC_PRIVATE_KEY_PATH` | Path to .p8 key |
-| `ASC_APP_ID` | Default app ID |
-| `ASC_VENDOR_NUMBER` | For sales/finance reports |
-| `ASC_TIMEOUT` | Request timeout |
-| `ASC_DEFAULT_OUTPUT` | Default output format |
+```bash
+swiftship              # Interactive mode
+swiftship setup        # Install prerequisites (Xcode, XcodeGen, Claude Code)
+swiftship fix          # Auto-fix build errors
+swiftship run          # Build and launch in simulator
+swiftship info         # Show project status
+swiftship usage        # Token usage and cost
+```
 
-### Output Formats
+### How it works
 
-| Format | Flag | Use Case |
-|--------|------|----------|
-| JSON (minified) | default | Scripting, automation |
-| Table | `--output table` | Terminal display |
-| Markdown | `--output markdown` | Documentation |
+```
+describe → analyze → plan → build → fix → run
+```
 
-### Global Flags
+1. **Analyze** - Extracts app name, features, core flow from description
+2. **Plan** - Produces file-level build plan: data models, navigation, design
+3. **Build** - Generates Swift source files, project.yml, asset catalog
+4. **Fix** - Compiles and auto-repairs until build succeeds
+5. **Run** - Boots iOS Simulator and launches the app
 
-- `--paginate` - fetch all pages automatically
-- `--limit N` - results per page
-- `--sort field` - sort (prefix `-` for descending)
-- `--pretty` - pretty-print JSON
-- `--confirm` - required for destructive operations
-- `--profile "name"` - use specific auth profile
-- `--debug` - enable debug output
+### Interactive commands
+
+| Command | Description |
+|---------|-------------|
+| `/run` | Build and launch in simulator |
+| `/fix` | Auto-fix compilation errors |
+| `/open` | Open project in Xcode |
+| `/model [name]` | Switch model (sonnet, opus, haiku) |
+| `/info` | Show project info |
+| `/usage` | Token usage and cost |
+
+## References
+
+| Reference | Content |
+|-----------|---------|
+| [references/app-store-connect.md](references/app-store-connect.md) | Complete App Store Connect CLI commands |
+| [references/ios-rules/](references/ios-rules/) | 38 iOS development rules (accessibility, dark mode, localization, etc.) |
+| [references/swiftui-guides/](references/swiftui-guides/) | 12 SwiftUI best practice guides (animations, liquid glass, state, etc.) |
+| [references/ios-app-builder-prompts.md](references/ios-app-builder-prompts.md) | System prompts for app analysis, planning, and building |
+
+### iOS Rules (38 files)
+
+accessibility, app_clips, app_review, apple_translation, biometrics, camera, charts, color_contrast, components, dark_mode, design-system, feedback_states, file-structure, forbidden-patterns, foundation_models, gestures, haptics, healthkit, live_activities, localization, maps, mvvm-architecture, navigation-patterns, notification_service, notifications, safari_extension, share_extension, siri_intents, spacing_layout, speech, storage-patterns, swift-conventions, timers, typography, view-composition, view_complexity, website_links, widgets
+
+### SwiftUI Guides (12 files)
+
+animations, forms-and-input, layout, liquid-glass, list-patterns, media, modern-apis, navigation, performance, scroll-patterns, state-management, text-formatting
