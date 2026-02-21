@@ -10,9 +10,16 @@ Three tools in one skill: documentation search, App Store Connect management, an
 
 ## Setup
 
+Binaries auto-install on first use via Homebrew:
+
 ```bash
-brew tap Abdullah4AI/tap
-brew install appstore swiftship
+brew tap Abdullah4AI/tap && brew install appstore swiftship
+```
+
+Or run the setup script (included in skill):
+
+```bash
+bash scripts/setup.sh
 ```
 
 For App Store Connect, authenticate:
