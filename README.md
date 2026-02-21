@@ -35,7 +35,7 @@ All-in-one Apple developer skill: documentation search, WWDC videos, App Store C
 
 - **Node.js** v18+ (for documentation search)
 - **Xcode** (for iOS app building)
-- Binaries included - no external installs needed
+- **Go** 1.25+ (for building binaries via `bash scripts/setup.sh`)
 
 ## Installation
 
