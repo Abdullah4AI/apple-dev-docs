@@ -30,7 +30,7 @@ All-in-one Apple developer skill: documentation search, WWDC videos, and full Ap
 ## Requirements
 
 - **Node.js** v18+ (for documentation search)
-- **asc** CLI (auto-installed via `bash scripts/setup.sh`) for App Store Connect
+- App Store Connect CLI (auto-installed via `bash scripts/setup.sh`) for App Store Connect
 
 ## Installation
 
@@ -67,26 +67,26 @@ node cli.js overview "SwiftUI"
 ### App Store Connect
 
 ```bash
-# Auto-install asc CLI (first run only)
+# Auto-install App Store Connect CLI (first run only)
 bash scripts/setup.sh
 
 # Setup authentication
-asc auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
+appstore auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
 
 # List your apps
-asc apps
+appstore apps
 
 # Upload and distribute to TestFlight
-asc publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta Testers" --wait
+appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta Testers" --wait
 
 # Submit to App Store
-asc publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait
+appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait
 
 # Check reviews
-asc reviews --app "APP_ID" --output table
+appstore reviews --app "APP_ID" --output table
 
 # Download sales report
-asc analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"
+appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"
 ```
 
 If installed as a skill, just ask your AI agent naturally:
@@ -126,27 +126,27 @@ If installed as a skill, just ask your AI agent naturally:
 
 | Task | Command |
 |------|---------|
-| List apps | `asc apps` |
-| List builds | `asc builds list --app "APP_ID"` |
-| Upload build | `asc builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
-| Latest build | `asc builds latest --app "APP_ID"` |
-| Expire old builds | `asc builds expire-all --app "APP_ID" --older-than 90d --confirm` |
-| TestFlight groups | `asc testflight beta-groups list --app "APP_ID"` |
-| Add tester | `asc testflight beta-testers add --app "APP_ID" --email "t@test.com" --group "Beta"` |
-| Publish TestFlight | `asc publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
-| Submit App Store | `asc publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
-| Certificates | `asc certificates list` |
-| Profiles | `asc profiles list` |
-| Create version | `asc versions create --app "APP_ID" --version "1.0.0"` |
-| Reviews | `asc reviews --app "APP_ID" --output table` |
-| Sales report | `asc analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
-| Xcode Cloud | `asc xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
-| Notarize | `asc notarization submit --file ./MyApp.zip --wait` |
-| Validate | `asc validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
-| Subscriptions | `asc subscriptions groups list --app "APP_ID"` |
-| IAP | `asc iap list --app "APP_ID"` |
-| Game Center | `asc game-center achievements list --app "APP_ID"` |
-| Webhooks | `asc webhooks list --app "APP_ID"` |
+| List apps | `appstore apps` |
+| List builds | `appstore builds list --app "APP_ID"` |
+| Upload build | `appstore builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
+| Latest build | `appstore builds latest --app "APP_ID"` |
+| Expire old builds | `appstore builds expire-all --app "APP_ID" --older-than 90d --confirm` |
+| TestFlight groups | `appstore testflight beta-groups list --app "APP_ID"` |
+| Add tester | `appstore testflight beta-testers add --app "APP_ID" --email "t@test.com" --group "Beta"` |
+| Publish TestFlight | `appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
+| Submit App Store | `appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
+| Certificates | `appstore certificates list` |
+| Profiles | `appstore profiles list` |
+| Create version | `appstore versions create --app "APP_ID" --version "1.0.0"` |
+| Reviews | `appstore reviews --app "APP_ID" --output table` |
+| Sales report | `appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
+| Xcode Cloud | `appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
+| Notarize | `appstore notarization submit --file ./MyApp.zip --wait` |
+| Validate | `appstore validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
+| Subscriptions | `appstore subscriptions groups list --app "APP_ID"` |
+| IAP | `appstore iap list --app "APP_ID"` |
+| Game Center | `appstore game-center achievements list --app "APP_ID"` |
+| Webhooks | `appstore webhooks list --app "APP_ID"` |
 
 For the complete App Store Connect reference with all commands and flags, see [references/app-store-connect.md](references/app-store-connect.md).
 
@@ -188,7 +188,7 @@ node build-wwdc-index.js
 
 ## How It Works
 
-Documentation searches query developer.apple.com directly. WWDC data is indexed locally for fast offline search. App Store Connect operations use the `asc` CLI tool which communicates with the App Store Connect API using your API key credentials.
+Documentation searches query developer.apple.com directly. WWDC data is indexed locally for fast offline search. App Store Connect operations use the built-in CLI which communicates with the App Store Connect API using your API key credentials.
 
 ## License
 

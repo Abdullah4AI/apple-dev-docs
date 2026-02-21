@@ -4,18 +4,18 @@ set -e
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$SKILL_DIR/bin"
-ASC_BIN="$BIN_DIR/asc"
+TARGET_BIN="$BIN_DIR/appstore"
 VERSION="0.31.3"
 
 # Check if already installed
-if [ -f "$ASC_BIN" ]; then
-  echo "asc CLI already installed at $ASC_BIN"
+if [ -f "$TARGET_BIN" ]; then
+  echo "App Store Connect CLI already installed at $TARGET_BIN"
   exit 0
 fi
 
 # Also check system PATH
-if command -v asc &>/dev/null; then
-  echo "asc CLI found in PATH: $(which asc)"
+if command -v appstore &>/dev/null; then
+  echo "App Store Connect CLI found in PATH: $(which appstore)"
   exit 0
 fi
 
@@ -43,8 +43,8 @@ URL="https://github.com/rudrankriyam/App-Store-Connect-CLI/releases/download/${V
 mkdir -p "$BIN_DIR"
 
 echo "Downloading ${FILENAME}..."
-curl -fsSL "$URL" -o "$ASC_BIN"
-chmod +x "$ASC_BIN"
+curl -fsSL "$URL" -o "$TARGET_BIN"
+chmod +x "$TARGET_BIN"
 
-echo "Installed asc v${VERSION} to $ASC_BIN"
+echo "Installed App Store Connect CLI v${VERSION} to $TARGET_BIN"
 echo "Add to PATH: export PATH=\"$BIN_DIR:\$PATH\""

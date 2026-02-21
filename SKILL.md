@@ -15,7 +15,7 @@ Search Apple docs, frameworks, APIs, WWDC videos, and manage App Store Connect f
 bash scripts/setup.sh
 
 # Authenticate with App Store Connect API
-asc auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
+appstore auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
 ```
 
 Generate API keys at: https://appstoreconnect.apple.com/access/integrations/api
@@ -72,29 +72,29 @@ Available topics: swiftui-ui-frameworks, swift, machine-learning-ai, developer-t
 
 Full reference: [references/app-store-connect.md](references/app-store-connect.md)
 
-All `asc` commands output JSON by default. Use `--output table` for human-readable output.
+All `appstore` commands output JSON by default. Use `--output table` for human-readable output.
 
 ### Quick Reference
 
 | Task | Command |
 |------|---------|
-| List apps | `asc apps` |
-| List builds | `asc builds list --app "APP_ID"` |
-| Upload build | `asc builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
-| Latest build | `asc builds latest --app "APP_ID"` |
-| Expire old builds | `asc builds expire-all --app "APP_ID" --older-than 90d --confirm` |
-| List TestFlight groups | `asc testflight beta-groups list --app "APP_ID"` |
-| Add tester | `asc testflight beta-testers add --app "APP_ID" --email "t@test.com" --group "Beta"` |
-| Publish to TestFlight | `asc publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
-| Submit to App Store | `asc publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
-| List certificates | `asc certificates list` |
-| List profiles | `asc profiles list` |
-| Create version | `asc versions create --app "APP_ID" --version "1.0.0"` |
-| Check reviews | `asc reviews --app "APP_ID" --output table` |
-| Sales report | `asc analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
-| Xcode Cloud trigger | `asc xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
-| Notarize macOS app | `asc notarization submit --file ./MyApp.zip --wait` |
-| Validate pre-submit | `asc validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
+| List apps | `appstore apps` |
+| List builds | `appstore builds list --app "APP_ID"` |
+| Upload build | `appstore builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
+| Latest build | `appstore builds latest --app "APP_ID"` |
+| Expire old builds | `appstore builds expire-all --app "APP_ID" --older-than 90d --confirm` |
+| List TestFlight groups | `appstore testflight beta-groups list --app "APP_ID"` |
+| Add tester | `appstore testflight beta-testers add --app "APP_ID" --email "t@test.com" --group "Beta"` |
+| Publish to TestFlight | `appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
+| Submit to App Store | `appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
+| List certificates | `appstore certificates list` |
+| List profiles | `appstore profiles list` |
+| Create version | `appstore versions create --app "APP_ID" --version "1.0.0"` |
+| Check reviews | `appstore reviews --app "APP_ID" --output table` |
+| Sales report | `appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
+| Xcode Cloud trigger | `appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
+| Notarize macOS app | `appstore notarization submit --file ./MyApp.zip --wait` |
+| Validate pre-submit | `appstore validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
 
 ### Categories
 
@@ -112,7 +112,7 @@ All `asc` commands output JSON by default. Use `--output table` for human-readab
 **Webhooks**: create, deliveries, redeliver, ping
 **App Clips**: experiences, header images, invocations, domain status
 **Screenshots**: capture, frame, upload, sizes
-**Workflow**: multi-step automation via .asc/workflow.json
+**Workflow**: multi-step automation via .appstore/workflow.json
 **Publish**: end-to-end TestFlight and App Store workflows
 
 ### Auth Environment Variables
