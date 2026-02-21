@@ -1,139 +1,188 @@
 # Apple Developer Toolkit
 
-All-in-one Apple developer skill: documentation search, WWDC videos, App Store Connect management, and autonomous iOS app builder. Built for AI agents and developers.
+All-in-one Apple developer skill: documentation search, WWDC videos, App Store Connect management, and autonomous iOS app builder.
 
-## Features
+## Install
 
-### Documentation & WWDC
-- 1,267 WWDC sessions indexed locally (2014-2025)
-- Direct integration with developer.apple.com
-- Score-based search across all indexed sessions
+```bash
+brew tap Abdullah4AI/tap
+brew install appstore swiftship
+```
 
-### App Store Connect
-- **TestFlight** - builds, beta groups, testers, feedback, crash reports
-- **Builds** - upload IPAs/PKGs, expire old builds, test notes, metrics
-- **App Store** - versions, localizations, screenshots, review submissions, phased releases
-- **Signing** - certificates, provisioning profiles, bundle IDs, capabilities
-- **Subscriptions & IAP** - create and manage subscriptions, in-app purchases, offer codes, pricing
-- **Analytics & Sales** - download sales reports, analytics data, finance reports
-- **Xcode Cloud** - trigger workflows, monitor build runs, download artifacts
-- **Notarization** - submit, poll, and retrieve logs for macOS notarization
-- **Game Center** - achievements, leaderboards, leaderboard sets
-- **Webhooks, App Clips, Screenshots, Workflow automation**
-- **Validate & Migrate** - pre-submission checks, Fastlane compatibility
-
-### iOS App Builder
-- Build complete iOS apps from natural language descriptions
-- Multi-phase pipeline: analyze, plan, build, fix, run
-- 38 iOS development rules (accessibility, dark mode, localization, gestures, etc.)
-- 12 SwiftUI best practice guides (animations, liquid glass, state management, etc.)
-- Auto-fix compilation errors
-- Launch directly in iOS Simulator
-- Interactive editing with slash commands
-
-## Requirements
-
-- **Node.js** v18+ (for documentation search)
-- **Xcode** (for iOS app building)
-- `brew tap Abdullah4AI/tap && brew install appstore swiftship`
-
-## Installation
-
-For AI agents:
+Or via npx:
 
 ```bash
 npx skills add Abdullah4AI/apple-developer-toolkit
 ```
 
-For ClawHub:
+ClawHub:
 
 ```bash
 clawhub install apple-developer-toolkit
 ```
 
-## Quick Start
+## What's Inside
 
-### Documentation
+### 1. Documentation Search
+
+Search Apple Developer Documentation and 1,267 WWDC sessions (2014-2025) locally indexed.
 
 ```bash
-node cli.js search "SwiftUI animation"
-node cli.js wwdc-search "swift concurrency"
-node cli.js wwdc-video 2024-10169
+node cli.js search "NavigationStack"
+node cli.js symbols "UIView"
+node cli.js doc "/documentation/swiftui/navigationstack"
 node cli.js overview "SwiftUI"
+node cli.js samples "SwiftUI"
+node cli.js wwdc-search "concurrency"
+node cli.js wwdc-year 2025
+node cli.js wwdc-topic "swiftui-ui-frameworks"
 ```
 
-### App Store Connect
+### 2. App Store Connect (`appstore`)
+
+80+ commands covering the entire App Store Connect API.
 
 ```bash
-# Install
-brew tap Abdullah4AI/tap
-brew install appstore swiftship
-
-# Authenticate
 appstore auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
-appstore apps
-appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta Testers" --wait
-appstore reviews --app "APP_ID" --output table
 ```
 
-### iOS App Builder
+#### Apps & Versions
+```bash
+appstore apps                                    # List all apps
+appstore versions --app "APP_ID"                 # List versions
+appstore app-info --app "APP_ID"                 # App metadata
+appstore localizations --app "APP_ID"            # Localization metadata
+appstore screenshots upload --app "APP_ID" ...   # Upload screenshots
+```
+
+#### TestFlight & Builds
+```bash
+appstore builds upload --app "APP_ID" --ipa "app.ipa" --wait
+appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait
+appstore testflight groups --app "APP_ID"
+appstore feedback --app "APP_ID"
+appstore crashes --app "APP_ID"
+```
+
+#### App Store Submission
+```bash
+appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait
+appstore submit --app "APP_ID"
+appstore validate --app "APP_ID" --version-id "VER_ID" --strict
+appstore review --app "APP_ID"
+```
+
+#### Signing & Certificates
+```bash
+appstore certificates list
+appstore profiles list
+appstore bundle-ids list
+appstore signing create --app "APP_ID"
+```
+
+#### Monetization
+```bash
+appstore subscriptions list --app "APP_ID"
+appstore iap list --app "APP_ID"
+appstore offer-codes create --subscription "SUB_ID"
+appstore pricing schedule get --app "APP_ID"
+```
+
+#### Analytics & Finance
+```bash
+appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"
+appstore finance reports --vendor "VENDOR"
+appstore reviews --app "APP_ID" --output table
+appstore insights weekly --app "APP_ID"
+```
+
+#### Automation
+```bash
+appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait
+appstore notarization submit --file ./MyApp.zip --wait
+appstore webhooks list
+appstore workflow run --file .appstore/workflow.json
+appstore migrate from-fastlane --app "APP_ID"
+```
+
+#### Full Command List
+
+| Category | Commands |
+|----------|----------|
+| Getting Started | auth, doctor, init, docs |
+| Apps | apps, app-setup, app-tags, app-info, app-infos, versions, localizations, screenshots, video-previews |
+| TestFlight | testflight, builds, build-bundles, pre-release-versions, build-localizations, beta-app-localizations, sandbox |
+| Review & Release | review, reviews, submit, validate, publish |
+| Signing | signing, bundle-ids, certificates, profiles, merchant-ids, pass-type-ids, notarization |
+| Monetization | iap, subscriptions, offer-codes, win-back-offers, promoted-purchases, app-events, pricing, pre-orders |
+| Analytics | analytics, insights, finance, performance, feedback, crashes |
+| Automation | xcode-cloud, webhooks, notify, migrate, workflow, metadata, diff |
+| Team | account, users, actors, devices |
+| Other | categories, age-rating, accessibility, encryption, eula, agreements, app-clips, game-center, background-assets, product-pages, routing-coverage, nominations, marketplace, alternative-distribution, android-ios-mapping |
+
+### 3. iOS App Builder (`swiftship`)
+
+Build complete iOS apps from natural language descriptions. Powered by Claude Code.
 
 ```bash
-swiftship
-# > A workout tracker that logs exercises and shows weekly progress with charts
-# ✓ Build complete — ready to launch!
+swiftship                        # Interactive mode - describe your app
+swiftship chat                   # Chat mode for editing existing apps
+swiftship setup                  # Install prerequisites (Xcode, XcodeGen)
+swiftship fix                    # Auto-fix build errors
+swiftship run                    # Build and launch in simulator
+swiftship open                   # Open project in Xcode
+swiftship info                   # Show project status
+swiftship usage                  # Token usage and cost
+swiftship --model opus           # Use a specific model
 ```
 
-## Documentation Commands
+#### How It Works
+
+```
+describe → analyze → plan → build → fix → run
+```
+
+1. **Analyze** - Extracts app name, features, core flow from your description
+2. **Plan** - Produces file-level build plan with data models, navigation, and design system
+3. **Build** - Generates Swift source files, project.yml, and asset catalog
+4. **Fix** - Compiles and auto-repairs until build succeeds
+5. **Run** - Boots iOS Simulator and launches the app
+
+#### Interactive Commands
 
 | Command | Description |
 |---------|-------------|
-| `search "query"` | Search Apple Developer Documentation |
-| `symbols "UIView"` | Search framework classes, structs, protocols |
-| `doc "/path/to/doc"` | Get detailed documentation by path |
-| `apis "UIViewController"` | Find related APIs |
-| `overview "SwiftUI"` | Get technology overview guide |
-| `samples "SwiftUI"` | Find sample code projects |
-| `wwdc-search "async"` | Search WWDC sessions |
-| `wwdc-year 2025` | List all videos for a year |
+| `/run` | Build and launch in simulator |
+| `/fix` | Auto-fix compilation errors |
+| `/open` | Open project in Xcode |
+| `/model [name]` | Switch model (sonnet, opus, haiku) |
+| `/info` | Show project info |
+| `/usage` | Token usage and cost |
 
-## App Store Connect Commands
+## Reference Files
 
-| Task | Command |
-|------|---------|
-| List apps | `appstore apps` |
-| Upload build | `appstore builds upload --app "APP_ID" --ipa "app.ipa" --wait` |
-| Publish TestFlight | `appstore publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait` |
-| Submit App Store | `appstore publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait` |
-| Certificates | `appstore certificates list` |
-| Reviews | `appstore reviews --app "APP_ID" --output table` |
-| Sales report | `appstore analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"` |
-| Xcode Cloud | `appstore xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait` |
-| Notarize | `appstore notarization submit --file ./MyApp.zip --wait` |
-| Validate | `appstore validate --app "APP_ID" --version-id "VERSION_ID" --strict` |
+This skill includes 50+ reference files for AI agents:
 
-Full reference: [references/app-store-connect.md](references/app-store-connect.md)
+| Reference | Content |
+|-----------|---------|
+| `references/app-store-connect.md` | Complete App Store Connect CLI reference |
+| `references/ios-rules/` | 38 iOS development rules |
+| `references/swiftui-guides/` | 12 SwiftUI best practice guides |
+| `references/ios-app-builder-prompts.md` | System prompts for app building |
 
-## iOS App Builder Commands
+### iOS Rules (38)
 
-| Command | Description |
-|---------|-------------|
-| `swiftship` | Interactive mode - describe your app |
-| `swiftship setup` | Install prerequisites |
-| `swiftship fix` | Auto-fix build errors |
-| `swiftship run` | Build and launch in simulator |
-| `swiftship info` | Show project status |
-| `swiftship usage` | Token usage and cost |
+accessibility, app_clips, app_review, apple_translation, biometrics, camera, charts, color_contrast, components, dark_mode, design-system, feedback_states, file-structure, forbidden-patterns, foundation_models, gestures, haptics, healthkit, live_activities, localization, maps, mvvm-architecture, navigation-patterns, notification_service, notifications, safari_extension, share_extension, siri_intents, spacing_layout, speech, storage-patterns, swift-conventions, timers, typography, view-composition, view_complexity, website_links, widgets
 
-## References
+### SwiftUI Guides (12)
 
-- **38 iOS development rules**: accessibility, dark mode, localization, gestures, widgets, haptics, and more
-- **12 SwiftUI guides**: animations, liquid glass, state management, navigation, layout, performance, and more
-- **App builder prompts**: system prompts for app analysis, planning, and code generation
+animations, forms-and-input, layout, liquid-glass, list-patterns, media, modern-apis, navigation, performance, scroll-patterns, state-management, text-formatting
 
-## How It Works
+## Requirements
 
-Documentation searches query developer.apple.com directly. WWDC data is indexed locally. App Store Connect operations use the built-in `appstore` CLI. iOS app building uses the `swiftship` CLI with Claude Code as the AI backend.
+- **Node.js** v18+ (documentation search)
+- **Xcode** (iOS app building)
+- **Homebrew** (binary installation)
 
 ## License
 
