@@ -1,5 +1,5 @@
 ---
-name: apple-developer-toolkit
+name: apple-dev-docs
 description: "Complete Apple developer toolkit: documentation search, WWDC videos (2014-2025), App Store Connect management (TestFlight, builds, signing, analytics, subscriptions), and autonomous iOS app builder with 50 SwiftUI/iOS best practice guides. USE WHEN: user asks about Apple APIs, needs docs lookup, manages App Store Connect, builds iOS apps from description, or searches WWDC sessions. DON'T USE WHEN: non-Apple platforms or general coding without Apple context."
 metadata: {"clawdbot":{"emoji":"🍎"}}
 ---

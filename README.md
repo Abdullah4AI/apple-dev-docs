@@ -42,7 +42,7 @@ All-in-one Apple developer skill: documentation search, WWDC videos, App Store C
 For AI agents:
 
 ```bash
-npx skills add Abdullah4AI/apple-dev-docs
+npx skills add Abdullah4AI/apple-developer-toolkit
 ```
 
 For ClawHub:
