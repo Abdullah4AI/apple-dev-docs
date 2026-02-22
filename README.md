@@ -4,11 +4,8 @@ All-in-one Apple developer skill: documentation search, WWDC videos, App Store C
 
 ## Install
 
-### Single binary (recommended)
-
 ```bash
-brew tap Abdullah4AI/tap
-brew install appledev
+brew install Abdullah4AI/tap/appledev
 ```
 
 This installs one binary with symlinks for backward compatibility:
@@ -20,12 +17,6 @@ This installs one binary with symlinks for backward compatibility:
 
 ```bash
 clawhub install apple-developer-toolkit
-```
-
-### Via npx
-
-```bash
-npx skills add Abdullah4AI/apple-developer-toolkit
 ```
 
 ## Usage

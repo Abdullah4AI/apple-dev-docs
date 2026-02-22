@@ -88,7 +88,7 @@ node cli.js search "NavigationStack"
 Install via Homebrew:
 
 ```bash
-brew tap Abdullah4AI/tap && brew install appledev
+brew install Abdullah4AI/tap/appledev
 ```
 
 Authenticate with your App Store Connect API key:
