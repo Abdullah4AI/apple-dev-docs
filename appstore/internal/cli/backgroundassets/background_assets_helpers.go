@@ -1,0 +1,41 @@
+package backgroundassets
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+)
+
+const backgroundAssetsMaxLimit = 200
+
+var backgroundAssetUploadFileAssetTypeValues = []string{
+	string(asc.BackgroundAssetUploadFileAssetTypeAsset),
+	string(asc.BackgroundAssetUploadFileAssetTypeManifest),
+}
+
+func normalizeBackgroundAssetUploadFileAssetType(value string) (asc.BackgroundAssetUploadFileAssetType, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case string(asc.BackgroundAssetUploadFileAssetTypeAsset):
+		return asc.BackgroundAssetUploadFileAssetTypeAsset, nil
+	case string(asc.BackgroundAssetUploadFileAssetTypeManifest):
+		return asc.BackgroundAssetUploadFileAssetTypeManifest, nil
+	default:
+		return "", fmt.Errorf("--asset-type must be one of: %s", strings.Join(backgroundAssetUploadFileAssetTypeValues, ", "))
+	}
+}
+
+func parseBool(value, flagName string) (bool, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "true", "1", "yes":
+		return true, nil
+	case "false", "0", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", flagName)
+	}
+}

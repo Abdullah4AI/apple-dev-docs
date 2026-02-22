@@ -1,0 +1,70 @@
+package shots
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/screenshots"
+)
+
+// ShotsRunCommand returns the screenshots run subcommand.
+func ShotsRunCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	planPath := fs.String("plan", ".appstore/screenshots.json", "Path to screenshot run plan JSON")
+	bundleID := fs.String("bundle-id", "", "Override app bundle ID from plan")
+	udid := fs.String("udid", "", "Override simulator UDID from plan")
+	outputDir := fs.String("output-dir", "", "Override output directory from plan")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "run",
+		ShortUsage: "appstore screenshots run [--plan .appstore/screenshots.json] [flags]",
+		ShortHelp:  "Run a deterministic screenshot sequence from JSON (experimental).",
+		LongHelp: `Run a deterministic screenshot automation sequence (experimental).
+
+By default it loads .appstore/screenshots.json from the current project root.
+Supported actions: launch, tap, type, wait, wait_for (polling), screenshot.`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			planPathVal := strings.TrimSpace(*planPath)
+			if planPathVal == "" {
+				fmt.Fprintln(os.Stderr, "Error: --plan is required")
+				return flag.ErrHelp
+			}
+
+			absPlanPath, err := filepath.Abs(planPathVal)
+			if err != nil {
+				return fmt.Errorf("screenshots run: resolve plan path: %w", err)
+			}
+
+			plan, err := screenshots.LoadPlanUnvalidated(absPlanPath)
+			if err != nil {
+				return fmt.Errorf("screenshots run: %w", err)
+			}
+
+			if override := strings.TrimSpace(*bundleID); override != "" {
+				plan.App.BundleID = override
+			}
+			if override := strings.TrimSpace(*udid); override != "" {
+				plan.App.UDID = override
+			}
+			if override := strings.TrimSpace(*outputDir); override != "" {
+				plan.App.OutputDir = override
+			}
+
+			result, err := screenshots.RunPlan(ctx, plan)
+			if err != nil {
+				return fmt.Errorf("screenshots run: %w", err)
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}

@@ -1,0 +1,232 @@
+package asc
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+)
+
+// AppStoreReviewAttachmentAttributes describes attachment attributes.
+type AppStoreReviewAttachmentAttributes struct {
+	FileSize           int64               `json:"fileSize,omitempty"`
+	FileName           string              `json:"fileName,omitempty"`
+	SourceFileChecksum string              `json:"sourceFileChecksum,omitempty"`
+	UploadOperations   []UploadOperation   `json:"uploadOperations,omitempty"`
+	AssetDeliveryState *AppMediaAssetState `json:"assetDeliveryState,omitempty"`
+}
+
+// AppStoreReviewAttachmentsResponse is the response for attachment lists.
+type AppStoreReviewAttachmentsResponse = Response[AppStoreReviewAttachmentAttributes]
+
+// AppStoreReviewAttachmentResponse is the response for attachment detail.
+type AppStoreReviewAttachmentResponse = SingleResponse[AppStoreReviewAttachmentAttributes]
+
+// AppStoreReviewAttachmentCreateAttributes describes create attributes.
+type AppStoreReviewAttachmentCreateAttributes struct {
+	FileSize int64  `json:"fileSize"`
+	FileName string `json:"fileName"`
+}
+
+// AppStoreReviewAttachmentRelationships describes attachment relationships.
+type AppStoreReviewAttachmentRelationships struct {
+	AppStoreReviewDetail *Relationship `json:"appStoreReviewDetail"`
+}
+
+// AppStoreReviewAttachmentCreateData is the data portion of a create request.
+type AppStoreReviewAttachmentCreateData struct {
+	Type          ResourceType                             `json:"type"`
+	Attributes    AppStoreReviewAttachmentCreateAttributes `json:"attributes"`
+	Relationships *AppStoreReviewAttachmentRelationships   `json:"relationships"`
+}
+
+// AppStoreReviewAttachmentCreateRequest is a request to create an attachment.
+type AppStoreReviewAttachmentCreateRequest struct {
+	Data AppStoreReviewAttachmentCreateData `json:"data"`
+}
+
+// AppStoreReviewAttachmentUpdateAttributes describes update attributes.
+type AppStoreReviewAttachmentUpdateAttributes struct {
+	SourceFileChecksum *string `json:"sourceFileChecksum,omitempty"`
+	Uploaded           *bool   `json:"uploaded,omitempty"`
+}
+
+// AppStoreReviewAttachmentUpdateData is the data portion of an update request.
+type AppStoreReviewAttachmentUpdateData struct {
+	Type       ResourceType                              `json:"type"`
+	ID         string                                    `json:"id"`
+	Attributes *AppStoreReviewAttachmentUpdateAttributes `json:"attributes,omitempty"`
+}
+
+// AppStoreReviewAttachmentUpdateRequest is a request to update an attachment.
+type AppStoreReviewAttachmentUpdateRequest struct {
+	Data AppStoreReviewAttachmentUpdateData `json:"data"`
+}
+
+// AppStoreReviewAttachmentDeleteResult represents CLI output for deletions.
+type AppStoreReviewAttachmentDeleteResult struct {
+	ID      string `json:"id"`
+	Deleted bool   `json:"deleted"`
+}
+
+// GetAppStoreReviewAttachmentsForReviewDetail lists attachments for a review detail.
+func (c *Client) GetAppStoreReviewAttachmentsForReviewDetail(ctx context.Context, reviewDetailID string, opts ...AppStoreReviewAttachmentsOption) (*AppStoreReviewAttachmentsResponse, error) {
+	reviewDetailID = strings.TrimSpace(reviewDetailID)
+	if reviewDetailID == "" {
+		return nil, fmt.Errorf("reviewDetailID is required")
+	}
+
+	query := &appStoreReviewAttachmentsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
+	path := fmt.Sprintf("/v1/appStoreReviewDetails/%s/appStoreReviewAttachments", reviewDetailID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("app-store-review-attachments: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildAppStoreReviewAttachmentsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
+
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AppStoreReviewAttachmentsResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetAppStoreReviewAttachment retrieves an attachment by ID.
+func (c *Client) GetAppStoreReviewAttachment(ctx context.Context, attachmentID string, opts ...AppStoreReviewAttachmentsOption) (*AppStoreReviewAttachmentResponse, error) {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return nil, fmt.Errorf("attachmentID is required")
+	}
+
+	query := &appStoreReviewAttachmentsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
+	path := fmt.Sprintf("/v1/appStoreReviewAttachments/%s", attachmentID)
+	if queryString := buildAppStoreReviewAttachmentsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
+
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AppStoreReviewAttachmentResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// CreateAppStoreReviewAttachment creates a new attachment.
+func (c *Client) CreateAppStoreReviewAttachment(ctx context.Context, reviewDetailID, fileName string, fileSize int64) (*AppStoreReviewAttachmentResponse, error) {
+	reviewDetailID = strings.TrimSpace(reviewDetailID)
+	fileName = strings.TrimSpace(fileName)
+	if reviewDetailID == "" {
+		return nil, fmt.Errorf("reviewDetailID is required")
+	}
+	if fileName == "" {
+		return nil, fmt.Errorf("fileName is required")
+	}
+	if fileSize <= 0 {
+		return nil, fmt.Errorf("fileSize is required")
+	}
+
+	payload := AppStoreReviewAttachmentCreateRequest{
+		Data: AppStoreReviewAttachmentCreateData{
+			Type: ResourceTypeAppStoreReviewAttachments,
+			Attributes: AppStoreReviewAttachmentCreateAttributes{
+				FileName: fileName,
+				FileSize: fileSize,
+			},
+			Relationships: &AppStoreReviewAttachmentRelationships{
+				AppStoreReviewDetail: &Relationship{
+					Data: ResourceData{
+						Type: ResourceTypeAppStoreReviewDetails,
+						ID:   reviewDetailID,
+					},
+				},
+			},
+		},
+	}
+
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := c.do(ctx, http.MethodPost, "/v1/appStoreReviewAttachments", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AppStoreReviewAttachmentResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// UpdateAppStoreReviewAttachment updates an attachment by ID.
+func (c *Client) UpdateAppStoreReviewAttachment(ctx context.Context, attachmentID string, attrs AppStoreReviewAttachmentUpdateAttributes) (*AppStoreReviewAttachmentResponse, error) {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return nil, fmt.Errorf("attachmentID is required")
+	}
+
+	payload := AppStoreReviewAttachmentUpdateRequest{
+		Data: AppStoreReviewAttachmentUpdateData{
+			Type: ResourceTypeAppStoreReviewAttachments,
+			ID:   attachmentID,
+		},
+	}
+	if attrs.SourceFileChecksum != nil || attrs.Uploaded != nil {
+		payload.Data.Attributes = &attrs
+	}
+
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := c.do(ctx, http.MethodPatch, fmt.Sprintf("/v1/appStoreReviewAttachments/%s", attachmentID), body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response AppStoreReviewAttachmentResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// DeleteAppStoreReviewAttachment deletes an attachment by ID.
+func (c *Client) DeleteAppStoreReviewAttachment(ctx context.Context, attachmentID string) error {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return fmt.Errorf("attachmentID is required")
+	}
+
+	_, err := c.do(ctx, http.MethodDelete, fmt.Sprintf("/v1/appStoreReviewAttachments/%s", attachmentID), nil)
+	return err
+}

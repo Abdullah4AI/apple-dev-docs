@@ -1,0 +1,451 @@
+package reviews
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+// ReviewSubmissionsListCommand returns the review submissions list subcommand.
+func ReviewSubmissionsListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-list", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID)")
+	global := fs.Bool("global", false, "Use top-level /v1/reviewSubmissions endpoint")
+	platform := fs.String("platform", "", "Filter by platform: IOS, MAC_OS, TV_OS, VISION_OS (comma-separated)")
+	state := fs.String("state", "", "Filter by state (comma-separated)")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Next page URL from a previous response")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-list",
+		ShortUsage: "appstore review submissions-list [flags]",
+		ShortHelp:  "List review submissions for an app or globally.",
+		LongHelp: `List review submissions for an app or globally.
+
+Examples:
+  appstore review submissions-list --app "123456789"
+  appstore review submissions-list --app "123456789" --platform IOS --state READY_FOR_REVIEW
+  appstore review submissions-list --app "123456789" --paginate
+  appstore review submissions-list --global --app "123456789"
+  appstore review submissions-list --global --app "123456789" --platform IOS --state READY_FOR_REVIEW`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("review submissions-list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("review submissions-list: %w", err)
+			}
+
+			platforms, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platform))
+			if err != nil {
+				return fmt.Errorf("review submissions-list: %w", err)
+			}
+			states := shared.SplitCSVUpper(*state)
+
+			resolvedAppID := shared.ResolveAppID(*appID)
+			nextURL := strings.TrimSpace(*next)
+
+			// Require one of --app or --global (unless --next is provided)
+			if !*global && resolvedAppID == "" && nextURL == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app or --global is required (or set APPSTORE_APP_ID)")
+				return flag.ErrHelp
+			}
+			// Top-level /v1/reviewSubmissions requires filter[app].
+			if *global && resolvedAppID == "" && nextURL == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required with --global (or set APPSTORE_APP_ID)")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.ReviewSubmissionsOption{
+				asc.WithReviewSubmissionsLimit(*limit),
+				asc.WithReviewSubmissionsNextURL(*next),
+				asc.WithReviewSubmissionsPlatforms(platforms),
+				asc.WithReviewSubmissionsStates(states),
+			}
+			if *global && resolvedAppID != "" {
+				opts = append(opts, asc.WithReviewSubmissionsApps([]string{resolvedAppID}))
+			}
+
+			if *global {
+				if *paginate {
+					paginateOpts := append(opts, asc.WithReviewSubmissionsLimit(200))
+					resp, err := shared.PaginateWithSpinner(requestCtx,
+						func(ctx context.Context) (asc.PaginatedResponse, error) {
+							return client.ListReviewSubmissions(ctx, paginateOpts...)
+						},
+						func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+							return client.ListReviewSubmissions(ctx, asc.WithReviewSubmissionsNextURL(nextURL))
+						},
+					)
+					if err != nil {
+						return fmt.Errorf("review submissions-list: %w", err)
+					}
+
+					return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+				}
+
+				resp, err := client.ListReviewSubmissions(requestCtx, opts...)
+				if err != nil {
+					return fmt.Errorf("review submissions-list: failed to fetch: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithReviewSubmissionsLimit(200))
+				resp, err := shared.PaginateWithSpinner(requestCtx,
+					func(ctx context.Context) (asc.PaginatedResponse, error) {
+						return client.GetReviewSubmissions(ctx, resolvedAppID, paginateOpts...)
+					},
+					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+						return client.GetReviewSubmissions(ctx, resolvedAppID, asc.WithReviewSubmissionsNextURL(nextURL))
+					},
+				)
+				if err != nil {
+					return fmt.Errorf("review submissions-list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetReviewSubmissions(requestCtx, resolvedAppID, opts...)
+			if err != nil {
+				return fmt.Errorf("review submissions-list: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsGetCommand returns the review submissions get subcommand.
+func ReviewSubmissionsGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-get", flag.ExitOnError)
+
+	submissionID := fs.String("id", "", "Review submission ID (required)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-get",
+		ShortUsage: "appstore review submissions-get [flags]",
+		ShortHelp:  "Get a review submission by ID.",
+		LongHelp: `Get a review submission by ID.
+
+Examples:
+  appstore review submissions-get --id "SUBMISSION_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if strings.TrimSpace(*submissionID) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetReviewSubmission(requestCtx, strings.TrimSpace(*submissionID))
+			if err != nil {
+				return fmt.Errorf("review submissions-get: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsCreateCommand returns the review submissions create subcommand.
+func ReviewSubmissionsCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-create", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID)")
+	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-create",
+		ShortUsage: "appstore review submissions-create [flags]",
+		ShortHelp:  "Create a review submission.",
+		LongHelp: `Create a review submission for an app.
+
+Examples:
+  appstore review submissions-create --app "123456789" --platform IOS`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)")
+				return flag.ErrHelp
+			}
+
+			normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
+			if err != nil {
+				return fmt.Errorf("review submissions-create: %w", err)
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.CreateReviewSubmission(requestCtx, resolvedAppID, asc.Platform(normalizedPlatform))
+			if err != nil {
+				return fmt.Errorf("review submissions-create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsUpdateCommand returns the review submissions update subcommand.
+func ReviewSubmissionsUpdateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-update", flag.ExitOnError)
+
+	submissionID := fs.String("id", "", "Review submission ID (required)")
+	canceled := fs.Bool("canceled", false, "Cancel submission (true/false)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-update",
+		ShortUsage: "appstore review submissions-update --id \"SUBMISSION_ID\" --canceled true [flags]",
+		ShortHelp:  "Update a review submission.",
+		LongHelp: `Update a review submission.
+
+Examples:
+  appstore review submissions-update --id "SUBMISSION_ID" --canceled true`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			trimmedID := strings.TrimSpace(*submissionID)
+			if trimmedID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			visited := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) {
+				visited[f.Name] = true
+			})
+			if !visited["canceled"] {
+				fmt.Fprintln(os.Stderr, "Error: --canceled is required")
+				return flag.ErrHelp
+			}
+
+			attrs := asc.ReviewSubmissionUpdateAttributes{
+				Canceled: canceled,
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-update: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.UpdateReviewSubmission(requestCtx, trimmedID, attrs)
+			if err != nil {
+				return fmt.Errorf("review submissions-update: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsSubmitCommand returns the review submissions submit subcommand.
+func ReviewSubmissionsSubmitCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-submit", flag.ExitOnError)
+
+	submissionID := fs.String("id", "", "Review submission ID (required)")
+	confirm := fs.Bool("confirm", false, "Confirm submission (required)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-submit",
+		ShortUsage: "appstore review submissions-submit [flags]",
+		ShortHelp:  "Submit a review submission.",
+		LongHelp: `Submit a review submission for review.
+
+Examples:
+  appstore review submissions-submit --id "SUBMISSION_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required to submit")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*submissionID) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-submit: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.SubmitReviewSubmission(requestCtx, strings.TrimSpace(*submissionID))
+			if err != nil {
+				return fmt.Errorf("review submissions-submit: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsCancelCommand returns the review submissions cancel subcommand.
+func ReviewSubmissionsCancelCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-cancel", flag.ExitOnError)
+
+	submissionID := fs.String("id", "", "Review submission ID (required)")
+	confirm := fs.Bool("confirm", false, "Confirm cancellation (required)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-cancel",
+		ShortUsage: "appstore review submissions-cancel [flags]",
+		ShortHelp:  "Cancel a review submission.",
+		LongHelp: `Cancel a review submission.
+
+Examples:
+  appstore review submissions-cancel --id "SUBMISSION_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required to cancel")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*submissionID) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-cancel: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.CancelReviewSubmission(requestCtx, strings.TrimSpace(*submissionID))
+			if err != nil {
+				return fmt.Errorf("review submissions-cancel: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// ReviewSubmissionsItemsIDsCommand returns the review submission item IDs subcommand.
+func ReviewSubmissionsItemsIDsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("submissions-items-ids", flag.ExitOnError)
+
+	submissionID := fs.String("id", "", "Review submission ID (required)")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Next page URL from a previous response")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "submissions-items-ids",
+		ShortUsage: "appstore review submissions-items-ids --id \"SUBMISSION_ID\" [flags]",
+		ShortHelp:  "List review submission item IDs for a submission.",
+		LongHelp: `List review submission item IDs for a submission.
+
+Examples:
+  appstore review submissions-items-ids --id "SUBMISSION_ID"
+  appstore review submissions-items-ids --id "SUBMISSION_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			trimmedID := strings.TrimSpace(*submissionID)
+			if trimmedID == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("review submissions-items-ids: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("review submissions-items-ids: %w", err)
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("review submissions-items-ids: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.LinkagesOption{
+				asc.WithLinkagesLimit(*limit),
+				asc.WithLinkagesNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithLinkagesLimit(200))
+				resp, err := shared.PaginateWithSpinner(requestCtx,
+					func(ctx context.Context) (asc.PaginatedResponse, error) {
+						return client.GetReviewSubmissionItemsRelationships(ctx, trimmedID, paginateOpts...)
+					},
+					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+						return client.GetReviewSubmissionItemsRelationships(ctx, trimmedID, asc.WithLinkagesNextURL(nextURL))
+					},
+				)
+				if err != nil {
+					return fmt.Errorf("review submissions-items-ids: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetReviewSubmissionItemsRelationships(requestCtx, trimmedID, opts...)
+			if err != nil {
+				return fmt.Errorf("review submissions-items-ids: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}

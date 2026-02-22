@@ -1,0 +1,507 @@
+package iap
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+// IAPOfferCodesCustomCodesCommand returns the custom codes command group.
+func IAPOfferCodesCustomCodesCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes custom-codes", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "custom-codes",
+		ShortUsage: "appstore iap offer-codes custom-codes <subcommand> [flags]",
+		ShortHelp:  "Manage custom codes for in-app purchase offer codes.",
+		LongHelp: `Manage custom codes for in-app purchase offer codes.
+
+Examples:
+  appstore iap offer-codes custom-codes list --offer-code-id "OFFER_CODE_ID"
+  appstore iap offer-codes custom-codes get --custom-code-id "CUSTOM_CODE_ID"
+  appstore iap offer-codes custom-codes create --offer-code-id "OFFER_CODE_ID" --custom-code "SUMMER26" --quantity 100`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			IAPOfferCodesCustomCodesListCommand(),
+			IAPOfferCodesCustomCodesGetCommand(),
+			IAPOfferCodesCustomCodesCreateCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// IAPOfferCodesCustomCodesListCommand returns the custom codes list subcommand.
+func IAPOfferCodesCustomCodesListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes custom-codes list", flag.ExitOnError)
+
+	offerCodeID := fs.String("offer-code-id", "", "Offer code ID")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore iap offer-codes custom-codes list --offer-code-id \"OFFER_CODE_ID\" [flags]",
+		ShortHelp:  "List custom codes for an offer code.",
+		LongHelp: `List custom codes for an offer code.
+
+Examples:
+  appstore iap offer-codes custom-codes list --offer-code-id "OFFER_CODE_ID"
+  appstore iap offer-codes custom-codes list --offer-code-id "OFFER_CODE_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("iap offer-codes custom-codes list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes list: %w", err)
+			}
+
+			id := strings.TrimSpace(*offerCodeID)
+			if id == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.IAPOfferCodeCustomCodesOption{
+				asc.WithIAPOfferCodeCustomCodesLimit(*limit),
+				asc.WithIAPOfferCodeCustomCodesNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithIAPOfferCodeCustomCodesLimit(200))
+				firstPage, err := client.GetInAppPurchaseOfferCodeCustomCodes(requestCtx, id, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("iap offer-codes custom-codes list: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetInAppPurchaseOfferCodeCustomCodes(ctx, id, asc.WithIAPOfferCodeCustomCodesNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("iap offer-codes custom-codes list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetInAppPurchaseOfferCodeCustomCodes(requestCtx, id, opts...)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesCustomCodesGetCommand returns the custom codes get subcommand.
+func IAPOfferCodesCustomCodesGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes custom-codes get", flag.ExitOnError)
+
+	customCodeID := fs.String("custom-code-id", "", "Custom code ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore iap offer-codes custom-codes get --custom-code-id \"CUSTOM_CODE_ID\"",
+		ShortHelp:  "Get a custom code by ID.",
+		LongHelp: `Get a custom code by ID.
+
+Examples:
+  appstore iap offer-codes custom-codes get --custom-code-id "CUSTOM_CODE_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*customCodeID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --custom-code-id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetInAppPurchaseOfferCodeCustomCode(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesCustomCodesCreateCommand returns the custom codes create subcommand.
+func IAPOfferCodesCustomCodesCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes custom-codes create", flag.ExitOnError)
+
+	offerCodeID := fs.String("offer-code-id", "", "Offer code ID (required)")
+	customCode := fs.String("custom-code", "", "Custom code value (required)")
+	quantity := fs.Int("quantity", 0, "Number of codes to create (required, positive integer)")
+	expirationDate := fs.String("expiration-date", "", "Expiration date (YYYY-MM-DD)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "create",
+		ShortUsage: "appstore iap offer-codes custom-codes create --offer-code-id \"OFFER_CODE_ID\" --custom-code \"CODE\" --quantity N [flags]",
+		ShortHelp:  "Create custom codes for an in-app purchase offer code.",
+		LongHelp: `Create custom codes for an in-app purchase offer code.
+
+Examples:
+  appstore iap offer-codes custom-codes create --offer-code-id "OFFER_CODE_ID" --custom-code "SUMMER26" --quantity 100
+  appstore iap offer-codes custom-codes create --offer-code-id "OFFER_CODE_ID" --custom-code "HOLIDAY2026" --quantity 50 --expiration-date "2026-12-31"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*offerCodeID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
+				return flag.ErrHelp
+			}
+
+			code := strings.TrimSpace(*customCode)
+			if code == "" {
+				fmt.Fprintln(os.Stderr, "Error: --custom-code is required")
+				return flag.ErrHelp
+			}
+
+			if *quantity <= 0 {
+				fmt.Fprintln(os.Stderr, "Error: --quantity must be a positive integer")
+				return flag.ErrHelp
+			}
+
+			var normalizedExpiration *string
+			if strings.TrimSpace(*expirationDate) != "" {
+				normalized, err := shared.NormalizeDate(*expirationDate, "--expiration-date")
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					return flag.ErrHelp
+				}
+				normalizedExpiration = &normalized
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			req := asc.InAppPurchaseOfferCodeCustomCodeCreateRequest{
+				Data: asc.InAppPurchaseOfferCodeCustomCodeCreateData{
+					Type: asc.ResourceTypeInAppPurchaseOfferCodeCustomCodes,
+					Attributes: asc.InAppPurchaseOfferCodeCustomCodeCreateAttributes{
+						CustomCode:     code,
+						NumberOfCodes:  *quantity,
+						ExpirationDate: normalizedExpiration,
+					},
+					Relationships: asc.InAppPurchaseOfferCodeCustomCodeCreateRelationships{
+						OfferCode: asc.Relationship{
+							Data: asc.ResourceData{
+								Type: asc.ResourceTypeInAppPurchaseOfferCodes,
+								ID:   id,
+							},
+						},
+					},
+				},
+			}
+
+			resp, err := client.CreateInAppPurchaseOfferCodeCustomCode(requestCtx, req)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes custom-codes create: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesOneTimeCodesCommand returns the one-time codes command group.
+func IAPOfferCodesOneTimeCodesCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes one-time-codes", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "one-time-codes",
+		ShortUsage: "appstore iap offer-codes one-time-codes <subcommand> [flags]",
+		ShortHelp:  "Manage one-time use codes for in-app purchase offer codes.",
+		LongHelp: `Manage one-time use codes for in-app purchase offer codes.
+
+Examples:
+  appstore iap offer-codes one-time-codes list --offer-code-id "OFFER_CODE_ID"
+  appstore iap offer-codes one-time-codes get --one-time-code-id "ONE_TIME_USE_CODE_ID"
+  appstore iap offer-codes one-time-codes create --offer-code-id "OFFER_CODE_ID" --quantity 100 --expiration-date "2026-12-31"
+  appstore iap offer-codes one-time-codes values --one-time-code-id "ONE_TIME_USE_CODE_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			IAPOfferCodesOneTimeCodesListCommand(),
+			IAPOfferCodesOneTimeCodesGetCommand(),
+			IAPOfferCodesOneTimeCodesCreateCommand(),
+			IAPOfferCodesOneTimeCodesValuesCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// IAPOfferCodesOneTimeCodesListCommand returns the one-time codes list subcommand.
+func IAPOfferCodesOneTimeCodesListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes one-time-codes list", flag.ExitOnError)
+
+	offerCodeID := fs.String("offer-code-id", "", "Offer code ID")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore iap offer-codes one-time-codes list --offer-code-id \"OFFER_CODE_ID\" [flags]",
+		ShortHelp:  "List one-time use code batches for an offer code.",
+		LongHelp: `List one-time use code batches for an offer code.
+
+Examples:
+  appstore iap offer-codes one-time-codes list --offer-code-id "OFFER_CODE_ID"
+  appstore iap offer-codes one-time-codes list --offer-code-id "OFFER_CODE_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("iap offer-codes one-time-codes list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes list: %w", err)
+			}
+
+			id := strings.TrimSpace(*offerCodeID)
+			if id == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.IAPOfferCodeOneTimeUseCodesOption{
+				asc.WithIAPOfferCodeOneTimeUseCodesLimit(*limit),
+				asc.WithIAPOfferCodeOneTimeUseCodesNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithIAPOfferCodeOneTimeUseCodesLimit(200))
+				firstPage, err := client.GetInAppPurchaseOfferCodeOneTimeUseCodes(requestCtx, id, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("iap offer-codes one-time-codes list: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetInAppPurchaseOfferCodeOneTimeUseCodes(ctx, id, asc.WithIAPOfferCodeOneTimeUseCodesNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("iap offer-codes one-time-codes list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetInAppPurchaseOfferCodeOneTimeUseCodes(requestCtx, id, opts...)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesOneTimeCodesGetCommand returns the one-time codes get subcommand.
+func IAPOfferCodesOneTimeCodesGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes one-time-codes get", flag.ExitOnError)
+
+	oneTimeCodeID := fs.String("one-time-code-id", "", "One-time use code batch ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore iap offer-codes one-time-codes get --one-time-code-id \"ONE_TIME_USE_CODE_ID\"",
+		ShortHelp:  "Get a one-time use code batch by ID.",
+		LongHelp: `Get a one-time use code batch by ID.
+
+Examples:
+  appstore iap offer-codes one-time-codes get --one-time-code-id "ONE_TIME_USE_CODE_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*oneTimeCodeID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --one-time-code-id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetInAppPurchaseOfferCodeOneTimeUseCode(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesOneTimeCodesCreateCommand returns the one-time codes create subcommand.
+func IAPOfferCodesOneTimeCodesCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes one-time-codes create", flag.ExitOnError)
+
+	offerCodeID := fs.String("offer-code-id", "", "Offer code ID (required)")
+	quantity := fs.Int("quantity", 0, "Number of codes to generate (required, positive integer)")
+	expirationDate := fs.String("expiration-date", "", "Expiration date (YYYY-MM-DD) (required)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "create",
+		ShortUsage: "appstore iap offer-codes one-time-codes create --offer-code-id \"OFFER_CODE_ID\" --quantity N --expiration-date \"YYYY-MM-DD\" [flags]",
+		ShortHelp:  "Generate one-time use codes for an in-app purchase offer code.",
+		LongHelp: `Generate one-time use codes for an in-app purchase offer code.
+
+Examples:
+  appstore iap offer-codes one-time-codes create --offer-code-id "OFFER_CODE_ID" --quantity 100 --expiration-date "2026-12-31"
+  appstore iap offer-codes one-time-codes create --offer-code-id "OFFER_CODE_ID" --quantity 500 --expiration-date "2026-09-30"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*offerCodeID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
+				return flag.ErrHelp
+			}
+
+			if *quantity <= 0 {
+				fmt.Fprintln(os.Stderr, "Error: --quantity must be a positive integer")
+				return flag.ErrHelp
+			}
+
+			normalizedExpiration, err := shared.NormalizeDate(*expirationDate, "--expiration-date")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err)
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			req := asc.InAppPurchaseOfferCodeOneTimeUseCodeCreateRequest{
+				Data: asc.InAppPurchaseOfferCodeOneTimeUseCodeCreateData{
+					Type: asc.ResourceTypeInAppPurchaseOfferCodeOneTimeUseCodes,
+					Attributes: asc.InAppPurchaseOfferCodeOneTimeUseCodeCreateAttributes{
+						NumberOfCodes:  *quantity,
+						ExpirationDate: normalizedExpiration,
+					},
+					Relationships: asc.InAppPurchaseOfferCodeOneTimeUseCodeCreateRelationships{
+						OfferCode: asc.Relationship{
+							Data: asc.ResourceData{
+								Type: asc.ResourceTypeInAppPurchaseOfferCodes,
+								ID:   id,
+							},
+						},
+					},
+				},
+			}
+
+			resp, err := client.CreateInAppPurchaseOfferCodeOneTimeUseCode(requestCtx, req)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes create: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// IAPOfferCodesOneTimeCodesValuesCommand returns the one-time code values subcommand.
+func IAPOfferCodesOneTimeCodesValuesCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("offer-codes one-time-codes values", flag.ExitOnError)
+
+	oneTimeCodeID := fs.String("one-time-code-id", "", "One-time use code batch ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "values",
+		ShortUsage: "appstore iap offer-codes one-time-codes values --one-time-code-id \"ONE_TIME_USE_CODE_ID\"",
+		ShortHelp:  "Fetch one-time use offer code values for a batch.",
+		LongHelp: `Fetch one-time use offer code values for a batch.
+
+Examples:
+  appstore iap offer-codes one-time-codes values --one-time-code-id "ONE_TIME_USE_CODE_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*oneTimeCodeID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --one-time-code-id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes values: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			values, err := client.GetInAppPurchaseOfferCodeOneTimeUseCodeValues(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("iap offer-codes one-time-codes values: failed to fetch: %w", err)
+			}
+
+			result := &asc.OfferCodeValuesResult{Codes: values}
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}

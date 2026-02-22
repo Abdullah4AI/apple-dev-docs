@@ -1,0 +1,81 @@
+package asc
+
+import (
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+func normalizeList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		normalized = append(normalized, value)
+	}
+	return normalized
+}
+
+func normalizeUpperList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		normalized = append(normalized, strings.ToUpper(value))
+	}
+	return normalized
+}
+
+func normalizeCSVString(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	normalized := normalizeList(strings.Split(value, ","))
+	if len(normalized) == 0 {
+		return ""
+	}
+	return strings.Join(normalized, ",")
+}
+
+func normalizeUpperCSVString(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	normalized := normalizeUpperList(strings.Split(value, ","))
+	if len(normalized) == 0 {
+		return ""
+	}
+	return strings.Join(normalized, ",")
+}
+
+func addCSV(values url.Values, key string, items []string) {
+	items = normalizeList(items)
+	if len(items) == 0 {
+		return
+	}
+	values.Set(key, strings.Join(items, ","))
+}
+
+func addLimit(values url.Values, limit int) {
+	if limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+}
+
+func addValue(values url.Values, key string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	values.Set(key, value)
+}

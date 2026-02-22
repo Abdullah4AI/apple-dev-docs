@@ -1,0 +1,1102 @@
+package subscriptions
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+// SubscriptionsCommand returns the subscriptions command group.
+func SubscriptionsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("subscriptions", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "subscriptions",
+		ShortUsage: "appstore subscriptions <subcommand> [flags]",
+		ShortHelp:  "Manage subscription groups and subscriptions.",
+		LongHelp: `Manage subscription groups and subscriptions.
+
+Examples:
+  appstore subscriptions groups list --app "APP_ID"
+  appstore subscriptions pricing --app "APP_ID"
+  appstore subscriptions pricing --app "APP_ID" --territory "USA" --output table
+  appstore subscriptions list --group "GROUP_ID"
+  appstore subscriptions create --group "GROUP_ID" --ref-name "Monthly" --product-id "com.example.sub.monthly"
+  appstore subscriptions prices add --id "SUB_ID" --price-point "PRICE_POINT_ID"
+  appstore subscriptions availability set --id "SUB_ID" --territory "USA,CAN"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			SubscriptionsGroupsCommand(),
+			SubscriptionsPricingCommand(),
+			SubscriptionsListCommand(),
+			SubscriptionsCreateCommand(),
+			SubscriptionsGetCommand(),
+			SubscriptionsUpdateCommand(),
+			SubscriptionsDeleteCommand(),
+			SubscriptionsPricesCommand(),
+			SubscriptionsAvailabilityCommand(),
+			SubscriptionsLocalizationsCommand(),
+			SubscriptionsImagesCommand(),
+			SubscriptionsIntroductoryOffersCommand(),
+			SubscriptionsPromotionalOffersCommand(),
+			SubscriptionsOfferCodesCommand(),
+			SubscriptionsPricePointsCommand(),
+			SubscriptionsReviewScreenshotsCommand(),
+			SubscriptionsAppStoreReviewScreenshotCommand(),
+			SubscriptionsPromotedPurchaseCommand(),
+			SubscriptionsGracePeriodsCommand(),
+			SubscriptionsSubmitCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// SubscriptionsGroupsCommand returns the subscriptions groups command group.
+func SubscriptionsGroupsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "groups",
+		ShortUsage: "appstore subscriptions groups <subcommand> [flags]",
+		ShortHelp:  "Manage subscription groups.",
+		LongHelp: `Manage subscription groups.
+
+Examples:
+  appstore subscriptions groups list --app "APP_ID"
+  appstore subscriptions groups create --app "APP_ID" --reference-name "Premium"
+  appstore subscriptions groups get --id "GROUP_ID"
+  appstore subscriptions groups delete --id "GROUP_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			SubscriptionsGroupsListCommand(),
+			SubscriptionsGroupsCreateCommand(),
+			SubscriptionsGroupsGetCommand(),
+			SubscriptionsGroupsUpdateCommand(),
+			SubscriptionsGroupsDeleteCommand(),
+			SubscriptionsGroupsLocalizationsCommand(),
+			SubscriptionsGroupsSubmitCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// SubscriptionsGroupsListCommand returns the groups list subcommand.
+func SubscriptionsGroupsListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups list", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore subscriptions groups list [flags]",
+		ShortHelp:  "List subscription groups for an app.",
+		LongHelp: `List subscription groups for an app.
+
+Examples:
+  appstore subscriptions groups list --app "APP_ID"
+  appstore subscriptions groups list --app "APP_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("subscriptions groups list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("subscriptions groups list: %w", err)
+			}
+
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions groups list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.SubscriptionGroupsOption{
+				asc.WithSubscriptionGroupsLimit(*limit),
+				asc.WithSubscriptionGroupsNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithSubscriptionGroupsLimit(200))
+				firstPage, err := client.GetSubscriptionGroups(requestCtx, resolvedAppID, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("subscriptions groups list: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetSubscriptionGroups(ctx, resolvedAppID, asc.WithSubscriptionGroupsNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("subscriptions groups list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetSubscriptionGroups(requestCtx, resolvedAppID, opts...)
+			if err != nil {
+				return fmt.Errorf("subscriptions groups list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsGroupsCreateCommand returns the groups create subcommand.
+func SubscriptionsGroupsCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups create", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	referenceName := fs.String("reference-name", "", "Reference name")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "create",
+		ShortUsage: "appstore subscriptions groups create [flags]",
+		ShortHelp:  "Create a subscription group.",
+		LongHelp: `Create a subscription group.
+
+Examples:
+  appstore subscriptions groups create --app "APP_ID" --reference-name "Premium"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)")
+				return flag.ErrHelp
+			}
+
+			name := strings.TrimSpace(*referenceName)
+			if name == "" {
+				fmt.Fprintln(os.Stderr, "Error: --reference-name is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions groups create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionGroupCreateAttributes{
+				ReferenceName: name,
+			}
+
+			resp, err := client.CreateSubscriptionGroup(requestCtx, resolvedAppID, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions groups create: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsGroupsGetCommand returns the groups get subcommand.
+func SubscriptionsGroupsGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups get", flag.ExitOnError)
+
+	groupID := fs.String("id", "", "Subscription group ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore subscriptions groups get --id \"GROUP_ID\"",
+		ShortHelp:  "Get a subscription group by ID.",
+		LongHelp: `Get a subscription group by ID.
+
+Examples:
+  appstore subscriptions groups get --id "GROUP_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*groupID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions groups get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetSubscriptionGroup(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("subscriptions groups get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsGroupsUpdateCommand returns the groups update subcommand.
+func SubscriptionsGroupsUpdateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups update", flag.ExitOnError)
+
+	groupID := fs.String("id", "", "Subscription group ID")
+	referenceName := fs.String("reference-name", "", "Reference name")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "update",
+		ShortUsage: "appstore subscriptions groups update [flags]",
+		ShortHelp:  "Update a subscription group.",
+		LongHelp: `Update a subscription group.
+
+Examples:
+  appstore subscriptions groups update --id "GROUP_ID" --reference-name "Premium"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*groupID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			name := strings.TrimSpace(*referenceName)
+			if name == "" {
+				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions groups update: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionGroupUpdateAttributes{
+				ReferenceName: &name,
+			}
+
+			resp, err := client.UpdateSubscriptionGroup(requestCtx, id, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions groups update: failed to update: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsGroupsDeleteCommand returns the groups delete subcommand.
+func SubscriptionsGroupsDeleteCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("groups delete", flag.ExitOnError)
+
+	groupID := fs.String("id", "", "Subscription group ID")
+	confirm := fs.Bool("confirm", false, "Confirm deletion")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "delete",
+		ShortUsage: "appstore subscriptions groups delete --id \"GROUP_ID\" --confirm",
+		ShortHelp:  "Delete a subscription group.",
+		LongHelp: `Delete a subscription group.
+
+Examples:
+  appstore subscriptions groups delete --id "GROUP_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*groupID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions groups delete: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.DeleteSubscriptionGroup(requestCtx, id); err != nil {
+				return fmt.Errorf("subscriptions groups delete: failed to delete: %w", err)
+			}
+
+			result := &asc.SubscriptionGroupDeleteResult{
+				ID:      id,
+				Deleted: true,
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsListCommand returns the subscriptions list subcommand.
+func SubscriptionsListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+
+	groupID := fs.String("group", "", "Subscription group ID")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore subscriptions list [flags]",
+		ShortHelp:  "List subscriptions in a group.",
+		LongHelp: `List subscriptions in a group.
+
+Examples:
+  appstore subscriptions list --group "GROUP_ID"
+  appstore subscriptions list --group "GROUP_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("subscriptions list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("subscriptions list: %w", err)
+			}
+
+			id := strings.TrimSpace(*groupID)
+			if id == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --group is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.SubscriptionsOption{
+				asc.WithSubscriptionsLimit(*limit),
+				asc.WithSubscriptionsNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithSubscriptionsLimit(200))
+				firstPage, err := client.GetSubscriptions(requestCtx, id, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("subscriptions list: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetSubscriptions(ctx, id, asc.WithSubscriptionsNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("subscriptions list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetSubscriptions(requestCtx, id, opts...)
+			if err != nil {
+				return fmt.Errorf("subscriptions list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsCreateCommand returns the subscriptions create subcommand.
+func SubscriptionsCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("create", flag.ExitOnError)
+
+	groupID := fs.String("group", "", "Subscription group ID")
+	refName := fs.String("ref-name", "", "Reference name")
+	productID := fs.String("product-id", "", "Product ID (e.g., com.example.sub)")
+	subscriptionPeriod := fs.String("subscription-period", "", "Subscription period: "+strings.Join(subscriptionPeriodValues, ", "))
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "create",
+		ShortUsage: "appstore subscriptions create [flags]",
+		ShortHelp:  "Create a subscription.",
+		LongHelp: `Create a subscription.
+
+Examples:
+  appstore subscriptions create --group "GROUP_ID" --ref-name "Monthly" --product-id "com.example.sub.monthly"
+  appstore subscriptions create --group "GROUP_ID" --ref-name "Monthly" --product-id "com.example.sub.monthly" --subscription-period ONE_MONTH`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			group := strings.TrimSpace(*groupID)
+			if group == "" {
+				fmt.Fprintln(os.Stderr, "Error: --group is required")
+				return flag.ErrHelp
+			}
+
+			name := strings.TrimSpace(*refName)
+			if name == "" {
+				fmt.Fprintln(os.Stderr, "Error: --ref-name is required")
+				return flag.ErrHelp
+			}
+
+			product := strings.TrimSpace(*productID)
+			if product == "" {
+				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
+				return flag.ErrHelp
+			}
+
+			period, err := normalizeSubscriptionPeriod(*subscriptionPeriod, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionCreateAttributes{
+				Name:      name,
+				ProductID: product,
+			}
+			if period != "" {
+				attrs.SubscriptionPeriod = string(period)
+			}
+
+			resp, err := client.CreateSubscription(requestCtx, group, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions create: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsGetCommand returns the subscriptions get subcommand.
+func SubscriptionsGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("get", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore subscriptions get --id \"SUB_ID\"",
+		ShortHelp:  "Get a subscription by ID.",
+		LongHelp: `Get a subscription by ID.
+
+Examples:
+  appstore subscriptions get --id "SUB_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*subID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetSubscription(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("subscriptions get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsUpdateCommand returns the subscriptions update subcommand.
+func SubscriptionsUpdateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	refName := fs.String("ref-name", "", "Reference name")
+	subscriptionPeriod := fs.String("subscription-period", "", "Subscription period: "+strings.Join(subscriptionPeriodValues, ", "))
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "update",
+		ShortUsage: "appstore subscriptions update [flags]",
+		ShortHelp:  "Update a subscription.",
+		LongHelp: `Update a subscription.
+
+Examples:
+  appstore subscriptions update --id "SUB_ID" --ref-name "New Name"
+  appstore subscriptions update --id "SUB_ID" --subscription-period ONE_YEAR`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*subID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			name := strings.TrimSpace(*refName)
+			period, err := normalizeSubscriptionPeriod(*subscriptionPeriod, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+			if name == "" && period == "" {
+				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions update: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionUpdateAttributes{}
+			if name != "" {
+				attrs.Name = &name
+			}
+			if period != "" {
+				periodValue := string(period)
+				attrs.SubscriptionPeriod = &periodValue
+			}
+
+			resp, err := client.UpdateSubscription(requestCtx, id, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions update: failed to update: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsDeleteCommand returns the subscriptions delete subcommand.
+func SubscriptionsDeleteCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("delete", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	confirm := fs.Bool("confirm", false, "Confirm deletion")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "delete",
+		ShortUsage: "appstore subscriptions delete --id \"SUB_ID\" --confirm",
+		ShortHelp:  "Delete a subscription.",
+		LongHelp: `Delete a subscription.
+
+Examples:
+  appstore subscriptions delete --id "SUB_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*subID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions delete: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.DeleteSubscription(requestCtx, id); err != nil {
+				return fmt.Errorf("subscriptions delete: failed to delete: %w", err)
+			}
+
+			result := &asc.SubscriptionDeleteResult{
+				ID:      id,
+				Deleted: true,
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsPricesCommand returns the subscriptions prices command group.
+func SubscriptionsPricesCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("prices", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "prices",
+		ShortUsage: "appstore subscriptions prices <subcommand> [flags]",
+		ShortHelp:  "Manage subscription pricing.",
+		LongHelp: `Manage subscription pricing.
+
+Examples:
+  appstore subscriptions prices list --id "SUB_ID"
+  appstore subscriptions prices add --id "SUB_ID" --price-point "PRICE_POINT_ID"
+  appstore subscriptions prices import --id "SUB_ID" --input "./prices.csv"
+  appstore subscriptions prices delete --price-id "PRICE_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			SubscriptionsPricesListCommand(),
+			SubscriptionsPricesAddCommand(),
+			SubscriptionsPricesImportCommand(),
+			SubscriptionsPricesDeleteCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// SubscriptionsPricesListCommand returns the subscriptions prices list subcommand.
+func SubscriptionsPricesListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("prices list", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore subscriptions prices list --id \"SUB_ID\"",
+		ShortHelp:  "List prices for a subscription.",
+		LongHelp: `List prices for a subscription.
+
+Examples:
+  appstore subscriptions prices list --id "SUB_ID"
+  appstore subscriptions prices list --id "SUB_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("subscriptions prices list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("subscriptions prices list: %w", err)
+			}
+
+			id := strings.TrimSpace(*subID)
+			if id == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions prices list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.SubscriptionPricesOption{
+				asc.WithSubscriptionPricesLimit(*limit),
+				asc.WithSubscriptionPricesNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithSubscriptionPricesLimit(200))
+				firstPage, err := client.GetSubscriptionPrices(requestCtx, id, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("subscriptions prices list: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetSubscriptionPrices(ctx, id, asc.WithSubscriptionPricesNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("subscriptions prices list: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetSubscriptionPrices(requestCtx, id, opts...)
+			if err != nil {
+				return fmt.Errorf("subscriptions prices list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsPricesAddCommand returns the subscriptions prices add subcommand.
+func SubscriptionsPricesAddCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("prices add", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	pricePointID := fs.String("price-point", "", "Subscription price point ID")
+	territory := fs.String("territory", "", "Territory ID (e.g., USA)")
+	startDate := fs.String("start-date", "", "Start date (YYYY-MM-DD)")
+	preserved := fs.Bool("preserved", false, "Preserve existing prices")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "add",
+		ShortUsage: "appstore subscriptions prices add [flags]",
+		ShortHelp:  "Add a subscription price.",
+		LongHelp: `Add a subscription price.
+
+Examples:
+  appstore subscriptions prices add --id "SUB_ID" --price-point "PRICE_POINT_ID"
+  appstore subscriptions prices add --id "SUB_ID" --price-point "PRICE_POINT_ID" --territory "USA"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*subID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			pricePoint := strings.TrimSpace(*pricePointID)
+			if pricePoint == "" {
+				fmt.Fprintln(os.Stderr, "Error: --price-point is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions prices add: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionPriceCreateAttributes{
+				StartDate: strings.TrimSpace(*startDate),
+			}
+			if *preserved {
+				attrs.Preserved = preserved
+			}
+
+			territoryID := strings.ToUpper(strings.TrimSpace(*territory))
+			resp, err := client.CreateSubscriptionPrice(requestCtx, id, pricePoint, territoryID, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions prices add: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsPricesDeleteCommand returns the subscriptions prices delete subcommand.
+func SubscriptionsPricesDeleteCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("prices delete", flag.ExitOnError)
+
+	priceID := fs.String("price-id", "", "Subscription price ID")
+	confirm := fs.Bool("confirm", false, "Confirm deletion")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "delete",
+		ShortUsage: "appstore subscriptions prices delete --price-id \"PRICE_ID\" --confirm",
+		ShortHelp:  "Delete a subscription price.",
+		LongHelp: `Delete a subscription price.
+
+Examples:
+  appstore subscriptions prices delete --price-id "PRICE_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*priceID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --price-id is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions prices delete: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.DeleteSubscriptionPrice(requestCtx, id); err != nil {
+				return fmt.Errorf("subscriptions prices delete: failed to delete: %w", err)
+			}
+
+			result := &asc.SubscriptionPriceDeleteResult{
+				ID:      id,
+				Deleted: true,
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsAvailabilityCommand returns the subscriptions availability command group.
+func SubscriptionsAvailabilityCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("availability", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "availability",
+		ShortUsage: "appstore subscriptions availability <subcommand> [flags]",
+		ShortHelp:  "Manage subscription availability.",
+		LongHelp: `Manage subscription availability.
+
+Examples:
+  appstore subscriptions availability get --id "AVAILABILITY_ID"
+  appstore subscriptions availability set --id "SUB_ID" --territory "USA,CAN"
+  appstore subscriptions availability available-territories --id "AVAILABILITY_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			SubscriptionsAvailabilityGetCommand(),
+			SubscriptionsAvailabilityAvailableTerritoriesCommand(),
+			SubscriptionsAvailabilitySetCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// SubscriptionsAvailabilityGetCommand returns the availability get subcommand.
+func SubscriptionsAvailabilityGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("availability get", flag.ExitOnError)
+
+	availabilityID := fs.String("id", "", "Subscription availability ID")
+	subscriptionID := fs.String("subscription-id", "", "Subscription ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore subscriptions availability get --id \"AVAILABILITY_ID\"",
+		ShortHelp:  "Get subscription availability by ID or subscription.",
+		LongHelp: `Get subscription availability by ID or subscription.
+
+Examples:
+  appstore subscriptions availability get --id "AVAILABILITY_ID"
+  appstore subscriptions availability get --subscription-id "SUB_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			availabilityValue := strings.TrimSpace(*availabilityID)
+			subscriptionValue := strings.TrimSpace(*subscriptionID)
+			if availabilityValue == "" && subscriptionValue == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id or --subscription-id is required")
+				return flag.ErrHelp
+			}
+			if availabilityValue != "" && subscriptionValue != "" {
+				fmt.Fprintln(os.Stderr, "Error: --id and --subscription-id are mutually exclusive")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions availability get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if availabilityValue != "" {
+				resp, err := client.GetSubscriptionAvailability(requestCtx, availabilityValue)
+				if err != nil {
+					return fmt.Errorf("subscriptions availability get: failed to fetch: %w", err)
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetSubscriptionAvailabilityForSubscription(requestCtx, subscriptionValue)
+			if err != nil {
+				return fmt.Errorf("subscriptions availability get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsAvailabilityAvailableTerritoriesCommand returns the available territories subcommand.
+func SubscriptionsAvailabilityAvailableTerritoriesCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("availability available-territories", flag.ExitOnError)
+
+	availabilityID := fs.String("id", "", "Subscription availability ID")
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "available-territories",
+		ShortUsage: "appstore subscriptions availability available-territories --id \"AVAILABILITY_ID\"",
+		ShortHelp:  "List available territories for a subscription availability.",
+		LongHelp: `List available territories for a subscription availability.
+
+Examples:
+  appstore subscriptions availability available-territories --id "AVAILABILITY_ID"
+  appstore subscriptions availability available-territories --id "AVAILABILITY_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("subscriptions availability available-territories: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("subscriptions availability available-territories: %w", err)
+			}
+
+			id := strings.TrimSpace(*availabilityID)
+			if id == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions availability available-territories: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.SubscriptionAvailabilityTerritoriesOption{
+				asc.WithSubscriptionAvailabilityTerritoriesLimit(*limit),
+				asc.WithSubscriptionAvailabilityTerritoriesNextURL(*next),
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithSubscriptionAvailabilityTerritoriesLimit(200))
+				firstPage, err := client.GetSubscriptionAvailabilityAvailableTerritories(requestCtx, id, paginateOpts...)
+				if err != nil {
+					return fmt.Errorf("subscriptions availability available-territories: failed to fetch: %w", err)
+				}
+
+				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetSubscriptionAvailabilityAvailableTerritories(ctx, id, asc.WithSubscriptionAvailabilityTerritoriesNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("subscriptions availability available-territories: %w", err)
+				}
+
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.GetSubscriptionAvailabilityAvailableTerritories(requestCtx, id, opts...)
+			if err != nil {
+				return fmt.Errorf("subscriptions availability available-territories: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// SubscriptionsAvailabilitySetCommand returns the availability set subcommand.
+func SubscriptionsAvailabilitySetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("availability set", flag.ExitOnError)
+
+	subID := fs.String("id", "", "Subscription ID")
+	territories := fs.String("territory", "", "Territory IDs, comma-separated")
+	availableInNew := fs.Bool("available-in-new-territories", false, "Include new territories automatically")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "set",
+		ShortUsage: "appstore subscriptions availability set [flags]",
+		ShortHelp:  "Set subscription availability in territories.",
+		LongHelp: `Set subscription availability in territories.
+
+Examples:
+  appstore subscriptions availability set --id "SUB_ID" --territory "USA,CAN"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			id := strings.TrimSpace(*subID)
+			if id == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			territoryIDs := shared.SplitCSV(*territories)
+			if len(territoryIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --territory is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions availability set: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			attrs := asc.SubscriptionAvailabilityAttributes{
+				AvailableInNewTerritories: *availableInNew,
+			}
+
+			resp, err := client.CreateSubscriptionAvailability(requestCtx, id, territoryIDs, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions availability set: failed to set: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}

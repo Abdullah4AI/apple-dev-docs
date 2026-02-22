@@ -1,0 +1,31 @@
+email,first_name,last_name,groups
+aria.halden@example.com,Aria,Halden,Core Team;Nightly
+lev.warner@example.com,Lev,Warner,Core Team
+nina.quill@example.com,Nina,Quill,Power Users;Localization
+omar.voss@example.com,Omar,Voss,Power Users
+ivy.marlow@example.com,Ivy,Marlow,Nightly
+felix.braun@example.com,Felix,Braun,Core Team;Analytics
+dana.klein@example.com,Dana,Klein,Analytics
+juno.rivers@example.com,Juno,Rivers,Localization
+zane.holt@example.com,Zane,Holt,Core Team;Security
+lena.park@example.com,Lena,Park,Security
+marco.reid@example.com,Marco,Reid,Power Users;Growth
+eva.stone@example.com,Eva,Stone,Growth
+kai.bishop@example.com,Kai,Bishop,Core Team;Beta 2
+maya.frost@example.com,Maya,Frost,Beta 2
+noah.darcy@example.com,Noah,Darcy,Core Team;Design
+pia.lawson@example.com,Pia,Lawson,Design
+ravi.shah@example.com,Ravi,Shah,Localization;Growth
+thea.cole@example.com,Thea,Cole,Localization
+viktor.chen@example.com,Viktor,Chen,Core Team;A11y
+sara.owen@example.com,Sara,Owen,A11y
+liam.hayes@example.com,Liam,Hayes,Core Team;Nightly
+zoe.patel@example.com,Zoe,Patel,Nightly
+ian.ramirez@example.com,Ian,Ramirez,Power Users;Finance
+lara.kent@example.com,Lara,Kent,Finance
+milo.singh@example.com,Milo,Singh,Core Team;Release
+anya.ross@example.com,Anya,Ross,Release
+tariq.edwards@example.com,Tariq,Edwards,Growth;Security
+clara.novak@example.com,Clara,Novak,Security
+bruno.meyer@example.com,Bruno,Meyer,Core Team;Platform
+esme.hart@example.com,Esme,Hart,Platform

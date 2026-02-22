@@ -1,0 +1,167 @@
+package apps
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"path/filepath"
+	"testing"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+)
+
+func TestAppSetupInfoSetCommand_MissingApp(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	cmd := AppSetupInfoSetCommand()
+
+	if err := cmd.FlagSet.Parse([]string{}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when --app is missing, got %v", err)
+	}
+}
+
+func TestAppSetupInfoSetCommand_MissingUpdates(t *testing.T) {
+	cmd := AppSetupInfoSetCommand()
+
+	if err := cmd.FlagSet.Parse([]string{"--app", "APP"}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when no update flags provided, got %v", err)
+	}
+}
+
+func TestAppSetupInfoSetCommand_MissingLocale(t *testing.T) {
+	cmd := AppSetupInfoSetCommand()
+
+	if err := cmd.FlagSet.Parse([]string{"--app", "APP", "--name", "My App"}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when locale is missing, got %v", err)
+	}
+}
+
+func TestAppSetupCategoriesSetCommand_MissingFlags(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "missing app", args: []string{"--primary", "GAMES"}},
+		{name: "missing primary", args: []string{"--app", "APP"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := AppSetupCategoriesSetCommand()
+			if err := cmd.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			if err := cmd.Exec(context.Background(), []string{}); err == nil {
+				t.Fatal("expected error for missing flags")
+			}
+		})
+	}
+}
+
+func TestAppSetupAvailabilitySetCommand_MissingFlags(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "missing app", args: []string{"--territory", "USA", "--available", "true", "--available-in-new-territories", "true"}},
+		{name: "missing territory", args: []string{"--app", "APP", "--available", "true", "--available-in-new-territories", "true"}},
+		{name: "missing available", args: []string{"--app", "APP", "--territory", "USA", "--available-in-new-territories", "true"}},
+		{name: "missing available in new territories", args: []string{"--app", "APP", "--territory", "USA", "--available", "true"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := AppSetupAvailabilitySetCommand()
+			if err := cmd.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAppSetupPricingSetCommand_MissingFlags(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "missing app", args: []string{"--price-point", "PP"}},
+		{name: "missing price point", args: []string{"--app", "APP"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := AppSetupPricingSetCommand()
+			if err := cmd.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAppSetupLocalizationsUploadCommand_MissingPath(t *testing.T) {
+	cmd := AppSetupLocalizationsUploadCommand()
+
+	if err := cmd.FlagSet.Parse([]string{"--version", "VERSION_ID"}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when --path is missing, got %v", err)
+	}
+}
+
+func TestAppSetupCommands_DefaultOutputJSON(t *testing.T) {
+	commands := []*struct {
+		name string
+		cmd  func() *ffcli.Command
+	}{
+		{"info set", AppSetupInfoSetCommand},
+		{"categories set", AppSetupCategoriesSetCommand},
+		{"availability set", AppSetupAvailabilitySetCommand},
+		{"pricing set", AppSetupPricingSetCommand},
+		{"localizations upload", AppSetupLocalizationsUploadCommand},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.cmd()
+			f := cmd.FlagSet.Lookup("output")
+			if f == nil {
+				t.Fatalf("expected --output flag to be defined")
+			}
+			if f.DefValue != "json" {
+				t.Fatalf("expected --output default to be 'json', got %q", f.DefValue)
+			}
+		})
+	}
+}

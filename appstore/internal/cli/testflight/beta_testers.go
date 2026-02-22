@@ -1,0 +1,719 @@
+package testflight
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+// BetaTestersCommand returns the beta testers command with subcommands.
+func BetaTestersCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("beta-testers", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "beta-testers",
+		ShortUsage: "appstore testflight beta-testers <subcommand> [flags]",
+		ShortHelp:  "Manage TestFlight beta testers.",
+		LongHelp: `Manage TestFlight beta testers.
+
+Examples:
+  appstore testflight beta-testers list --app "APP_ID"
+  appstore testflight beta-testers get --id "TESTER_ID"
+  appstore testflight beta-testers add --app "APP_ID" --email "tester@example.com" --group "Beta"
+  appstore testflight beta-testers export --app "APP_ID" --output "./testflight-testers.csv"
+  appstore testflight beta-testers import --app "APP_ID" --input "./testflight-testers.csv" --dry-run
+  appstore testflight beta-testers remove --app "APP_ID" --email "tester@example.com"
+  appstore testflight beta-testers add-groups --id "TESTER_ID" --group "GROUP_ID"
+  appstore testflight beta-testers remove-groups --id "TESTER_ID" --group "GROUP_ID"
+  appstore testflight beta-testers add-builds --id "TESTER_ID" --build "BUILD_ID"
+  appstore testflight beta-testers remove-builds --id "TESTER_ID" --build "BUILD_ID" --confirm
+  appstore testflight beta-testers remove-apps --id "TESTER_ID" --app "APP_ID" --confirm
+  appstore testflight beta-testers invite --app "APP_ID" --email "tester@example.com"
+  appstore testflight beta-testers invite --app "APP_ID" --email "tester@example.com" --group "Beta"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			BetaTestersListCommand(),
+			BetaTestersGetCommand(),
+			BetaTestersAddCommand(),
+			BetaTestersExportCommand(),
+			BetaTestersImportCommand(),
+			BetaTestersRemoveCommand(),
+			BetaTestersAddGroupsCommand(),
+			BetaTestersRemoveGroupsCommand(),
+			BetaTestersAddBuildsCommand(),
+			BetaTestersRemoveBuildsCommand(),
+			BetaTestersRemoveAppsCommand(),
+			BetaTestersRelationshipsCommand(),
+			BetaTestersAppsCommand(),
+			BetaTestersBetaGroupsCommand(),
+			BetaTestersBuildsCommand(),
+			BetaTestersMetricsCommand(),
+			BetaTestersInviteCommand(),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// BetaTestersListCommand returns the beta testers list subcommand.
+func BetaTestersListCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	buildID := fs.String("build", "", "Build ID to filter")
+	group := fs.String("group", "", "Beta group name or ID to filter")
+	email := fs.String("email", "", "Filter by tester email")
+	output := shared.BindOutputFlags(fs)
+	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+
+	return &ffcli.Command{
+		Name:       "list",
+		ShortUsage: "appstore testflight beta-testers list [flags]",
+		ShortHelp:  "List TestFlight beta testers for an app.",
+		LongHelp: `List TestFlight beta testers for an app.
+
+Examples:
+  appstore testflight beta-testers list --app "APP_ID"
+  appstore testflight beta-testers list --app "APP_ID" --build "BUILD_ID"
+  appstore testflight beta-testers list --app "APP_ID" --group "Beta"
+  appstore testflight beta-testers list --app "APP_ID" --limit 25
+  appstore testflight beta-testers list --app "APP_ID" --paginate`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("beta-testers list: --limit must be between 1 and 200")
+			}
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("beta-testers list: %w", err)
+			}
+
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
+				fmt.Fprintf(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)\n\n")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers list: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			opts := []asc.BetaTestersOption{
+				asc.WithBetaTestersLimit(*limit),
+				asc.WithBetaTestersNextURL(*next),
+			}
+
+			if strings.TrimSpace(*buildID) != "" {
+				opts = append(opts, asc.WithBetaTestersBuildID(strings.TrimSpace(*buildID)))
+			}
+
+			if strings.TrimSpace(*email) != "" {
+				opts = append(opts, asc.WithBetaTestersEmail(*email))
+			}
+
+			if strings.TrimSpace(*group) != "" && strings.TrimSpace(*next) == "" {
+				groupID, err := resolveBetaGroupID(requestCtx, client, resolvedAppID, *group)
+				if err != nil {
+					return fmt.Errorf("beta-testers list: %w", err)
+				}
+				opts = append(opts, asc.WithBetaTestersGroupIDs([]string{groupID}))
+			}
+
+			if *paginate {
+				paginateOpts := append(opts, asc.WithBetaTestersLimit(200))
+				testers, err := shared.PaginateWithSpinner(requestCtx,
+					func(ctx context.Context) (asc.PaginatedResponse, error) {
+						return client.GetBetaTesters(ctx, resolvedAppID, paginateOpts...)
+					},
+					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+						return client.GetBetaTesters(ctx, resolvedAppID, asc.WithBetaTestersNextURL(nextURL))
+					},
+				)
+				if err != nil {
+					return fmt.Errorf("beta-testers list: %w", err)
+				}
+
+				return shared.PrintOutput(testers, *output.Output, *output.Pretty)
+			}
+
+			testers, err := client.GetBetaTesters(requestCtx, resolvedAppID, opts...)
+			if err != nil {
+				return fmt.Errorf("beta-testers list: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(testers, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// BetaTestersGetCommand returns the beta testers get subcommand.
+func BetaTestersGetCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("get", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "get",
+		ShortUsage: "appstore testflight beta-testers get [flags]",
+		ShortHelp:  "Get a TestFlight beta tester by ID.",
+		LongHelp: `Get a TestFlight beta tester by ID.
+
+Examples:
+  appstore testflight beta-testers get --id "TESTER_ID"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			idValue := strings.TrimSpace(*id)
+			if idValue == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers get: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			tester, err := client.GetBetaTester(requestCtx, idValue)
+			if err != nil {
+				return fmt.Errorf("beta-testers get: failed to fetch: %w", err)
+			}
+
+			return shared.PrintOutput(tester, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// BetaTestersAddCommand returns the beta testers add subcommand.
+func BetaTestersAddCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("add", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	email := fs.String("email", "", "Tester email address")
+	firstName := fs.String("first-name", "", "Tester first name")
+	lastName := fs.String("last-name", "", "Tester last name")
+	group := fs.String("group", "", "Beta group name or ID")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "add",
+		ShortUsage: "appstore testflight beta-testers add [flags]",
+		ShortHelp:  "Add a TestFlight beta tester.",
+		LongHelp: `Add a TestFlight beta tester.
+
+Examples:
+  appstore testflight beta-testers add --app "APP_ID" --email "tester@example.com" --group "Beta"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintf(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)\n\n")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*email) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --email is required")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*group) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --group is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers add: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			groupID, err := resolveBetaGroupID(requestCtx, client, resolvedAppID, *group)
+			if err != nil {
+				return fmt.Errorf("beta-testers add: %w", err)
+			}
+
+			tester, err := client.CreateBetaTester(requestCtx, *email, *firstName, *lastName, []string{groupID})
+			if err != nil {
+				return fmt.Errorf("beta-testers add: failed to create: %w", err)
+			}
+
+			return shared.PrintOutput(tester, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// BetaTestersRemoveCommand returns the beta testers remove subcommand.
+func BetaTestersRemoveCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("remove", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	email := fs.String("email", "", "Tester email address")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "remove",
+		ShortUsage: "appstore testflight beta-testers remove [flags]",
+		ShortHelp:  "Remove a TestFlight beta tester.",
+		LongHelp: `Remove a TestFlight beta tester.
+
+Examples:
+  appstore testflight beta-testers remove --app "APP_ID" --email "tester@example.com"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintf(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)\n\n")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*email) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --email is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers remove: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			testerID, err := findBetaTesterIDByEmail(requestCtx, client, resolvedAppID, *email)
+			if err != nil {
+				if errors.Is(err, errBetaTesterNotFound) {
+					return fmt.Errorf("beta-testers remove: no tester found for %q", strings.TrimSpace(*email))
+				}
+				return fmt.Errorf("beta-testers remove: %w", err)
+			}
+
+			if err := client.DeleteBetaTester(requestCtx, testerID); err != nil {
+				return fmt.Errorf("beta-testers remove: failed to remove: %w", err)
+			}
+
+			result := &asc.BetaTesterDeleteResult{
+				ID:      testerID,
+				Email:   strings.TrimSpace(*email),
+				Deleted: true,
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+// BetaTestersAddGroupsCommand returns the beta testers add-groups subcommand.
+func BetaTestersAddGroupsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("add-groups", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	groups := fs.String("group", "", "Comma-separated beta group IDs")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "add-groups",
+		ShortUsage: "appstore testflight beta-testers add-groups --id TESTER_ID --group GROUP_ID[,GROUP_ID...]",
+		ShortHelp:  "Add a beta tester to beta groups.",
+		LongHelp: `Add a beta tester to beta groups.
+
+Examples:
+  appstore testflight beta-testers add-groups --id "TESTER_ID" --group "GROUP_ID"
+  appstore testflight beta-testers add-groups --id "TESTER_ID" --group "GROUP_ID_1,GROUP_ID_2"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			testerID := strings.TrimSpace(*id)
+			if testerID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			groupIDs := shared.SplitCSV(*groups)
+			if len(groupIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --group is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers add-groups: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.AddBetaTesterToGroups(requestCtx, testerID, groupIDs); err != nil {
+				return fmt.Errorf("beta-testers add-groups: failed to add groups: %w", err)
+			}
+
+			result := &asc.BetaTesterGroupsUpdateResult{
+				TesterID: testerID,
+				GroupIDs: groupIDs,
+				Action:   "added",
+			}
+
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Successfully added tester %s to %d group(s)\n", testerID, len(groupIDs))
+			return nil
+		},
+	}
+}
+
+// BetaTestersRemoveGroupsCommand returns the beta testers remove-groups subcommand.
+func BetaTestersRemoveGroupsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("remove-groups", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	groups := fs.String("group", "", "Comma-separated beta group IDs")
+	confirm := fs.Bool("confirm", false, "Confirm removal")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "remove-groups",
+		ShortUsage: "appstore testflight beta-testers remove-groups --id TESTER_ID --group GROUP_ID[,GROUP_ID...] --confirm",
+		ShortHelp:  "Remove a beta tester from beta groups.",
+		LongHelp: `Remove a beta tester from beta groups.
+
+Examples:
+  appstore testflight beta-testers remove-groups --id "TESTER_ID" --group "GROUP_ID" --confirm
+  appstore testflight beta-testers remove-groups --id "TESTER_ID" --group "GROUP_ID_1,GROUP_ID_2" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			testerID := strings.TrimSpace(*id)
+			if testerID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			groupIDs := shared.SplitCSV(*groups)
+			if len(groupIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --group is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers remove-groups: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.RemoveBetaTesterFromGroups(requestCtx, testerID, groupIDs); err != nil {
+				return fmt.Errorf("beta-testers remove-groups: failed to remove groups: %w", err)
+			}
+
+			result := &asc.BetaTesterGroupsUpdateResult{
+				TesterID: testerID,
+				GroupIDs: groupIDs,
+				Action:   "removed",
+			}
+
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Successfully removed tester %s from %d group(s)\n", testerID, len(groupIDs))
+			return nil
+		},
+	}
+}
+
+// BetaTestersAddBuildsCommand returns the beta testers add-builds subcommand.
+func BetaTestersAddBuildsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("add-builds", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	builds := fs.String("build", "", "Comma-separated build IDs")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "add-builds",
+		ShortUsage: "appstore testflight beta-testers add-builds --id TESTER_ID --build BUILD_ID[,BUILD_ID...]",
+		ShortHelp:  "Add builds to a beta tester.",
+		LongHelp: `Add builds to a beta tester.
+
+Examples:
+  appstore testflight beta-testers add-builds --id "TESTER_ID" --build "BUILD_ID"
+  appstore testflight beta-testers add-builds --id "TESTER_ID" --build "BUILD_ID1,BUILD_ID2"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			testerID := strings.TrimSpace(*id)
+			if testerID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			buildIDs := shared.SplitCSV(*builds)
+			if len(buildIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --build is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers add-builds: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.AddBuildsToBetaTester(requestCtx, testerID, buildIDs); err != nil {
+				return fmt.Errorf("beta-testers add-builds: failed to add builds: %w", err)
+			}
+
+			result := &asc.BetaTesterBuildsUpdateResult{
+				TesterID: testerID,
+				BuildIDs: buildIDs,
+				Action:   "added",
+			}
+
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Successfully added tester %s to %d build(s)\n", testerID, len(buildIDs))
+			return nil
+		},
+	}
+}
+
+// BetaTestersRemoveBuildsCommand returns the beta testers remove-builds subcommand.
+func BetaTestersRemoveBuildsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("remove-builds", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	builds := fs.String("build", "", "Comma-separated build IDs")
+	confirm := fs.Bool("confirm", false, "Confirm removal")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "remove-builds",
+		ShortUsage: "appstore testflight beta-testers remove-builds --id TESTER_ID --build BUILD_ID[,BUILD_ID...] --confirm",
+		ShortHelp:  "Remove builds from a beta tester.",
+		LongHelp: `Remove builds from a beta tester.
+
+Examples:
+  appstore testflight beta-testers remove-builds --id "TESTER_ID" --build "BUILD_ID" --confirm
+  appstore testflight beta-testers remove-builds --id "TESTER_ID" --build "BUILD_ID1,BUILD_ID2" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			testerID := strings.TrimSpace(*id)
+			if testerID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			buildIDs := shared.SplitCSV(*builds)
+			if len(buildIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --build is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers remove-builds: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.RemoveBuildsFromBetaTester(requestCtx, testerID, buildIDs); err != nil {
+				return fmt.Errorf("beta-testers remove-builds: failed to remove builds: %w", err)
+			}
+
+			result := &asc.BetaTesterBuildsUpdateResult{
+				TesterID: testerID,
+				BuildIDs: buildIDs,
+				Action:   "removed",
+			}
+
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Successfully removed tester %s from %d build(s)\n", testerID, len(buildIDs))
+			return nil
+		},
+	}
+}
+
+// BetaTestersRemoveAppsCommand returns the beta testers remove-apps subcommand.
+func BetaTestersRemoveAppsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("remove-apps", flag.ExitOnError)
+
+	id := fs.String("id", "", "Beta tester ID")
+	apps := fs.String("app", "", "Comma-separated app IDs")
+	confirm := fs.Bool("confirm", false, "Confirm removal")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "remove-apps",
+		ShortUsage: "appstore testflight beta-testers remove-apps --id TESTER_ID --app APP_ID[,APP_ID...] --confirm",
+		ShortHelp:  "Remove apps from a beta tester.",
+		LongHelp: `Remove apps from a beta tester.
+
+Examples:
+  appstore testflight beta-testers remove-apps --id "TESTER_ID" --app "APP_ID" --confirm
+  appstore testflight beta-testers remove-apps --id "TESTER_ID" --app "APP_ID1,APP_ID2" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			testerID := strings.TrimSpace(*id)
+			if testerID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --id is required")
+				return flag.ErrHelp
+			}
+
+			appIDs := shared.SplitCSV(*apps)
+			if len(appIDs) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --app is required")
+				return flag.ErrHelp
+			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers remove-apps: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			if err := client.RemoveBetaTesterFromApps(requestCtx, testerID, appIDs); err != nil {
+				return fmt.Errorf("beta-testers remove-apps: failed to remove apps: %w", err)
+			}
+
+			result := &asc.BetaTesterAppsUpdateResult{
+				TesterID: testerID,
+				AppIDs:   appIDs,
+				Action:   "removed",
+			}
+
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "Successfully removed tester %s from %d app(s)\n", testerID, len(appIDs))
+			return nil
+		},
+	}
+}
+
+// BetaTestersInviteCommand returns the beta testers invite subcommand.
+func BetaTestersInviteCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("invite", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or APPSTORE_APP_ID env)")
+	email := fs.String("email", "", "Tester email address")
+	group := fs.String("group", "", "Beta group name or ID (optional, creates tester if missing)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "invite",
+		ShortUsage: "appstore testflight beta-testers invite [flags]",
+		ShortHelp:  "Invite a TestFlight beta tester.",
+		LongHelp: `Invite a TestFlight beta tester.
+
+Examples:
+  appstore testflight beta-testers invite --app "APP_ID" --email "tester@example.com"
+  appstore testflight beta-testers invite --app "APP_ID" --email "tester@example.com" --group "Beta"`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintf(os.Stderr, "Error: --app is required (or set APPSTORE_APP_ID)\n\n")
+				return flag.ErrHelp
+			}
+			if strings.TrimSpace(*email) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --email is required")
+				return flag.ErrHelp
+			}
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("beta-testers invite: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			emailValue := strings.TrimSpace(*email)
+			groupValue := strings.TrimSpace(*group)
+			testerID, err := findBetaTesterIDByEmail(requestCtx, client, resolvedAppID, emailValue)
+			if err != nil {
+				if errors.Is(err, errBetaTesterNotFound) {
+					if groupValue == "" {
+						return fmt.Errorf("beta-testers invite: no tester found for %q (use beta-testers add --group ... or pass --group here)", emailValue)
+					}
+
+					groupID, resolveErr := resolveBetaGroupID(requestCtx, client, resolvedAppID, groupValue)
+					if resolveErr != nil {
+						return fmt.Errorf("beta-testers invite: %w", resolveErr)
+					}
+
+					created, createErr := client.CreateBetaTester(requestCtx, emailValue, "", "", []string{groupID})
+					if createErr != nil {
+						return fmt.Errorf("beta-testers invite: failed to create tester: %w", createErr)
+					}
+					testerID = created.Data.ID
+				} else {
+					return fmt.Errorf("beta-testers invite: %w", err)
+				}
+			}
+
+			invitation, err := client.CreateBetaTesterInvitation(requestCtx, resolvedAppID, testerID)
+			if err != nil {
+				return fmt.Errorf("beta-testers invite: failed to create invitation: %w", err)
+			}
+
+			result := &asc.BetaTesterInvitationResult{
+				InvitationID: invitation.Data.ID,
+				TesterID:     testerID,
+				AppID:        resolvedAppID,
+				Email:        emailValue,
+			}
+
+			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		},
+	}
+}
