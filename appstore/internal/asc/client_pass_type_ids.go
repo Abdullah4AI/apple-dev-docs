@@ -161,34 +161,16 @@ func (c *Client) GetPassTypeIDCertificates(ctx context.Context, passTypeID strin
 
 // GetPassTypeIDCertificatesRelationships retrieves certificate linkages for a pass type ID.
 func (c *Client) GetPassTypeIDCertificatesRelationships(ctx context.Context, passTypeID string, opts ...LinkagesOption) (*PassTypeIDCertificatesLinkagesResponse, error) {
-	passTypeID = strings.TrimSpace(passTypeID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/passTypeIds/%s/relationships/certificates", passTypeID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("passTypeIdCertificatesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response PassTypeIDCertificatesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[PassTypeIDCertificatesLinkagesResponse](
+		c,
+		ctx,
+		passTypeID,
+		"certificates",
+		"pass type ID",
+		"/v1/passTypeIds/%s/relationships/%s",
+		"passTypeIdCertificatesRelationships",
+		opts...,
+	)
 }
 
 // GetCertificatePassTypeID retrieves the pass type ID for a certificate.

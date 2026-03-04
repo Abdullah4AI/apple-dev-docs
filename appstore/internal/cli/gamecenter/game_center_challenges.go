@@ -241,7 +241,7 @@ Examples:
 			}
 
 			if strings.TrimSpace(*repeatable) != "" {
-				val, err := parseBool(*repeatable, "--repeatable")
+				val, err := shared.ParseBoolFlag(*repeatable, "--repeatable")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp
@@ -315,7 +315,7 @@ Examples:
 			}
 
 			if strings.TrimSpace(*repeatable) != "" {
-				val, err := parseBool(*repeatable, "--repeatable")
+				val, err := shared.ParseBoolFlag(*repeatable, "--repeatable")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp
@@ -325,7 +325,7 @@ Examples:
 			}
 
 			if strings.TrimSpace(*archived) != "" {
-				val, err := parseBool(*archived, "--archived")
+				val, err := shared.ParseBoolFlag(*archived, "--archived")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp

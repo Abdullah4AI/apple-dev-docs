@@ -498,54 +498,57 @@ func fetchSubscriptionPricePointsByTerritory(
 	territoryID string,
 ) (map[string][]string, error) {
 	priceByAmount := make(map[string][]string)
-	seenNext := make(map[string]struct{})
-	nextURL := ""
-
-	for {
+	fetchPage := func(nextURL string) (*asc.SubscriptionPricePointsResponse, error) {
 		pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-		var (
-			resp *asc.SubscriptionPricePointsResponse
-			err  error
-		)
+		defer pageCancel()
+
 		if nextURL == "" {
-			resp, err = client.GetSubscriptionPricePoints(
+			return client.GetSubscriptionPricePoints(
 				pageCtx,
 				subscriptionID,
 				asc.WithSubscriptionPricePointsTerritory(territoryID),
 				asc.WithSubscriptionPricePointsLimit(200),
 			)
 		} else {
-			resp, err = client.GetSubscriptionPricePoints(
+			return client.GetSubscriptionPricePoints(
 				pageCtx,
 				subscriptionID,
 				asc.WithSubscriptionPricePointsNextURL(nextURL),
 			)
 		}
-		pageCancel()
-		if err != nil {
-			return nil, fmt.Errorf("resolve price points for territory %q: %w", territoryID, err)
-		}
+	}
 
-		for _, pricePoint := range resp.Data {
-			priceKey, priceErr := normalizeSubscriptionPriceImportPrice(pricePoint.Attributes.CustomerPrice)
-			if priceErr != nil {
-				continue
-			}
-			id := strings.TrimSpace(pricePoint.ID)
-			if id == "" {
-				continue
-			}
-			priceByAmount[priceKey] = appendUniqueString(priceByAmount[priceKey], id)
-		}
+	firstPage, err := fetchPage("")
+	if err != nil {
+		return nil, fmt.Errorf("resolve price points for territory %q: %w", territoryID, err)
+	}
 
-		if strings.TrimSpace(resp.Links.Next) == "" {
-			break
-		}
-		if _, seen := seenNext[resp.Links.Next]; seen {
-			return nil, fmt.Errorf("resolve price points for territory %q: repeated next URL", territoryID)
-		}
-		seenNext[resp.Links.Next] = struct{}{}
-		nextURL = resp.Links.Next
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return fetchPage(nextURL)
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionPricePointsResponse)
+			if !ok {
+				return fmt.Errorf("unexpected response type %T", page)
+			}
+			for _, pricePoint := range resp.Data {
+				priceKey, priceErr := normalizeSubscriptionPriceImportPrice(pricePoint.Attributes.CustomerPrice)
+				if priceErr != nil {
+					continue
+				}
+				id := strings.TrimSpace(pricePoint.ID)
+				if id == "" {
+					continue
+				}
+				priceByAmount[priceKey] = appendUniqueString(priceByAmount[priceKey], id)
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, fmt.Errorf("resolve price points for territory %q: %w", territoryID, err)
 	}
 
 	return priceByAmount, nil

@@ -101,14 +101,38 @@ type SubscriptionCreateRequest struct {
 
 // SubscriptionUpdateData is the data portion of a subscription update request.
 type SubscriptionUpdateData struct {
-	Type       ResourceType                 `json:"type"`
-	ID         string                       `json:"id"`
-	Attributes SubscriptionUpdateAttributes `json:"attributes"`
+	Type          ResourceType                     `json:"type"`
+	ID            string                           `json:"id"`
+	Attributes    SubscriptionUpdateAttributes     `json:"attributes,omitempty"`
+	Relationships *SubscriptionUpdateRelationships `json:"relationships,omitempty"`
+}
+
+// SubscriptionUpdateRelationships describes relationships for updating a subscription.
+type SubscriptionUpdateRelationships struct {
+	Prices *RelationshipList `json:"prices,omitempty"`
 }
 
 // SubscriptionUpdateRequest is a request to update a subscription.
 type SubscriptionUpdateRequest struct {
-	Data SubscriptionUpdateData `json:"data"`
+	Data     SubscriptionUpdateData          `json:"data"`
+	Included []SubscriptionPriceInlineCreate `json:"included,omitempty"`
+}
+
+// SubscriptionPriceInlineCreate is an inline resource for creating subscription prices
+// via PATCH /v1/subscriptions/{id}. This is required for setting the initial base price
+// on a subscription that has no existing prices.
+type SubscriptionPriceInlineCreate struct {
+	Type          ResourceType                         `json:"type"`
+	ID            string                               `json:"id"`
+	Attributes    *SubscriptionPriceCreateAttributes   `json:"attributes,omitempty"`
+	Relationships SubscriptionPriceInlineRelationships `json:"relationships"`
+}
+
+// SubscriptionPriceInlineRelationships describes relationships for an inline price create.
+type SubscriptionPriceInlineRelationships struct {
+	Subscription           Relationship  `json:"subscription"`
+	SubscriptionPricePoint Relationship  `json:"subscriptionPricePoint"`
+	Territory              *Relationship `json:"territory,omitempty"`
 }
 
 // SubscriptionPriceAttributes describes a subscription price resource.

@@ -8,8 +8,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
-// ResolveAppStoreVersionID finds a version ID by version string and platform.
-func ResolveAppStoreVersionID(ctx context.Context, client *asc.Client, appID, version, platform string) (string, error) {
+// ResolveAppStoreVersionIDAndState finds a version ID and state by version string and platform.
+func ResolveAppStoreVersionIDAndState(ctx context.Context, client *asc.Client, appID, version, platform string) (string, string, error) {
 	opts := []asc.AppStoreVersionsOption{
 		asc.WithAppStoreVersionsVersionStrings([]string{version}),
 		asc.WithAppStoreVersionsPlatforms([]string{platform}),
@@ -17,15 +17,21 @@ func ResolveAppStoreVersionID(ctx context.Context, client *asc.Client, appID, ve
 	}
 	resp, err := client.GetAppStoreVersions(ctx, appID, opts...)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if resp == nil || len(resp.Data) == 0 {
-		return "", fmt.Errorf("app store version not found for version %q and platform %q", version, platform)
+		return "", "", fmt.Errorf("app store version not found for version %q and platform %q", version, platform)
 	}
 	if len(resp.Data) > 1 {
-		return "", fmt.Errorf("multiple app store versions found for version %q and platform %q (use --version-id)", version, platform)
+		return "", "", fmt.Errorf("multiple app store versions found for version %q and platform %q (use --version-id)", version, platform)
 	}
-	return resp.Data[0].ID, nil
+	return resp.Data[0].ID, strings.TrimSpace(resp.Data[0].Attributes.AppStoreState), nil
+}
+
+// ResolveAppStoreVersionID finds a version ID by version string and platform.
+func ResolveAppStoreVersionID(ctx context.Context, client *asc.Client, appID, version, platform string) (string, error) {
+	versionID, _, err := ResolveAppStoreVersionIDAndState(ctx, client, appID, version, platform)
+	return versionID, err
 }
 
 // ResolveAppInfoID resolves the app info ID, optionally using a provided override.

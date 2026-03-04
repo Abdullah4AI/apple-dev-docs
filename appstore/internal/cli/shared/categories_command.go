@@ -31,6 +31,10 @@ func NewCategoriesSetCommand(config CategoriesSetCommandConfig) *ffcli.Command {
 	}
 	primary := fs.String("primary", "", "Primary category ID (required)")
 	secondary := fs.String("secondary", "", "Secondary category ID (optional)")
+	primarySubOne := fs.String("primary-subcategory-one", "", "Primary subcategory one (e.g. GAMES_ACTION)")
+	primarySubTwo := fs.String("primary-subcategory-two", "", "Primary subcategory two (e.g. GAMES_SIMULATION)")
+	secondarySubOne := fs.String("secondary-subcategory-one", "", "Secondary subcategory one")
+	secondarySubTwo := fs.String("secondary-subcategory-two", "", "Secondary subcategory two")
 	output := BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -44,6 +48,10 @@ func NewCategoriesSetCommand(config CategoriesSetCommandConfig) *ffcli.Command {
 			appIDValue := strings.TrimSpace(*appID)
 			primaryValue := strings.TrimSpace(*primary)
 			secondaryValue := strings.TrimSpace(*secondary)
+			primarySubOneValue := strings.TrimSpace(*primarySubOne)
+			primarySubTwoValue := strings.TrimSpace(*primarySubTwo)
+			secondarySubOneValue := strings.TrimSpace(*secondarySubOne)
+			secondarySubTwoValue := strings.TrimSpace(*secondarySubTwo)
 
 			appInfoIDValue := ""
 			if appInfoID != nil {
@@ -70,7 +78,7 @@ func NewCategoriesSetCommand(config CategoriesSetCommandConfig) *ffcli.Command {
 				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
 			}
 
-			resp, err := client.UpdateAppInfoCategories(requestCtx, resolvedAppInfoID, primaryValue, secondaryValue)
+			resp, err := client.UpdateAppInfoCategories(requestCtx, resolvedAppInfoID, primaryValue, secondaryValue, primarySubOneValue, primarySubTwoValue, secondarySubOneValue, secondarySubTwoValue)
 			if err != nil {
 				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
 			}

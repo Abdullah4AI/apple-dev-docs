@@ -271,13 +271,6 @@ func WithAnalyticsReportsNextURL(next string) AnalyticsReportsOption {
 	}
 }
 
-// WithAnalyticsReportsCategory filters reports by category.
-func WithAnalyticsReportsCategory(category string) AnalyticsReportsOption {
-	return func(q *analyticsReportsQuery) {
-		q.category = strings.TrimSpace(category)
-	}
-}
-
 // WithAnalyticsReportInstancesLimit sets the max number of instances to return.
 func WithAnalyticsReportInstancesLimit(limit int) AnalyticsReportInstancesOption {
 	return func(q *analyticsReportInstancesQuery) {
@@ -516,64 +509,30 @@ func (c *Client) GetAnalyticsReports(ctx context.Context, requestID string, opts
 
 // GetAnalyticsReportRequestReportsRelationships retrieves report linkages for an analytics report request.
 func (c *Client) GetAnalyticsReportRequestReportsRelationships(ctx context.Context, requestID string, opts ...LinkagesOption) (*AnalyticsReportRequestReportsLinkagesResponse, error) {
-	requestID = strings.TrimSpace(requestID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/analyticsReportRequests/%s/relationships/reports", requestID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("analyticsReportRequestReportsRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AnalyticsReportRequestReportsLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
+	return getTypedResourceLinkages[AnalyticsReportRequestReportsLinkagesResponse](
+		c,
+		ctx,
+		requestID,
+		"reports",
+		"request ID",
+		"/v1/analyticsReportRequests/%s/relationships/%s",
+		"analyticsReportRequestReportsRelationships",
+		opts...,
+	)
 }
 
 // GetAnalyticsReportInstancesRelationships retrieves report instance linkages for a report.
 func (c *Client) GetAnalyticsReportInstancesRelationships(ctx context.Context, reportID string, opts ...LinkagesOption) (*AnalyticsReportInstancesLinkagesResponse, error) {
-	reportID = strings.TrimSpace(reportID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/analyticsReports/%s/relationships/instances", reportID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("analyticsReportInstancesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AnalyticsReportInstancesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
+	return getTypedResourceLinkages[AnalyticsReportInstancesLinkagesResponse](
+		c,
+		ctx,
+		reportID,
+		"instances",
+		"report ID",
+		"/v1/analyticsReports/%s/relationships/%s",
+		"analyticsReportInstancesRelationships",
+		opts...,
+	)
 }
 
 // GetAnalyticsReportInstances retrieves report instances for a report.
@@ -623,33 +582,16 @@ func (c *Client) GetAnalyticsReportInstance(ctx context.Context, instanceID stri
 
 // GetAnalyticsReportInstanceSegmentsRelationships retrieves segment linkages for a report instance.
 func (c *Client) GetAnalyticsReportInstanceSegmentsRelationships(ctx context.Context, instanceID string, opts ...LinkagesOption) (*AnalyticsReportInstanceSegmentsLinkagesResponse, error) {
-	instanceID = strings.TrimSpace(instanceID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/analyticsReportInstances/%s/relationships/segments", instanceID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("analyticsReportInstanceSegmentsRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AnalyticsReportInstanceSegmentsLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
+	return getTypedResourceLinkages[AnalyticsReportInstanceSegmentsLinkagesResponse](
+		c,
+		ctx,
+		instanceID,
+		"segments",
+		"instance ID",
+		"/v1/analyticsReportInstances/%s/relationships/%s",
+		"analyticsReportInstanceSegmentsRelationships",
+		opts...,
+	)
 }
 
 // GetAnalyticsReportSegments retrieves report segments for an instance.

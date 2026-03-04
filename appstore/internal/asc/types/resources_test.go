@@ -67,7 +67,7 @@ func TestTypeConstants(t *testing.T) {
 	if ChecksumAlgorithmSHA256 != "SHA_256" {
 		t.Fatalf("unexpected checksum algorithm constant: %q", ChecksumAlgorithmSHA256)
 	}
-	if UTIIPA != "com.apple.ipa" || UTIPKG != "com.apple.installer-package-archive" {
+	if UTIIPA != "com.apple.ipa" || UTIPKG != "com.apple.pkg" {
 		t.Fatalf("unexpected UTI constants: %q %q", UTIIPA, UTIPKG)
 	}
 }

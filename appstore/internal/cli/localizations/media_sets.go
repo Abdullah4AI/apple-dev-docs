@@ -42,188 +42,80 @@ Examples:
 
 // LocalizationsPreviewSetsListCommand returns the preview sets list subcommand.
 func LocalizationsPreviewSetsListCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations preview-sets list", flag.ExitOnError)
-
-	localizationID := fs.String("localization-id", "", "App Store version localization ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "list",
-		ShortUsage: "asc localizations preview-sets list --localization-id \"LOCALIZATION_ID\"",
-		ShortHelp:  "List preview sets for an App Store localization.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "localizations preview-sets list",
+		Name:        "list",
+		ShortUsage:  "asc localizations preview-sets list --localization-id \"LOCALIZATION_ID\"",
+		ShortHelp:   "List preview sets for an App Store localization.",
 		LongHelp: `List preview sets for an App Store localization.
 
 Examples:
   asc localizations preview-sets list --localization-id "LOCALIZATION_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*localizationID)
-			trimmedNext := strings.TrimSpace(*next)
-			if trimmedID == "" && trimmedNext == "" {
-				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return flag.ErrHelp
-			}
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("localizations preview-sets list: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("localizations preview-sets list: %w", err)
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations preview-sets list: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
+		ParentFlag:  "localization-id",
+		ParentUsage: "App Store version localization ID",
+		LimitMax:    200,
+		ErrorPrefix: "localizations preview-sets list",
+		FetchPage: func(ctx context.Context, client *asc.Client, localizationID string, limit int, next string) (asc.PaginatedResponse, error) {
 			opts := []asc.AppStoreVersionLocalizationPreviewSetsOption{
-				asc.WithAppStoreVersionLocalizationPreviewSetsLimit(*limit),
-				asc.WithAppStoreVersionLocalizationPreviewSetsNextURL(*next),
+				asc.WithAppStoreVersionLocalizationPreviewSetsLimit(limit),
+				asc.WithAppStoreVersionLocalizationPreviewSetsNextURL(next),
 			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithAppStoreVersionLocalizationPreviewSetsLimit(200))
-				firstPage, err := client.GetAppStoreVersionLocalizationPreviewSets(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("localizations preview-sets list: failed to fetch: %w", err)
-				}
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppStoreVersionLocalizationPreviewSets(ctx, trimmedID, asc.WithAppStoreVersionLocalizationPreviewSetsNextURL(nextURL))
-				})
-				if err != nil {
-					return fmt.Errorf("localizations preview-sets list: %w", err)
-				}
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetAppStoreVersionLocalizationPreviewSets(requestCtx, trimmedID, opts...)
+			resp, err := client.GetAppStoreVersionLocalizationPreviewSets(ctx, localizationID, opts...)
 			if err != nil {
-				return fmt.Errorf("localizations preview-sets list: failed to fetch: %w", err)
+				return nil, fmt.Errorf("failed to fetch: %w", err)
 			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return resp, nil
 		},
-	}
+	})
 }
 
 // LocalizationsPreviewSetsGetCommand returns the preview sets get subcommand.
 func LocalizationsPreviewSetsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations preview-sets get", flag.ExitOnError)
-
-	setID := fs.String("id", "", "App preview set ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc localizations preview-sets get --id \"PREVIEW_SET_ID\"",
-		ShortHelp:  "Get an app preview set by ID.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "localizations preview-sets get",
+		Name:        "get",
+		ShortUsage:  "asc localizations preview-sets get --id \"PREVIEW_SET_ID\"",
+		ShortHelp:   "Get an app preview set by ID.",
 		LongHelp: `Get an app preview set by ID.
 
 Examples:
   asc localizations preview-sets get --id "PREVIEW_SET_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*setID)
-			if trimmedID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations preview-sets get: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.GetAppPreviewSet(requestCtx, trimmedID)
-			if err != nil {
-				return fmt.Errorf("localizations preview-sets get: failed to fetch: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "App preview set ID",
+		ErrorPrefix: "localizations preview-sets get",
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetAppPreviewSet(ctx, id)
 		},
-	}
+	})
 }
 
 // LocalizationsPreviewSetsRelationshipsCommand returns the preview sets relationships subcommand.
 func LocalizationsPreviewSetsRelationshipsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations preview-sets relationships", flag.ExitOnError)
-
-	localizationID := fs.String("localization-id", "", "App Store version localization ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "relationships",
-		ShortUsage: "asc localizations preview-sets relationships --localization-id \"LOCALIZATION_ID\"",
-		ShortHelp:  "List preview set relationships for an App Store localization.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "localizations preview-sets relationships",
+		Name:        "relationships",
+		ShortUsage:  "asc localizations preview-sets relationships --localization-id \"LOCALIZATION_ID\"",
+		ShortHelp:   "List preview set relationships for an App Store localization.",
 		LongHelp: `List preview set relationships for an App Store localization.
 
 Examples:
   asc localizations preview-sets relationships --localization-id "LOCALIZATION_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*localizationID)
-			trimmedNext := strings.TrimSpace(*next)
-			if trimmedID == "" && trimmedNext == "" {
-				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return flag.ErrHelp
-			}
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("localizations preview-sets relationships: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("localizations preview-sets relationships: %w", err)
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations preview-sets relationships: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
+		ParentFlag:  "localization-id",
+		ParentUsage: "App Store version localization ID",
+		LimitMax:    200,
+		ErrorPrefix: "localizations preview-sets relationships",
+		FetchPage: func(ctx context.Context, client *asc.Client, localizationID string, limit int, next string) (asc.PaginatedResponse, error) {
 			opts := []asc.LinkagesOption{
-				asc.WithLinkagesLimit(*limit),
-				asc.WithLinkagesNextURL(*next),
+				asc.WithLinkagesLimit(limit),
+				asc.WithLinkagesNextURL(next),
 			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithLinkagesLimit(200))
-				firstPage, err := client.GetAppStoreVersionLocalizationPreviewSetsRelationships(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("localizations preview-sets relationships: failed to fetch: %w", err)
-				}
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppStoreVersionLocalizationPreviewSetsRelationships(ctx, trimmedID, asc.WithLinkagesNextURL(nextURL))
-				})
-				if err != nil {
-					return fmt.Errorf("localizations preview-sets relationships: %w", err)
-				}
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetAppStoreVersionLocalizationPreviewSetsRelationships(requestCtx, trimmedID, opts...)
+			resp, err := client.GetAppStoreVersionLocalizationPreviewSetsRelationships(ctx, localizationID, opts...)
 			if err != nil {
-				return fmt.Errorf("localizations preview-sets relationships: %w", err)
+				return nil, fmt.Errorf("failed to fetch: %w", err)
 			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return resp, nil
 		},
-	}
+	})
 }
 
 // LocalizationsScreenshotSetsCommand returns the screenshot sets command group.
@@ -257,44 +149,22 @@ Examples:
 
 // LocalizationsScreenshotSetsGetCommand returns the screenshot sets get subcommand.
 func LocalizationsScreenshotSetsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations screenshot-sets get", flag.ExitOnError)
-
-	setID := fs.String("id", "", "App screenshot set ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc localizations screenshot-sets get --id \"SCREENSHOT_SET_ID\"",
-		ShortHelp:  "Get an app screenshot set by ID.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "localizations screenshot-sets get",
+		Name:        "get",
+		ShortUsage:  "asc localizations screenshot-sets get --id \"SCREENSHOT_SET_ID\"",
+		ShortHelp:   "Get an app screenshot set by ID.",
 		LongHelp: `Get an app screenshot set by ID.
 
 Examples:
   asc localizations screenshot-sets get --id "SCREENSHOT_SET_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*setID)
-			if trimmedID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets get: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.GetAppScreenshotSet(requestCtx, trimmedID)
-			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets get: failed to fetch: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "App screenshot set ID",
+		ErrorPrefix: "localizations screenshot-sets get",
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetAppScreenshotSet(ctx, id)
 		},
-	}
+	})
 }
 
 // LocalizationsScreenshotSetsDeleteCommand returns the screenshot sets delete subcommand.
@@ -350,144 +220,58 @@ Examples:
 
 // LocalizationsScreenshotSetsListCommand returns the screenshot sets list subcommand.
 func LocalizationsScreenshotSetsListCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations screenshot-sets list", flag.ExitOnError)
-
-	localizationID := fs.String("localization-id", "", "App Store version localization ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "list",
-		ShortUsage: "asc localizations screenshot-sets list --localization-id \"LOCALIZATION_ID\"",
-		ShortHelp:  "List screenshot sets for an App Store localization.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "localizations screenshot-sets list",
+		Name:        "list",
+		ShortUsage:  "asc localizations screenshot-sets list --localization-id \"LOCALIZATION_ID\"",
+		ShortHelp:   "List screenshot sets for an App Store localization.",
 		LongHelp: `List screenshot sets for an App Store localization.
 
 Examples:
   asc localizations screenshot-sets list --localization-id "LOCALIZATION_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*localizationID)
-			trimmedNext := strings.TrimSpace(*next)
-			if trimmedID == "" && trimmedNext == "" {
-				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return flag.ErrHelp
-			}
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("localizations screenshot-sets list: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("localizations screenshot-sets list: %w", err)
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets list: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
+		ParentFlag:  "localization-id",
+		ParentUsage: "App Store version localization ID",
+		LimitMax:    200,
+		ErrorPrefix: "localizations screenshot-sets list",
+		FetchPage: func(ctx context.Context, client *asc.Client, localizationID string, limit int, next string) (asc.PaginatedResponse, error) {
 			opts := []asc.AppStoreVersionLocalizationScreenshotSetsOption{
-				asc.WithAppStoreVersionLocalizationScreenshotSetsLimit(*limit),
-				asc.WithAppStoreVersionLocalizationScreenshotSetsNextURL(*next),
+				asc.WithAppStoreVersionLocalizationScreenshotSetsLimit(limit),
+				asc.WithAppStoreVersionLocalizationScreenshotSetsNextURL(next),
 			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithAppStoreVersionLocalizationScreenshotSetsLimit(200))
-				firstPage, err := client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("localizations screenshot-sets list: failed to fetch: %w", err)
-				}
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppStoreVersionLocalizationScreenshotSets(ctx, trimmedID, asc.WithAppStoreVersionLocalizationScreenshotSetsNextURL(nextURL))
-				})
-				if err != nil {
-					return fmt.Errorf("localizations screenshot-sets list: %w", err)
-				}
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, trimmedID, opts...)
+			resp, err := client.GetAppStoreVersionLocalizationScreenshotSets(ctx, localizationID, opts...)
 			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets list: failed to fetch: %w", err)
+				return nil, fmt.Errorf("failed to fetch: %w", err)
 			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return resp, nil
 		},
-	}
+	})
 }
 
 // LocalizationsScreenshotSetsRelationshipsCommand returns the screenshot sets relationships subcommand.
 func LocalizationsScreenshotSetsRelationshipsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations screenshot-sets relationships", flag.ExitOnError)
-
-	localizationID := fs.String("localization-id", "", "App Store version localization ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "relationships",
-		ShortUsage: "asc localizations screenshot-sets relationships --localization-id \"LOCALIZATION_ID\"",
-		ShortHelp:  "List screenshot set relationships for an App Store localization.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "localizations screenshot-sets relationships",
+		Name:        "relationships",
+		ShortUsage:  "asc localizations screenshot-sets relationships --localization-id \"LOCALIZATION_ID\"",
+		ShortHelp:   "List screenshot set relationships for an App Store localization.",
 		LongHelp: `List screenshot set relationships for an App Store localization.
 
 Examples:
   asc localizations screenshot-sets relationships --localization-id "LOCALIZATION_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*localizationID)
-			trimmedNext := strings.TrimSpace(*next)
-			if trimmedID == "" && trimmedNext == "" {
-				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return flag.ErrHelp
-			}
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("localizations screenshot-sets relationships: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("localizations screenshot-sets relationships: %w", err)
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets relationships: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
+		ParentFlag:  "localization-id",
+		ParentUsage: "App Store version localization ID",
+		LimitMax:    200,
+		ErrorPrefix: "localizations screenshot-sets relationships",
+		FetchPage: func(ctx context.Context, client *asc.Client, localizationID string, limit int, next string) (asc.PaginatedResponse, error) {
 			opts := []asc.LinkagesOption{
-				asc.WithLinkagesLimit(*limit),
-				asc.WithLinkagesNextURL(*next),
+				asc.WithLinkagesLimit(limit),
+				asc.WithLinkagesNextURL(next),
 			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithLinkagesLimit(200))
-				firstPage, err := client.GetAppStoreVersionLocalizationScreenshotSetsRelationships(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("localizations screenshot-sets relationships: failed to fetch: %w", err)
-				}
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppStoreVersionLocalizationScreenshotSetsRelationships(ctx, trimmedID, asc.WithLinkagesNextURL(nextURL))
-				})
-				if err != nil {
-					return fmt.Errorf("localizations screenshot-sets relationships: %w", err)
-				}
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetAppStoreVersionLocalizationScreenshotSetsRelationships(requestCtx, trimmedID, opts...)
+			resp, err := client.GetAppStoreVersionLocalizationScreenshotSetsRelationships(ctx, localizationID, opts...)
 			if err != nil {
-				return fmt.Errorf("localizations screenshot-sets relationships: %w", err)
+				return nil, fmt.Errorf("failed to fetch: %w", err)
 			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return resp, nil
 		},
-	}
+	})
 }

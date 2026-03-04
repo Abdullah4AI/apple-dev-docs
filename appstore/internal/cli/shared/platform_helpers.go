@@ -27,28 +27,6 @@ func NormalizePlatform(value string) (asc.Platform, error) {
 	return platform, nil
 }
 
-// NormalizePlatforms validates and normalizes multiple platform strings.
-func NormalizePlatforms(values []string) ([]string, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	normalized := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.ToUpper(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := platformValues[trimmed]; !ok {
-			return nil, fmt.Errorf("--platform must be one of: %s", strings.Join(platformList(), ", "))
-		}
-		normalized = append(normalized, trimmed)
-	}
-	if len(normalized) == 0 {
-		return nil, nil
-	}
-	return normalized, nil
-}
-
 // PlatformList returns the allowed platform values.
 func PlatformList() []string {
 	return platformList()

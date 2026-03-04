@@ -97,6 +97,10 @@ Examples:
 				}
 			}
 
+			if err := runSubmitCreateLocalizationPreflight(requestCtx, client, resolvedVersionID); err != nil {
+				return err
+			}
+
 			// Attach build to version
 			if err := client.AttachBuildToVersion(requestCtx, resolvedVersionID, strings.TrimSpace(*buildID)); err != nil {
 				return fmt.Errorf("submit create: failed to attach build: %w", err)
@@ -139,6 +143,29 @@ Examples:
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func runSubmitCreateLocalizationPreflight(ctx context.Context, client *asc.Client, versionID string) error {
+	localizations, err := client.GetAppStoreVersionLocalizations(ctx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	if err != nil {
+		return fmt.Errorf("submit create: failed to fetch version localizations for preflight: %w", err)
+	}
+	if len(localizations.Data) == 0 {
+		fmt.Fprintln(os.Stderr, "Submit preflight failed: no app store version localizations found for this version.")
+		return fmt.Errorf("submit create: submit preflight failed")
+	}
+
+	issues := shared.SubmitReadinessIssuesByLocale(localizations.Data)
+	if len(issues) == 0 {
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "Submit preflight failed: submission-blocking localization fields are missing:")
+	for _, issue := range issues {
+		fmt.Fprintf(os.Stderr, "  - %s: %s\n", issue.Locale, strings.Join(issue.MissingFields, ", "))
+	}
+	fmt.Fprintln(os.Stderr, "Fix these with `asc app-info set` (optionally using --copy-from-locale) before retrying submit create.")
+	return fmt.Errorf("submit create: submit preflight failed")
 }
 
 func SubmitStatusCommand() *ffcli.Command {

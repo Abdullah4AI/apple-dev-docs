@@ -242,33 +242,3 @@ func buildAppCreateRequest(attrs AppCreateAttributes) *AppCreateRequest {
 
 	return req
 }
-
-// FindApp finds an existing app by bundle ID
-func (c *Client) FindApp(bundleID string) (*AppResponse, error) {
-	path := fmt.Sprintf("/apps?filter[bundleId]=%s", bundleID)
-
-	respBody, err := c.doRequest("GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Data []struct {
-			ID         string                 `json:"id"`
-			Type       string                 `json:"type"`
-			Attributes map[string]interface{} `json:"attributes"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse app response: %w", err)
-	}
-
-	if len(result.Data) == 0 {
-		return nil, nil
-	}
-
-	return &AppResponse{
-		Data: result.Data[0],
-	}, nil
-}

@@ -616,7 +616,13 @@ func TryResumeSession(ctx context.Context, username string) (*AuthSession, bool,
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	return resumeFromPersistedSession(ctx, sess)
+	resumed, ok, err := resumeFromPersistedSession(ctx, sess)
+	if err != nil || !ok || resumed == nil {
+		return resumed, ok, err
+	}
+	// Best effort: persist refreshed cookies after successful session validation.
+	_ = PersistSession(resumed)
+	return resumed, true, nil
 }
 
 // TryResumeLastSession attempts to resume the last successful web session.
@@ -639,7 +645,13 @@ func TryResumeLastSession(ctx context.Context) (*AuthSession, bool, error) {
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	return resumeFromPersistedSession(ctx, sess)
+	resumed, ok, err := resumeFromPersistedSession(ctx, sess)
+	if err != nil || !ok || resumed == nil {
+		return resumed, ok, err
+	}
+	// Best effort: persist refreshed cookies after successful session validation.
+	_ = PersistSession(resumed)
+	return resumed, true, nil
 }
 
 // DeleteSession removes the cached session for a specific Apple ID.

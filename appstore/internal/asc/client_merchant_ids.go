@@ -161,32 +161,14 @@ func (c *Client) GetMerchantIDCertificates(ctx context.Context, merchantID strin
 
 // GetMerchantIDCertificatesRelationships retrieves certificate linkages for a merchant ID.
 func (c *Client) GetMerchantIDCertificatesRelationships(ctx context.Context, merchantID string, opts ...LinkagesOption) (*MerchantIDCertificatesLinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	merchantID = strings.TrimSpace(merchantID)
-	path := fmt.Sprintf("/v1/merchantIds/%s/relationships/certificates", merchantID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("merchantIdCertificatesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response MerchantIDCertificatesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[MerchantIDCertificatesLinkagesResponse](
+		c,
+		ctx,
+		merchantID,
+		"certificates",
+		"merchant ID",
+		"/v1/merchantIds/%s/relationships/%s",
+		"merchantIdCertificatesRelationships",
+		opts...,
+	)
 }

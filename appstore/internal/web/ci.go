@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -318,6 +319,50 @@ func (c *Client) ListCIProducts(ctx context.Context, teamID string) (*CIProductL
 	return &result, nil
 }
 
+// CIEnvironmentVariable represents a workflow environment variable.
+type CIEnvironmentVariable struct {
+	ID    string                     `json:"id"`
+	Name  string                     `json:"name"`
+	Value CIEnvironmentVariableValue `json:"value"`
+}
+
+// CIEnvironmentVariableValue holds exactly one of plaintext, ciphertext, or redacted.
+type CIEnvironmentVariableValue struct {
+	Plaintext     *string `json:"plaintext,omitempty"`
+	Ciphertext    *string `json:"ciphertext,omitempty"`
+	RedactedValue *string `json:"redacted_value,omitempty"`
+}
+
+// CIWorkflowFull is the full workflow body for GET/PUT round-trips.
+// Uses json.RawMessage for Content to preserve unknown fields.
+type CIWorkflowFull struct {
+	ID      string          `json:"id"`
+	Content json.RawMessage `json:"content"`
+}
+
+// CIWorkflowConfig captures workflow fields surfaced by the web UI.
+// Nested and evolving structures are kept as raw JSON for forward compatibility.
+type CIWorkflowConfig struct {
+	Name                        string          `json:"name"`
+	Description                 string          `json:"description,omitempty"`
+	Disabled                    bool            `json:"disabled"`
+	Locked                      bool            `json:"locked"`
+	XcodeVersion                json.RawMessage `json:"xcode_version,omitempty"`
+	MacOSVersion                json.RawMessage `json:"macos_version,omitempty"`
+	StartConditions             json.RawMessage `json:"start_conditions,omitempty"`
+	Actions                     json.RawMessage `json:"actions,omitempty"`
+	PostActions                 json.RawMessage `json:"post_actions,omitempty"`
+	Clean                       json.RawMessage `json:"clean,omitempty"`
+	ContainerFilePath           string          `json:"container_file_path,omitempty"`
+	Repo                        json.RawMessage `json:"repo,omitempty"`
+	ProductEnvironmentVariables []string        `json:"product_environment_variables,omitempty"`
+}
+
+// CIEncryptionKeyResponse is the response from /auth/keys/client-encryption.
+type CIEncryptionKeyResponse struct {
+	Key string `json:"key"`
+}
+
 // ListCIWorkflows lists Xcode Cloud workflows for a product.
 func (c *Client) ListCIWorkflows(ctx context.Context, teamID, productID string) (*CIWorkflowListResponse, error) {
 	teamID = strings.TrimSpace(teamID)
@@ -341,4 +386,282 @@ func (c *Client) ListCIWorkflows(ctx context.Context, teamID, productID string) 
 		return nil, fmt.Errorf("failed to decode ci workflows: %w", err)
 	}
 	return &result, nil
+}
+
+// GetCIWorkflow gets a single workflow (full body including env vars).
+// GET /teams/{teamID}/products/{productID}/workflows-v15/{workflowID}
+func (c *Client) GetCIWorkflow(ctx context.Context, teamID, productID, workflowID string) (*CIWorkflowFull, error) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil, fmt.Errorf("team id is required")
+	}
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, fmt.Errorf("product id is required")
+	}
+	workflowID = strings.TrimSpace(workflowID)
+	if workflowID == "" {
+		return nil, fmt.Errorf("workflow id is required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/workflows-v15/" + url.PathEscape(workflowID)
+	body, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result CIWorkflowFull
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode ci workflow: %w", err)
+	}
+	return &result, nil
+}
+
+// UpdateCIWorkflow updates a workflow (PUT full body).
+// PUT /teams/{teamID}/products/{productID}/workflows-v15/{workflowID}
+func (c *Client) UpdateCIWorkflow(ctx context.Context, teamID, productID, workflowID string, content json.RawMessage) error {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return fmt.Errorf("team id is required")
+	}
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return fmt.Errorf("product id is required")
+	}
+	workflowID = strings.TrimSpace(workflowID)
+	if workflowID == "" {
+		return fmt.Errorf("workflow id is required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/workflows-v15/" + url.PathEscape(workflowID)
+	_, err := c.doRequest(ctx, "PUT", path, content)
+	return err
+}
+
+// GetCIEncryptionKey fetches the P-256 public key for secret encryption.
+// GET /auth/keys/client-encryption (relative to /ci/api base URL)
+func (c *Client) GetCIEncryptionKey(ctx context.Context) (*CIEncryptionKeyResponse, error) {
+	body, err := c.doRequest(ctx, "GET", "/auth/keys/client-encryption", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result CIEncryptionKeyResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode ci encryption key: %w", err)
+	}
+	return &result, nil
+}
+
+// CIProductEnvironmentVariable represents a shared (product-level) environment variable.
+type CIProductEnvironmentVariable struct {
+	ID                       string                     `json:"id"`
+	Name                     string                     `json:"name"`
+	Value                    CIEnvironmentVariableValue `json:"value"`
+	IsLocked                 bool                       `json:"is_locked"`
+	RelatedWorkflowSummaries []CIRelatedWorkflowSummary `json:"related_workflow_summaries,omitempty"`
+}
+
+// CIRelatedWorkflowSummary describes a workflow linked to a shared env var.
+type CIRelatedWorkflowSummary struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Disabled       bool   `json:"disabled"`
+	Locked         bool   `json:"locked"`
+	LastModifiedBy string `json:"last_modified_by,omitempty"`
+	LastModifiedAt string `json:"last_modified_at,omitempty"`
+}
+
+// CIProductEnvVarRequest is the PUT body for creating/updating a shared env var.
+type CIProductEnvVarRequest struct {
+	Name        string                     `json:"name"`
+	Value       CIEnvironmentVariableValue `json:"value"`
+	IsLocked    bool                       `json:"is_locked"`
+	WorkflowIDs []string                   `json:"workflow_ids"`
+}
+
+// ListCIProductEnvVars lists shared (product-level) environment variables.
+// GET /teams/{teamID}/products/{productID}/product-environment-variables
+func (c *Client) ListCIProductEnvVars(ctx context.Context, teamID, productID string) ([]CIProductEnvironmentVariable, error) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil, fmt.Errorf("team id is required")
+	}
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, fmt.Errorf("product id is required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/product-environment-variables"
+	body, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result []CIProductEnvironmentVariable
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode product environment variables: %w", err)
+	}
+	return result, nil
+}
+
+// SetCIProductEnvVar creates or updates a shared (product-level) environment variable.
+// PUT /teams/{teamID}/products/{productID}/product-environment-variables/{varID}
+func (c *Client) SetCIProductEnvVar(ctx context.Context, teamID, productID, varID string, req CIProductEnvVarRequest) (*CIProductEnvironmentVariable, error) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil, fmt.Errorf("team id is required")
+	}
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, fmt.Errorf("product id is required")
+	}
+	varID = strings.TrimSpace(varID)
+	if varID == "" {
+		return nil, fmt.Errorf("variable id is required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/product-environment-variables/" + url.PathEscape(varID)
+	body, err := c.doRequest(ctx, "PUT", path, req)
+	if err != nil {
+		return nil, err
+	}
+	var result CIProductEnvironmentVariable
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode product environment variable response: %w", err)
+	}
+	return &result, nil
+}
+
+// DeleteCIProductEnvVar deletes a shared (product-level) environment variable.
+// DELETE /teams/{teamID}/products/{productID}/product-environment-variables/{varID}
+func (c *Client) DeleteCIProductEnvVar(ctx context.Context, teamID, productID, varID string) error {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return fmt.Errorf("team id is required")
+	}
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return fmt.Errorf("product id is required")
+	}
+	varID = strings.TrimSpace(varID)
+	if varID == "" {
+		return fmt.Errorf("variable id is required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/product-environment-variables/" + url.PathEscape(varID)
+	_, err := c.doRequest(ctx, "DELETE", path, nil)
+	return err
+}
+
+// ExtractEnvVars extracts environment_variables from raw workflow content.
+func ExtractEnvVars(content json.RawMessage) ([]CIEnvironmentVariable, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(content, &m); err != nil {
+		return nil, fmt.Errorf("failed to decode workflow content: %w", err)
+	}
+	raw, ok := m["environment_variables"]
+	if !ok {
+		return nil, nil
+	}
+	var vars []CIEnvironmentVariable
+	if err := json.Unmarshal(raw, &vars); err != nil {
+		return nil, fmt.Errorf("failed to decode environment_variables: %w", err)
+	}
+	return vars, nil
+}
+
+// SetEnvVars sets environment_variables in raw workflow content, preserving other fields.
+func SetEnvVars(content json.RawMessage, vars []CIEnvironmentVariable) (json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(content, &m); err != nil {
+		return nil, fmt.Errorf("failed to decode workflow content: %w", err)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("failed to decode workflow content: expected JSON object")
+	}
+	varsJSON, err := json.Marshal(vars)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal environment_variables: %w", err)
+	}
+	m["environment_variables"] = varsJSON
+	// Use compact JSON to match API expectations.
+	result, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal workflow content: %w", err)
+	}
+	// Compact to remove any extra whitespace.
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, result); err != nil {
+		return nil, fmt.Errorf("failed to compact workflow content: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// ExtractWorkflowConfig extracts known workflow configuration fields from raw workflow content.
+func ExtractWorkflowConfig(content json.RawMessage) (*CIWorkflowConfig, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(content, &m); err != nil {
+		return nil, fmt.Errorf("failed to decode workflow content: %w", err)
+	}
+	cfg := &CIWorkflowConfig{
+		Name:              decodeJSONString(m["name"]),
+		Description:       decodeJSONString(m["description"]),
+		Disabled:          decodeJSONBool(m["disabled"]),
+		Locked:            decodeJSONBool(m["locked"]),
+		XcodeVersion:      m["xcode_version"],
+		MacOSVersion:      m["macos_version"],
+		StartConditions:   m["start_conditions"],
+		Actions:           m["actions"],
+		PostActions:       m["post_actions"],
+		Clean:             m["clean"],
+		ContainerFilePath: decodeJSONString(m["container_file_path"]),
+		Repo:              m["repo"],
+	}
+
+	if len(m["product_environment_variables"]) > 0 {
+		var refs []string
+		if err := json.Unmarshal(m["product_environment_variables"], &refs); err == nil {
+			cfg.ProductEnvironmentVariables = refs
+		}
+	}
+
+	return cfg, nil
+}
+
+// SetWorkflowDisabled sets the disabled field on raw workflow content while preserving all other fields.
+func SetWorkflowDisabled(content json.RawMessage, disabled bool) (json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(content, &m); err != nil {
+		return nil, fmt.Errorf("failed to decode workflow content: %w", err)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("failed to decode workflow content: expected JSON object")
+	}
+
+	disabledJSON, err := json.Marshal(disabled)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal disabled: %w", err)
+	}
+	m["disabled"] = disabledJSON
+
+	result, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal workflow content: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, result); err != nil {
+		return nil, fmt.Errorf("failed to compact workflow content: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func decodeJSONString(raw json.RawMessage) string {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func decodeJSONBool(raw json.RawMessage) bool {
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return value
 }

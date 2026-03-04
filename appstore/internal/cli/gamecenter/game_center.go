@@ -3,9 +3,7 @@ package gamecenter
 import (
 	"context"
 	"flag"
-	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -56,19 +54,6 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
 		},
-	}
-}
-
-// parseBool parses a string boolean value with a descriptive flag name for errors.
-func parseBool(value, flagName string) (bool, error) {
-	v := strings.ToLower(strings.TrimSpace(value))
-	switch v {
-	case "true", "1", "yes":
-		return true, nil
-	case "false", "0", "no":
-		return false, nil
-	default:
-		return false, fmt.Errorf("%s must be true or false", flagName)
 	}
 }
 

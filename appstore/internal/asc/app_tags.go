@@ -139,64 +139,28 @@ func (c *Client) GetAppTagTerritories(ctx context.Context, tagID string, opts ..
 
 // GetAppTagTerritoriesRelationships retrieves territory linkages for an app tag.
 func (c *Client) GetAppTagTerritoriesRelationships(ctx context.Context, tagID string, opts ...LinkagesOption) (*AppTagTerritoriesLinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	tagID = strings.TrimSpace(tagID)
-	path := fmt.Sprintf("/v1/appTags/%s/relationships/territories", tagID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("appTagTerritoriesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AppTagTerritoriesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[AppTagTerritoriesLinkagesResponse](
+		c,
+		ctx,
+		tagID,
+		"territories",
+		"app tag ID",
+		"/v1/appTags/%s/relationships/%s",
+		"appTagTerritoriesRelationships",
+		opts...,
+	)
 }
 
 // GetAppTagsRelationshipsForApp retrieves app tag linkages for an app.
 func (c *Client) GetAppTagsRelationshipsForApp(ctx context.Context, appID string, opts ...LinkagesOption) (*AppAppTagsLinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	appID = strings.TrimSpace(appID)
-	path := fmt.Sprintf("/v1/apps/%s/relationships/appTags", appID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("appTagsRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AppAppTagsLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[AppAppTagsLinkagesResponse](
+		c,
+		ctx,
+		appID,
+		"appTags",
+		"app ID",
+		"/v1/apps/%s/relationships/%s",
+		"appTagsRelationships",
+		opts...,
+	)
 }

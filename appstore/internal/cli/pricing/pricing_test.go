@@ -223,9 +223,10 @@ func TestPricingAvailabilitySetCommand_MissingFlags(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "missing app", args: []string{"--territory", "USA", "--available", "true"}},
-		{name: "missing territory", args: []string{"--app", "APP", "--available", "true"}},
-		{name: "missing available", args: []string{"--app", "APP", "--territory", "USA"}},
+		{name: "missing app", args: []string{"--territory", "USA", "--available", "true", "--available-in-new-territories", "true"}},
+		{name: "missing territory", args: []string{"--app", "APP", "--available", "true", "--available-in-new-territories", "true"}},
+		{name: "missing available", args: []string{"--app", "APP", "--territory", "USA", "--available-in-new-territories", "true"}},
+		{name: "missing available in new territories", args: []string{"--app", "APP", "--territory", "USA", "--available", "true"}},
 	}
 
 	for _, test := range tests {
@@ -239,6 +240,14 @@ func TestPricingAvailabilitySetCommand_MissingFlags(t *testing.T) {
 				t.Fatalf("expected flag.ErrHelp, got %v", err)
 			}
 		})
+	}
+}
+
+func TestPricingAvailabilitySetCommand_HasAvailableInNewTerritoriesFlag(t *testing.T) {
+	cmd := PricingAvailabilitySetCommand()
+
+	if f := cmd.FlagSet.Lookup("available-in-new-territories"); f == nil {
+		t.Fatal("expected --available-in-new-territories flag to be defined")
 	}
 }
 

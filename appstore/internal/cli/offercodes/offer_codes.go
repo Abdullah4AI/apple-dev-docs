@@ -56,78 +56,33 @@ Examples:
 
 // OfferCodesListCommand returns the offer codes list subcommand.
 func OfferCodesListCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("list", flag.ExitOnError)
-
-	offerCodeID := fs.String("offer-code", "", "Subscription offer code ID (required)")
-	output := shared.BindOutputFlags(fs)
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-
-	return &ffcli.Command{
-		Name:       "list",
-		ShortUsage: "asc offer-codes list [flags]",
-		ShortHelp:  "List one-time use offer code batches for a subscription offer.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "list",
+		Name:        "list",
+		ShortUsage:  "asc offer-codes list [flags]",
+		ShortHelp:   "List one-time use offer code batches for a subscription offer.",
 		LongHelp: `List one-time use offer code batches for a subscription offer.
 
 Examples:
   asc offer-codes list --offer-code "OFFER_CODE_ID"
   asc offer-codes list --offer-code "OFFER_CODE_ID" --limit 10
   asc offer-codes list --offer-code "OFFER_CODE_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > offerCodesMaxLimit) {
-				return fmt.Errorf("offer-codes list: --limit must be between 1 and %d", offerCodesMaxLimit)
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("offer-codes list: %w", err)
-			}
-
-			trimmedOfferCodeID := strings.TrimSpace(*offerCodeID)
-			if trimmedOfferCodeID == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintf(os.Stderr, "Error: --offer-code is required\n\n")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("offer-codes list: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
+		ParentFlag:  "offer-code",
+		ParentUsage: "Subscription offer code ID (required)",
+		LimitMax:    offerCodesMaxLimit,
+		ErrorPrefix: "offer-codes list",
+		FetchPage: func(ctx context.Context, client *asc.Client, offerCodeID string, limit int, next string) (asc.PaginatedResponse, error) {
 			opts := []asc.SubscriptionOfferCodeOneTimeUseCodesOption{
-				asc.WithSubscriptionOfferCodeOneTimeUseCodesLimit(*limit),
-				asc.WithSubscriptionOfferCodeOneTimeUseCodesNextURL(*next),
+				asc.WithSubscriptionOfferCodeOneTimeUseCodesLimit(limit),
+				asc.WithSubscriptionOfferCodeOneTimeUseCodesNextURL(next),
 			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithSubscriptionOfferCodeOneTimeUseCodesLimit(offerCodesMaxLimit))
-				firstPage, err := client.GetSubscriptionOfferCodeOneTimeUseCodes(requestCtx, trimmedOfferCodeID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("offer-codes list: failed to fetch: %w", err)
-				}
-
-				pages, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetSubscriptionOfferCodeOneTimeUseCodes(ctx, trimmedOfferCodeID, asc.WithSubscriptionOfferCodeOneTimeUseCodesNextURL(nextURL))
-				})
-				if err != nil {
-					return fmt.Errorf("offer-codes list: %w", err)
-				}
-
-				return shared.PrintOutput(pages, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetSubscriptionOfferCodeOneTimeUseCodes(requestCtx, trimmedOfferCodeID, opts...)
+			resp, err := client.GetSubscriptionOfferCodeOneTimeUseCodes(ctx, offerCodeID, opts...)
 			if err != nil {
-				return fmt.Errorf("offer-codes list: failed to fetch: %w", err)
+				return nil, fmt.Errorf("failed to fetch: %w", err)
 			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return resp, nil
 		},
-	}
+	})
 }
 
 // OfferCodesGenerateCommand returns the offer codes generate subcommand.

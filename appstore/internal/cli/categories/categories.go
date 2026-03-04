@@ -90,17 +90,20 @@ Examples:
 func CategoriesSetCommand() *ffcli.Command {
 	return shared.NewCategoriesSetCommand(shared.CategoriesSetCommandConfig{
 		FlagSetName: "categories set",
-		ShortUsage:  "asc categories set --app APP_ID --primary CATEGORY_ID [--secondary CATEGORY_ID] [--app-info APP_INFO_ID]",
+		ShortUsage:  "asc categories set --app APP_ID --primary CATEGORY_ID [--secondary CATEGORY_ID] [flags]",
 		ShortHelp:   "Set primary and secondary categories for an app.",
 		LongHelp: `Set the primary and secondary categories for an app.
 
 Use 'asc categories list' to find valid category IDs.
+Use 'asc categories subcategories --category-id GAMES' to find valid subcategory IDs.
 
 Note: The app must have an editable version in PREPARE_FOR_SUBMISSION state.
 
 Examples:
   asc categories set --app 123456789 --primary GAMES
   asc categories set --app 123456789 --primary GAMES --secondary ENTERTAINMENT
+  asc categories set --app 123456789 --primary GAMES --primary-subcategory-one GAMES_ACTION --primary-subcategory-two GAMES_SIMULATION
+  asc categories set --app 123456789 --primary GAMES --primary-subcategory-one GAMES_ACTION --secondary ENTERTAINMENT
   asc categories set --app 123456789 --primary PHOTO_AND_VIDEO`,
 		ErrorPrefix:    "categories set",
 		IncludeAppInfo: true,

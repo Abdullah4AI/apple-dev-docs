@@ -41,9 +41,7 @@ func createTempFileNoFollowWithPerm(dir string, pattern string, perm os.FileMode
 	return nil, fmt.Errorf("failed to create temporary file in %q", dir)
 }
 
-// WriteFileNoSymlinkOverwrite writes reader to path via temp+rename.
-// It refuses to overwrite symlinks and uses a Windows-safe replace when needed.
-func WriteFileNoSymlinkOverwrite(path string, reader io.Reader, perm os.FileMode, tempPattern string, backupPattern string) (int64, error) {
+func writeFileNoSymlinkOverwrite(path string, perm os.FileMode, tempPattern string, backupPattern string, write func(*os.File) (int64, error)) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, err
 	}
@@ -76,7 +74,12 @@ func WriteFileNoSymlinkOverwrite(path string, reader io.Reader, perm os.FileMode
 		}
 	}()
 
-	written, err := io.Copy(tempFile, reader)
+	// Ensure final file permissions match caller intent rather than process umask.
+	if err := tempFile.Chmod(perm); err != nil {
+		return 0, err
+	}
+
+	written, err := write(tempFile)
 	if err != nil {
 		return 0, err
 	}
@@ -119,4 +122,12 @@ func WriteFileNoSymlinkOverwrite(path string, reader io.Reader, perm os.FileMode
 
 	success = true
 	return written, nil
+}
+
+// WriteFileNoSymlinkOverwrite writes reader to path via temp+rename.
+// It refuses to overwrite symlinks and uses a Windows-safe replace when needed.
+func WriteFileNoSymlinkOverwrite(path string, reader io.Reader, perm os.FileMode, tempPattern string, backupPattern string) (int64, error) {
+	return writeFileNoSymlinkOverwrite(path, perm, tempPattern, backupPattern, func(file *os.File) (int64, error) {
+		return io.Copy(file, reader)
+	})
 }

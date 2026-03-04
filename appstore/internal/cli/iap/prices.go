@@ -443,49 +443,57 @@ func fetchManualSchedulePricePointValues(
 	scheduleID string,
 	territoryID string,
 ) (map[string]iapPricePointValue, string, error) {
-	page, err := client.GetInAppPurchasePriceScheduleManualPrices(
-		ctx,
-		scheduleID,
-		asc.WithIAPPriceSchedulePricesInclude([]string{"inAppPurchasePricePoint", "territory"}),
-		asc.WithIAPPriceSchedulePricesFields([]string{"manual", "inAppPurchasePricePoint", "territory"}),
-		asc.WithIAPPriceSchedulePricesPricePointFields([]string{"customerPrice", "proceeds", "territory"}),
-		asc.WithIAPPriceSchedulePricesTerritoryFields([]string{"currency"}),
-		asc.WithIAPPriceSchedulePricesLimit(200),
-	)
+	values := make(map[string]iapPricePointValue)
+	currency := ""
+
+	fetchPage := func(nextURL string) (*asc.InAppPurchasePricesResponse, error) {
+		if strings.TrimSpace(nextURL) == "" {
+			return client.GetInAppPurchasePriceScheduleManualPrices(
+				ctx,
+				scheduleID,
+				asc.WithIAPPriceSchedulePricesInclude([]string{"inAppPurchasePricePoint", "territory"}),
+				asc.WithIAPPriceSchedulePricesFields([]string{"manual", "inAppPurchasePricePoint", "territory"}),
+				asc.WithIAPPriceSchedulePricesPricePointFields([]string{"customerPrice", "proceeds", "territory"}),
+				asc.WithIAPPriceSchedulePricesTerritoryFields([]string{"currency"}),
+				asc.WithIAPPriceSchedulePricesLimit(200),
+			)
+		}
+		return client.GetInAppPurchasePriceScheduleManualPrices(
+			ctx,
+			scheduleID,
+			asc.WithIAPPriceSchedulePricesNextURL(nextURL),
+		)
+	}
+
+	firstPage, err := fetchPage("")
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch manual schedule price point values: %w", err)
 	}
 
-	values := make(map[string]iapPricePointValue)
-	currency := ""
-	seenNext := make(map[string]struct{})
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return fetchPage(nextURL)
+		},
+		func(page asc.PaginatedResponse) error {
+			typed, ok := page.(*asc.InAppPurchasePricesResponse)
+			if !ok {
+				return fmt.Errorf("unexpected response type %T", page)
+			}
 
-	for {
-		pageValues, pageCurrency, err := parseManualSchedulePricePointValues(page.Included, territoryID)
-		if err != nil {
-			return nil, "", err
-		}
-		maps.Copy(values, pageValues)
-		if currency == "" && pageCurrency != "" {
-			currency = pageCurrency
-		}
-
-		if page.Links.Next == "" {
-			break
-		}
-		if _, exists := seenNext[page.Links.Next]; exists {
-			return nil, "", fmt.Errorf("paginate manual schedule price point values: %w", asc.ErrRepeatedPaginationURL)
-		}
-		seenNext[page.Links.Next] = struct{}{}
-
-		page, err = client.GetInAppPurchasePriceScheduleManualPrices(
-			ctx,
-			scheduleID,
-			asc.WithIAPPriceSchedulePricesNextURL(page.Links.Next),
-		)
-		if err != nil {
-			return nil, "", fmt.Errorf("paginate manual schedule price point values: %w", err)
-		}
+			pageValues, pageCurrency, err := parseManualSchedulePricePointValues(typed.Included, territoryID)
+			if err != nil {
+				return err
+			}
+			maps.Copy(values, pageValues)
+			if currency == "" && pageCurrency != "" {
+				currency = pageCurrency
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, "", fmt.Errorf("paginate manual schedule price point values: %w", err)
 	}
 
 	return values, currency, nil

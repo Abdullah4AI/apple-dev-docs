@@ -3,9 +3,6 @@ package xcodecloud
 import (
 	"context"
 	"flag"
-	"fmt"
-	"os"
-	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -100,107 +97,53 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud build-runs builds: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud build-runs builds: %w", err)
-			}
-
-			runIDValue := strings.TrimSpace(*runID)
-			if runIDValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --run-id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud build-runs builds: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiBuildRunBuildsOption{
-				asc.WithCiBuildRunBuildsLimit(*limit),
-				asc.WithCiBuildRunBuildsNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiBuildRunBuildsLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiBuildRunBuilds(ctx, runIDValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiBuildRunBuilds(ctx, runIDValue, asc.WithCiBuildRunBuildsNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud build-runs builds: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiBuildRunBuilds(requestCtx, runIDValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud build-runs builds: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return runXcodeCloudPaginatedParentList(
+				ctx,
+				*runID,
+				"run-id",
+				*limit,
+				*next,
+				*paginate,
+				*output.Output,
+				*output.Pretty,
+				"xcode-cloud build-runs builds",
+				func(ctx context.Context, client *asc.Client, runID string, limit int, next string) (asc.PaginatedResponse, error) {
+					return client.GetCiBuildRunBuilds(
+						ctx,
+						runID,
+						asc.WithCiBuildRunBuildsLimit(limit),
+						asc.WithCiBuildRunBuildsNextURL(next),
+					)
+				},
+				func(ctx context.Context, client *asc.Client, runID string, next string) (asc.PaginatedResponse, error) {
+					return client.GetCiBuildRunBuilds(ctx, runID, asc.WithCiBuildRunBuildsNextURL(next))
+				},
+			)
 		},
 	}
 }
 
 func xcodeCloudBuildRunsList(ctx context.Context, workflowID string, limit int, next string, paginate bool, output string, pretty bool) error {
-	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("xcode-cloud build-runs: --limit must be between 1 and 200")
-	}
-	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("xcode-cloud build-runs: %w", err)
-	}
-
-	resolvedWorkflowID := strings.TrimSpace(workflowID)
-	if resolvedWorkflowID == "" && strings.TrimSpace(next) == "" {
-		fmt.Fprintln(os.Stderr, "Error: --workflow-id is required")
-		return flag.ErrHelp
-	}
-
-	client, err := shared.GetASCClient()
-	if err != nil {
-		return fmt.Errorf("xcode-cloud build-runs: %w", err)
-	}
-
-	requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-	defer cancel()
-
-	opts := []asc.CiBuildRunsOption{
-		asc.WithCiBuildRunsLimit(limit),
-		asc.WithCiBuildRunsNextURL(next),
-	}
-
-	if paginate {
-		paginateOpts := append(opts, asc.WithCiBuildRunsLimit(200))
-		resp, err := shared.PaginateWithSpinner(requestCtx,
-			func(ctx context.Context) (asc.PaginatedResponse, error) {
-				return client.GetCiBuildRuns(ctx, resolvedWorkflowID, paginateOpts...)
-			},
-			func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-				return client.GetCiBuildRuns(ctx, resolvedWorkflowID, asc.WithCiBuildRunsNextURL(nextURL))
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("xcode-cloud build-runs: %w", err)
-		}
-
-		return shared.PrintOutput(resp, output, pretty)
-	}
-
-	resp, err := client.GetCiBuildRuns(requestCtx, resolvedWorkflowID, opts...)
-	if err != nil {
-		return fmt.Errorf("xcode-cloud build-runs: %w", err)
-	}
-
-	return shared.PrintOutput(resp, output, pretty)
+	return runXcodeCloudPaginatedParentList(
+		ctx,
+		workflowID,
+		"workflow-id",
+		limit,
+		next,
+		paginate,
+		output,
+		pretty,
+		"xcode-cloud build-runs",
+		func(ctx context.Context, client *asc.Client, workflowID string, limit int, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiBuildRuns(
+				ctx,
+				workflowID,
+				asc.WithCiBuildRunsLimit(limit),
+				asc.WithCiBuildRunsNextURL(next),
+			)
+		},
+		func(ctx context.Context, client *asc.Client, workflowID string, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiBuildRuns(ctx, workflowID, asc.WithCiBuildRunsNextURL(next))
+		},
+	)
 }

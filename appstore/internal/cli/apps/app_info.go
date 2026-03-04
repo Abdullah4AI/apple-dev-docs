@@ -211,6 +211,7 @@ func AppInfoSetCommand() *ffcli.Command {
 	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS (required with --version)")
 	state := fs.String("state", "", "Filter by app store state(s), comma-separated")
 	locale := fs.String("locale", "", "Locale (e.g., en-US)")
+	copyFromLocale := fs.String("copy-from-locale", "", "Copy submit-required fields (description, keywords, support-url) from this locale when missing")
 	description := fs.String("description", "", "App description")
 	keywords := fs.String("keywords", "", "Keywords (comma-separated)")
 	supportURL := fs.String("support-url", "", "Support URL")
@@ -227,6 +228,7 @@ func AppInfoSetCommand() *ffcli.Command {
 
 Examples:
   asc app-info set --app "APP_ID" --locale "en-US" --whats-new "Bug fixes"
+  asc app-info set --app "APP_ID" --locale "fr-FR" --copy-from-locale "en-US" --whats-new "Corrections"
   asc app-info set --app "APP_ID" --version "1.2.3" --platform IOS --locale "en-US" --description "New release"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -262,6 +264,15 @@ Examples:
 			if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
 				return shared.UsageError(err.Error())
 			}
+			copyFromLocaleValue := strings.TrimSpace(*copyFromLocale)
+			if copyFromLocaleValue != "" {
+				if err := shared.ValidateBuildLocalizationLocale(copyFromLocaleValue); err != nil {
+					return shared.UsageError(err.Error())
+				}
+				if strings.EqualFold(copyFromLocaleValue, localeValue) {
+					return shared.UsageError("--copy-from-locale must be different from --locale")
+				}
+			}
 
 			descriptionValue := strings.TrimSpace(*description)
 			keywordsValue := strings.TrimSpace(*keywords)
@@ -274,7 +285,8 @@ Examples:
 				supportURLValue == "" &&
 				marketingURLValue == "" &&
 				promotionalTextValue == "" &&
-				whatsNewValue == "" {
+				whatsNewValue == "" &&
+				copyFromLocaleValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
 				return flag.ErrHelp
 			}
@@ -302,43 +314,66 @@ Examples:
 
 			localizationOpts := []asc.AppStoreVersionLocalizationsOption{
 				asc.WithAppStoreVersionLocalizationsLimit(200),
-				asc.WithAppStoreVersionLocalizationLocales([]string{localeValue}),
+				asc.WithAppStoreVersionLocalizationLocales(appInfoSetRequestedLocales(localeValue, copyFromLocaleValue)),
 			}
 			localizations, err := client.GetAppStoreVersionLocalizations(requestCtx, versionResource.ID, localizationOpts...)
 			if err != nil {
 				return fmt.Errorf("app-info set: failed to fetch localizations: %w", err)
 			}
+			targetLocalization, targetExists := findAppInfoSetLocalizationByLocale(localizations.Data, localeValue)
 
-			attrs := asc.AppStoreVersionLocalizationAttributes{}
-			if descriptionValue != "" {
-				attrs.Description = descriptionValue
-			}
-			if keywordsValue != "" {
-				attrs.Keywords = keywordsValue
-			}
-			if supportURLValue != "" {
-				attrs.SupportURL = supportURLValue
-			}
-			if marketingURLValue != "" {
-				attrs.MarketingURL = marketingURLValue
-			}
-			if promotionalTextValue != "" {
-				attrs.PromotionalText = promotionalTextValue
-			}
-			if whatsNewValue != "" {
-				attrs.WhatsNew = whatsNewValue
+			if copyFromLocaleValue != "" {
+				sourceLocalization, found := findAppInfoSetLocalizationByLocale(localizations.Data, copyFromLocaleValue)
+				if !found {
+					return fmt.Errorf("app-info set: --copy-from-locale %q was not found for this app version", copyFromLocaleValue)
+				}
+				if shouldBackfillAppInfoSetField(descriptionValue, targetExists, targetLocalization.Attributes.Description) {
+					descriptionValue = strings.TrimSpace(sourceLocalization.Attributes.Description)
+				}
+				if shouldBackfillAppInfoSetField(keywordsValue, targetExists, targetLocalization.Attributes.Keywords) {
+					keywordsValue = strings.TrimSpace(sourceLocalization.Attributes.Keywords)
+				}
+				if shouldBackfillAppInfoSetField(supportURLValue, targetExists, targetLocalization.Attributes.SupportURL) {
+					supportURLValue = strings.TrimSpace(sourceLocalization.Attributes.SupportURL)
+				}
 			}
 
-			if len(localizations.Data) == 0 {
+			attrs := applyAppInfoSetValues(
+				asc.AppStoreVersionLocalizationAttributes{},
+				descriptionValue,
+				keywordsValue,
+				supportURLValue,
+				marketingURLValue,
+				promotionalTextValue,
+				whatsNewValue,
+			)
+
+			effectiveAttributes := asc.AppStoreVersionLocalizationAttributes{Locale: localeValue}
+			if targetExists {
+				effectiveAttributes = targetLocalization.Attributes
+				effectiveAttributes.Locale = localeValue
+			}
+			effectiveAttributes = applyAppInfoSetValues(
+				effectiveAttributes,
+				descriptionValue,
+				keywordsValue,
+				supportURLValue,
+				marketingURLValue,
+				promotionalTextValue,
+				whatsNewValue,
+			)
+
+			if !targetExists {
 				attrs.Locale = localeValue
 				resp, err := client.CreateAppStoreVersionLocalization(requestCtx, versionResource.ID, attrs)
 				if err != nil {
 					return fmt.Errorf("app-info set: %w", err)
 				}
+				warnAppInfoSetSubmitIncompleteLocale(localeValue, effectiveAttributes)
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
-			localizationID := strings.TrimSpace(localizations.Data[0].ID)
+			localizationID := strings.TrimSpace(targetLocalization.ID)
 			if localizationID == "" {
 				return fmt.Errorf("app-info set: localization id is empty")
 			}
@@ -346,9 +381,84 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("app-info set: %w", err)
 			}
+			warnAppInfoSetSubmitIncompleteLocale(localeValue, effectiveAttributes)
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func appInfoSetRequestedLocales(locale, copyFromLocale string) []string {
+	locales := []string{locale}
+	if strings.TrimSpace(copyFromLocale) != "" {
+		locales = append(locales, copyFromLocale)
+	}
+	return locales
+}
+
+func findAppInfoSetLocalizationByLocale(
+	localizations []asc.Resource[asc.AppStoreVersionLocalizationAttributes],
+	locale string,
+) (asc.Resource[asc.AppStoreVersionLocalizationAttributes], bool) {
+	for _, localization := range localizations {
+		if strings.EqualFold(strings.TrimSpace(localization.Attributes.Locale), strings.TrimSpace(locale)) {
+			return localization, true
+		}
+	}
+	return asc.Resource[asc.AppStoreVersionLocalizationAttributes]{}, false
+}
+
+func applyAppInfoSetValues(
+	attrs asc.AppStoreVersionLocalizationAttributes,
+	description string,
+	keywords string,
+	supportURL string,
+	marketingURL string,
+	promotionalText string,
+	whatsNew string,
+) asc.AppStoreVersionLocalizationAttributes {
+	if strings.TrimSpace(description) != "" {
+		attrs.Description = strings.TrimSpace(description)
+	}
+	if strings.TrimSpace(keywords) != "" {
+		attrs.Keywords = strings.TrimSpace(keywords)
+	}
+	if strings.TrimSpace(supportURL) != "" {
+		attrs.SupportURL = strings.TrimSpace(supportURL)
+	}
+	if strings.TrimSpace(marketingURL) != "" {
+		attrs.MarketingURL = strings.TrimSpace(marketingURL)
+	}
+	if strings.TrimSpace(promotionalText) != "" {
+		attrs.PromotionalText = strings.TrimSpace(promotionalText)
+	}
+	if strings.TrimSpace(whatsNew) != "" {
+		attrs.WhatsNew = strings.TrimSpace(whatsNew)
+	}
+	return attrs
+}
+
+func shouldBackfillAppInfoSetField(explicitValue string, targetExists bool, targetValue string) bool {
+	if strings.TrimSpace(explicitValue) != "" {
+		return false
+	}
+	if !targetExists {
+		return true
+	}
+	return strings.TrimSpace(targetValue) == ""
+}
+
+func warnAppInfoSetSubmitIncompleteLocale(locale string, attrs asc.AppStoreVersionLocalizationAttributes) {
+	missing := shared.MissingSubmitRequiredLocalizationFields(attrs)
+	if len(missing) == 0 {
+		return
+	}
+
+	fmt.Fprintf(
+		os.Stderr,
+		"Warning: locale %s is missing submit-required fields: %s. This may block `asc submit create`.\n",
+		locale,
+		strings.Join(missing, ", "),
+	)
 }
 
 func resolveAppStoreVersionForAppInfo(

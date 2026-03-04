@@ -151,8 +151,9 @@ asc <subcommand> [flags]
 
 ## Scripting Tips
 
-- JSON output is minified by default and optimized for machine parsing.
-- Use `--output table` or `--output markdown` for human-readable output.
+- Output defaults are TTY-aware: interactive terminals default to `table`, while piped/non-interactive output defaults to minified `json`.
+- Use `--output table` or `--output markdown` for explicit human-readable output.
+- Use `--output json` for explicit machine-readable output.
 - Use `--paginate` on list commands to fetch all pages automatically.
 - Use `--limit` and `--next` for manual pagination control.
 - Prefer explicit flags and deterministic outputs in CI scripts.

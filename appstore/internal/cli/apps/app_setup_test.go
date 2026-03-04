@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -71,6 +72,18 @@ func TestAppSetupCategoriesSetCommand_MissingFlags(t *testing.T) {
 				t.Fatal("expected error for missing flags")
 			}
 		})
+	}
+}
+
+func TestAppSetupCategoriesSetCommand_HelpMentionsSubcategoryFlags(t *testing.T) {
+	cmd := AppSetupCategoriesSetCommand()
+
+	if !strings.Contains(cmd.ShortUsage, "[flags]") {
+		t.Fatalf("expected [flags] in short usage, got %q", cmd.ShortUsage)
+	}
+
+	if !strings.Contains(cmd.LongHelp, "--primary-subcategory-one") {
+		t.Fatalf("expected subcategory example in long help, got %q", cmd.LongHelp)
 	}
 }
 

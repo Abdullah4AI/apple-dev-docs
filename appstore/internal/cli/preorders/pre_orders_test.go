@@ -12,6 +12,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestPreOrdersGetCommand_MissingApp(t *testing.T) {
@@ -243,9 +244,9 @@ func TestMapTerritoryAvailabilityIDs(t *testing.T) {
 		},
 	}
 
-	ids, err := mapTerritoryAvailabilityIDs(resp)
+	ids, err := shared.MapTerritoryAvailabilityIDs(resp)
 	if err != nil {
-		t.Fatalf("mapTerritoryAvailabilityIDs() error: %v", err)
+		t.Fatalf("MapTerritoryAvailabilityIDs() error: %v", err)
 	}
 	if ids["USA"] != "ta-1" {
 		t.Fatalf("expected territory USA to map to ta-1, got %q", ids["USA"])
@@ -265,9 +266,9 @@ func TestMapTerritoryAvailabilityIDs_FallbackID(t *testing.T) {
 		},
 	}
 
-	ids, err := mapTerritoryAvailabilityIDs(resp)
+	ids, err := shared.MapTerritoryAvailabilityIDs(resp)
 	if err != nil {
-		t.Fatalf("mapTerritoryAvailabilityIDs() error: %v", err)
+		t.Fatalf("MapTerritoryAvailabilityIDs() error: %v", err)
 	}
 	if ids["USA"] != encoded {
 		t.Fatalf("expected territory USA to map to %q, got %q", encoded, ids["USA"])

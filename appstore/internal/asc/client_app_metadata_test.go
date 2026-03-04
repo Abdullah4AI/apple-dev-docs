@@ -551,6 +551,74 @@ func TestGetAppInfo_SendsRequestWithInclude(t *testing.T) {
 	}
 }
 
+func TestUpdateAppInfoCategories_SendsSubcategoryRelationships(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"appInfos","id":"info-1","attributes":{"state":"READY"}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/appInfos/info-1" {
+			t.Fatalf("expected path /v1/appInfos/info-1, got %s", req.URL.Path)
+		}
+
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body error: %v", err)
+		}
+
+		var payload AppInfoUpdateCategoriesRequest
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode body error: %v", err)
+		}
+
+		if payload.Data.Type != ResourceTypeAppInfos {
+			t.Fatalf("expected type appInfos, got %q", payload.Data.Type)
+		}
+		if payload.Data.ID != "info-1" {
+			t.Fatalf("expected id info-1, got %q", payload.Data.ID)
+		}
+		if payload.Data.Relationships == nil {
+			t.Fatal("expected relationships payload")
+		}
+
+		rels := payload.Data.Relationships
+		if rels.PrimaryCategory == nil || rels.PrimaryCategory.Data.ID != "GAMES" {
+			t.Fatalf("expected primaryCategory GAMES, got %+v", rels.PrimaryCategory)
+		}
+		if rels.SecondaryCategory == nil || rels.SecondaryCategory.Data.ID != "ENTERTAINMENT" {
+			t.Fatalf("expected secondaryCategory ENTERTAINMENT, got %+v", rels.SecondaryCategory)
+		}
+		if rels.PrimarySubcategoryOne == nil || rels.PrimarySubcategoryOne.Data.ID != "GAMES_ACTION" {
+			t.Fatalf("expected primarySubcategoryOne GAMES_ACTION, got %+v", rels.PrimarySubcategoryOne)
+		}
+		if rels.PrimarySubcategoryTwo == nil || rels.PrimarySubcategoryTwo.Data.ID != "GAMES_SIMULATION" {
+			t.Fatalf("expected primarySubcategoryTwo GAMES_SIMULATION, got %+v", rels.PrimarySubcategoryTwo)
+		}
+		if rels.SecondarySubcategoryOne == nil || rels.SecondarySubcategoryOne.Data.ID != "ENTERTAINMENT_KIDS" {
+			t.Fatalf("expected secondarySubcategoryOne ENTERTAINMENT_KIDS, got %+v", rels.SecondarySubcategoryOne)
+		}
+		if rels.SecondarySubcategoryTwo == nil || rels.SecondarySubcategoryTwo.Data.ID != "ENTERTAINMENT_MUSIC" {
+			t.Fatalf("expected secondarySubcategoryTwo ENTERTAINMENT_MUSIC, got %+v", rels.SecondarySubcategoryTwo)
+		}
+
+		assertAuthorized(t, req)
+	}, response)
+
+	_, err := client.UpdateAppInfoCategories(
+		context.Background(),
+		"info-1",
+		"GAMES",
+		"ENTERTAINMENT",
+		"GAMES_ACTION",
+		"GAMES_SIMULATION",
+		"ENTERTAINMENT_KIDS",
+		"ENTERTAINMENT_MUSIC",
+	)
+	if err != nil {
+		t.Fatalf("UpdateAppInfoCategories() error: %v", err)
+	}
+}
+
 func TestGetAppInfoRelationships_SendsRequest(t *testing.T) {
 	tests := []struct {
 		name string

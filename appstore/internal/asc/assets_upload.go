@@ -144,17 +144,6 @@ func ReadImageDimensions(path string) (ImageDimensions, error) {
 	return ImageDimensions{Width: cfg.Width, Height: cfg.Height}, nil
 }
 
-// ComputeChecksum computes a checksum for a file on disk.
-func ComputeChecksum(path string, algorithm ChecksumAlgorithm) (*Checksum, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	return ComputeChecksumFromReader(file, algorithm)
-}
-
 // ComputeChecksumFromReader computes a checksum for an io.Reader.
 func ComputeChecksumFromReader(reader io.Reader, algorithm ChecksumAlgorithm) (*Checksum, error) {
 	var hasher hash.Hash

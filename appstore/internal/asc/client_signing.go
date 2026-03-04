@@ -533,66 +533,30 @@ func (c *Client) GetProfileBundleIDRelationship(ctx context.Context, profileID s
 
 // GetProfileCertificatesRelationships retrieves certificate linkages for a profile.
 func (c *Client) GetProfileCertificatesRelationships(ctx context.Context, profileID string, opts ...LinkagesOption) (*ProfileCertificatesLinkagesResponse, error) {
-	profileID = strings.TrimSpace(profileID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/profiles/%s/relationships/certificates", profileID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("profileCertificatesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response ProfileCertificatesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[ProfileCertificatesLinkagesResponse](
+		c,
+		ctx,
+		profileID,
+		"certificates",
+		"profile ID",
+		"/v1/profiles/%s/relationships/%s",
+		"profileCertificatesRelationships",
+		opts...,
+	)
 }
 
 // GetProfileDevicesRelationships retrieves device linkages for a profile.
 func (c *Client) GetProfileDevicesRelationships(ctx context.Context, profileID string, opts ...LinkagesOption) (*ProfileDevicesLinkagesResponse, error) {
-	profileID = strings.TrimSpace(profileID)
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	path := fmt.Sprintf("/v1/profiles/%s/relationships/devices", profileID)
-	if query.nextURL != "" {
-		// Validate nextURL to prevent credential exfiltration
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("profileDevicesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response ProfileDevicesLinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
+	return getTypedResourceLinkages[ProfileDevicesLinkagesResponse](
+		c,
+		ctx,
+		profileID,
+		"devices",
+		"profile ID",
+		"/v1/profiles/%s/relationships/%s",
+		"profileDevicesRelationships",
+		opts...,
+	)
 }
 
 // CreateProfile creates a new provisioning profile.

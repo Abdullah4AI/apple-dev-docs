@@ -65,8 +65,8 @@ func TestWebXcodeCloudCommandHierarchy(t *testing.T) {
 	if cmd.Name != "xcode-cloud" {
 		t.Fatalf("expected command name %q, got %q", "xcode-cloud", cmd.Name)
 	}
-	if len(cmd.Subcommands) != 2 {
-		t.Fatalf("expected 2 subcommands (usage, products), got %d", len(cmd.Subcommands))
+	if len(cmd.Subcommands) != 4 {
+		t.Fatalf("expected 4 subcommands (usage, products, workflows, env-vars), got %d", len(cmd.Subcommands))
 	}
 
 	names := map[string]bool{}
@@ -79,6 +79,12 @@ func TestWebXcodeCloudCommandHierarchy(t *testing.T) {
 	if !names["products"] {
 		t.Fatal("expected 'products' subcommand")
 	}
+	if !names["workflows"] {
+		t.Fatal("expected 'workflows' subcommand")
+	}
+	if !names["env-vars"] {
+		t.Fatal("expected 'env-vars' subcommand")
+	}
 }
 
 func TestWebXcodeCloudUsageSubcommands(t *testing.T) {
@@ -87,14 +93,14 @@ func TestWebXcodeCloudUsageSubcommands(t *testing.T) {
 	if usageCmd == nil {
 		t.Fatal("could not find 'usage' subcommand")
 	}
-	if len(usageCmd.Subcommands) != 4 {
-		t.Fatalf("expected 4 usage subcommands, got %d", len(usageCmd.Subcommands))
+	if len(usageCmd.Subcommands) != 5 {
+		t.Fatalf("expected 5 usage subcommands, got %d", len(usageCmd.Subcommands))
 	}
 	usageNames := map[string]bool{}
 	for _, sub := range usageCmd.Subcommands {
 		usageNames[sub.Name] = true
 	}
-	for _, expected := range []string{"summary", "months", "days", "workflows"} {
+	for _, expected := range []string{"summary", "alert", "months", "days", "workflows"} {
 		if !usageNames[expected] {
 			t.Fatalf("expected %q usage subcommand", expected)
 		}
@@ -119,6 +125,11 @@ func TestWebXcodeCloudSubcommandsResolveSessionWithinTimeoutContext(t *testing.T
 			args:  []string{"--apple-id", "user@example.com"},
 		},
 		{
+			name:  "usage alert",
+			build: webXcodeCloudUsageAlertCommand,
+			args:  []string{"--apple-id", "user@example.com"},
+		},
+		{
 			name:  "usage months",
 			build: webXcodeCloudUsageMonthsCommand,
 			args:  []string{"--apple-id", "user@example.com"},
@@ -137,6 +148,21 @@ func TestWebXcodeCloudSubcommandsResolveSessionWithinTimeoutContext(t *testing.T
 			name:  "products",
 			build: webXcodeCloudProductsCommand,
 			args:  []string{"--apple-id", "user@example.com"},
+		},
+		{
+			name:  "workflows describe",
+			build: webXcodeCloudWorkflowDescribeCommand,
+			args:  []string{"--apple-id", "user@example.com", "--product-id", "prod-123", "--workflow-id", "wf-123"},
+		},
+		{
+			name:  "workflows enable",
+			build: webXcodeCloudWorkflowEnableCommand,
+			args:  []string{"--apple-id", "user@example.com", "--product-id", "prod-123", "--workflow-id", "wf-123"},
+		},
+		{
+			name:  "workflows disable",
+			build: webXcodeCloudWorkflowDisableCommand,
+			args:  []string{"--apple-id", "user@example.com", "--product-id", "prod-123", "--workflow-id", "wf-123", "--confirm"},
 		},
 	}
 

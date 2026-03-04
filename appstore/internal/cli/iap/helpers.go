@@ -21,10 +21,7 @@ var validOfferCodeEligibilities = map[string]struct{}{
 }
 
 func contextWithAssetUploadTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithTimeout(ctx, asc.ResolveTimeoutWithDefault(iapAssetUploadDefaultTimeout))
+	return shared.ContextWithResolvedTimeout(ctx, iapAssetUploadDefaultTimeout)
 }
 
 func openImageFile(path string) (*os.File, os.FileInfo, error) {

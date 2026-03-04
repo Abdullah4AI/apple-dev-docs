@@ -35,43 +35,6 @@ func focusedScreenshotSizeCatalog() []asc.ScreenshotSizeEntry {
 	return focused
 }
 
-// AssetsScreenshotsCommand returns the screenshots subcommand group.
-func AssetsScreenshotsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("screenshots", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "screenshots",
-		ShortUsage: "asc screenshots <subcommand> [flags]",
-		ShortHelp:  "Manage App Store screenshots.",
-		LongHelp: `Manage App Store screenshots.
-
-Examples:
-  asc screenshots list --version-localization "LOC_ID"
-  asc screenshots sizes
-  asc screenshots sizes --all
-  asc screenshots upload --version-localization "LOC_ID" --path "./screenshots/iphone" --device-type "IPHONE_65"
-  asc screenshots upload --version-localization "LOC_ID" --path "./screenshots/ipad" --device-type "IPAD_PRO_3GEN_129"
-  asc screenshots download --version-localization "LOC_ID" --output-dir "./screenshots/downloaded"
-  asc screenshots delete --id "SCREENSHOT_ID" --confirm
-
-By default, "asc screenshots sizes" focuses on one iPhone set (IPHONE_65)
-and one iPad set (IPAD_PRO_3GEN_129). Use --all to list every supported
-display type.`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Subcommands: []*ffcli.Command{
-			AssetsScreenshotsListCommand(),
-			AssetsScreenshotsSizesCommand(),
-			AssetsScreenshotsUploadCommand(),
-			AssetsScreenshotsDownloadCommand(),
-			AssetsScreenshotsDeleteCommand(),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}
-
 // AssetsScreenshotsListCommand returns the screenshots list subcommand.
 func AssetsScreenshotsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)

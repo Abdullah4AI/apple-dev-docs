@@ -90,7 +90,7 @@ Examples:
 
 			var archivedFilter []string
 			if strings.TrimSpace(*archived) != "" {
-				value, err := parseBool(*archived, "--archived")
+				value, err := shared.ParseBoolFlag(*archived, "--archived")
 				if err != nil {
 					return fmt.Errorf("background-assets list: %w", err)
 				}
@@ -265,7 +265,7 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --archived is required")
 				return flag.ErrHelp
 			}
-			archivedValue, err := parseBool(*archived, "--archived")
+			archivedValue, err := shared.ParseBoolFlag(*archived, "--archived")
 			if err != nil {
 				return fmt.Errorf("background-assets update: %w", err)
 			}

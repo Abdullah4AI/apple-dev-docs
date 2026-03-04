@@ -103,7 +103,7 @@ Examples:
 				return fmt.Errorf("metadata pull: %w", err)
 			}
 
-			versionIDValue, err := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
+			versionIDValue, _, err := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
 			if err != nil {
 				if errors.Is(err, flag.ErrHelp) {
 					return err
@@ -241,9 +241,9 @@ func parseIncludes(value string) ([]string, error) {
 	return result, nil
 }
 
-func resolveVersionID(ctx context.Context, client *asc.Client, appID, version, platform string) (string, error) {
+func resolveVersionID(ctx context.Context, client *asc.Client, appID, version, platform string) (string, string, error) {
 	if platform != "" {
-		return shared.ResolveAppStoreVersionID(ctx, client, appID, version, platform)
+		return shared.ResolveAppStoreVersionIDAndState(ctx, client, appID, version, platform)
 	}
 
 	resp, err := client.GetAppStoreVersions(
@@ -253,15 +253,15 @@ func resolveVersionID(ctx context.Context, client *asc.Client, appID, version, p
 		asc.WithAppStoreVersionsLimit(200),
 	)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if resp == nil || len(resp.Data) == 0 {
-		return "", fmt.Errorf("app store version not found for version %q", version)
+		return "", "", fmt.Errorf("app store version not found for version %q", version)
 	}
 	if len(resp.Data) > 1 {
-		return "", shared.UsageErrorf("--platform is required when multiple app store versions match --version %q", version)
+		return "", "", shared.UsageErrorf("--platform is required when multiple app store versions match --version %q", version)
 	}
-	return resp.Data[0].ID, nil
+	return resp.Data[0].ID, strings.TrimSpace(resp.Data[0].Attributes.AppStoreState), nil
 }
 
 func fetchAppInfoLocalizations(ctx context.Context, client *asc.Client, appInfoID string) ([]asc.Resource[asc.AppInfoLocalizationAttributes], error) {

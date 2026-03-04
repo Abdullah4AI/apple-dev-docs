@@ -98,44 +98,22 @@ func parseOfferCodePrices(value string) ([]asc.SubscriptionOfferCodePrice, error
 
 // OfferCodesGetCommand returns the offer codes get subcommand.
 func OfferCodesGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("get", flag.ExitOnError)
-
-	offerCodeID := fs.String("offer-code-id", "", "Subscription offer code ID (required)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc offer-codes get --offer-code-id ID",
-		ShortHelp:  "Get a subscription offer code by ID.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "get",
+		Name:        "get",
+		ShortUsage:  "asc offer-codes get --offer-code-id ID",
+		ShortHelp:   "Get a subscription offer code by ID.",
 		LongHelp: `Get a subscription offer code by ID.
 
 Examples:
   asc offer-codes get --offer-code-id "OFFER_CODE_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*offerCodeID)
-			if trimmedID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("offer-codes get: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.GetSubscriptionOfferCode(requestCtx, trimmedID)
-			if err != nil {
-				return fmt.Errorf("offer-codes get: failed to fetch: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "offer-code-id",
+		IDUsage:     "Subscription offer code ID (required)",
+		ErrorPrefix: "offer-codes get",
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetSubscriptionOfferCode(ctx, id)
 		},
-	}
+	})
 }
 
 // OfferCodesCreateCommand returns the offer codes create subcommand.
@@ -270,54 +248,22 @@ Examples:
 
 // OfferCodesUpdateCommand returns the offer codes update subcommand.
 func OfferCodesUpdateCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("update", flag.ExitOnError)
-
-	offerCodeID := fs.String("offer-code-id", "", "Subscription offer code ID (required)")
-	active := fs.String("active", "", "Set active (true/false)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "update",
-		ShortUsage: "asc offer-codes update [flags]",
-		ShortHelp:  "Update a subscription offer code.",
+	return newActiveUpdateCommand(activeUpdateCommandConfig{
+		FlagSetName: "update",
+		Name:        "update",
+		ShortUsage:  "asc offer-codes update [flags]",
+		ShortHelp:   "Update a subscription offer code.",
 		LongHelp: `Update a subscription offer code.
 
 Examples:
   asc offer-codes update --offer-code-id "OFFER_CODE_ID" --active true`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedID := strings.TrimSpace(*offerCodeID)
-			if trimmedID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return flag.ErrHelp
-			}
-
-			activeValue, err := shared.ParseOptionalBoolFlag("--active", *active)
-			if err != nil {
-				return fmt.Errorf("offer-codes update: %w", err)
-			}
-			if activeValue == nil {
-				fmt.Fprintln(os.Stderr, "Error: --active is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("offer-codes update: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.UpdateSubscriptionOfferCode(requestCtx, trimmedID, asc.SubscriptionOfferCodeUpdateAttributes{Active: activeValue})
-			if err != nil {
-				return fmt.Errorf("offer-codes update: failed to update: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "offer-code-id",
+		IDUsage:     "Subscription offer code ID (required)",
+		ErrorPrefix: "offer-codes update",
+		Update: func(ctx context.Context, client *asc.Client, id string, active *bool) (any, error) {
+			return client.UpdateSubscriptionOfferCode(ctx, id, asc.SubscriptionOfferCodeUpdateAttributes{Active: active})
 		},
-	}
+	})
 }
 
 type optionalInt struct {
@@ -343,7 +289,7 @@ func (i *optionalInt) String() string {
 }
 
 func normalizeOfferCodeDuration(value string) (asc.SubscriptionOfferDuration, error) {
-	normalized := normalizeEnumValue(value)
+	normalized := shared.NormalizeEnumToken(value)
 	if normalized == "" {
 		return "", nil
 	}
@@ -354,7 +300,7 @@ func normalizeOfferCodeDuration(value string) (asc.SubscriptionOfferDuration, er
 }
 
 func normalizeOfferCodeMode(value string) (asc.SubscriptionOfferMode, error) {
-	normalized := normalizeEnumValue(value)
+	normalized := shared.NormalizeEnumToken(value)
 	if normalized == "" {
 		return "", nil
 	}
@@ -365,7 +311,7 @@ func normalizeOfferCodeMode(value string) (asc.SubscriptionOfferMode, error) {
 }
 
 func normalizeOfferCodeEligibility(value string) (asc.SubscriptionOfferEligibility, error) {
-	normalized := normalizeEnumValue(value)
+	normalized := shared.NormalizeEnumToken(value)
 	if normalized == "" {
 		return "", nil
 	}
@@ -383,7 +329,7 @@ func normalizeOfferCodeCustomerEligibilities(value string) ([]asc.SubscriptionCu
 
 	eligibilities := make([]asc.SubscriptionCustomerEligibility, 0, len(values))
 	for _, item := range values {
-		normalized := normalizeEnumValue(item)
+		normalized := shared.NormalizeEnumToken(item)
 		if eligibility, ok := offerCodeCustomerEligibilityMap[normalized]; ok {
 			eligibilities = append(eligibilities, eligibility)
 			continue
@@ -392,15 +338,4 @@ func normalizeOfferCodeCustomerEligibilities(value string) ([]asc.SubscriptionCu
 	}
 
 	return eligibilities, nil
-}
-
-func normalizeEnumValue(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return ""
-	}
-	normalized := strings.ToUpper(trimmed)
-	normalized = strings.ReplaceAll(normalized, "-", "_")
-	normalized = strings.ReplaceAll(normalized, " ", "_")
-	return normalized
 }

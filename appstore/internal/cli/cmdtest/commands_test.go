@@ -1346,6 +1346,11 @@ func TestPricingValidationErrors(t *testing.T) {
 			args:    []string{"pricing", "availability", "get", "--app", "APP_ID", "--id", "AVAILABILITY_ID"},
 			wantErr: "Error: --id and --app are mutually exclusive",
 		},
+		{
+			name:    "pricing availability set missing available in new territories",
+			args:    []string{"pricing", "availability", "set", "--app", "APP_ID", "--territory", "USA", "--available", "true"},
+			wantErr: "Error: --available-in-new-territories is required",
+		},
 	}
 
 	for _, test := range tests {
@@ -4488,7 +4493,7 @@ func TestAuthStatusShowsEnvPreference(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4528,7 +4533,7 @@ func TestAuthStatusEnvIncomplete(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4562,7 +4567,7 @@ func TestAuthStatusProfileOverridesEnvNote(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4613,7 +4618,7 @@ func TestAuthStatusShowsStorageLocation(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4689,7 +4694,7 @@ func TestAuthStatusValidateSuccess(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status", "--validate"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table", "--validate"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4745,7 +4750,7 @@ func TestAuthStatusValidateForbiddenReportsWorks(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status", "--validate"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table", "--validate"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -4801,7 +4806,7 @@ func TestAuthStatusValidateFailureReturnsReportedError(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "status", "--validate"}); err != nil {
+		if err := root.Parse([]string{"auth", "status", "--output", "table", "--validate"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err == nil {

@@ -179,21 +179,7 @@ Examples:
 				return fmt.Errorf("apps search-keywords set: failed to update: %w", err)
 			}
 
-			return shared.PrintOutput(buildAppKeywordsResponse(keywordValues), *output.Output, *output.Pretty)
+			return shared.PrintOutput(shared.BuildAppKeywordsResponse(keywordValues), *output.Output, *output.Pretty)
 		},
 	}
-}
-
-func buildAppKeywordsResponse(keywords []string) *asc.AppKeywordsResponse {
-	resp := &asc.AppKeywordsResponse{
-		Data: make([]asc.Resource[asc.AppKeywordAttributes], 0, len(keywords)),
-	}
-	for _, keyword := range keywords {
-		resp.Data = append(resp.Data, asc.Resource[asc.AppKeywordAttributes]{
-			Type:       asc.ResourceTypeAppKeywords,
-			ID:         keyword,
-			Attributes: asc.AppKeywordAttributes{},
-		})
-	}
-	return resp
 }

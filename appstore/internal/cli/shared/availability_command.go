@@ -2,6 +2,8 @@ package shared
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -68,6 +70,8 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 				fmt.Fprintln(os.Stderr, "Error: --territory must include at least one value")
 				return flag.ErrHelp
 			}
+			availableValue := available.Value()
+			availabilityExists := true
 
 			client, err := getASCClient()
 			if err != nil {
@@ -77,28 +81,151 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 			requestCtx, cancel := contextWithTimeout(ctx)
 			defer cancel()
 
-			availabilities := make([]asc.TerritoryAvailabilityCreate, 0, len(territories))
-			for _, territoryID := range territories {
-				availabilities = append(availabilities, asc.TerritoryAvailabilityCreate{
-					TerritoryID: territoryID,
-					Available:   available.Value(),
-				})
+			resp, err := client.GetAppAvailabilityV2(requestCtx, resolvedAppID)
+			if err != nil {
+				if isAppAvailabilityMissing(err) {
+					availabilityExists = false
+					requestedTerritoryAvailabilities := make([]asc.TerritoryAvailabilityCreate, 0, len(territories))
+					for _, territoryID := range territories {
+						requestedTerritoryAvailabilities = append(requestedTerritoryAvailabilities, asc.TerritoryAvailabilityCreate{
+							TerritoryID: territoryID,
+							Available:   availableValue,
+						})
+					}
+					createAttrs := asc.AppAvailabilityV2CreateAttributes{
+						TerritoryAvailabilities: requestedTerritoryAvailabilities,
+					}
+					if config.IncludeAvailableInNewTerritories {
+						availableInNewTerritoriesValue := availableInNewTerritories.Value()
+						createAttrs.AvailableInNewTerritories = &availableInNewTerritoriesValue
+					}
+					resp, err = client.CreateAppAvailabilityV2(requestCtx, resolvedAppID, createAttrs)
+					if err != nil {
+						return fmt.Errorf("%s: app availability not found for app %q and failed to create: %w", config.ErrorPrefix, resolvedAppID, err)
+					}
+				} else {
+					return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+				}
+			}
+			availabilityID := strings.TrimSpace(resp.Data.ID)
+			if availabilityID == "" {
+				return fmt.Errorf("%s: app availability ID missing from response", config.ErrorPrefix)
 			}
 
-			attributes := asc.AppAvailabilityV2CreateAttributes{
-				TerritoryAvailabilities: availabilities,
-			}
-			if config.IncludeAvailableInNewTerritories {
-				availableInNewTerritoriesValue := availableInNewTerritories.Value()
-				attributes.AvailableInNewTerritories = &availableInNewTerritoriesValue
-			}
-
-			resp, err := client.CreateAppAvailabilityV2(requestCtx, resolvedAppID, attributes)
+			firstPage, err := client.GetTerritoryAvailabilities(requestCtx, availabilityID, asc.WithTerritoryAvailabilitiesLimit(200))
 			if err != nil {
 				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+			}
+			paginated, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+				return client.GetTerritoryAvailabilities(ctx, availabilityID, asc.WithTerritoryAvailabilitiesNextURL(nextURL))
+			})
+			if err != nil {
+				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+			}
+			territoryResp, ok := paginated.(*asc.TerritoryAvailabilitiesResponse)
+			if !ok {
+				return fmt.Errorf("%s: unexpected territory availabilities response", config.ErrorPrefix)
+			}
+
+			if availabilityExists && config.IncludeAvailableInNewTerritories {
+				availableInNewTerritoriesValue := availableInNewTerritories.Value()
+				if resp.Data.Attributes.AvailableInNewTerritories != availableInNewTerritoriesValue {
+					return fmt.Errorf(
+						"%s: cannot change --available-in-new-territories for an existing app availability (current value: %t)",
+						config.ErrorPrefix,
+						resp.Data.Attributes.AvailableInNewTerritories,
+					)
+				}
+			}
+
+			territoryMap, err := MapTerritoryAvailabilityIDs(territoryResp)
+			if err != nil {
+				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+			}
+
+			missingTerritories := make([]string, 0)
+			territoryAvailabilityIDs := make([]string, 0, len(territories))
+			for _, territoryID := range territories {
+				territoryAvailabilityID := territoryMap[territoryID]
+				if territoryAvailabilityID == "" {
+					missingTerritories = append(missingTerritories, territoryID)
+					continue
+				}
+				territoryAvailabilityIDs = append(territoryAvailabilityIDs, territoryAvailabilityID)
+			}
+			if len(missingTerritories) > 0 {
+				return fmt.Errorf("%s: territory availability not found for territories: %s", config.ErrorPrefix, strings.Join(missingTerritories, ", "))
+			}
+
+			for _, territoryAvailabilityID := range territoryAvailabilityIDs {
+				if _, err := client.UpdateTerritoryAvailability(requestCtx, territoryAvailabilityID, asc.TerritoryAvailabilityUpdateAttributes{
+					Available: &availableValue,
+				}); err != nil {
+					return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+				}
 			}
 
 			return printOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+type territoryAvailabilityIDPayload struct {
+	Territory string `json:"t"`
+}
+
+// MapTerritoryAvailabilityIDs maps territory IDs to territory-availability IDs.
+func MapTerritoryAvailabilityIDs(resp *asc.TerritoryAvailabilitiesResponse) (map[string]string, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("territory availabilities response is nil")
+	}
+	ids := make(map[string]string, len(resp.Data))
+	for _, item := range resp.Data {
+		territoryID := ""
+		if len(item.Relationships) > 0 {
+			var relationships asc.TerritoryAvailabilityRelationships
+			if err := json.Unmarshal(item.Relationships, &relationships); err != nil {
+				return nil, fmt.Errorf("decode territory availability relationships for %q: %w", item.ID, err)
+			}
+			territoryID = strings.ToUpper(strings.TrimSpace(relationships.Territory.Data.ID))
+		}
+		if territoryID == "" {
+			var ok bool
+			territoryID, ok = territoryIDFromAvailabilityID(item.ID)
+			if !ok {
+				return nil, fmt.Errorf("territory availability %q missing territory id", item.ID)
+			}
+		}
+		ids[territoryID] = item.ID
+	}
+	return ids, nil
+}
+
+func territoryIDFromAvailabilityID(availabilityID string) (string, bool) {
+	trimmed := strings.TrimSpace(availabilityID)
+	if trimmed == "" {
+		return "", false
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(trimmed)
+	if err != nil {
+		decoded, err = base64.StdEncoding.DecodeString(trimmed)
+		if err != nil {
+			decoded, err = base64.RawURLEncoding.DecodeString(trimmed)
+			if err != nil {
+				decoded, err = base64.URLEncoding.DecodeString(trimmed)
+				if err != nil {
+					return "", false
+				}
+			}
+		}
+	}
+	var payload territoryAvailabilityIDPayload
+	if err := json.Unmarshal(decoded, &payload); err != nil {
+		return "", false
+	}
+	territoryID := strings.TrimSpace(payload.Territory)
+	if territoryID == "" {
+		return "", false
+	}
+	return strings.ToUpper(territoryID), true
 }

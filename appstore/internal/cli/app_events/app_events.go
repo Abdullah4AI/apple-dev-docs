@@ -178,7 +178,7 @@ func AppEventsCreateCommand() *ffcli.Command {
 	publishStart := fs.String("publish-start", "", "Publish start time (RFC3339)")
 	territories := fs.String("territories", "", "Territory codes (comma-separated)")
 	deepLink := fs.String("deep-link", "", "Deep link URL")
-	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement")
+	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement (currently supported: "+supportedAppEventPurchaseRequirementValues()+")")
 	primaryLocale := fs.String("primary-locale", "", "Primary locale (e.g., en-US)")
 	priority := fs.String("priority", "", "Priority: "+strings.Join(asc.ValidAppEventPriorities, ", "))
 	purpose := fs.String("purpose", "", "Purpose: "+strings.Join(asc.ValidAppEventPurposes, ", "))
@@ -192,7 +192,8 @@ func AppEventsCreateCommand() *ffcli.Command {
 
 Examples:
   asc app-events create --app "APP_ID" --name "Summer Challenge" --event-type CHALLENGE --start "2026-06-01T00:00:00Z" --end "2026-06-30T23:59:59Z"
-  asc app-events create --app "APP_ID" --name "Launch Party" --event-type PREMIERE --priority HIGH --purpose ATTRACT_NEW_USERS`,
+  asc app-events create --app "APP_ID" --name "Launch Party" --event-type PREMIERE --priority HIGH --purpose ATTRACT_NEW_USERS
+  asc app-events create --app "APP_ID" --name "Retro Challenge" --event-type LIVE_EVENT --priority HIGH --purpose APPROPRIATE_FOR_ALL_USERS`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -222,6 +223,16 @@ Examples:
 
 			normalizedPurpose, err := normalizeAppEventPurpose(*purpose)
 			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+
+			normalizedPurchaseRequirement, err := normalizeAppEventPurchaseRequirement(*purchaseRequirement)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+			if err := validateAppEventPurchaseRequirement(normalizedPurchaseRequirement); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
 				return flag.ErrHelp
 			}
@@ -257,7 +268,7 @@ Examples:
 				ReferenceName:       nameValue,
 				Badge:               normalizedBadge,
 				DeepLink:            strings.TrimSpace(*deepLink),
-				PurchaseRequirement: strings.TrimSpace(*purchaseRequirement),
+				PurchaseRequirement: normalizedPurchaseRequirement,
 				PrimaryLocale:       strings.TrimSpace(*primaryLocale),
 				Priority:            normalizedPriority,
 				Purpose:             normalizedPurpose,
@@ -294,7 +305,7 @@ func AppEventsUpdateCommand() *ffcli.Command {
 	publishStart := fs.String("publish-start", "", "Publish start time (RFC3339)")
 	territories := fs.String("territories", "", "Territory codes (comma-separated)")
 	deepLink := fs.String("deep-link", "", "Deep link URL")
-	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement")
+	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement (currently supported: "+supportedAppEventPurchaseRequirementValues()+")")
 	primaryLocale := fs.String("primary-locale", "", "Primary locale (e.g., en-US)")
 	priority := fs.String("priority", "", "Priority: "+strings.Join(asc.ValidAppEventPriorities, ", "))
 	purpose := fs.String("purpose", "", "Purpose: "+strings.Join(asc.ValidAppEventPurposes, ", "))
@@ -308,7 +319,8 @@ func AppEventsUpdateCommand() *ffcli.Command {
 
 Examples:
   asc app-events update --event-id "EVENT_ID" --priority HIGH
-  asc app-events update --event-id "EVENT_ID" --name "New Name" --event-type SPECIAL_EVENT`,
+  asc app-events update --event-id "EVENT_ID" --name "New Name" --event-type SPECIAL_EVENT
+  asc app-events update --event-id "EVENT_ID" --purchase-requirement NO_COST_ASSOCIATED --primary-locale en-US`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -347,8 +359,17 @@ Examples:
 				hasUpdate = true
 			}
 
-			if strings.TrimSpace(*purchaseRequirement) != "" {
-				value := strings.TrimSpace(*purchaseRequirement)
+			normalizedPurchaseRequirement, err := normalizeAppEventPurchaseRequirement(*purchaseRequirement)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+			if err := validateAppEventPurchaseRequirement(normalizedPurchaseRequirement); err != nil {
+				fmt.Fprintln(os.Stderr, "Error:", err.Error())
+				return flag.ErrHelp
+			}
+			if normalizedPurchaseRequirement != "" {
+				value := normalizedPurchaseRequirement
 				attrs.PurchaseRequirement = &value
 				hasUpdate = true
 			}

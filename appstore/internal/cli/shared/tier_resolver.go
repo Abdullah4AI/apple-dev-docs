@@ -86,52 +86,65 @@ func ResolveTiers(ctx context.Context, client *asc.Client, appID, territory stri
 
 // ResolveSubscriptionTiers resolves subscription price point tiers for a subscription and territory.
 func ResolveSubscriptionTiers(ctx context.Context, client *asc.Client, subscriptionID, territory string, refresh bool) ([]TierEntry, error) {
-	normalizedSubscriptionID, normalizedTerritory, err := normalizeTierResolverInputs("subscription", subscriptionID, territory)
-	if err != nil {
-		return nil, err
-	}
-
-	return resolveTiersWithFetcher(
-		refresh,
-		func() ([]TierEntry, error) {
-			return loadScopedTierCache(tierCacheScopeSubscription, normalizedSubscriptionID, normalizedTerritory)
-		},
-		func(tiers []TierEntry) error {
-			return saveScopedTierCache(tierCacheScopeSubscription, normalizedSubscriptionID, normalizedTerritory, tiers)
-		},
-		func(nextURL string) (tierPage, error) {
+	return resolveScopedTiers(ctx, client, "subscription", subscriptionID, territory, tierCacheScopeSubscription, refresh,
+		func(ctx context.Context, client *asc.Client, resourceID, territory, nextURL string) (tierPage, error) {
 			opts := []asc.SubscriptionPricePointsOption{
 				asc.WithSubscriptionPricePointsLimit(200),
-				asc.WithSubscriptionPricePointsTerritory(normalizedTerritory),
+				asc.WithSubscriptionPricePointsTerritory(territory),
 			}
 			if nextURL != "" {
 				opts = []asc.SubscriptionPricePointsOption{asc.WithSubscriptionPricePointsNextURL(nextURL)}
 			}
-			resp, err := client.GetSubscriptionPricePoints(ctx, normalizedSubscriptionID, opts...)
+			resp, err := client.GetSubscriptionPricePoints(ctx, resourceID, opts...)
 			if err != nil {
 				return tierPage{}, fmt.Errorf("fetch price points: %w", err)
 			}
-
-			entries := make([]pricePointEntry, 0, len(resp.Data))
-			for _, pp := range resp.Data {
-				entry, ok := newPricePointEntry(pp.ID, pp.Attributes.CustomerPrice, pp.Attributes.Proceeds)
-				if !ok {
-					continue
+			return buildTierPage(resp.Links.Next, func(add func(string, string, string)) {
+				for _, pp := range resp.Data {
+					add(pp.ID, pp.Attributes.CustomerPrice, pp.Attributes.Proceeds)
 				}
-				entries = append(entries, entry)
-			}
-
-			return tierPage{
-				entries: entries,
-				nextURL: resp.Links.Next,
-			}, nil
+			}), nil
 		},
 	)
 }
 
 // ResolveIAPTiers resolves in-app purchase price point tiers for an IAP and territory.
 func ResolveIAPTiers(ctx context.Context, client *asc.Client, iapID, territory string, refresh bool) ([]TierEntry, error) {
-	normalizedIAPID, normalizedTerritory, err := normalizeTierResolverInputs("in-app purchase", iapID, territory)
+	return resolveScopedTiers(ctx, client, "in-app purchase", iapID, territory, tierCacheScopeIAP, refresh,
+		func(ctx context.Context, client *asc.Client, resourceID, territory, nextURL string) (tierPage, error) {
+			opts := []asc.IAPPricePointsOption{
+				asc.WithIAPPricePointsLimit(200),
+				asc.WithIAPPricePointsTerritory(territory),
+			}
+			if nextURL != "" {
+				opts = []asc.IAPPricePointsOption{asc.WithIAPPricePointsNextURL(nextURL)}
+			}
+			resp, err := client.GetInAppPurchasePricePoints(ctx, resourceID, opts...)
+			if err != nil {
+				return tierPage{}, fmt.Errorf("fetch price points: %w", err)
+			}
+			return buildTierPage(resp.Links.Next, func(add func(string, string, string)) {
+				for _, pp := range resp.Data {
+					add(pp.ID, pp.Attributes.CustomerPrice, pp.Attributes.Proceeds)
+				}
+			}), nil
+		},
+	)
+}
+
+type scopedTierPageFetcher func(context.Context, *asc.Client, string, string, string) (tierPage, error)
+
+func resolveScopedTiers(
+	ctx context.Context,
+	client *asc.Client,
+	resourceName string,
+	resourceID string,
+	territory string,
+	cacheScope string,
+	refresh bool,
+	fetchPage scopedTierPageFetcher,
+) ([]TierEntry, error) {
+	normalizedResourceID, normalizedTerritory, err := normalizeTierResolverInputs(resourceName, resourceID, territory)
 	if err != nil {
 		return nil, err
 	}
@@ -139,37 +152,13 @@ func ResolveIAPTiers(ctx context.Context, client *asc.Client, iapID, territory s
 	return resolveTiersWithFetcher(
 		refresh,
 		func() ([]TierEntry, error) {
-			return loadScopedTierCache(tierCacheScopeIAP, normalizedIAPID, normalizedTerritory)
+			return loadScopedTierCache(cacheScope, normalizedResourceID, normalizedTerritory)
 		},
 		func(tiers []TierEntry) error {
-			return saveScopedTierCache(tierCacheScopeIAP, normalizedIAPID, normalizedTerritory, tiers)
+			return saveScopedTierCache(cacheScope, normalizedResourceID, normalizedTerritory, tiers)
 		},
 		func(nextURL string) (tierPage, error) {
-			opts := []asc.IAPPricePointsOption{
-				asc.WithIAPPricePointsLimit(200),
-				asc.WithIAPPricePointsTerritory(normalizedTerritory),
-			}
-			if nextURL != "" {
-				opts = []asc.IAPPricePointsOption{asc.WithIAPPricePointsNextURL(nextURL)}
-			}
-			resp, err := client.GetInAppPurchasePricePoints(ctx, normalizedIAPID, opts...)
-			if err != nil {
-				return tierPage{}, fmt.Errorf("fetch price points: %w", err)
-			}
-
-			entries := make([]pricePointEntry, 0, len(resp.Data))
-			for _, pp := range resp.Data {
-				entry, ok := newPricePointEntry(pp.ID, pp.Attributes.CustomerPrice, pp.Attributes.Proceeds)
-				if !ok {
-					continue
-				}
-				entries = append(entries, entry)
-			}
-
-			return tierPage{
-				entries: entries,
-				nextURL: resp.Links.Next,
-			}, nil
+			return fetchPage(ctx, client, normalizedResourceID, normalizedTerritory, nextURL)
 		},
 	)
 }
@@ -197,6 +186,21 @@ func newPricePointEntry(id, customerPrice, proceeds string) (pricePointEntry, bo
 		rawPrice:      customerPrice,
 		proceeds:      proceeds,
 	}, true
+}
+
+func buildTierPage(nextURL string, appendEntries func(add func(string, string, string))) tierPage {
+	entries := make([]pricePointEntry, 0)
+	appendEntries(func(id, customerPrice, proceeds string) {
+		entry, ok := newPricePointEntry(id, customerPrice, proceeds)
+		if !ok {
+			return
+		}
+		entries = append(entries, entry)
+	})
+	return tierPage{
+		entries: entries,
+		nextURL: nextURL,
+	}
 }
 
 func resolveTiersWithFetcher(

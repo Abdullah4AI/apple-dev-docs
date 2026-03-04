@@ -1,5 +1,12 @@
 [
   {
+    "app": "Audio Horoscope · Astrologica",
+    "link": "https://apps.apple.com/app/id6754387408",
+    "creator": "supnim",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/de/bd/7c/debd7c60-6be9-a231-d7c0-aa54a776dc3c/astrologica-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "bijou.fm",
     "link": "https://apps.apple.com/us/app/bijou-fm-for-last-fm/id6450460066",
     "creator": "zchwyng",
@@ -41,6 +48,13 @@
     "platform": ["iOS", "macOS"]
   },
   {
+    "app": "Dash: Widgets for Workouts",
+    "link": "https://apps.apple.com/us/app/dash-widgets-for-workouts/id1556281712",
+    "creator": "peres",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/6e/5f/10/6e5f10ee-fb13-c5b6-406b-7a7fdd2d3619/AppIcon-0-0-1x_U007ephone-0-1-P3-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Deep Hour - Deep Focus Ritual",
     "link": "https://apps.apple.com/app/id6758889630",
     "creator": "Gurfus",
@@ -62,10 +76,30 @@
     "platform": ["iOS"]
   },
   {
+    "app": "Finny: AI Money Tracker",
+    "link": "https://apps.apple.com/vn/app/finny-finance-tracker-app/id6736472735",
+    "creator": "dmeows",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/8d/26/50/8d26504f-b393-b855-7c14-205f556b29fe/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Fisherman SMS Filtering",
     "link": "https://apps.apple.com/app/id6449192504",
     "creator": "MGidnian",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f1/f9/ea/f1f9ea55-8410-9a4e-4316-eee4553386df/AppIcon-0-0-1x_U007epad-0-11-0-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
+    "app": "Foundation Lab",
+    "link": "https://testflight.apple.com/join/JWR9FpP3",
+    "creator": "rudrankriyam",
+    "platform": ["iOS", "macOS"]
+  },
+  {
+    "app": "Fuel: AI Nutrition",
+    "link": "https://apps.apple.com/app/id6748624107",
+    "creator": "0xSMW",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/43/32/e6/4332e644-d8c2-35e1-8916-64392e8774b1/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -79,35 +113,35 @@
     "app": "Inkput",
     "link": "https://apps.apple.com/app/id6758570182",
     "creator": "funclosure",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/a6/08/da/a608da09-81ee-bf12-46fe-e6d9c2f9489b/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/76/4a/ea/764aea26-2969-f746-c9bf-722c35b8223b/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
     "platform": ["iOS", "macOS"]
   },
   {
     "app": "KeepCount: Tally Counter",
     "link": "https://apps.apple.com/us/app/keepcount-tally-counter/id6758891370",
     "creator": "thillsman",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/a6/d6/95/a6d6959b-c69e-8c78-8247-3cd07eca7bd3/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/ee/f4/e6/eef4e6d4-c2af-3856-6cdf-80af085b1cb9/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
     "app": "kora: Music Reviews & Ratings",
     "link": "https://apps.apple.com/app/id6502549140",
     "creator": "adamjhf",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/31/82/4c/31824cf8-d6ff-edef-bf08-30c92e3fbdb8/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/86/c1/29/86c12949-457e-ab7b-a2b0-bce6723ecee3/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
     "app": "LilyFM",
     "link": "https://apps.apple.com/app/id6745472149",
     "creator": "Clark Zhou",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/c0/43/6e/c0436e71-e3cc-763c-4ece-98ef2adae0da/AppIcon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/a6/aa/4e/a6aa4ed4-1750-12c4-c206-8b1031c9c95c/AppIcon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
     "app": "LivaLog",
     "link": "https://apps.apple.com/us/app/livalog/id6759440574",
     "creator": "dreamon.im",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/5e/df/a9/5edfa9b0-c201-d044-0ec7-1c21d886bfbb/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/bf/cf/5d/bfcf5d5a-2cd1-b41a-f65d-a751085736c5/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -132,6 +166,13 @@
     "platform": ["iOS"]
   },
   {
+    "app": "minute cryptic • wordplay",
+    "link": "https://apps.apple.com/app/id6748607228",
+    "creator": "supnim",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/95/51/28/955128eb-6041-160a-464c-41795f7d0f12/wordplay-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Mixtape",
     "link": "https://apps.apple.com/us/app/mixtape-personal-music-gift/id6756442910",
     "creator": "jimripple",
@@ -152,6 +193,13 @@
     "platform": ["iOS"]
   },
   {
+    "app": "Pickle Rite",
+    "link": "https://apps.apple.com/us/app/pickle-rite/id6754095362",
+    "creator": "Badarinath Venkatnarayansetty",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/cb/8f/0b/cb8f0b7e-ba14-a1cf-49ef-09c64d9ce87e/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/512x512bb.jpg",
+    "platform": ["iOS", "watchOS"]
+  },
+  {
     "app": "Planit: Gamified Daily Planner",
     "link": "https://apps.apple.com/us/app/planit-gamified-daily-planner/id6759006335",
     "creator": "aboutzeph",
@@ -166,10 +214,17 @@
     "platform": ["iOS", "macOS"]
   },
   {
+    "app": "Plinth.IT",
+    "link": "https://apps.apple.com/us/app/plinth-it/id6746931219",
+    "creator": "lanxinger",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/2f/57/02/2f570236-cd2e-4d0b-a797-1130d5b68c19/AppIcon-0-1x_U007emarketing-0-11-0-85-220-0.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Popcorn Stack: Track Watchlist",
     "link": "https://apps.apple.com/app/id6759187614",
     "creator": "maail",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4f/b6/ed/4fb6edea-943d-13e3-3753-b99ee1920c7b/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/1b/9c/62/1b9c62c3-b960-84cd-77a1-f1f4a734a572/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -190,7 +245,7 @@
     "app": "Reloop - AI Transcribe & Speak",
     "link": "https://apps.apple.com/us/app/reloop-ai-transcribe-speak/id6752853818",
     "creator": "wuqinqiang",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/34/77/c5/3477c5ac-25dd-3684-9bad-e3d8a591d467/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4a/82/b0/4a82b04f-13e8-e968-d81b-490a791ccefe/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -211,14 +266,14 @@
     "app": "Siraj — Your Ramadan Light",
     "link": "https://apps.apple.com/app/id6759178047",
     "creator": "SwifAI",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/db/df/61/dbdf615f-cd5a-45c9-d892-76d4d8bcdac3/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/6b/35/9d/6b359d31-4d98-e089-1145-efbc57acb4b3/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
     "app": "SnapVinyl",
     "link": "https://apps.apple.com/app/id6741057688",
     "creator": "TomLiu",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/85/d9/6d/85d96db0-f29c-9528-edb5-67d760c10c4a/AppIcon-0-1x_U007epad-0-1-0-85-220-0.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d4/c7/22/d4c722e8-7585-24a7-64b8-b83e47c93ff6/AppIcon-0-1x_U007epad-0-1-0-85-220-0.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -257,17 +312,24 @@
     "platform": ["iOS"]
   },
   {
+    "app": "text to speech · speakeasy",
+    "link": "https://apps.apple.com/app/id6758816495",
+    "creator": "supnim",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/58/b7/a3/58b7a3e5-c045-888b-2c83-5561b920841c/speakeasy-icon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "TickerPad",
     "link": "https://apps.apple.com/app/id1578860989",
     "creator": "daimajia",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/3f/a0/10/3fa0108a-9671-6045-d0bb-a546a27645f5/AppIcon-0-0-85-220-0-0-5-0-2x-0-0-0.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d0/1b/19/d01b1977-6842-0528-9447-6e24a8cc1bf1/AppIcon-0-0-85-220-0-0-5-0-2x-0-0-0.png/512x512bb.png",
     "platform": ["macOS"]
   },
   {
     "app": "Timefall",
     "link": "https://apps.apple.com/app/id6757712804",
     "creator": "vatrueshka",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/98/0e/91/980e91cd-ce57-7711-f659-8779f25dd3ab/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d5/00/51/d500514a-c728-8598-f562-105dcc8005b9/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
     "platform": ["iOS", "macOS"]
   },
   {
@@ -306,17 +368,24 @@
     "platform": ["iOS"]
   },
   {
+    "app": "Voice Do",
+    "link": "https://apps.apple.com/us/app/voice-do-task-manager/id6746357453",
+    "creator": "maail",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/db/38/3a/db383add-39de-00cd-d079-319f7245b43c/Placeholder.mill/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Weather mini - Trip Forecasts",
     "link": "https://apps.apple.com/us/app/weather-mini-trip-forecasts/id892589817",
     "creator": "Kai Luo",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/b7/eb/18/b7eb183c-9fcd-843d-ccfc-b1610c8ac1f2/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/41/1a/b0/411ab0ad-3dcb-52d1-78a7-4c8aec5a7c89/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg",
     "platform": ["iOS", "macOS", "visionOS"]
   },
   {
     "app": "Wozi Vocabulary Builder",
     "link": "https://apps.apple.com/app/id1536585848",
     "creator": "wozi-x",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/0d/cb/21/0dcb21e1-afe0-6281-3c31-3e2049d70a0f/WoziAppIcon-0-0-1x_U007epad-0-1-P3-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/54/66/dd/5466ddfe-7358-aafe-8f0d-5fd06a13f3ed/WoziAppIcon-0-0-1x_U007epad-0-1-P3-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -331,6 +400,13 @@
     "link": "https://apps.apple.com/us/app/xo-have-i-ever/id6757594745",
     "creator": "arunavo4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d7/4d/4c/d74d4c07-c147-fa7e-86fe-cff01727629b/XO-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
+    "app": "시선 - 사진 한 장, 시 한 줄",
+    "link": "https://apps.apple.com/app/id6748271659",
+    "creator": "evanyi",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4e/a3/3b/4ea33b80-8dcb-11ec-4699-6ccff7efcfa9/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
     "platform": ["iOS"]
   }
 ]

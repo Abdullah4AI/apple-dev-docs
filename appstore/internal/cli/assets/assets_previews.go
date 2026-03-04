@@ -16,35 +16,6 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-// AssetsPreviewsCommand returns the previews subcommand group.
-func AssetsPreviewsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("previews", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "previews",
-		ShortUsage: "asc video-previews <subcommand> [flags]",
-		ShortHelp:  "Manage App Store app preview videos.",
-		LongHelp: `Manage App Store app preview videos.
-
-Examples:
-  asc video-previews list --version-localization "LOC_ID"
-  asc video-previews upload --version-localization "LOC_ID" --path "./previews" --device-type "IPHONE_65"
-  asc video-previews download --version-localization "LOC_ID" --output-dir "./previews/downloaded"
-  asc video-previews delete --id "PREVIEW_ID" --confirm`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Subcommands: []*ffcli.Command{
-			AssetsPreviewsListCommand(),
-			AssetsPreviewsUploadCommand(),
-			AssetsPreviewsDownloadCommand(),
-			AssetsPreviewsDeleteCommand(),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}
-
 // AssetsPreviewsListCommand returns the previews list subcommand.
 func AssetsPreviewsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)

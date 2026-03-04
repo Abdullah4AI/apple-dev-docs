@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestWriteFileNoSymlinkOverwrite_RespectsUmask(t *testing.T) {
+func TestWriteFileNoSymlinkOverwrite_AppliesRequestedPermissions(t *testing.T) {
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "profile.mobileprovision")
 
@@ -27,8 +27,8 @@ func TestWriteFileNoSymlinkOverwrite_RespectsUmask(t *testing.T) {
 		t.Fatalf("stat error: %v", err)
 	}
 
-	// 0644 masked by 0077 => 0600.
-	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+	// Explicit chmod should preserve requested permissions despite restrictive umask.
+	if got, want := info.Mode().Perm(), os.FileMode(0o644); got != want {
 		t.Fatalf("mode = %o, want %o", got, want)
 	}
 }

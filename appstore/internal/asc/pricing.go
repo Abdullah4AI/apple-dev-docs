@@ -89,6 +89,7 @@ type AppPriceRelationships struct {
 // AppAvailabilityV2CreateAttributes defines inputs for app availability.
 type AppAvailabilityV2CreateAttributes struct {
 	AvailableInNewTerritories *bool                         `json:"availableInNewTerritories,omitempty"`
+	TerritoryAvailabilityIDs  []string                      `json:"-"`
 	TerritoryAvailabilities   []TerritoryAvailabilityCreate `json:"-"`
 }
 
@@ -102,8 +103,8 @@ type TerritoryAvailabilityCreate struct {
 
 // AppAvailabilityV2CreateRequest is a request to create app availability.
 type AppAvailabilityV2CreateRequest struct {
-	Data     AppAvailabilityV2CreateData           `json:"data"`
-	Included []TerritoryAvailabilityCreateResource `json:"included,omitempty"`
+	Data     AppAvailabilityV2CreateData         `json:"data"`
+	Included []AppAvailabilityV2IncludedResource `json:"included,omitempty"`
 }
 
 // AppAvailabilityV2CreateData is the data portion of availability create.
@@ -115,8 +116,8 @@ type AppAvailabilityV2CreateData struct {
 
 // AppAvailabilityV2CreateRelationships describes availability relationships.
 type AppAvailabilityV2CreateRelationships struct {
-	App                     Relationship     `json:"app"`
-	TerritoryAvailabilities RelationshipList `json:"territoryAvailabilities"`
+	App                     Relationship      `json:"app"`
+	TerritoryAvailabilities *RelationshipList `json:"territoryAvailabilities,omitempty"`
 }
 
 // TerritoryAvailabilityCreateAttributes describes attributes for create.
@@ -126,12 +127,13 @@ type TerritoryAvailabilityCreateAttributes struct {
 	PreOrderEnabled *bool  `json:"preOrderEnabled,omitempty"`
 }
 
-// TerritoryAvailabilityCreateResource represents a create payload resource.
-type TerritoryAvailabilityCreateResource struct {
-	Type          ResourceType                          `json:"type"`
-	ID            string                                `json:"id,omitempty"`
-	Attributes    TerritoryAvailabilityCreateAttributes `json:"attributes"`
-	Relationships TerritoryAvailabilityRelationships    `json:"relationships"`
+// AppAvailabilityV2IncludedResource represents an included resource used by availability create.
+// It supports both inline territory availability IDs and full inline territory availability objects.
+type AppAvailabilityV2IncludedResource struct {
+	Type          ResourceType                           `json:"type"`
+	ID            string                                 `json:"id,omitempty"`
+	Attributes    *TerritoryAvailabilityCreateAttributes `json:"attributes,omitempty"`
+	Relationships *TerritoryAvailabilityRelationships    `json:"relationships,omitempty"`
 }
 
 // TerritoryAvailabilityRelationships describes relationships for availability.

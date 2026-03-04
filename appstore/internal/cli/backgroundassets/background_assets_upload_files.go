@@ -307,7 +307,7 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --uploaded is required")
 				return flag.ErrHelp
 			}
-			uploadedBool, err := parseBool(uploadedValue, "--uploaded")
+			uploadedBool, err := shared.ParseBoolFlag(uploadedValue, "--uploaded")
 			if err != nil {
 				return fmt.Errorf("background-assets upload-files update: %w", err)
 			}

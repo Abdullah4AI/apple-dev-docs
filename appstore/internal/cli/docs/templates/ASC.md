@@ -18,7 +18,7 @@ Do not memorize flags. Always use `--help` for the current interface.
 ## Core Principles
 
 - Explicit flags (prefer `--app` over short flags)
-- JSON-first output (minified JSON by default)
+- TTY-aware output defaults (`table` in terminals, `json` when piped/non-interactive)
 - No interactive prompts (use `--confirm` for destructive actions)
 - Pagination via `--paginate` on list commands
 
@@ -28,6 +28,7 @@ Do not memorize flags. Always use `--help` for the current interface.
 - `--app "APP_ID"` is often required (or set `ASC_APP_ID`).
 - `--paginate` fetches all pages; use `--limit` and `--next` for manual pagination.
 - Output formats: `--output json|table|markdown` and `--pretty` for readable JSON.
+- `ASC_DEFAULT_OUTPUT` can pin the default output mode across contexts.
 - Destructive operations require `--confirm`.
 - Profiles: `--profile "NAME"` and `--strict-auth` for auth resolution safety.
 - Debugging: `--debug`, `--api-debug`, `--retry-log`.

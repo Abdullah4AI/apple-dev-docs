@@ -2,11 +2,8 @@ package xcodecloud
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -79,433 +76,193 @@ Examples:
 }
 
 func XcodeCloudProductsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("get", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc xcode-cloud products get --id \"PRODUCT_ID\"",
-		ShortHelp:  "Get details for a product.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "get",
+		Name:        "get",
+		ShortUsage:  "asc xcode-cloud products get --id \"PRODUCT_ID\"",
+		ShortHelp:   "Get details for a product.",
 		LongHelp: `Get details for a product.
 
 Examples:
   asc xcode-cloud products get --id "PRODUCT_ID"
   asc xcode-cloud products get --id "PRODUCT_ID" --output table`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products get: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			resp, err := client.GetCiProduct(requestCtx, idValue)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products get: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "Product ID",
+		ErrorPrefix: "xcode-cloud products get",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetCiProduct(ctx, id)
+		},
+	})
 }
 
 func XcodeCloudProductsAppCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("app", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "app",
-		ShortUsage: "asc xcode-cloud products app --id \"PRODUCT_ID\"",
-		ShortHelp:  "Get the app for a product.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "app",
+		Name:        "app",
+		ShortUsage:  "asc xcode-cloud products app --id \"PRODUCT_ID\"",
+		ShortHelp:   "Get the app for a product.",
 		LongHelp: `Get the app for a product.
 
 Examples:
   asc xcode-cloud products app --id "PRODUCT_ID"
   asc xcode-cloud products app --id "PRODUCT_ID" --output table`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products app: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			resp, err := client.GetCiProductApp(requestCtx, idValue)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products app: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "Product ID",
+		ErrorPrefix: "xcode-cloud products app",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetCiProductApp(ctx, id)
+		},
+	})
 }
 
 func XcodeCloudProductsBuildRunsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("build-runs", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "build-runs",
-		ShortUsage: "asc xcode-cloud products build-runs [flags]",
-		ShortHelp:  "List build runs for a product.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "build-runs",
+		Name:        "build-runs",
+		ShortUsage:  "asc xcode-cloud products build-runs [flags]",
+		ShortHelp:   "List build runs for a product.",
 		LongHelp: `List build runs for a product.
 
 Examples:
   asc xcode-cloud products build-runs --id "PRODUCT_ID"
   asc xcode-cloud products build-runs --id "PRODUCT_ID" --limit 50
   asc xcode-cloud products build-runs --id "PRODUCT_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud products build-runs: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud products build-runs: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products build-runs: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiBuildRunsOption{
-				asc.WithCiBuildRunsLimit(*limit),
-				asc.WithCiBuildRunsNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiBuildRunsLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiProductBuildRuns(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiProductBuildRuns(ctx, idValue, asc.WithCiBuildRunsNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud products build-runs: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiProductBuildRuns(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products build-runs: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "Product ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud products build-runs",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, productID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiBuildRunsOption{
+				asc.WithCiBuildRunsLimit(limit),
+				asc.WithCiBuildRunsNextURL(next),
+			}
+			return client.GetCiProductBuildRuns(ctx, productID, opts...)
+		},
+	})
 }
 
 func XcodeCloudProductsWorkflowsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("workflows", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "workflows",
-		ShortUsage: "asc xcode-cloud products workflows [flags]",
-		ShortHelp:  "List workflows for a product.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "workflows",
+		Name:        "workflows",
+		ShortUsage:  "asc xcode-cloud products workflows [flags]",
+		ShortHelp:   "List workflows for a product.",
 		LongHelp: `List workflows for a product.
 
 Examples:
   asc xcode-cloud products workflows --id "PRODUCT_ID"
   asc xcode-cloud products workflows --id "PRODUCT_ID" --limit 50
   asc xcode-cloud products workflows --id "PRODUCT_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud products workflows: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud products workflows: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products workflows: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiWorkflowsOption{
-				asc.WithCiWorkflowsLimit(*limit),
-				asc.WithCiWorkflowsNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiWorkflowsLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiWorkflows(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiWorkflows(ctx, idValue, asc.WithCiWorkflowsNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud products workflows: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiWorkflows(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products workflows: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "Product ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud products workflows",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, productID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiWorkflowsOption{
+				asc.WithCiWorkflowsLimit(limit),
+				asc.WithCiWorkflowsNextURL(next),
+			}
+			return client.GetCiWorkflows(ctx, productID, opts...)
+		},
+	})
 }
 
 func XcodeCloudProductsPrimaryRepositoriesCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("primary-repositories", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "primary-repositories",
-		ShortUsage: "asc xcode-cloud products primary-repositories [flags]",
-		ShortHelp:  "List primary repositories for a product.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "primary-repositories",
+		Name:        "primary-repositories",
+		ShortUsage:  "asc xcode-cloud products primary-repositories [flags]",
+		ShortHelp:   "List primary repositories for a product.",
 		LongHelp: `List primary repositories for a product.
 
 Examples:
   asc xcode-cloud products primary-repositories --id "PRODUCT_ID"
   asc xcode-cloud products primary-repositories --id "PRODUCT_ID" --limit 50
   asc xcode-cloud products primary-repositories --id "PRODUCT_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud products primary-repositories: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud products primary-repositories: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products primary-repositories: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiProductRepositoriesOption{
-				asc.WithCiProductRepositoriesLimit(*limit),
-				asc.WithCiProductRepositoriesNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiProductRepositoriesLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiProductPrimaryRepositories(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiProductPrimaryRepositories(ctx, idValue, asc.WithCiProductRepositoriesNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud products primary-repositories: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiProductPrimaryRepositories(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products primary-repositories: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "Product ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud products primary-repositories",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, productID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiProductRepositoriesOption{
+				asc.WithCiProductRepositoriesLimit(limit),
+				asc.WithCiProductRepositoriesNextURL(next),
+			}
+			return client.GetCiProductPrimaryRepositories(ctx, productID, opts...)
+		},
+	})
 }
 
 func XcodeCloudProductsAdditionalRepositoriesCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("additional-repositories", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "additional-repositories",
-		ShortUsage: "asc xcode-cloud products additional-repositories [flags]",
-		ShortHelp:  "List additional repositories for a product.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "additional-repositories",
+		Name:        "additional-repositories",
+		ShortUsage:  "asc xcode-cloud products additional-repositories [flags]",
+		ShortHelp:   "List additional repositories for a product.",
 		LongHelp: `List additional repositories for a product.
 
 Examples:
   asc xcode-cloud products additional-repositories --id "PRODUCT_ID"
   asc xcode-cloud products additional-repositories --id "PRODUCT_ID" --limit 50
   asc xcode-cloud products additional-repositories --id "PRODUCT_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud products additional-repositories: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud products additional-repositories: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products additional-repositories: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiProductRepositoriesOption{
-				asc.WithCiProductRepositoriesLimit(*limit),
-				asc.WithCiProductRepositoriesNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiProductRepositoriesLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiProductAdditionalRepositories(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiProductAdditionalRepositories(ctx, idValue, asc.WithCiProductRepositoriesNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud products additional-repositories: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiProductAdditionalRepositories(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products additional-repositories: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "Product ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud products additional-repositories",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, productID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiProductRepositoriesOption{
+				asc.WithCiProductRepositoriesLimit(limit),
+				asc.WithCiProductRepositoriesNextURL(next),
+			}
+			return client.GetCiProductAdditionalRepositories(ctx, productID, opts...)
+		},
+	})
 }
 
 func XcodeCloudProductsDeleteCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("delete", flag.ExitOnError)
-
-	id := fs.String("id", "", "Product ID")
-	confirm := fs.Bool("confirm", false, "Confirm deletion")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "delete",
-		ShortUsage: "asc xcode-cloud products delete --id \"PRODUCT_ID\" --confirm",
-		ShortHelp:  "Delete a product.",
+	return shared.BuildConfirmDeleteCommand(shared.ConfirmDeleteCommandConfig{
+		FlagSetName: "delete",
+		Name:        "delete",
+		ShortUsage:  "asc xcode-cloud products delete --id \"PRODUCT_ID\" --confirm",
+		ShortHelp:   "Delete a product.",
 		LongHelp: `Delete a product.
 
 Examples:
   asc xcode-cloud products delete --id "PRODUCT_ID" --confirm`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-			if !*confirm {
-				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud products delete: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			if err := client.DeleteCiProduct(requestCtx, idValue); err != nil {
-				return fmt.Errorf("xcode-cloud products delete: failed to delete: %w", err)
-			}
-
-			result := &asc.CiProductDeleteResult{ID: idValue, Deleted: true}
-			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "Product ID",
+		ErrorPrefix: "xcode-cloud products delete",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		Delete: func(ctx context.Context, client *asc.Client, id string) error {
+			if err := client.DeleteCiProduct(ctx, id); err != nil {
+				return fmt.Errorf("failed to delete: %w", err)
+			}
+			return nil
+		},
+		Result: func(id string) any {
+			return &asc.CiProductDeleteResult{ID: id, Deleted: true}
+		},
+	})
 }
 
 func xcodeCloudProductsList(ctx context.Context, appID string, limit int, next string, paginate bool, output string, pretty bool) error {
@@ -622,166 +379,77 @@ Examples:
 }
 
 func XcodeCloudMacOSVersionsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("get", flag.ExitOnError)
-
-	id := fs.String("id", "", "macOS version ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc xcode-cloud macos-versions get --id \"MACOS_VERSION_ID\"",
-		ShortHelp:  "Get details for a macOS version.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "get",
+		Name:        "get",
+		ShortUsage:  "asc xcode-cloud macos-versions get --id \"MACOS_VERSION_ID\"",
+		ShortHelp:   "Get details for a macOS version.",
 		LongHelp: `Get details for a macOS version.
 
 Examples:
   asc xcode-cloud macos-versions get --id "MACOS_VERSION_ID"
   asc xcode-cloud macos-versions get --id "MACOS_VERSION_ID" --output table`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud macos-versions get: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			resp, err := client.GetCiMacOsVersion(requestCtx, idValue)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud macos-versions get: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "macOS version ID",
+		ErrorPrefix: "xcode-cloud macos-versions get",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetCiMacOsVersion(ctx, id)
+		},
+	})
 }
 
 func XcodeCloudMacOSVersionsXcodeVersionsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("xcode-versions", flag.ExitOnError)
-
-	id := fs.String("id", "", "macOS version ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "xcode-versions",
-		ShortUsage: "asc xcode-cloud macos-versions xcode-versions [flags]",
-		ShortHelp:  "List Xcode versions for a macOS version.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "xcode-versions",
+		Name:        "xcode-versions",
+		ShortUsage:  "asc xcode-cloud macos-versions xcode-versions [flags]",
+		ShortHelp:   "List Xcode versions for a macOS version.",
 		LongHelp: `List Xcode versions for a macOS version.
 
 Examples:
   asc xcode-cloud macos-versions xcode-versions --id "MACOS_VERSION_ID"
   asc xcode-cloud macos-versions xcode-versions --id "MACOS_VERSION_ID" --limit 50
   asc xcode-cloud macos-versions xcode-versions --id "MACOS_VERSION_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud macos-versions xcode-versions: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud macos-versions xcode-versions: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud macos-versions xcode-versions: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiXcodeVersionsOption{
-				asc.WithCiXcodeVersionsLimit(*limit),
-				asc.WithCiXcodeVersionsNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiXcodeVersionsLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiMacOsVersionXcodeVersions(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiMacOsVersionXcodeVersions(ctx, idValue, asc.WithCiXcodeVersionsNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud macos-versions xcode-versions: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiMacOsVersionXcodeVersions(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud macos-versions xcode-versions: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "macOS version ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud macos-versions xcode-versions",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, macOSVersionID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiXcodeVersionsOption{
+				asc.WithCiXcodeVersionsLimit(limit),
+				asc.WithCiXcodeVersionsNextURL(next),
+			}
+			return client.GetCiMacOsVersionXcodeVersions(ctx, macOSVersionID, opts...)
+		},
+	})
 }
 
 func xcodeCloudMacOSVersionsList(ctx context.Context, limit int, next string, paginate bool, output string, pretty bool) error {
-	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("xcode-cloud macos-versions: --limit must be between 1 and 200")
-	}
-	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("xcode-cloud macos-versions: %w", err)
-	}
-
-	client, err := shared.GetASCClient()
-	if err != nil {
-		return fmt.Errorf("xcode-cloud macos-versions: %w", err)
-	}
-
-	requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-	defer cancel()
-
-	opts := []asc.CiMacOsVersionsOption{
-		asc.WithCiMacOsVersionsLimit(limit),
-		asc.WithCiMacOsVersionsNextURL(next),
-	}
-
-	if paginate {
-		paginateOpts := append(opts, asc.WithCiMacOsVersionsLimit(200))
-		resp, err := shared.PaginateWithSpinner(requestCtx,
-			func(ctx context.Context) (asc.PaginatedResponse, error) {
-				return client.GetCiMacOsVersions(ctx, paginateOpts...)
-			},
-			func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-				return client.GetCiMacOsVersions(ctx, asc.WithCiMacOsVersionsNextURL(nextURL))
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("xcode-cloud macos-versions: %w", err)
-		}
-
-		return shared.PrintOutput(resp, output, pretty)
-	}
-
-	resp, err := client.GetCiMacOsVersions(requestCtx, opts...)
-	if err != nil {
-		return fmt.Errorf("xcode-cloud macos-versions: %w", err)
-	}
-
-	return shared.PrintOutput(resp, output, pretty)
+	return runXcodeCloudPaginatedList(
+		ctx,
+		limit,
+		next,
+		paginate,
+		output,
+		pretty,
+		"xcode-cloud macos-versions",
+		func(ctx context.Context, client *asc.Client, limit int, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiMacOsVersions(
+				ctx,
+				asc.WithCiMacOsVersionsLimit(limit),
+				asc.WithCiMacOsVersionsNextURL(next),
+			)
+		},
+		func(ctx context.Context, client *asc.Client, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiMacOsVersions(ctx, asc.WithCiMacOsVersionsNextURL(next))
+		},
+	)
 }
 
 // XcodeCloudXcodeVersionsCommand returns the xcode-cloud xcode-versions command.
@@ -838,195 +506,75 @@ Examples:
 }
 
 func XcodeCloudXcodeVersionsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("get", flag.ExitOnError)
-
-	id := fs.String("id", "", "Xcode version ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc xcode-cloud xcode-versions get --id \"XCODE_VERSION_ID\"",
-		ShortHelp:  "Get details for an Xcode version.",
+	return shared.BuildIDGetCommand(shared.IDGetCommandConfig{
+		FlagSetName: "get",
+		Name:        "get",
+		ShortUsage:  "asc xcode-cloud xcode-versions get --id \"XCODE_VERSION_ID\"",
+		ShortHelp:   "Get details for an Xcode version.",
 		LongHelp: `Get details for an Xcode version.
 
 Examples:
   asc xcode-cloud xcode-versions get --id "XCODE_VERSION_ID"
   asc xcode-cloud xcode-versions get --id "XCODE_VERSION_ID" --output table`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud xcode-versions get: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			resp, err := client.GetCiXcodeVersion(requestCtx, idValue)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud xcode-versions get: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		IDFlag:      "id",
+		IDUsage:     "Xcode version ID",
+		ErrorPrefix: "xcode-cloud xcode-versions get",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		Fetch: func(ctx context.Context, client *asc.Client, id string) (any, error) {
+			return client.GetCiXcodeVersion(ctx, id)
+		},
+	})
 }
 
 func XcodeCloudXcodeVersionsMacOSVersionsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("macos-versions", flag.ExitOnError)
-
-	id := fs.String("id", "", "Xcode version ID")
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "macos-versions",
-		ShortUsage: "asc xcode-cloud xcode-versions macos-versions [flags]",
-		ShortHelp:  "List macOS versions for an Xcode version.",
+	return shared.BuildPaginatedListCommand(shared.PaginatedListCommandConfig{
+		FlagSetName: "macos-versions",
+		Name:        "macos-versions",
+		ShortUsage:  "asc xcode-cloud xcode-versions macos-versions [flags]",
+		ShortHelp:   "List macOS versions for an Xcode version.",
 		LongHelp: `List macOS versions for an Xcode version.
 
 Examples:
   asc xcode-cloud xcode-versions macos-versions --id \"XCODE_VERSION_ID\"
   asc xcode-cloud xcode-versions macos-versions --id \"XCODE_VERSION_ID\" --limit 50
   asc xcode-cloud xcode-versions macos-versions --id \"XCODE_VERSION_ID\" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("xcode-cloud xcode-versions macos-versions: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("xcode-cloud xcode-versions macos-versions: %w", err)
-			}
-
-			idValue := strings.TrimSpace(*id)
-			if idValue == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("xcode-cloud xcode-versions macos-versions: %w", err)
-			}
-
-			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-			defer cancel()
-
-			opts := []asc.CiMacOsVersionsOption{
-				asc.WithCiMacOsVersionsLimit(*limit),
-				asc.WithCiMacOsVersionsNextURL(*next),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithCiMacOsVersionsLimit(200))
-				resp, err := shared.PaginateWithSpinner(requestCtx,
-					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetCiXcodeVersionMacOsVersions(ctx, idValue, paginateOpts...)
-					},
-					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetCiXcodeVersionMacOsVersions(ctx, idValue, asc.WithCiMacOsVersionsNextURL(nextURL))
-					},
-				)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud xcode-versions macos-versions: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetCiXcodeVersionMacOsVersions(requestCtx, idValue, opts...)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud xcode-versions macos-versions: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		ParentFlag:  "id",
+		ParentUsage: "Xcode version ID",
+		LimitMax:    200,
+		ErrorPrefix: "xcode-cloud xcode-versions macos-versions",
+		ContextTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return contextWithXcodeCloudTimeout(ctx, 0)
 		},
-	}
+		FetchPage: func(ctx context.Context, client *asc.Client, xcodeVersionID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.CiMacOsVersionsOption{
+				asc.WithCiMacOsVersionsLimit(limit),
+				asc.WithCiMacOsVersionsNextURL(next),
+			}
+			return client.GetCiXcodeVersionMacOsVersions(ctx, xcodeVersionID, opts...)
+		},
+	})
 }
 
 func xcodeCloudXcodeVersionsList(ctx context.Context, limit int, next string, paginate bool, output string, pretty bool) error {
-	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("xcode-cloud xcode-versions: --limit must be between 1 and 200")
-	}
-	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("xcode-cloud xcode-versions: %w", err)
-	}
-
-	client, err := shared.GetASCClient()
-	if err != nil {
-		return fmt.Errorf("xcode-cloud xcode-versions: %w", err)
-	}
-
-	requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
-	defer cancel()
-
-	opts := []asc.CiXcodeVersionsOption{
-		asc.WithCiXcodeVersionsLimit(limit),
-		asc.WithCiXcodeVersionsNextURL(next),
-	}
-
-	if paginate {
-		paginateOpts := append(opts, asc.WithCiXcodeVersionsLimit(200))
-		resp, err := shared.PaginateWithSpinner(requestCtx,
-			func(ctx context.Context) (asc.PaginatedResponse, error) {
-				return client.GetCiXcodeVersions(ctx, paginateOpts...)
-			},
-			func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-				return client.GetCiXcodeVersions(ctx, asc.WithCiXcodeVersionsNextURL(nextURL))
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("xcode-cloud xcode-versions: %w", err)
-		}
-
-		return shared.PrintOutput(resp, output, pretty)
-	}
-
-	resp, err := client.GetCiXcodeVersions(requestCtx, opts...)
-	if err != nil {
-		return fmt.Errorf("xcode-cloud xcode-versions: %w", err)
-	}
-
-	return shared.PrintOutput(resp, output, pretty)
-}
-
-func readJSONFilePayload(path string) (json.RawMessage, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("payload path must be a file")
-	}
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		return nil, fmt.Errorf("payload file is empty")
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-
-	return json.RawMessage(data), nil
+	return runXcodeCloudPaginatedList(
+		ctx,
+		limit,
+		next,
+		paginate,
+		output,
+		pretty,
+		"xcode-cloud xcode-versions",
+		func(ctx context.Context, client *asc.Client, limit int, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiXcodeVersions(
+				ctx,
+				asc.WithCiXcodeVersionsLimit(limit),
+				asc.WithCiXcodeVersionsNextURL(next),
+			)
+		},
+		func(ctx context.Context, client *asc.Client, next string) (asc.PaginatedResponse, error) {
+			return client.GetCiXcodeVersions(ctx, asc.WithCiXcodeVersionsNextURL(next))
+		},
+	)
 }

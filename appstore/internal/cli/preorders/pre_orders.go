@@ -2,8 +2,6 @@ package preorders
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -202,18 +200,6 @@ Examples:
 			if availabilityID == "" {
 				return fmt.Errorf("pre-orders enable: app availability ID missing from response")
 			}
-			availableInNew := availableInNewTerritories.Value()
-			createResp, err := client.CreateAppAvailabilityV2(requestCtx, resolvedAppID, asc.AppAvailabilityV2CreateAttributes{
-				AvailableInNewTerritories: &availableInNew,
-			})
-			if err != nil {
-				return fmt.Errorf("pre-orders enable: %w", err)
-			}
-			availabilityID = strings.TrimSpace(createResp.Data.ID)
-			if availabilityID == "" {
-				return fmt.Errorf("pre-orders enable: app availability ID missing from response")
-			}
-
 			firstPage, err := client.GetTerritoryAvailabilities(requestCtx, availabilityID, asc.WithTerritoryAvailabilitiesLimit(200))
 			if err != nil {
 				return fmt.Errorf("pre-orders enable: %w", err)
@@ -228,8 +214,24 @@ Examples:
 			if !ok {
 				return fmt.Errorf("pre-orders enable: unexpected territory availabilities response")
 			}
+			allTerritoryAvailabilityIDs := make([]string, 0, len(territoryResp.Data))
+			for _, item := range territoryResp.Data {
+				trimmedID := strings.TrimSpace(item.ID)
+				if trimmedID == "" {
+					return fmt.Errorf("pre-orders enable: territory availability ID is empty")
+				}
+				allTerritoryAvailabilityIDs = append(allTerritoryAvailabilityIDs, trimmedID)
+			}
 
-			territoryMap, err := mapTerritoryAvailabilityIDs(territoryResp)
+			availableInNew := availableInNewTerritories.Value()
+			if _, err := client.CreateAppAvailabilityV2(requestCtx, resolvedAppID, asc.AppAvailabilityV2CreateAttributes{
+				AvailableInNewTerritories: &availableInNew,
+				TerritoryAvailabilityIDs:  allTerritoryAvailabilityIDs,
+			}); err != nil {
+				return fmt.Errorf("pre-orders enable: %w", err)
+			}
+
+			territoryMap, err := shared.MapTerritoryAvailabilityIDs(territoryResp)
 			if err != nil {
 				return fmt.Errorf("pre-orders enable: %w", err)
 			}
@@ -411,63 +413,4 @@ Examples:
 
 func normalizePreOrderReleaseDate(value string) (string, error) {
 	return shared.NormalizeDate(value, "--release-date")
-}
-
-type territoryAvailabilityIDPayload struct {
-	Territory string `json:"t"`
-}
-
-func mapTerritoryAvailabilityIDs(resp *asc.TerritoryAvailabilitiesResponse) (map[string]string, error) {
-	if resp == nil {
-		return nil, fmt.Errorf("territory availabilities response is nil")
-	}
-	ids := make(map[string]string, len(resp.Data))
-	for _, item := range resp.Data {
-		territoryID := ""
-		if len(item.Relationships) > 0 {
-			var relationships asc.TerritoryAvailabilityRelationships
-			if err := json.Unmarshal(item.Relationships, &relationships); err != nil {
-				return nil, fmt.Errorf("decode territory availability relationships for %q: %w", item.ID, err)
-			}
-			territoryID = strings.ToUpper(strings.TrimSpace(relationships.Territory.Data.ID))
-		}
-		if territoryID == "" {
-			var ok bool
-			territoryID, ok = territoryIDFromAvailabilityID(item.ID)
-			if !ok {
-				return nil, fmt.Errorf("territory availability %q missing territory id", item.ID)
-			}
-		}
-		ids[territoryID] = item.ID
-	}
-	return ids, nil
-}
-
-func territoryIDFromAvailabilityID(availabilityID string) (string, bool) {
-	trimmed := strings.TrimSpace(availabilityID)
-	if trimmed == "" {
-		return "", false
-	}
-	decoded, err := base64.RawStdEncoding.DecodeString(trimmed)
-	if err != nil {
-		decoded, err = base64.StdEncoding.DecodeString(trimmed)
-		if err != nil {
-			decoded, err = base64.RawURLEncoding.DecodeString(trimmed)
-			if err != nil {
-				decoded, err = base64.URLEncoding.DecodeString(trimmed)
-				if err != nil {
-					return "", false
-				}
-			}
-		}
-	}
-	var payload territoryAvailabilityIDPayload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return "", false
-	}
-	territoryID := strings.TrimSpace(payload.Territory)
-	if territoryID == "" {
-		return "", false
-	}
-	return strings.ToUpper(territoryID), true
 }

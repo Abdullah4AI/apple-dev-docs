@@ -12,7 +12,7 @@ import (
 	"github.com/99designs/keyring"
 )
 
-func withArraySessionKeyring(t *testing.T) keyring.Keyring {
+func withArraySessionKeyring(t *testing.T) {
 	t.Helper()
 	prev := sessionKeyringOpen
 	kr := keyring.NewArrayKeyring([]keyring.Item{})
@@ -22,7 +22,6 @@ func withArraySessionKeyring(t *testing.T) keyring.Keyring {
 	t.Cleanup(func() {
 		sessionKeyringOpen = prev
 	})
-	return kr
 }
 
 func withSessionInfoStub(t *testing.T, email string, providerID int64) {
@@ -105,4 +104,131 @@ func TestPersistAndResumeSessionFromKeychain(t *testing.T) {
 	if resumed.ProviderID != 42 {
 		t.Fatalf("expected provider id 42, got %d", resumed.ProviderID)
 	}
+}
+
+func TestTryResumeSessionPersistsRefreshedCookies(t *testing.T) {
+	withArraySessionKeyring(t)
+	t.Setenv(webSessionBackendEnv, "keychain")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{
+		{Name: "myacinfo", Value: "stale-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)},
+	})
+
+	session := &AuthSession{
+		Client:    &http.Client{Jar: jar},
+		UserEmail: "user@example.com",
+	}
+	if err := PersistSession(session); err != nil {
+		t.Fatalf("PersistSession error: %v", err)
+	}
+
+	prev := sessionInfoFetcher
+	sessionInfoFetcher = func(ctx context.Context, client *http.Client) (*sessionInfo, error) {
+		client.Jar.SetCookies(targetURL, []*http.Cookie{
+			{Name: "myacinfo", Value: "refreshed-token", Path: "/", Expires: time.Now().Add(72 * time.Hour)},
+		})
+		out := &sessionInfo{}
+		out.Provider.ProviderID = 42
+		out.User.EmailAddress = "user@example.com"
+		return out, nil
+	}
+	t.Cleanup(func() {
+		sessionInfoFetcher = prev
+	})
+
+	resumed, ok, err := TryResumeSession(context.Background(), "user@example.com")
+	if err != nil {
+		t.Fatalf("TryResumeSession error: %v", err)
+	}
+	if !ok || resumed == nil {
+		t.Fatal("expected resumed session")
+	}
+
+	selection := resolveBackendSelection()
+	stored, ok, err := readSessionBySelection(selection, webSessionCacheKey("user@example.com"))
+	if err != nil {
+		t.Fatalf("readSessionBySelection error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected refreshed session in cache")
+	}
+
+	if got := persistedCookieValue(stored, "https://appstoreconnect.apple.com/", "myacinfo"); got != "refreshed-token" {
+		t.Fatalf("expected refreshed cookie value, got %q", got)
+	}
+}
+
+func TestTryResumeLastSessionPersistsRefreshedCookies(t *testing.T) {
+	withArraySessionKeyring(t)
+	t.Setenv(webSessionBackendEnv, "keychain")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{
+		{Name: "myacinfo", Value: "old-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)},
+	})
+
+	session := &AuthSession{
+		Client:    &http.Client{Jar: jar},
+		UserEmail: "user@example.com",
+	}
+	if err := PersistSession(session); err != nil {
+		t.Fatalf("PersistSession error: %v", err)
+	}
+
+	prev := sessionInfoFetcher
+	sessionInfoFetcher = func(ctx context.Context, client *http.Client) (*sessionInfo, error) {
+		client.Jar.SetCookies(targetURL, []*http.Cookie{
+			{Name: "myacinfo", Value: "new-token", Path: "/", Expires: time.Now().Add(72 * time.Hour)},
+		})
+		out := &sessionInfo{}
+		out.Provider.ProviderID = 99
+		out.User.EmailAddress = "user@example.com"
+		return out, nil
+	}
+	t.Cleanup(func() {
+		sessionInfoFetcher = prev
+	})
+
+	resumed, ok, err := TryResumeLastSession(context.Background())
+	if err != nil {
+		t.Fatalf("TryResumeLastSession error: %v", err)
+	}
+	if !ok || resumed == nil {
+		t.Fatal("expected resumed session")
+	}
+
+	selection := resolveBackendSelection()
+	stored, ok, err := readSessionBySelection(selection, webSessionCacheKey("user@example.com"))
+	if err != nil {
+		t.Fatalf("readSessionBySelection error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected refreshed session in cache")
+	}
+	if got := persistedCookieValue(stored, "https://appstoreconnect.apple.com/", "myacinfo"); got != "new-token" {
+		t.Fatalf("expected refreshed cookie value, got %q", got)
+	}
+}
+
+func persistedCookieValue(sess persistedSession, baseURL, cookieName string) string {
+	list := sess.Cookies[baseURL]
+	for _, cookie := range list {
+		if cookie.Name == cookieName {
+			return cookie.Value
+		}
+	}
+	return ""
 }

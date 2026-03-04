@@ -264,7 +264,7 @@ type AppInfoUpdateCategoriesRequest struct {
 }
 
 // UpdateAppInfoCategories updates the categories for an app info resource.
-func (c *Client) UpdateAppInfoCategories(ctx context.Context, appInfoID string, primaryCategoryID, secondaryCategoryID string) (*AppInfoResponse, error) {
+func (c *Client) UpdateAppInfoCategories(ctx context.Context, appInfoID string, primaryCategoryID, secondaryCategoryID, primarySubcategoryOneID, primarySubcategoryTwoID, secondarySubcategoryOneID, secondarySubcategoryTwoID string) (*AppInfoResponse, error) {
 	relationships := &AppInfoUpdateCategoriesRelationships{}
 
 	if primaryCategoryID != "" {
@@ -281,6 +281,42 @@ func (c *Client) UpdateAppInfoCategories(ctx context.Context, appInfoID string, 
 			Data: ResourceData{
 				Type: ResourceTypeAppCategories,
 				ID:   secondaryCategoryID,
+			},
+		}
+	}
+
+	if primarySubcategoryOneID != "" {
+		relationships.PrimarySubcategoryOne = &Relationship{
+			Data: ResourceData{
+				Type: ResourceTypeAppCategories,
+				ID:   primarySubcategoryOneID,
+			},
+		}
+	}
+
+	if primarySubcategoryTwoID != "" {
+		relationships.PrimarySubcategoryTwo = &Relationship{
+			Data: ResourceData{
+				Type: ResourceTypeAppCategories,
+				ID:   primarySubcategoryTwoID,
+			},
+		}
+	}
+
+	if secondarySubcategoryOneID != "" {
+		relationships.SecondarySubcategoryOne = &Relationship{
+			Data: ResourceData{
+				Type: ResourceTypeAppCategories,
+				ID:   secondarySubcategoryOneID,
+			},
+		}
+	}
+
+	if secondarySubcategoryTwoID != "" {
+		relationships.SecondarySubcategoryTwo = &Relationship{
+			Data: ResourceData{
+				Type: ResourceTypeAppCategories,
+				ID:   secondarySubcategoryTwoID,
 			},
 		}
 	}

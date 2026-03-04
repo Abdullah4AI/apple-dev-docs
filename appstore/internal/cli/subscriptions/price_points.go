@@ -90,8 +90,7 @@ Examples:
 				return fmt.Errorf("subscriptions price-points list: %w", err)
 			}
 			if *stream && !*paginate {
-				fmt.Fprintln(os.Stderr, "Error: --stream requires --paginate")
-				return flag.ErrHelp
+				return shared.UsageError("--stream requires --paginate")
 			}
 
 			priceFilter := shared.PriceFilter{
@@ -103,14 +102,12 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 			if priceFilter.HasFilter() && *stream {
-				fmt.Fprintln(os.Stderr, "Error: price filtering is not supported with --stream")
-				return flag.ErrHelp
+				return shared.UsageError("price filtering is not supported with --stream")
 			}
 
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return flag.ErrHelp
+				return shared.UsageError("--subscription-id is required")
 			}
 
 			client, err := shared.GetASCClient()
@@ -136,27 +133,23 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("subscriptions price-points list: failed to fetch: %w", err)
 				}
-
-				seenNext := make(map[string]struct{})
-				for {
-					if err := shared.PrintStreamPage(page); err != nil {
-						return fmt.Errorf("subscriptions price-points list: write stream page: %w", err)
-					}
-
-					if page.Links.Next == "" {
-						break
-					}
-					if _, exists := seenNext[page.Links.Next]; exists {
-						return fmt.Errorf("subscriptions price-points list: %w", asc.ErrRepeatedPaginationURL)
-					}
-					seenNext[page.Links.Next] = struct{}{}
-
-					pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-					page, err = client.GetSubscriptionPricePoints(pageCtx, id, asc.WithSubscriptionPricePointsNextURL(page.Links.Next))
-					pageCancel()
-					if err != nil {
-						return fmt.Errorf("subscriptions price-points list: %w", err)
-					}
+				if err := asc.PaginateEach(
+					ctx,
+					page,
+					func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+						pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
+						defer pageCancel()
+						return client.GetSubscriptionPricePoints(pageCtx, id, asc.WithSubscriptionPricePointsNextURL(nextURL))
+					},
+					func(page asc.PaginatedResponse) error {
+						typed, ok := page.(*asc.SubscriptionPricePointsResponse)
+						if !ok {
+							return fmt.Errorf("unexpected pagination response type %T", page)
+						}
+						return shared.PrintStreamPage(typed)
+					},
+				); err != nil {
+					return fmt.Errorf("subscriptions price-points list: %w", err)
 				}
 				return nil
 			}

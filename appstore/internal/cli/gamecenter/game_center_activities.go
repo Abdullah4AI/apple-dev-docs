@@ -258,7 +258,7 @@ Examples:
 				attrs.MaximumPlayersCount = &value
 			}
 			if strings.TrimSpace(*supportsPartyCode) != "" {
-				val, err := parseBool(*supportsPartyCode, "--supports-party-code")
+				val, err := shared.ParseBoolFlag(*supportsPartyCode, "--supports-party-code")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp
@@ -348,7 +348,7 @@ Examples:
 				hasUpdate = true
 			}
 			if strings.TrimSpace(*supportsPartyCode) != "" {
-				val, err := parseBool(*supportsPartyCode, "--supports-party-code")
+				val, err := shared.ParseBoolFlag(*supportsPartyCode, "--supports-party-code")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp
@@ -357,7 +357,7 @@ Examples:
 				hasUpdate = true
 			}
 			if strings.TrimSpace(*archived) != "" {
-				val, err := parseBool(*archived, "--archived")
+				val, err := shared.ParseBoolFlag(*archived, "--archived")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp

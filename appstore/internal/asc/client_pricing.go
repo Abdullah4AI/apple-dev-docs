@@ -554,8 +554,29 @@ func (c *Client) CreateAppAvailabilityV2(ctx context.Context, appID string, attr
 		},
 	}
 
-	if len(attrs.TerritoryAvailabilities) > 0 {
-		payload.Included = make([]TerritoryAvailabilityCreateResource, 0, len(attrs.TerritoryAvailabilities))
+	if len(attrs.TerritoryAvailabilityIDs) > 0 {
+		relationshipData := make([]ResourceData, 0, len(attrs.TerritoryAvailabilityIDs))
+		payload.Included = make([]AppAvailabilityV2IncludedResource, 0, len(attrs.TerritoryAvailabilityIDs))
+		for _, territoryAvailabilityID := range attrs.TerritoryAvailabilityIDs {
+			trimmedID := strings.TrimSpace(territoryAvailabilityID)
+			if trimmedID == "" {
+				return nil, fmt.Errorf("territory availability ID is required")
+			}
+			relationshipData = append(relationshipData, ResourceData{
+				Type: ResourceTypeTerritoryAvailabilities,
+				ID:   trimmedID,
+			})
+			payload.Included = append(payload.Included, AppAvailabilityV2IncludedResource{
+				Type: ResourceTypeTerritoryAvailabilities,
+				ID:   trimmedID,
+			})
+		}
+		payload.Data.Relationships.TerritoryAvailabilities = &RelationshipList{
+			Data: relationshipData,
+		}
+	} else if len(attrs.TerritoryAvailabilities) > 0 {
+		payload.Included = make([]AppAvailabilityV2IncludedResource, 0, len(attrs.TerritoryAvailabilities)*2)
+		includedTerritories := make(map[string]struct{}, len(attrs.TerritoryAvailabilities))
 		relationshipData := make([]ResourceData, 0, len(attrs.TerritoryAvailabilities))
 		for _, availability := range attrs.TerritoryAvailabilities {
 			territoryID := strings.ToUpper(strings.TrimSpace(availability.TerritoryID))
@@ -567,25 +588,34 @@ func (c *Client) CreateAppAvailabilityV2(ctx context.Context, appID string, attr
 				Type: ResourceTypeTerritoryAvailabilities,
 				ID:   resourceID,
 			})
-			payload.Included = append(payload.Included, TerritoryAvailabilityCreateResource{
-				Type: ResourceTypeTerritoryAvailabilities,
-				ID:   resourceID,
-				Attributes: TerritoryAvailabilityCreateAttributes{
-					Available:       availability.Available,
-					ReleaseDate:     strings.TrimSpace(availability.ReleaseDate),
-					PreOrderEnabled: availability.PreOrderEnabled,
-				},
-				Relationships: TerritoryAvailabilityRelationships{
-					Territory: Relationship{
-						Data: ResourceData{
-							Type: ResourceTypeTerritories,
-							ID:   territoryID,
-						},
+			attributes := &TerritoryAvailabilityCreateAttributes{
+				Available:       availability.Available,
+				ReleaseDate:     strings.TrimSpace(availability.ReleaseDate),
+				PreOrderEnabled: availability.PreOrderEnabled,
+			}
+			relationships := &TerritoryAvailabilityRelationships{
+				Territory: Relationship{
+					Data: ResourceData{
+						Type: ResourceTypeTerritories,
+						ID:   territoryID,
 					},
 				},
+			}
+			payload.Included = append(payload.Included, AppAvailabilityV2IncludedResource{
+				Type:          ResourceTypeTerritoryAvailabilities,
+				ID:            resourceID,
+				Attributes:    attributes,
+				Relationships: relationships,
 			})
+			if _, exists := includedTerritories[territoryID]; !exists {
+				payload.Included = append(payload.Included, AppAvailabilityV2IncludedResource{
+					Type: ResourceTypeTerritories,
+					ID:   territoryID,
+				})
+				includedTerritories[territoryID] = struct{}{}
+			}
 		}
-		payload.Data.Relationships.TerritoryAvailabilities = RelationshipList{
+		payload.Data.Relationships.TerritoryAvailabilities = &RelationshipList{
 			Data: relationshipData,
 		}
 	}

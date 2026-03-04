@@ -492,7 +492,7 @@ Examples:
 			}
 
 			if strings.TrimSpace(*archived) != "" {
-				val, err := parseBool(*archived, "--archived")
+				val, err := shared.ParseBoolFlag(*archived, "--archived")
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp

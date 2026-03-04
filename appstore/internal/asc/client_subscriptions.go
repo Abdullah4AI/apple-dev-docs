@@ -236,6 +236,79 @@ func (c *Client) UpdateSubscription(ctx context.Context, subID string, attrs Sub
 	return &response, nil
 }
 
+// SetSubscriptionInitialPrice sets the initial base price on a subscription that
+// has no existing prices. This uses PATCH /v1/subscriptions/{id} with inline
+// SubscriptionPriceInlineCreate resources, which is the only supported method
+// for setting the first price on a new subscription. POST /v1/subscriptionPrices
+// only works for price *changes* on subscriptions that already have a price.
+func (c *Client) SetSubscriptionInitialPrice(ctx context.Context, subID, pricePointID, territoryID string, attrs SubscriptionPriceCreateAttributes) (*SubscriptionResponse, error) {
+	subID = strings.TrimSpace(subID)
+	pricePointID = strings.TrimSpace(pricePointID)
+	territoryID = strings.ToUpper(strings.TrimSpace(territoryID))
+	if subID == "" || pricePointID == "" {
+		return nil, fmt.Errorf("subscription ID and price point ID are required")
+	}
+
+	var attributes *SubscriptionPriceCreateAttributes
+	if attrs.StartDate != "" || attrs.Preserved != nil {
+		attributes = &attrs
+	}
+
+	relationships := SubscriptionPriceInlineRelationships{
+		Subscription:           Relationship{Data: ResourceData{Type: ResourceTypeSubscriptions, ID: subID}},
+		SubscriptionPricePoint: Relationship{Data: ResourceData{Type: ResourceTypeSubscriptionPricePoints, ID: pricePointID}},
+	}
+	if territoryID != "" {
+		relationships.Territory = &Relationship{
+			Data: ResourceData{
+				Type: ResourceTypeTerritories,
+				ID:   territoryID,
+			},
+		}
+	}
+
+	inlinePriceID := "${price-1}"
+	payload := SubscriptionUpdateRequest{
+		Data: SubscriptionUpdateData{
+			Type: ResourceTypeSubscriptions,
+			ID:   subID,
+			Relationships: &SubscriptionUpdateRelationships{
+				Prices: &RelationshipList{
+					Data: []ResourceData{
+						{Type: ResourceTypeSubscriptionPrices, ID: inlinePriceID},
+					},
+				},
+			},
+		},
+		Included: []SubscriptionPriceInlineCreate{
+			{
+				Type:          ResourceTypeSubscriptionPrices,
+				ID:            inlinePriceID,
+				Attributes:    attributes,
+				Relationships: relationships,
+			},
+		},
+	}
+
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/v1/subscriptions/%s", subID)
+	data, err := c.do(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SubscriptionResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
 // DeleteSubscription deletes a subscription.
 func (c *Client) DeleteSubscription(ctx context.Context, subID string) error {
 	path := fmt.Sprintf("/v1/subscriptions/%s", strings.TrimSpace(subID))

@@ -62,6 +62,22 @@ var ValidAppEventPurposes = []string{
 	string(AppEventPurposeBringBackUsers),
 }
 
+// AppEventPurchaseRequirement represents app event purchase requirement.
+type AppEventPurchaseRequirement string
+
+const (
+	AppEventPurchaseRequirementNoCostAssociated AppEventPurchaseRequirement = "NO_COST_ASSOCIATED"
+	AppEventPurchaseRequirementNoIAPRequired    AppEventPurchaseRequirement = "NO_IAP_REQUIRED"
+	AppEventPurchaseRequirementIAPRequired      AppEventPurchaseRequirement = "IAP_REQUIRED"
+)
+
+// ValidAppEventPurchaseRequirements lists supported purchase requirement values.
+var ValidAppEventPurchaseRequirements = []string{
+	string(AppEventPurchaseRequirementNoCostAssociated),
+	string(AppEventPurchaseRequirementNoIAPRequired),
+	string(AppEventPurchaseRequirementIAPRequired),
+}
+
 // AppEventAssetType represents app event asset types.
 type AppEventAssetType string
 
