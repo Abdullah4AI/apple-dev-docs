@@ -1,6 +1,6 @@
 # Apple Developer Toolkit
 
-All-in-one Apple developer skill: documentation search, WWDC videos, App Store Connect management, and autonomous iOS app builder. Ships as a **single unified binary** (`appledev`) with multi-call support.
+All-in-one Apple developer CLI: documentation search, WWDC videos, App Store Connect management, autonomous iOS app builder, and lifecycle hooks with Telegram notifications. Ships as a **single unified binary** (`appledev`).
 
 ## Install
 
@@ -8,44 +8,107 @@ All-in-one Apple developer skill: documentation search, WWDC videos, App Store C
 brew install Abdullah4AI/tap/appledev
 ```
 
-This installs one binary with symlinks for backward compatibility:
-- `appledev` - unified CLI
-- `appstore` - symlink to `appledev` (App Store Connect mode)
-- `swiftship` - symlink to `appledev` (iOS app builder mode)
-
-### Via ClawHub
-
 ```bash
 clawhub install apple-developer-toolkit
 ```
 
-## Usage
-
-### Unified CLI
+## Quick Start
 
 ```bash
-appledev build ...    # iOS app builder (SwiftShip)
-appledev store ...    # App Store Connect CLI
-appledev b ...        # Short alias for build
-appledev s ...        # Short alias for store
+appledev build                    # Build an iOS app from a description
+appledev store apps               # List your App Store Connect apps
+appledev hooks init               # Set up lifecycle hooks
+appledev notify telegram --message "Hello"  # Send a Telegram notification
+node cli.js search "NavigationStack"        # Search Apple docs
 ```
-
-### Direct mode (symlinks)
-
-Backward-compatible with existing scripts and workflows:
-
-```bash
-swiftship ...         # Runs SwiftShip directly
-appstore ...          # Runs App Store Connect directly
-```
-
-Both modes run the same binary. Zero overhead, zero duplication.
 
 ## What's Inside
 
-### 1. Documentation Search
+| Tool | Command | Description |
+|------|---------|-------------|
+| **Docs** | `node cli.js` | Apple docs + 1,267 WWDC sessions (2014-2025) |
+| **Store** | `appledev store` | 120+ App Store Connect commands |
+| **Builder** | `appledev build` | AI-powered iOS/macOS/watchOS/tvOS/visionOS app generation |
+| **Hooks** | `appledev hooks` | Lifecycle hooks with Telegram/Slack notifications |
 
-Search Apple Developer Documentation and 1,267 WWDC sessions (2014-2025) locally indexed.
+## Lifecycle Hooks
+
+Hooks fire automatically when you build, upload, submit, or release. Get Telegram notifications, auto-distribute to TestFlight, git-tag releases, and chain operations into pipelines.
+
+### Setup
+
+```bash
+appledev hooks init --template indie    # Creates ~/.appledev/hooks.yaml
+```
+
+### 31 Events
+
+| Category | Events |
+|----------|--------|
+| **Build** | `build.start`, `build.compile.success`, `build.compile.failure`, `build.fix.start`, `build.fix.done`, `build.run.success`, `build.done` |
+| **Store** | `store.upload.start/done/failure`, `store.processing.done`, `store.testflight.distribute`, `store.submit.start/done/failure`, `store.review.approved/rejected`, `store.release.done`, `store.validate.pass/fail` |
+| **Pipeline** | `pipeline.start`, `pipeline.step.done`, `pipeline.done`, `pipeline.failure` |
+
+### Config Example
+
+```yaml
+version: 1
+notifiers:
+  telegram:
+    enabled: true
+    bot_token_keychain: "my-bot-token"
+    chat_id: "123456"
+
+hooks:
+  build.done:
+    - name: notify-build
+      notify: telegram
+      template: "{{if eq .STATUS \"success\"}}✅{{else}}❌{{end}} {{.APP_NAME}} build {{.STATUS}}"
+      when: always
+
+  store.upload.done:
+    - name: auto-testflight
+      run: "appledev store publish testflight --app {{.APP_ID}} --build {{.BUILD_ID}} --group Beta"
+      when: success
+
+  store.review.approved:
+    - name: tag-release
+      run: "git tag v{{.VERSION}} && git push origin v{{.VERSION}}"
+    - name: notify
+      notify: telegram
+      template: "🎉 {{.APP_NAME}} v{{.VERSION}} approved"
+```
+
+### Templates
+
+| Template | For | Includes |
+|----------|-----|----------|
+| `indie` | Solo developers | Telegram notifications + auto TestFlight |
+| `team` | Teams | Slack + Telegram, git tagging, changelog |
+| `ci` | CI/CD pipelines | Logging, test running, no interactive notifications |
+
+### CLI Commands
+
+```bash
+appledev hooks init [--template indie|team|ci] [--project]
+appledev hooks list [--event "store.*"]
+appledev hooks fire <event> [KEY=VALUE...]
+appledev hooks fire --dry-run build.done STATUS=success
+appledev hooks validate
+appledev notify telegram --message "Deploy done"
+appledev notify slack --webhook $URL --message "Build ready"
+```
+
+### Config Locations
+
+| Scope | Path | Behavior |
+|-------|------|----------|
+| Global | `~/.appledev/hooks.yaml` | Applies to all projects |
+| Project | `.appledev/hooks.yaml` | Extends/overrides global |
+
+## Documentation Search
+
+Search Apple Developer Documentation and WWDC sessions locally. No API key needed.
 
 ```bash
 node cli.js search "NavigationStack"
@@ -58,159 +121,111 @@ node cli.js wwdc-year 2025
 node cli.js wwdc-topic "swiftui-ui-frameworks"
 ```
 
-### 2. App Store Connect (`appledev store` / `appstore`)
+## App Store Connect
 
 120+ commands covering the entire App Store Connect API.
+
+### Auth
 
 ```bash
 appledev store auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
 ```
 
-#### Apps & Versions
-```bash
-appledev store apps                                    # List all apps
-appledev store versions --app "APP_ID"                 # List versions
-appledev store app-info --app "APP_ID"                 # App metadata
-appledev store localizations --app "APP_ID"            # Localization metadata
-appledev store screenshots upload --app "APP_ID" ...   # Upload screenshots
-```
+### Common Workflows
 
-#### TestFlight & Builds
 ```bash
-appledev store builds upload --app "APP_ID" --ipa "app.ipa" --wait
+# List apps
+appledev store apps
+
+# Upload and distribute to TestFlight
 appledev store publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait
-appledev store testflight groups --app "APP_ID"
-appledev store feedback --app "APP_ID"
-appledev store crashes --app "APP_ID"
-```
 
-#### App Store Submission
-```bash
+# Submit for App Store review
 appledev store publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait
-appledev store submit --app "APP_ID"
+
+# Pre-submission validation
 appledev store validate --app "APP_ID" --version-id "VER_ID" --strict
-appledev store review --app "APP_ID"
+
+# Release pipeline dashboard
+appledev store status --app "APP_ID" --output table
+
+# Analytics
+appledev store insights weekly --app "APP_ID" --source analytics
+
+# Multi-step workflow automation
+appledev store workflow run beta BUILD_ID:123 GROUP_ID:abc
 ```
 
-#### Signing & Certificates
-```bash
-appledev store certificates list
-appledev store profiles list
-appledev store bundle-ids list
-appledev store signing create --app "APP_ID"
-```
-
-#### Monetization
-```bash
-appledev store subscriptions list --app "APP_ID"
-appledev store iap list --app "APP_ID"
-appledev store offer-codes create --subscription "SUB_ID"
-appledev store pricing schedule get --app "APP_ID"
-```
-
-#### Analytics & Finance
-```bash
-appledev store analytics sales --vendor "VENDOR" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"
-appledev store finance reports --vendor "VENDOR"
-appledev store reviews --app "APP_ID" --output table
-appledev store insights weekly --app "APP_ID"
-```
-
-#### Automation
-```bash
-appledev store xcode-cloud run --app "APP_ID" --workflow "CI" --branch "main" --wait
-appledev store notarization submit --file ./MyApp.zip --wait
-appledev store webhooks list
-appledev store workflow run --file .appstore/workflow.json
-appledev store migrate from-fastlane --app "APP_ID"
-```
-
-#### Full Command List
+### Full Command Reference
 
 | Category | Commands |
 |----------|----------|
 | Getting Started | auth, doctor, init, docs |
 | Apps | apps, app-setup, app-tags, app-info, app-infos, versions, localizations, screenshots, video-previews |
-| TestFlight | testflight, builds, build-bundles, pre-release-versions, build-localizations, beta-app-localizations, sandbox |
-| Review & Release | review, reviews, submit, validate, publish |
+| TestFlight | testflight, builds, build-bundles, pre-release-versions, sandbox, feedback, crashes |
+| Review & Release | review, reviews, submit, validate, publish, status |
 | Signing | signing, bundle-ids, certificates, profiles, merchant-ids, pass-type-ids, notarization |
 | Monetization | iap, subscriptions, offer-codes, win-back-offers, promoted-purchases, app-events, pricing, pre-orders |
-| Analytics | analytics, insights, finance, performance, feedback, crashes |
-| Automation | xcode-cloud, webhooks, notify, migrate, workflow, metadata, diff |
+| Analytics | analytics, insights, finance, performance |
+| Automation | xcode-cloud, webhooks, notify, workflow, metadata, diff, migrate |
 | Team | account, users, actors, devices |
-| Other | categories, age-rating, accessibility, encryption, eula, agreements, app-clips, game-center, background-assets, product-pages, routing-coverage, nominations, marketplace, alternative-distribution, android-ios-mapping |
 
-### 3. iOS App Builder (`appledev build` / `swiftship`)
+## iOS App Builder
 
-Build complete iOS apps from natural language descriptions. Powered by AI code generation.
+Build complete multi-platform Apple apps from natural language. Powered by Claude Code.
 
 ```bash
-appledev build                     # Interactive mode - describe your app
-appledev build chat                # Chat mode for editing existing apps
-appledev build setup               # Install prerequisites (Xcode, XcodeGen)
-appledev build fix                 # Auto-fix build errors
+appledev build                     # Describe your app and build it
+appledev build chat                # Edit an existing app interactively
+appledev build fix                 # Auto-fix compilation errors
 appledev build run                 # Build and launch in simulator
-appledev build open                # Open project in Xcode
-appledev build info                # Show project status
-appledev build usage               # Token usage and cost
-appledev build --model opus        # Use a specific model
+appledev build open                # Open in Xcode
+appledev build setup               # Install prerequisites
 ```
 
-#### How It Works
+### Supported Platforms
+
+iOS, iPadOS, macOS, watchOS, tvOS, visionOS
+
+### How It Works
 
 ```
-describe > analyze > plan > build > fix > run
+describe → analyze → plan → build → fix → run
 ```
 
-1. **Analyze** - Extracts app name, features, core flow from your description
-2. **Plan** - Produces file-level build plan with data models, navigation, and design system
-3. **Build** - Generates Swift source files, project.yml, and asset catalog
+1. **Analyze** - Extracts app name, features, platform from your description
+2. **Plan** - Produces file-level build plan with data models and navigation
+3. **Build** - Generates Swift/SwiftUI source files and project config
 4. **Fix** - Compiles and auto-repairs until build succeeds
-5. **Run** - Boots iOS Simulator and launches the app
-
-#### Interactive Commands
-
-| Command | Description |
-|---------|-------------|
-| `/run` | Build and launch in simulator |
-| `/fix` | Auto-fix compilation errors |
-| `/open` | Open project in Xcode |
-| `/model [name]` | Switch model (sonnet, opus, haiku) |
-| `/info` | Show project info |
-| `/usage` | Token usage and cost |
+5. **Run** - Boots simulator and launches the app
 
 ## Reference Files
 
-This skill includes 50+ reference files for AI agents:
+50+ reference files for AI agents building Apple apps:
 
-| Reference | Content |
-|-----------|---------|
-| `references/app-store-connect.md` | Complete App Store Connect CLI reference |
-| `references/ios-rules/` | 38 iOS development rules |
-| `references/swiftui-guides/` | 12 SwiftUI best practice guides |
-| `references/ios-app-builder-prompts.md` | System prompts for app building |
-
-### iOS Rules (38)
-
-accessibility, app_clips, app_review, apple_translation, biometrics, camera, charts, color_contrast, components, dark_mode, design-system, feedback_states, file-structure, forbidden-patterns, foundation_models, gestures, haptics, healthkit, live_activities, localization, maps, mvvm-architecture, navigation-patterns, notification_service, notifications, safari_extension, share_extension, siri_intents, spacing_layout, speech, storage-patterns, swift-conventions, timers, typography, view-composition, view_complexity, website_links, widgets
-
-### SwiftUI Guides (12)
-
-animations, forms-and-input, layout, liquid-glass, list-patterns, media, modern-apis, navigation, performance, scroll-patterns, state-management, text-formatting
+| Reference | Count | Content |
+|-----------|-------|---------|
+| `references/ios-rules/` | 38 files | iOS development rules (accessibility, app review, gestures, haptics, etc.) |
+| `references/swiftui-guides/` | 12 files | SwiftUI best practices (Liquid Glass, navigation, state management, animations, etc.) |
+| `references/app-store-connect.md` | 1 file | Complete App Store Connect CLI reference |
+| `references/hooks-reference.md` | 1 file | All 31 hook events with context variables |
 
 ## Requirements
 
-- **Node.js** v18+ (documentation search)
-- **Xcode** (iOS app building)
-- **Go** 1.25+ (building from source)
+| Feature | Requires |
+|---------|----------|
+| Documentation search | Node.js 18+ |
+| App Store Connect | API key (.p8 file) |
+| iOS app builder | Xcode + LLM API key |
+| Hooks | Nothing (works out of the box) |
 
 ## Building from Source
 
 ```bash
+git clone https://github.com/Abdullah4AI/apple-developer-toolkit.git
+cd apple-developer-toolkit
 bash scripts/setup.sh
 ```
-
-This builds the unified `appledev` binary and creates symlinks for `appstore` and `swiftship`.
 
 ## License
 
