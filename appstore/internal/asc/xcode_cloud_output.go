@@ -28,14 +28,18 @@ type CiProductDeleteResult struct {
 }
 
 func xcodeCloudRunResultRows(result *XcodeCloudRunResult) ([]string, [][]string) {
-	headers := []string{"Build Run ID", "Build #", "Workflow ID", "Workflow Name", "Git Ref ID", "Git Ref Name", "Progress", "Status", "Start Reason", "Created"}
+	headers := []string{"Build Run ID", "Build #", "Workflow ID", "Workflow Name", "Trigger Source", "Git Ref ID", "Git Ref Name", "Pull Request ID", "Source Run ID", "Clean", "Progress", "Status", "Start Reason", "Created"}
 	rows := [][]string{{
 		result.BuildRunID,
 		fmt.Sprintf("%d", result.BuildNumber),
 		result.WorkflowID,
 		result.WorkflowName,
+		result.TriggerSource,
 		result.GitReferenceID,
 		result.GitReferenceName,
+		result.PullRequestID,
+		result.SourceRunID,
+		fmt.Sprintf("%t", result.Clean),
 		result.ExecutionProgress,
 		result.CompletionStatus,
 		result.StartReason,

@@ -791,25 +791,7 @@ func phasedReleaseProgressBar(phased *phasedReleaseSection) string {
 	if !phased.Configured {
 		return "not configured"
 	}
-
-	day := phased.CurrentDayNumber
-	if day < 0 {
-		day = 0
-	}
-	if day > 7 {
-		day = 7
-	}
-
-	const barWidth = 10
-	filled := (day * barWidth) / 7
-	if day > 0 && filled == 0 {
-		filled = 1
-	}
-	if filled > barWidth {
-		filled = barWidth
-	}
-
-	return fmt.Sprintf("[%s%s] %d/7", strings.Repeat("#", filled), strings.Repeat("-", barWidth-filled), day)
+	return asc.FormatPhasedReleaseProgressBar(phased.CurrentDayNumber)
 }
 
 func renderTable(resp *dashboardResponse) {

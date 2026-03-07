@@ -178,6 +178,7 @@ func init() {
 	registerRowsWithSingleResourceAdapter(bundleIDCapabilitiesRows)
 	registerRows(localizationDownloadResultRows)
 	registerRows(localizationUploadResultRows)
+	registerRows(appInfoSetBatchResultRows)
 	registerDirect(func(v *BuildUploadResult, render func([]string, [][]string)) error {
 		h, r := buildUploadResultRows(v)
 		render(h, r)

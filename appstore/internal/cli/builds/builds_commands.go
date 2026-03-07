@@ -381,6 +381,7 @@ Examples:
   asc builds latest --app "123456789"
   asc builds find --app "123456789" --build-number "42"
   asc builds wait --build "BUILD_ID"
+  asc builds wait --app "123456789" --newest
   asc builds info --build "BUILD_ID"
   asc builds expire --build "BUILD_ID"
   asc builds expire-all --app "123456789" --older-than 90d --dry-run
@@ -562,48 +563,10 @@ Examples:
 }
 
 func normalizeBuildProcessingStateFilter(raw string) ([]string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, nil
-	}
-
-	values := shared.SplitCSVUpper(raw)
-	if len(values) == 0 {
-		return nil, shared.UsageError("--processing-state must include at least one state")
-	}
-
-	if len(values) == 1 && values[0] == "ALL" {
-		return []string{
-			asc.BuildProcessingStateProcessing,
-			asc.BuildProcessingStateFailed,
-			asc.BuildProcessingStateInvalid,
-			asc.BuildProcessingStateValid,
-		}, nil
-	}
-
-	allowed := map[string]struct{}{
-		asc.BuildProcessingStateValid:      {},
-		asc.BuildProcessingStateProcessing: {},
-		asc.BuildProcessingStateFailed:     {},
-		asc.BuildProcessingStateInvalid:    {},
-	}
-
-	resolved := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		if value == "ALL" {
-			return nil, shared.UsageError("--processing-state value \"all\" cannot be combined with other states")
-		}
-		if _, ok := allowed[value]; !ok {
-			return nil, shared.UsageError("--processing-state must be one of VALID, PROCESSING, FAILED, INVALID, or all")
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		resolved = append(resolved, value)
-	}
-
-	return resolved, nil
+	return shared.NormalizeBuildProcessingStateFilter(raw, shared.BuildProcessingStateFilterOptions{
+		FlagName:          "--processing-state",
+		AllowedValuesHelp: "VALID, PROCESSING, FAILED, INVALID, or all",
+	})
 }
 
 func findPreReleaseVersionIDsForBuildsList(

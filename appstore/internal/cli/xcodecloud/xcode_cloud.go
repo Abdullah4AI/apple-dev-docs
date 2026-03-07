@@ -31,6 +31,8 @@ Examples:
   asc xcode-cloud scm providers list
   asc xcode-cloud run --app "APP_ID" --workflow "WorkflowName" --branch "main"
   asc xcode-cloud run --workflow-id "WORKFLOW_ID" --git-reference-id "REF_ID"
+  asc xcode-cloud run --workflow-id "WORKFLOW_ID" --pull-request-id "PR_ID"
+  asc xcode-cloud run --source-run-id "BUILD_RUN_ID" --clean
   asc xcode-cloud run --app "APP_ID" --workflow "Deploy" --branch "main" --wait
   asc xcode-cloud status --run-id "BUILD_RUN_ID"
   asc xcode-cloud status --run-id "BUILD_RUN_ID" --wait`,
@@ -65,6 +67,9 @@ func XcodeCloudRunCommand() *ffcli.Command {
 	workflowID := fs.String("workflow-id", "", "Workflow ID to trigger (alternative to --workflow)")
 	branch := fs.String("branch", "", "Branch or tag name to build")
 	gitReferenceID := fs.String("git-reference-id", "", "Git reference ID to build (alternative to --branch)")
+	pullRequestID := fs.String("pull-request-id", "", "Pull request ID to build")
+	sourceRunID := fs.String("source-run-id", "", "Source build run ID to rerun")
+	clean := fs.Bool("clean", false, "Request a clean build")
 	wait := fs.Bool("wait", false, "Wait for build to complete")
 	pollInterval := fs.Duration("poll-interval", 10*time.Second, "Poll interval when waiting")
 	timeout := fs.Duration("timeout", 0, "Timeout for Xcode Cloud requests (0 = use ASC_TIMEOUT or 30m default)")
@@ -76,12 +81,18 @@ func XcodeCloudRunCommand() *ffcli.Command {
 		ShortHelp:  "Trigger an Xcode Cloud workflow build.",
 		LongHelp: `Trigger an Xcode Cloud workflow build.
 
-You can specify the workflow by name (requires --app) or by ID (--workflow-id).
-You can specify the branch/tag by name (--branch) or by ID (--git-reference-id).
+Standard mode:
+- Specify workflow by name (requires --app) or by ID (--workflow-id)
+- Specify source by branch/tag (--branch or --git-reference-id) or pull request (--pull-request-id)
+
+Rerun mode:
+- Use --source-run-id to rerun from an existing build run (without workflow/source selectors)
 
 Examples:
   asc xcode-cloud run --app "123456789" --workflow "CI" --branch "main"
   asc xcode-cloud run --workflow-id "WORKFLOW_ID" --git-reference-id "REF_ID"
+  asc xcode-cloud run --workflow-id "WORKFLOW_ID" --pull-request-id "PR_ID"
+  asc xcode-cloud run --source-run-id "BUILD_RUN_ID" --clean
   asc xcode-cloud run --app "123456789" --workflow "Deploy" --branch "release/1.0" --wait
   asc xcode-cloud run --app "123456789" --workflow "CI" --branch "main" --wait --poll-interval 30s --timeout 1h`,
 		FlagSet:   fs,
@@ -92,20 +103,34 @@ Examples:
 			hasWorkflowID := strings.TrimSpace(*workflowID) != ""
 			hasBranch := strings.TrimSpace(*branch) != ""
 			hasGitRefID := strings.TrimSpace(*gitReferenceID) != ""
+			hasPullRequestID := strings.TrimSpace(*pullRequestID) != ""
+			hasSourceRunID := strings.TrimSpace(*sourceRunID) != ""
 
 			if hasWorkflowName && hasWorkflowID {
 				return shared.UsageError("--workflow and --workflow-id are mutually exclusive")
 			}
-			if !hasWorkflowName && !hasWorkflowID {
-				fmt.Fprintln(os.Stderr, "Error: --workflow or --workflow-id is required")
-				return flag.ErrHelp
-			}
 			if hasBranch && hasGitRefID {
 				return shared.UsageError("--branch and --git-reference-id are mutually exclusive")
 			}
-			if !hasBranch && !hasGitRefID {
-				fmt.Fprintln(os.Stderr, "Error: --branch or --git-reference-id is required")
-				return flag.ErrHelp
+			if (hasBranch || hasGitRefID) && hasPullRequestID {
+				return shared.UsageError("--branch, --git-reference-id, and --pull-request-id are mutually exclusive")
+			}
+			if hasSourceRunID {
+				if hasWorkflowName || hasWorkflowID {
+					return shared.UsageError("--source-run-id is mutually exclusive with --workflow and --workflow-id")
+				}
+				if hasBranch || hasGitRefID || hasPullRequestID {
+					return shared.UsageError("--source-run-id is mutually exclusive with --branch, --git-reference-id, and --pull-request-id")
+				}
+			} else {
+				if !hasWorkflowName && !hasWorkflowID {
+					fmt.Fprintln(os.Stderr, "Error: --workflow or --workflow-id is required")
+					return flag.ErrHelp
+				}
+				if !hasBranch && !hasGitRefID && !hasPullRequestID {
+					fmt.Fprintln(os.Stderr, "Error: --branch, --git-reference-id, or --pull-request-id is required")
+					return flag.ErrHelp
+				}
 			}
 			if *timeout < 0 {
 				return shared.UsageError("--timeout must be greater than or equal to 0")
@@ -115,7 +140,7 @@ Examples:
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
-			if hasWorkflowName && resolvedAppID == "" {
+			if hasWorkflowName && !hasSourceRunID && resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required when using --workflow (or set ASC_APP_ID)")
 				return flag.ErrHelp
 			}
@@ -128,58 +153,105 @@ Examples:
 			requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, *timeout)
 			defer cancel()
 
-			// Resolve workflow ID
 			resolvedWorkflowID := strings.TrimSpace(*workflowID)
 			var workflowNameForOutput string
-			if resolvedWorkflowID == "" {
-				// Need to resolve workflow by name
-				product, err := client.ResolveCiProductForApp(requestCtx, resolvedAppID)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud run: %w", err)
-				}
-
-				workflow, err := client.ResolveCiWorkflowByName(requestCtx, product.ID, strings.TrimSpace(*workflowName))
-				if err != nil {
-					return fmt.Errorf("xcode-cloud run: %w", err)
-				}
-
-				resolvedWorkflowID = workflow.ID
-				workflowNameForOutput = workflow.Attributes.Name
-			}
-
-			// Resolve git reference ID
 			resolvedGitRefID := strings.TrimSpace(*gitReferenceID)
+			resolvedPullRequestID := strings.TrimSpace(*pullRequestID)
+			resolvedSourceRunID := strings.TrimSpace(*sourceRunID)
 			var refNameForOutput string
-			if resolvedGitRefID == "" {
-				// Need to resolve git reference by name
-				// First get the repository from the workflow
-				repo, err := client.GetCiWorkflowRepository(requestCtx, resolvedWorkflowID)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud run: failed to get workflow repository: %w", err)
+			triggerSource := ""
+
+			if !hasSourceRunID {
+				// Resolve workflow ID if needed.
+				if resolvedWorkflowID == "" {
+					product, err := client.ResolveCiProductForApp(requestCtx, resolvedAppID)
+					if err != nil {
+						return fmt.Errorf("xcode-cloud run: %w", err)
+					}
+
+					workflow, err := client.ResolveCiWorkflowByName(requestCtx, product.ID, strings.TrimSpace(*workflowName))
+					if err != nil {
+						return fmt.Errorf("xcode-cloud run: %w", err)
+					}
+
+					resolvedWorkflowID = workflow.ID
+					workflowNameForOutput = workflow.Attributes.Name
 				}
 
-				gitRef, err := client.ResolveGitReferenceByName(requestCtx, repo.ID, strings.TrimSpace(*branch))
-				if err != nil {
-					return fmt.Errorf("xcode-cloud run: %w", err)
-				}
+				if resolvedPullRequestID != "" {
+					triggerSource = "pull-request"
+				} else {
+					// Resolve git reference by name if needed.
+					if resolvedGitRefID == "" {
+						repo, err := client.GetCiWorkflowRepository(requestCtx, resolvedWorkflowID)
+						if err != nil {
+							return fmt.Errorf("xcode-cloud run: failed to get workflow repository: %w", err)
+						}
 
-				resolvedGitRefID = gitRef.ID
-				refNameForOutput = gitRef.Attributes.Name
+						gitRef, err := client.ResolveGitReferenceByName(requestCtx, repo.ID, strings.TrimSpace(*branch))
+						if err != nil {
+							return fmt.Errorf("xcode-cloud run: %w", err)
+						}
+
+						resolvedGitRefID = gitRef.ID
+						refNameForOutput = gitRef.Attributes.Name
+						triggerSource = "branch"
+					} else {
+						triggerSource = "git-reference"
+					}
+				}
+			} else {
+				sourceRunResp, err := getCiBuildRunWithRetry(
+					requestCtx,
+					client,
+					resolvedSourceRunID,
+					asc.WithCiBuildRunInclude("workflow"),
+					asc.WithCiBuildRunFields("workflow"),
+				)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud run: failed to resolve source run workflow: %w", err)
+				}
+				if sourceRunResp.Data.Relationships == nil || sourceRunResp.Data.Relationships.Workflow == nil || strings.TrimSpace(sourceRunResp.Data.Relationships.Workflow.Data.ID) == "" {
+					return fmt.Errorf("xcode-cloud run: source run %q does not contain a workflow relationship", resolvedSourceRunID)
+				}
+				resolvedWorkflowID = sourceRunResp.Data.Relationships.Workflow.Data.ID
+				triggerSource = "source-run"
 			}
 
-			// Create the build run
+			relationships := &asc.CiBuildRunCreateRelationships{}
+			switch {
+			case hasSourceRunID:
+				relationships.Workflow = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeCiWorkflows, ID: resolvedWorkflowID},
+				}
+				relationships.BuildRun = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeCiBuildRuns, ID: resolvedSourceRunID},
+				}
+			case resolvedPullRequestID != "":
+				relationships.Workflow = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeCiWorkflows, ID: resolvedWorkflowID},
+				}
+				relationships.PullRequest = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeScmPullRequests, ID: resolvedPullRequestID},
+				}
+			default:
+				relationships.Workflow = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeCiWorkflows, ID: resolvedWorkflowID},
+				}
+				relationships.SourceBranchOrTag = &asc.Relationship{
+					Data: asc.ResourceData{Type: asc.ResourceTypeScmGitReferences, ID: resolvedGitRefID},
+				}
+			}
+
 			req := asc.CiBuildRunCreateRequest{
 				Data: asc.CiBuildRunCreateData{
-					Type: asc.ResourceTypeCiBuildRuns,
-					Relationships: &asc.CiBuildRunCreateRelationships{
-						Workflow: &asc.Relationship{
-							Data: asc.ResourceData{Type: asc.ResourceTypeCiWorkflows, ID: resolvedWorkflowID},
-						},
-						SourceBranchOrTag: &asc.Relationship{
-							Data: asc.ResourceData{Type: asc.ResourceTypeScmGitReferences, ID: resolvedGitRefID},
-						},
-					},
+					Type:          asc.ResourceTypeCiBuildRuns,
+					Relationships: relationships,
 				},
+			}
+			if *clean {
+				cleanValue := true
+				req.Data.Attributes = &asc.CiBuildRunCreateAttributes{Clean: &cleanValue}
 			}
 
 			resp, err := client.CreateCiBuildRun(requestCtx, req)
@@ -192,14 +264,29 @@ Examples:
 				BuildNumber:       resp.Data.Attributes.Number,
 				WorkflowID:        resolvedWorkflowID,
 				WorkflowName:      workflowNameForOutput,
+				TriggerSource:     triggerSource,
 				GitReferenceID:    resolvedGitRefID,
 				GitReferenceName:  refNameForOutput,
+				PullRequestID:     resolvedPullRequestID,
+				SourceRunID:       resolvedSourceRunID,
+				Clean:             *clean,
 				ExecutionProgress: string(resp.Data.Attributes.ExecutionProgress),
 				CompletionStatus:  string(resp.Data.Attributes.CompletionStatus),
 				StartReason:       resp.Data.Attributes.StartReason,
 				CreatedDate:       resp.Data.Attributes.CreatedDate,
 				StartedDate:       resp.Data.Attributes.StartedDate,
 				FinishedDate:      resp.Data.Attributes.FinishedDate,
+			}
+			if resp.Data.Relationships != nil {
+				if result.WorkflowID == "" && resp.Data.Relationships.Workflow != nil {
+					result.WorkflowID = resp.Data.Relationships.Workflow.Data.ID
+				}
+				if result.GitReferenceID == "" && resp.Data.Relationships.SourceBranchOrTag != nil {
+					result.GitReferenceID = resp.Data.Relationships.SourceBranchOrTag.Data.ID
+				}
+				if result.PullRequestID == "" && resp.Data.Relationships.PullRequest != nil {
+					result.PullRequestID = resp.Data.Relationships.PullRequest.Data.ID
+				}
 			}
 
 			if !*wait {

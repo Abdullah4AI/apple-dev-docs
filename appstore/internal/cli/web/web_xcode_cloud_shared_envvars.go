@@ -112,14 +112,21 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			vars, err := client.ListCIProductEnvVars(requestCtx, teamID, pid)
+			result := &CISharedEnvVarsListResult{}
+			err = withWebSpinner("Loading shared Xcode Cloud environment variables", func() error {
+				vars, err := client.ListCIProductEnvVars(requestCtx, teamID, pid)
+				if err != nil {
+					return err
+				}
+
+				result = &CISharedEnvVarsListResult{
+					ProductID: pid,
+					Variables: vars,
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars shared list")
-			}
-
-			result := &CISharedEnvVarsListResult{
-				ProductID: pid,
-				Variables: vars,
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -194,74 +201,76 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-
-			// Build the value (plaintext or encrypted)
-			var envValue webcore.CIEnvironmentVariableValue
-			if *secret {
-				keyResp, err := client.GetCIEncryptionKey(requestCtx)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud env-vars shared set failed: could not fetch encryption key: %w", err)
+			result := &CISharedEnvVarsSetResult{}
+			err = withWebSpinner("Updating shared Xcode Cloud environment variable", func() error {
+				var envValue webcore.CIEnvironmentVariableValue
+				if *secret {
+					keyResp, err := client.GetCIEncryptionKey(requestCtx)
+					if err != nil {
+						return fmt.Errorf("xcode-cloud env-vars shared set failed: could not fetch encryption key: %w", err)
+					}
+					ct, err := webcore.ECIESEncrypt(keyResp.Key, varValue)
+					if err != nil {
+						return fmt.Errorf("xcode-cloud env-vars shared set failed: encryption error: %w", err)
+					}
+					envValue = webcore.CIEnvironmentVariableValue{Ciphertext: &ct}
+				} else {
+					envValue = webcore.CIEnvironmentVariableValue{Plaintext: &varValue}
 				}
-				ct, err := webcore.ECIESEncrypt(keyResp.Key, varValue)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud env-vars shared set failed: encryption error: %w", err)
+
+				wfIDs := parseWorkflowIDs(*workflowIDs)
+				if wfIDs == nil {
+					wfIDs = []string{}
 				}
-				envValue = webcore.CIEnvironmentVariableValue{Ciphertext: &ct}
-			} else {
-				envValue = webcore.CIEnvironmentVariableValue{Plaintext: &varValue}
-			}
 
-			// Parse workflow IDs (must be non-nil so JSON encodes as [] not null)
-			wfIDs := parseWorkflowIDs(*workflowIDs)
-			if wfIDs == nil {
-				wfIDs = []string{}
-			}
+				existing, err := client.ListCIProductEnvVars(requestCtx, teamID, pid)
+				if err != nil {
+					return err
+				}
 
-			// List existing to find by name (upsert)
-			existing, err := client.ListCIProductEnvVars(requestCtx, teamID, pid)
+				varID := ""
+				action := "created"
+				for _, v := range existing {
+					if strings.EqualFold(v.Name, varName) {
+						varID = v.ID
+						action = "updated"
+						if len(wfIDs) == 0 {
+							for _, ws := range v.RelatedWorkflowSummaries {
+								wfIDs = append(wfIDs, ws.ID)
+							}
+						}
+						break
+					}
+				}
+				if varID == "" {
+					varID = newUUID()
+				}
+
+				req := webcore.CIProductEnvVarRequest{
+					Name:        varName,
+					Value:       envValue,
+					IsLocked:    *locked,
+					WorkflowIDs: wfIDs,
+				}
+				if _, err := client.SetCIProductEnvVar(requestCtx, teamID, pid, varID, req); err != nil {
+					return err
+				}
+
+				varType := "plaintext"
+				if *secret {
+					varType = "secret"
+				}
+				result = &CISharedEnvVarsSetResult{
+					ProductID: pid,
+					Name:      varName,
+					Type:      varType,
+					Locked:    *locked,
+					Action:    action,
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars shared set")
-			}
-
-			varID := ""
-			action := "created"
-			for _, v := range existing {
-				if strings.EqualFold(v.Name, varName) {
-					varID = v.ID
-					action = "updated"
-					// Preserve existing workflow associations if not specified
-					if len(wfIDs) == 0 {
-						for _, ws := range v.RelatedWorkflowSummaries {
-							wfIDs = append(wfIDs, ws.ID)
-						}
-					}
-					break
-				}
-			}
-			if varID == "" {
-				varID = newUUID()
-			}
-
-			req := webcore.CIProductEnvVarRequest{
-				Name:        varName,
-				Value:       envValue,
-				IsLocked:    *locked,
-				WorkflowIDs: wfIDs,
-			}
-			if _, err := client.SetCIProductEnvVar(requestCtx, teamID, pid, varID, req); err != nil {
-				return withWebAuthHint(err, "xcode-cloud env-vars shared set")
-			}
-
-			varType := "plaintext"
-			if *secret {
-				varType = "secret"
-			}
-			result := &CISharedEnvVarsSetResult{
-				ProductID: pid,
-				Name:      varName,
-				Type:      varType,
-				Locked:    *locked,
-				Action:    action,
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -326,9 +335,15 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-
-			// List to find by name
-			existing, err := client.ListCIProductEnvVars(requestCtx, teamID, pid)
+			var existing []webcore.CIProductEnvironmentVariable
+			err = withWebSpinner("Loading shared Xcode Cloud environment variables", func() error {
+				var err error
+				existing, err = client.ListCIProductEnvVars(requestCtx, teamID, pid)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars shared delete")
 			}
@@ -344,13 +359,20 @@ Examples:
 				return fmt.Errorf("shared environment variable %q not found in product %s", varName, pid)
 			}
 
-			if err := client.DeleteCIProductEnvVar(requestCtx, teamID, pid, varID); err != nil {
-				return withWebAuthHint(err, "xcode-cloud env-vars shared delete")
-			}
+			result := &CISharedEnvVarsDeleteResult{}
+			err = withWebSpinner("Deleting shared Xcode Cloud environment variable", func() error {
+				if err := client.DeleteCIProductEnvVar(requestCtx, teamID, pid, varID); err != nil {
+					return err
+				}
 
-			result := &CISharedEnvVarsDeleteResult{
-				ProductID: pid,
-				Name:      varName,
+				result = &CISharedEnvVarsDeleteResult{
+					ProductID: pid,
+					Name:      varName,
+				}
+				return nil
+			})
+			if err != nil {
+				return withWebAuthHint(err, "xcode-cloud env-vars shared delete")
 			}
 			return shared.PrintOutputWithRenderers(
 				result,

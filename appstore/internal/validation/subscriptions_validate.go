@@ -7,11 +7,14 @@ import (
 
 // Subscription represents an auto-renewable subscription for review-readiness validation.
 type Subscription struct {
-	ID        string
-	Name      string
-	ProductID string
-	State     string
-	GroupID   string
+	ID                   string
+	Name                 string
+	ProductID            string
+	State                string
+	GroupID              string
+	HasImage             bool
+	ImageCheckSkipped    bool
+	ImageCheckSkipReason string
 }
 
 // SubscriptionsInput collects subscription validation inputs.
@@ -31,7 +34,9 @@ type SubscriptionsReport struct {
 
 // ValidateSubscriptions validates subscription review readiness and returns a report.
 func ValidateSubscriptions(input SubscriptionsInput, strict bool) SubscriptionsReport {
-	checks := subscriptionReviewReadinessChecks(input.Subscriptions)
+	checks := make([]CheckResult, 0)
+	checks = append(checks, subscriptionImageChecks(input.Subscriptions)...)
+	checks = append(checks, subscriptionReviewReadinessChecks(input.Subscriptions)...)
 	summary := summarize(checks, strict)
 
 	return SubscriptionsReport{
@@ -41,6 +46,63 @@ func ValidateSubscriptions(input SubscriptionsInput, strict bool) SubscriptionsR
 		Checks:            checks,
 		Strict:            strict,
 	}
+}
+
+func subscriptionFetchChecks(reason string) []CheckResult {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil
+	}
+
+	return []CheckResult{{
+		ID:          "subscriptions.readiness.unverified",
+		Severity:    SeverityInfo,
+		Field:       "subscriptions",
+		Message:     "Could not verify subscription readiness for this app",
+		Remediation: reason,
+	}}
+}
+
+func subscriptionImageChecks(subs []Subscription) []CheckResult {
+	var checks []CheckResult
+	for _, sub := range subs {
+		state := strings.ToUpper(strings.TrimSpace(sub.State))
+		if state == "REMOVED_FROM_SALE" || state == "DEVELOPER_REMOVED_FROM_SALE" {
+			continue
+		}
+		label := formatSubscriptionLabel(sub)
+		if sub.ImageCheckSkipped {
+			remediation := strings.TrimSpace(sub.ImageCheckSkipReason)
+			if remediation == "" {
+				remediation = "Review this subscription's promotional image in App Store Connect; validation could not verify image presence automatically"
+			}
+			checks = append(checks, CheckResult{
+				ID:           "subscriptions.images.unverified",
+				Severity:     SeverityInfo,
+				Field:        "images",
+				ResourceType: "subscription",
+				ResourceID:   strings.TrimSpace(sub.ID),
+				Message:      fmt.Sprintf("Could not verify whether %s has a subscription promotional image", label),
+				Remediation:  remediation,
+			})
+			continue
+		}
+		if sub.HasImage {
+			continue
+		}
+
+		checks = append(checks, CheckResult{
+			ID:           "subscriptions.images.recommended",
+			Severity:     SeverityWarning,
+			Field:        "images",
+			ResourceType: "subscription",
+			ResourceID:   strings.TrimSpace(sub.ID),
+			Message:      fmt.Sprintf("%s has no subscription promotional image", label),
+			Remediation:  "Upload a unique promotional image if you plan to promote this subscription on the App Store, support offer-code redemption pages, or run win-back offers; the App Review screenshot is separate and review-only",
+		})
+	}
+
+	return checks
 }
 
 func subscriptionReviewReadinessChecks(subs []Subscription) []CheckResult {
@@ -107,9 +169,9 @@ func formatSubscriptionLabel(sub Subscription) string {
 func remediationForSubscriptionState(state string) string {
 	switch strings.ToUpper(strings.TrimSpace(state)) {
 	case "MISSING_METADATA":
-		return "Complete required metadata for this subscription in App Store Connect"
+		return "Complete required metadata for this subscription, including its image, in App Store Connect"
 	case "READY_TO_SUBMIT":
-		return "Submit this subscription for review in App Store Connect"
+		return "Submit this subscription for review in App Store Connect so it is attached to the next app review submission"
 	case "DEVELOPER_ACTION_NEEDED":
 		return "Resolve developer action required issues for this subscription in App Store Connect"
 	case "REJECTED":

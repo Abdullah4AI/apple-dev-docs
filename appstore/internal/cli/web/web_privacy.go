@@ -1179,27 +1179,34 @@ Examples:
 			}
 			client := webcore.NewClient(session)
 
-			categories, err := client.ListAppDataUsageCategories(requestCtx)
-			if err != nil {
-				return withWebAuthHint(err, "web privacy catalog")
-			}
-			purposes, err := client.ListAppDataUsagePurposes(requestCtx)
-			if err != nil {
-				return withWebAuthHint(err, "web privacy catalog")
-			}
-			protections, err := client.ListAppDataUsageDataProtections(requestCtx)
-			if err != nil {
-				return withWebAuthHint(err, "web privacy catalog")
-			}
+			payload := privacyCatalogOutput{}
+			err = withWebSpinner("Loading privacy catalog", func() error {
+				categories, err := client.ListAppDataUsageCategories(requestCtx)
+				if err != nil {
+					return err
+				}
+				purposes, err := client.ListAppDataUsagePurposes(requestCtx)
+				if err != nil {
+					return err
+				}
+				protections, err := client.ListAppDataUsageDataProtections(requestCtx)
+				if err != nil {
+					return err
+				}
 
-			sort.Slice(categories, func(i, j int) bool { return categories[i].ID < categories[j].ID })
-			sort.Slice(purposes, func(i, j int) bool { return purposes[i].ID < purposes[j].ID })
-			sort.Slice(protections, func(i, j int) bool { return protections[i].ID < protections[j].ID })
+				sort.Slice(categories, func(i, j int) bool { return categories[i].ID < categories[j].ID })
+				sort.Slice(purposes, func(i, j int) bool { return purposes[i].ID < purposes[j].ID })
+				sort.Slice(protections, func(i, j int) bool { return protections[i].ID < protections[j].ID })
 
-			payload := privacyCatalogOutput{
-				Categories:      categories,
-				Purposes:        purposes,
-				DataProtections: protections,
+				payload = privacyCatalogOutput{
+					Categories:      categories,
+					Purposes:        purposes,
+					DataProtections: protections,
+				}
+				return nil
+			})
+			if err != nil {
+				return withWebAuthHint(err, "web privacy catalog")
 			}
 			return shared.PrintOutputWithRenderers(
 				payload,
@@ -1253,11 +1260,19 @@ Examples:
 			}
 			client := webcore.NewClient(session)
 
-			remoteUsages, err := client.ListAppDataUsages(requestCtx, resolvedAppID)
-			if err != nil {
-				return withWebAuthHint(err, "web privacy pull")
-			}
-			publishState, err := client.GetAppDataUsagesPublishState(requestCtx, resolvedAppID)
+			var (
+				remoteUsages []webcore.AppDataUsage
+				publishState *webcore.AppDataUsagesPublishState
+			)
+			err = withWebSpinner("Loading app privacy state", func() error {
+				var err error
+				remoteUsages, err = client.ListAppDataUsages(requestCtx, resolvedAppID)
+				if err != nil {
+					return err
+				}
+				publishState, err = client.GetAppDataUsagesPublishState(requestCtx, resolvedAppID)
+				return err
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web privacy pull")
 			}
@@ -1342,12 +1357,19 @@ Examples:
 				return err
 			}
 			client := webcore.NewClient(session)
-			remoteUsages, err := client.ListAppDataUsages(requestCtx, resolvedAppID)
+			plan := privacyPlanOutput{}
+			err = withWebSpinner("Planning privacy changes", func() error {
+				remoteUsages, err := client.ListAppDataUsages(requestCtx, resolvedAppID)
+				if err != nil {
+					return err
+				}
+				remoteState := remoteStateFromDataUsages(remoteUsages)
+				plan = planFromDesiredAndRemote(resolvedAppID, resolvedFilePath, desiredTuples, remoteState)
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web privacy plan")
 			}
-			remoteState := remoteStateFromDataUsages(remoteUsages)
-			plan := planFromDesiredAndRemote(resolvedAppID, resolvedFilePath, desiredTuples, remoteState)
 
 			return shared.PrintOutputWithRenderers(
 				plan,
@@ -1418,12 +1440,19 @@ Examples:
 				return err
 			}
 			client := webcore.NewClient(session)
-			remoteUsages, err := client.ListAppDataUsages(requestCtx, resolvedAppID)
+			plan := privacyPlanOutput{}
+			err = withWebSpinner("Planning privacy changes", func() error {
+				remoteUsages, err := client.ListAppDataUsages(requestCtx, resolvedAppID)
+				if err != nil {
+					return err
+				}
+				remoteState := remoteStateFromDataUsages(remoteUsages)
+				plan = planFromDesiredAndRemote(resolvedAppID, resolvedFilePath, desiredTuples, remoteState)
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web privacy apply")
 			}
-			remoteState := remoteStateFromDataUsages(remoteUsages)
-			plan := planFromDesiredAndRemote(resolvedAppID, resolvedFilePath, desiredTuples, remoteState)
 
 			if len(plan.Deletes) > 0 && !*allowDeletes {
 				return shared.UsageError("--allow-deletes is required to apply delete operations")
@@ -1432,7 +1461,9 @@ Examples:
 				return shared.UsageError("--confirm is required when applying delete operations")
 			}
 
-			actions, err := applyPrivacyPlan(requestCtx, client, resolvedAppID, plan)
+			actions, err := withWebSpinnerValue("Applying privacy changes", func() ([]privacyApplyAction, error) {
+				return applyPrivacyPlan(requestCtx, client, resolvedAppID, plan)
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web privacy apply")
 			}
@@ -1501,13 +1532,17 @@ Examples:
 			}
 			client := webcore.NewClient(session)
 
-			stateBefore, err := client.GetAppDataUsagesPublishState(requestCtx, resolvedAppID)
+			stateBefore, err := withWebSpinnerValue("Loading privacy publish state", func() (*webcore.AppDataUsagesPublishState, error) {
+				return client.GetAppDataUsagesPublishState(requestCtx, resolvedAppID)
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web privacy publish")
 			}
 			stateAfter := stateBefore
 			if !stateBefore.Published {
-				stateAfter, err = client.SetAppDataUsagesPublished(requestCtx, stateBefore.ID, true)
+				stateAfter, err = withWebSpinnerValue("Publishing app privacy declarations", func() (*webcore.AppDataUsagesPublishState, error) {
+					return client.SetAppDataUsagesPublished(requestCtx, stateBefore.ID, true)
+				})
 				if err != nil {
 					return withWebAuthHint(err, "web privacy publish")
 				}

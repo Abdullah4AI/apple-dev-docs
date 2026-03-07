@@ -20,6 +20,10 @@ import (
 
 // newRequest creates a new HTTP request with JWT authentication
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if err := validateAPIPath(path); err != nil {
+		return nil, err
+	}
+
 	// Generate JWT token
 	token, err := c.generateJWT()
 	if err != nil {
@@ -581,6 +585,52 @@ func sanitizeTerminal(input string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// validateAPIPath checks a relative API path for dangerous characters that
+// could indicate a hallucinated or malicious resource ID. Full URLs (pagination
+// cursors) are skipped — they are validated separately by validateNextURL.
+//
+// The check operates on path segments only (before any query string) and rejects:
+//   - control characters (< 0x20, DEL)
+//   - pre-encoded percent sequences (%) that would cause double-encoding
+//   - fragment markers (#) that truncate the URL
+//   - backslashes that may be misinterpreted across platforms
+//   - path traversal segments (.. or empty segments //)
+func validateAPIPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return nil
+	}
+
+	pathOnly := path
+	if idx := strings.IndexByte(path, '?'); idx >= 0 {
+		pathOnly = path[:idx]
+	}
+
+	for _, r := range pathOnly {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("API path contains control character: %q", path)
+		}
+	}
+
+	if strings.ContainsAny(pathOnly, "#%\\") {
+		return fmt.Errorf("API path contains unsafe character (#, %%, or \\): %q", path)
+	}
+
+	if strings.Contains(pathOnly, "//") {
+		return fmt.Errorf("API path contains empty segment (//): %q", path)
+	}
+
+	for _, segment := range strings.Split(pathOnly, "/") {
+		if segment == ".." {
+			return fmt.Errorf("API path contains traversal segment: %q", path)
+		}
+	}
+
+	return nil
 }
 
 // IsNotFound checks if the error is a "not found" error

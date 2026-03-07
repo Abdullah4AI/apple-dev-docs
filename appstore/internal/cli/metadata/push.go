@@ -145,180 +145,20 @@ Notes:
 			if len(args) > 0 {
 				return shared.UsageError("metadata push does not accept positional arguments")
 			}
-			resolvedAppID := shared.ResolveAppID(*appID)
-			if resolvedAppID == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
-			}
-			versionValue := strings.TrimSpace(*version)
-			if versionValue == "" {
-				return shared.UsageError("--version is required")
-			}
-			dirValue := strings.TrimSpace(*dir)
-			if dirValue == "" {
-				return shared.UsageError("--dir is required")
-			}
-
-			platformValue := strings.TrimSpace(*platform)
-			if platformValue != "" {
-				normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(platformValue)
-				if err != nil {
-					return shared.UsageError(err.Error())
-				}
-				platformValue = normalizedPlatform
-			}
-
-			includes, err := parseIncludes(*include)
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
-
-			localBundle, err := loadLocalMetadata(dirValue, versionValue)
+			result, err := ExecutePush(ctx, PushExecutionOptions{
+				AppID:        *appID,
+				AppInfoID:    *appInfoID,
+				Version:      *version,
+				Platform:     *platform,
+				Dir:          *dir,
+				Include:      *include,
+				DryRun:       *dryRun,
+				AllowDeletes: *allowDeletes,
+				Confirm:      *confirm,
+			})
 			if err != nil {
 				return err
 			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("metadata push: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			versionIDValue, versionStateValue, err := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
-			if err != nil {
-				if errors.Is(err, flag.ErrHelp) {
-					return err
-				}
-				return fmt.Errorf("metadata push: %w", err)
-			}
-			appInfoIDValue, err := resolveMetadataPushAppInfoID(
-				requestCtx,
-				client,
-				resolvedAppID,
-				strings.TrimSpace(*appInfoID),
-				versionValue,
-				platformValue,
-				dirValue,
-				versionStateValue,
-			)
-			if err != nil {
-				if errors.Is(err, flag.ErrHelp) {
-					return err
-				}
-				return fmt.Errorf("metadata push: %w", err)
-			}
-
-			remoteAppInfoItems, err := fetchAppInfoLocalizations(requestCtx, client, appInfoIDValue)
-			if err != nil {
-				return fmt.Errorf("metadata push: %w", err)
-			}
-			remoteVersionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
-			if err != nil {
-				return fmt.Errorf("metadata push: %w", err)
-			}
-
-			remoteAppInfo := make(map[string]AppInfoLocalization, len(remoteAppInfoItems))
-			for _, item := range remoteAppInfoItems {
-				locale := strings.TrimSpace(item.Attributes.Locale)
-				if locale == "" {
-					continue
-				}
-				remoteAppInfo[locale] = NormalizeAppInfoLocalization(AppInfoLocalization{
-					Name:              item.Attributes.Name,
-					Subtitle:          item.Attributes.Subtitle,
-					PrivacyPolicyURL:  item.Attributes.PrivacyPolicyURL,
-					PrivacyChoicesURL: item.Attributes.PrivacyChoicesURL,
-					PrivacyPolicyText: item.Attributes.PrivacyPolicyText,
-				})
-			}
-
-			remoteVersion := make(map[string]VersionLocalization, len(remoteVersionItems))
-			for _, item := range remoteVersionItems {
-				locale := strings.TrimSpace(item.Attributes.Locale)
-				if locale == "" {
-					continue
-				}
-				remoteVersion[locale] = NormalizeVersionLocalization(VersionLocalization{
-					Description:     item.Attributes.Description,
-					Keywords:        item.Attributes.Keywords,
-					MarketingURL:    item.Attributes.MarketingURL,
-					PromotionalText: item.Attributes.PromotionalText,
-					SupportURL:      item.Attributes.SupportURL,
-					WhatsNew:        item.Attributes.WhatsNew,
-				})
-			}
-
-			localAppInfo := applyDefaultAppInfoFallback(localBundle.appInfo, localBundle.defaultAppInfo, remoteAppInfo, *allowDeletes)
-			localVersion := applyDefaultVersionFallback(localBundle.version, localBundle.defaultVersion, remoteVersion, *allowDeletes)
-
-			adds, updates, deletes, appInfoCalls := buildScopePlan(
-				appInfoDirName,
-				"",
-				appInfoPlanFields,
-				appInfoToPlanFields(localAppInfo),
-				appInfoToFieldMap(remoteAppInfo),
-			)
-			versionAdds, versionUpdates, versionDeletes, versionCalls := buildScopePlan(
-				versionDirName,
-				versionValue,
-				versionPlanFields,
-				versionToPlanFields(localVersion),
-				versionToFieldMap(remoteVersion),
-			)
-			adds = append(adds, versionAdds...)
-			updates = append(updates, versionUpdates...)
-			deletes = append(deletes, versionDeletes...)
-
-			sortPlanItems(adds)
-			sortPlanItems(updates)
-			sortPlanItems(deletes)
-
-			apiCalls := buildAPICallSummary(appInfoCalls, versionCalls)
-
-			result := PushPlanResult{
-				AppID:     resolvedAppID,
-				AppInfoID: appInfoIDValue,
-				Version:   versionValue,
-				VersionID: versionIDValue,
-				Dir:       dirValue,
-				DryRun:    *dryRun,
-				Includes:  includes,
-				Adds:      adds,
-				Updates:   updates,
-				Deletes:   deletes,
-				APICalls:  apiCalls,
-			}
-
-			if !*dryRun {
-				if len(result.Deletes) > 0 {
-					if !*allowDeletes {
-						return shared.UsageError("--allow-deletes is required to apply delete operations")
-					}
-					if !*confirm {
-						return shared.UsageError("--confirm is required when applying delete operations")
-					}
-				}
-
-				actions, applyErr := applyMetadataPlan(
-					requestCtx,
-					client,
-					appInfoIDValue,
-					versionIDValue,
-					versionValue,
-					localAppInfo,
-					localVersion,
-					remoteAppInfoItems,
-					remoteVersionItems,
-					*allowDeletes,
-				)
-				if applyErr != nil {
-					return fmt.Errorf("metadata push: %w", applyErr)
-				}
-				result.Applied = true
-				result.Actions = actions
-			}
-
 			return shared.PrintOutputWithRenderers(
 				result,
 				*output.Output,

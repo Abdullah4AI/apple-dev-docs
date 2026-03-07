@@ -745,7 +745,12 @@ func WebReviewListCommand() *ffcli.Command {
 			}
 			client := webcore.NewClient(session)
 
-			submissions, err := client.ListReviewSubmissions(requestCtx, trimmedAppID)
+			var submissions []webcore.ReviewSubmission
+			err = withWebSpinner("Loading review submissions", func() error {
+				var err error
+				submissions, err = client.ListReviewSubmissions(requestCtx, trimmedAppID)
+				return err
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web review list")
 			}
@@ -811,7 +816,12 @@ Selection:
 			}
 			client := webcore.NewClient(session)
 
-			submissions, err := client.ListReviewSubmissions(requestCtx, trimmedAppID)
+			var submissions []webcore.ReviewSubmission
+			err = withWebSpinner("Loading review submissions", func() error {
+				var err error
+				submissions, err = client.ListReviewSubmissions(requestCtx, trimmedAppID)
+				return err
+			})
 			if err != nil {
 				return withWebAuthHint(err, "web review show")
 			}
@@ -827,28 +837,46 @@ Selection:
 				return shared.PrintOutput(payload, *output.Output, *output.Pretty)
 			}
 
-			items, err := client.ListReviewSubmissionItems(requestCtx, selectedSubmission.ID)
-			if err != nil {
-				return withWebAuthHint(err, "web review show")
-			}
-			threads, err := client.ListResolutionCenterThreadsBySubmission(requestCtx, selectedSubmission.ID)
-			if err != nil {
-				return withWebAuthHint(err, "web review show")
-			}
-			threadDetails, attachmentsWithURL, err := buildThreadDetails(requestCtx, client, threads, *plainText)
-			if err != nil {
-				return withWebAuthHint(err, "web review show")
-			}
-			outDirResolved := resolveShowOutDir(trimmedAppID, selectedSubmission.ID, *outDir)
-			downloads, downloadFailures, err := downloadAttachmentsForShow(
-				requestCtx,
-				client,
-				attachmentsWithURL,
-				selectedSubmission.ID,
-				outDirResolved,
-				trimmedPattern,
-				*overwrite,
+			var (
+				items              []webcore.ReviewSubmissionItem
+				threadDetails      []reviewThreadDetails
+				attachmentsWithURL []webcore.ReviewAttachment
 			)
+			err = withWebSpinner("Loading review details and attachments", func() error {
+				var err error
+				items, err = client.ListReviewSubmissionItems(requestCtx, selectedSubmission.ID)
+				if err != nil {
+					return err
+				}
+				threads, err := client.ListResolutionCenterThreadsBySubmission(requestCtx, selectedSubmission.ID)
+				if err != nil {
+					return err
+				}
+				threadDetails, attachmentsWithURL, err = buildThreadDetails(requestCtx, client, threads, *plainText)
+				return err
+			})
+			if err != nil {
+				return withWebAuthHint(err, "web review show")
+			}
+
+			outDirResolved := resolveShowOutDir(trimmedAppID, selectedSubmission.ID, *outDir)
+			var (
+				downloads        []reviewAttachmentDownloadResult
+				downloadFailures []string
+			)
+			err = withWebSpinner("Downloading review attachments", func() error {
+				var err error
+				downloads, downloadFailures, err = downloadAttachmentsForShow(
+					requestCtx,
+					client,
+					attachmentsWithURL,
+					selectedSubmission.ID,
+					outDirResolved,
+					trimmedPattern,
+					*overwrite,
+				)
+				return err
+			})
 			if err != nil {
 				return err
 			}
@@ -864,7 +892,7 @@ Selection:
 				Downloads:        downloads,
 				DownloadFailures: downloadFailures,
 			}
-			if len(downloads) == 0 {
+			if len(payload.Downloads) == 0 {
 				payload.OutputDirectory = ""
 			}
 
@@ -877,8 +905,8 @@ Selection:
 			); err != nil {
 				return err
 			}
-			if len(downloadFailures) > 0 {
-				return fmt.Errorf("review show completed with %d download failure(s)", len(downloadFailures))
+			if len(payload.DownloadFailures) > 0 {
+				return fmt.Errorf("review show completed with %d download failure(s)", len(payload.DownloadFailures))
 			}
 			return nil
 		},

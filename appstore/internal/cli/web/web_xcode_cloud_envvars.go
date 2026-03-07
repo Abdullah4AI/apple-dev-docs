@@ -125,18 +125,25 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+			result := &CIEnvVarsListResult{}
+			err = withWebSpinner("Loading Xcode Cloud workflow environment variables", func() error {
+				workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+				if err != nil {
+					return err
+				}
+				vars, err := webcore.ExtractEnvVars(workflow.Content)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud env-vars list failed: %w", err)
+				}
+
+				result = &CIEnvVarsListResult{
+					WorkflowID: wfID,
+					Variables:  vars,
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars list")
-			}
-			vars, err := webcore.ExtractEnvVars(workflow.Content)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud env-vars list failed: %w", err)
-			}
-
-			result := &CIEnvVarsListResult{
-				WorkflowID: wfID,
-				Variables:  vars,
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -212,75 +219,76 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
+			result := &CIEnvVarsSetResult{}
+			err = withWebSpinner("Updating Xcode Cloud workflow environment variables", func() error {
+				workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+				if err != nil {
+					return err
+				}
+				vars, err := webcore.ExtractEnvVars(workflow.Content)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud env-vars set failed: %w", err)
+				}
 
-			// Get current workflow
-			workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+				var envVar webcore.CIEnvironmentVariable
+				envVar.Name = varName
+
+				if *secret {
+					keyResp, err := client.GetCIEncryptionKey(requestCtx)
+					if err != nil {
+						return fmt.Errorf("xcode-cloud env-vars set failed: could not fetch encryption key: %w", err)
+					}
+					ct, err := webcore.ECIESEncrypt(keyResp.Key, varValue)
+					if err != nil {
+						return fmt.Errorf("xcode-cloud env-vars set failed: encryption error: %w", err)
+					}
+					envVar.Value = webcore.CIEnvironmentVariableValue{Ciphertext: &ct}
+				} else {
+					envVar.Value = webcore.CIEnvironmentVariableValue{Plaintext: &varValue}
+				}
+
+				found := false
+				for i, v := range vars {
+					if strings.EqualFold(v.Name, varName) {
+						envVar.ID = v.ID
+						vars[i] = envVar
+						found = true
+						break
+					}
+				}
+				if !found {
+					envVar.ID = newUUID()
+					vars = append(vars, envVar)
+				}
+
+				newContent, err := webcore.SetEnvVars(workflow.Content, vars)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud env-vars set failed: %w", err)
+				}
+				if err := client.UpdateCIWorkflow(requestCtx, teamID, pid, wfID, newContent); err != nil {
+					return err
+				}
+
+				varType := "plaintext"
+				if *secret {
+					varType = "secret"
+				}
+				action := "created"
+				if found {
+					action = "updated"
+				}
+				wfName := extractWorkflowName(workflow.Content)
+				result = &CIEnvVarsSetResult{
+					WorkflowID:   wfID,
+					WorkflowName: wfName,
+					Name:         varName,
+					Type:         varType,
+					Action:       action,
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars set")
-			}
-			vars, err := webcore.ExtractEnvVars(workflow.Content)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud env-vars set failed: %w", err)
-			}
-
-			// Build the new env var
-			var envVar webcore.CIEnvironmentVariable
-			envVar.Name = varName
-
-			if *secret {
-				// Fetch encryption key and encrypt
-				keyResp, err := client.GetCIEncryptionKey(requestCtx)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud env-vars set failed: could not fetch encryption key: %w", err)
-				}
-				ct, err := webcore.ECIESEncrypt(keyResp.Key, varValue)
-				if err != nil {
-					return fmt.Errorf("xcode-cloud env-vars set failed: encryption error: %w", err)
-				}
-				envVar.Value = webcore.CIEnvironmentVariableValue{Ciphertext: &ct}
-			} else {
-				envVar.Value = webcore.CIEnvironmentVariableValue{Plaintext: &varValue}
-			}
-
-			// Upsert: find existing by name or append
-			found := false
-			for i, v := range vars {
-				if strings.EqualFold(v.Name, varName) {
-					envVar.ID = v.ID
-					vars[i] = envVar
-					found = true
-					break
-				}
-			}
-			if !found {
-				envVar.ID = newUUID()
-				vars = append(vars, envVar)
-			}
-
-			// Update workflow
-			newContent, err := webcore.SetEnvVars(workflow.Content, vars)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud env-vars set failed: %w", err)
-			}
-			if err := client.UpdateCIWorkflow(requestCtx, teamID, pid, wfID, newContent); err != nil {
-				return withWebAuthHint(err, "xcode-cloud env-vars set")
-			}
-
-			varType := "plaintext"
-			if *secret {
-				varType = "secret"
-			}
-			action := "created"
-			if found {
-				action = "updated"
-			}
-			wfName := extractWorkflowName(workflow.Content)
-			result := &CIEnvVarsSetResult{
-				WorkflowID:   wfID,
-				WorkflowName: wfName,
-				Name:         varName,
-				Type:         varType,
-				Action:       action,
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -351,18 +359,26 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-
-			// Get current workflow
-			workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+			var (
+				workflow *webcore.CIWorkflowFull
+				vars     []webcore.CIEnvironmentVariable
+			)
+			err = withWebSpinner("Loading Xcode Cloud workflow environment variables", func() error {
+				var err error
+				workflow, err = client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+				if err != nil {
+					return err
+				}
+				vars, err = webcore.ExtractEnvVars(workflow.Content)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud env-vars delete failed: %w", err)
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud env-vars delete")
 			}
-			vars, err := webcore.ExtractEnvVars(workflow.Content)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud env-vars delete failed: %w", err)
-			}
 
-			// Find and remove the variable
 			found := false
 			filtered := make([]webcore.CIEnvironmentVariable, 0, len(vars))
 			for _, v := range vars {
@@ -376,20 +392,26 @@ Examples:
 				return fmt.Errorf("environment variable %q not found in workflow %s", varName, wfID)
 			}
 
-			// Update workflow
-			newContent, err := webcore.SetEnvVars(workflow.Content, filtered)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud env-vars delete failed: %w", err)
-			}
-			if err := client.UpdateCIWorkflow(requestCtx, teamID, pid, wfID, newContent); err != nil {
-				return withWebAuthHint(err, "xcode-cloud env-vars delete")
-			}
+			result := &CIEnvVarsDeleteResult{}
+			err = withWebSpinner("Deleting Xcode Cloud workflow environment variable", func() error {
+				newContent, err := webcore.SetEnvVars(workflow.Content, filtered)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud env-vars delete failed: %w", err)
+				}
+				if err := client.UpdateCIWorkflow(requestCtx, teamID, pid, wfID, newContent); err != nil {
+					return err
+				}
 
-			wfName := extractWorkflowName(workflow.Content)
-			result := &CIEnvVarsDeleteResult{
-				WorkflowID:   wfID,
-				WorkflowName: wfName,
-				Name:         varName,
+				wfName := extractWorkflowName(workflow.Content)
+				result = &CIEnvVarsDeleteResult{
+					WorkflowID:   wfID,
+					WorkflowName: wfName,
+					Name:         varName,
+				}
+				return nil
+			})
+			if err != nil {
+				return withWebAuthHint(err, "xcode-cloud env-vars delete")
 			}
 			return shared.PrintOutputWithRenderers(
 				result,

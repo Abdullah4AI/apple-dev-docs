@@ -172,23 +172,65 @@ func BetaBuildLocalizationsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("get", flag.ExitOnError)
 
 	id := fs.String("id", "", "Beta build localization ID")
+	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (required with --latest)")
+	latest := fs.Bool("latest", false, "Resolve latest build for --app context")
+	state := fs.String("state", "", "Latest-build state filter: PROCESSING,VALID,FAILED,INVALID,COMPLETE(alias of VALID), or all (requires --latest)")
+	locale := fs.String("locale", "", "Locale for latest-build lookup (e.g., en-US); required when latest build has multiple localizations")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "get",
-		ShortUsage: "asc beta-build-localizations get --id \"LOCALIZATION_ID\"",
+		ShortUsage: "asc beta-build-localizations get --id \"LOCALIZATION_ID\" | --app \"APP_ID\" --latest [flags]",
 		ShortHelp:  "Get a beta build localization by ID.",
-		LongHelp: `Get a beta build localization by ID.
+		LongHelp: `Get a beta build localization by ID or by latest build for an app.
 
 Examples:
-  asc beta-build-localizations get --id "LOCALIZATION_ID"`,
+  asc beta-build-localizations get --id "LOCALIZATION_ID"
+  asc beta-build-localizations get --app "123456789" --latest --state "PROCESSING,COMPLETE"
+  asc beta-build-localizations get --app "123456789" --latest --state "PROCESSING,COMPLETE" --locale "en-US"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			idValue := strings.TrimSpace(*id)
-			if idValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
+			appValue := strings.TrimSpace(*appID)
+			stateValue := strings.TrimSpace(*state)
+			localeValue := strings.TrimSpace(*locale)
+			normalizedStateValues, err := normalizeLatestBuildProcessingStateFilter(stateValue)
+			if err != nil {
+				return err
+			}
+
+			if idValue != "" {
+				if appValue != "" || *latest || stateValue != "" || localeValue != "" {
+					fmt.Fprintln(os.Stderr, "Error: --id is mutually exclusive with --app, --latest, --state, and --locale")
+					return flag.ErrHelp
+				}
+			} else {
+				if appValue == "" && !*latest {
+					fmt.Fprintln(os.Stderr, "Error: --id is required")
+					return flag.ErrHelp
+				}
+				if *latest && appValue == "" {
+					fmt.Fprintln(os.Stderr, "Error: --app is required with --latest")
+					return flag.ErrHelp
+				}
+				if !*latest && appValue != "" {
+					fmt.Fprintln(os.Stderr, "Error: --latest is required with --app")
+					return flag.ErrHelp
+				}
+			}
+			if stateValue != "" && !*latest {
+				fmt.Fprintln(os.Stderr, "Error: --state requires --latest")
 				return flag.ErrHelp
+			}
+			if localeValue != "" && !*latest {
+				fmt.Fprintln(os.Stderr, "Error: --locale requires --latest")
+				return flag.ErrHelp
+			}
+			if localeValue != "" {
+				if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
+					return fmt.Errorf("beta-build-localizations get: %w", err)
+				}
 			}
 
 			client, err := shared.GetASCClient()
@@ -198,6 +240,44 @@ Examples:
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
+
+			if idValue == "" {
+				buildValue, err := resolveLatestBuildIDForBetaBuildLocalizations(requestCtx, client, appValue, normalizedStateValues)
+				if err != nil {
+					return fmt.Errorf("beta-build-localizations get: %w", err)
+				}
+
+				opts := []asc.BetaBuildLocalizationsOption{
+					asc.WithBetaBuildLocalizationsLimit(200),
+				}
+				if localeValue != "" {
+					opts = append(opts, asc.WithBetaBuildLocalizationLocales([]string{localeValue}))
+				}
+
+				localizations, err := client.GetBetaBuildLocalizations(requestCtx, buildValue, opts...)
+				if err != nil {
+					return fmt.Errorf("beta-build-localizations get: failed to fetch latest-build localizations: %w", err)
+				}
+				if len(localizations.Data) == 0 {
+					if localeValue != "" {
+						return fmt.Errorf("beta-build-localizations get: no localization found for latest build %q and locale %q", buildValue, localeValue)
+					}
+					return fmt.Errorf("beta-build-localizations get: no localization found for latest build %q", buildValue)
+				}
+				if localeValue == "" && len(localizations.Data) > 1 {
+					return fmt.Errorf(
+						"beta-build-localizations get: latest build %q has %d localizations; pass --locale to disambiguate",
+						buildValue,
+						len(localizations.Data),
+					)
+				}
+
+				resp := &asc.BetaBuildLocalizationResponse{
+					Data:  localizations.Data[0],
+					Links: localizations.Links,
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
 
 			resp, err := client.GetBetaBuildLocalization(requestCtx, idValue)
 			if err != nil {
@@ -214,6 +294,9 @@ func BetaBuildLocalizationsCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 
 	buildID := fs.String("build", "", "Build ID")
+	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (required with --latest)")
+	latest := fs.Bool("latest", false, "Resolve latest build for --app context")
+	state := fs.String("state", "", "Latest-build state filter: PROCESSING,VALID,FAILED,INVALID,COMPLETE(alias of VALID), or all (requires --latest)")
 	locale := fs.String("locale", "", "Locale (e.g., en-US)")
 	whatsNew := fs.String("whats-new", "", "What to Test notes")
 	upsert := fs.Bool("upsert", false, "Create-or-update by locale (idempotent)")
@@ -227,13 +310,37 @@ func BetaBuildLocalizationsCreateCommand() *ffcli.Command {
 
 Examples:
   asc beta-build-localizations create --build "BUILD_ID" --locale "en-US" --whats-new "Test instructions"
+  asc beta-build-localizations create --app "123456789" --latest --state "PROCESSING,COMPLETE" --locale "en-US" --whats-new "Test instructions"
   asc beta-build-localizations create --build "BUILD_ID" --locale "en-US" --whats-new "Test instructions" --upsert`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			buildValue := strings.TrimSpace(*buildID)
-			if buildValue == "" {
+			appValue := strings.TrimSpace(*appID)
+			stateValue := strings.TrimSpace(*state)
+			normalizedStateValues, err := normalizeLatestBuildProcessingStateFilter(stateValue)
+			if err != nil {
+				return err
+			}
+
+			if buildValue == "" && appValue == "" && !*latest {
 				fmt.Fprintln(os.Stderr, "Error: --build is required")
+				return flag.ErrHelp
+			}
+			if buildValue != "" && (appValue != "" || *latest || stateValue != "") {
+				fmt.Fprintln(os.Stderr, "Error: --build is mutually exclusive with --app, --latest, and --state")
+				return flag.ErrHelp
+			}
+			if *latest && appValue == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required with --latest")
+				return flag.ErrHelp
+			}
+			if !*latest && appValue != "" {
+				fmt.Fprintln(os.Stderr, "Error: --latest is required with --app")
+				return flag.ErrHelp
+			}
+			if stateValue != "" && !*latest {
+				fmt.Fprintln(os.Stderr, "Error: --state requires --latest")
 				return flag.ErrHelp
 			}
 
@@ -259,6 +366,13 @@ Examples:
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
+
+			if buildValue == "" {
+				buildValue, err = resolveLatestBuildIDForBetaBuildLocalizations(requestCtx, client, appValue, normalizedStateValues)
+				if err != nil {
+					return fmt.Errorf("beta-build-localizations create: %w", err)
+				}
+			}
 
 			attrs := asc.BetaBuildLocalizationAttributes{
 				Locale:   localeValue,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // PhasedReleaseState represents the state of a phased release.
@@ -77,6 +78,29 @@ type AppStoreVersionPhasedReleaseUpdateAttributes struct {
 type AppStoreVersionPhasedReleaseDeleteResult struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
+}
+
+// FormatPhasedReleaseProgressBar renders the phased release day as a deterministic
+// seven-step ASCII progress bar for human-facing outputs.
+func FormatPhasedReleaseProgressBar(currentDayNumber int) string {
+	day := currentDayNumber
+	if day < 0 {
+		day = 0
+	}
+	if day > 7 {
+		day = 7
+	}
+
+	const barWidth = 10
+	filled := (day * barWidth) / 7
+	if day > 0 && filled == 0 {
+		filled = 1
+	}
+	if filled > barWidth {
+		filled = barWidth
+	}
+
+	return fmt.Sprintf("[%s%s] %d/7", strings.Repeat("#", filled), strings.Repeat("-", barWidth-filled), day)
 }
 
 // GetAppStoreVersionPhasedRelease fetches the phased release for an app store version.

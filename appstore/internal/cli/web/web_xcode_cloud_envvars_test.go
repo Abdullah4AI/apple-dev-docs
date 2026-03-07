@@ -776,6 +776,12 @@ func TestEnvVarsDelete_NotFound(t *testing.T) {
 		if !strings.Contains(err.Error(), "not found") {
 			t.Fatalf("expected 'not found' error, got %v", err)
 		}
+		if strings.Contains(err.Error(), "xcode-cloud env-vars delete failed:") {
+			t.Fatalf("expected raw not-found error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "web session is unauthorized or expired") {
+			t.Fatalf("expected no auth hint for not-found error, got %v", err)
+		}
 	})
 }
 

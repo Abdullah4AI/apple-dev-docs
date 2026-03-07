@@ -5,11 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
@@ -32,11 +30,13 @@ func ValidateSubscriptionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "subscriptions",
 		ShortUsage: "asc validate subscriptions --app \"APP_ID\" [flags]",
-		ShortHelp:  "Validate subscription review readiness (warning-only by default).",
+		ShortHelp:  "Validate subscription review readiness and promotional image guidance.",
 		LongHelp: `Validate review readiness for auto-renewable subscriptions.
 
-This command is conservative: it emits warnings for subscriptions that look
-unsubmitted or need action, but it does not block by default (use --strict for CI).
+This command is conservative: it emits warnings for subscriptions that need
+review attention or are missing promotional images Apple uses for App Store
+promotion, offer-code redemption pages, and win-back offers. Use --strict to
+gate on warnings in CI.
 
 Examples:
   asc validate subscriptions --app "APP_ID"
@@ -67,65 +67,9 @@ func runValidateSubscriptions(ctx context.Context, opts validateSubscriptionsOpt
 		return fmt.Errorf("validate subscriptions: %w", err)
 	}
 
-	groupsCtx, groupsCancel := shared.ContextWithTimeout(ctx)
-	groupsResp, err := client.GetSubscriptionGroups(groupsCtx, opts.AppID, asc.WithSubscriptionGroupsLimit(200))
-	groupsCancel()
+	subs, err := fetchSubscriptionsFn(ctx, client, opts.AppID)
 	if err != nil {
-		return fmt.Errorf("validate subscriptions: failed to fetch subscription groups: %w", err)
-	}
-
-	paginatedGroups, err := asc.PaginateAll(ctx, groupsResp, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-		defer pageCancel()
-		return client.GetSubscriptionGroups(pageCtx, opts.AppID, asc.WithSubscriptionGroupsNextURL(nextURL))
-	})
-	if err != nil {
-		return fmt.Errorf("validate subscriptions: paginate subscription groups: %w", err)
-	}
-
-	groups, ok := paginatedGroups.(*asc.SubscriptionGroupsResponse)
-	if !ok {
-		return fmt.Errorf("validate subscriptions: unexpected subscription groups response type %T", paginatedGroups)
-	}
-
-	subs := make([]validation.Subscription, 0)
-	for _, group := range groups.Data {
-		groupID := strings.TrimSpace(group.ID)
-		if groupID == "" {
-			continue
-		}
-
-		subsCtx, subsCancel := shared.ContextWithTimeout(ctx)
-		subsResp, err := client.GetSubscriptions(subsCtx, groupID, asc.WithSubscriptionsLimit(200))
-		subsCancel()
-		if err != nil {
-			return fmt.Errorf("validate subscriptions: failed to fetch subscriptions for group %s: %w", groupID, err)
-		}
-
-		paginatedSubs, err := asc.PaginateAll(ctx, subsResp, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
-			pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-			defer pageCancel()
-			return client.GetSubscriptions(pageCtx, groupID, asc.WithSubscriptionsNextURL(nextURL))
-		})
-		if err != nil {
-			return fmt.Errorf("validate subscriptions: paginate subscriptions: %w", err)
-		}
-
-		subsResult, ok := paginatedSubs.(*asc.SubscriptionsResponse)
-		if !ok {
-			return fmt.Errorf("validate subscriptions: unexpected subscriptions response type %T", paginatedSubs)
-		}
-
-		for _, sub := range subsResult.Data {
-			attrs := sub.Attributes
-			subs = append(subs, validation.Subscription{
-				ID:        sub.ID,
-				Name:      attrs.Name,
-				ProductID: attrs.ProductID,
-				State:     attrs.State,
-				GroupID:   groupID,
-			})
-		}
+		return fmt.Errorf("validate subscriptions: %w", err)
 	}
 
 	report := validation.ValidateSubscriptions(validation.SubscriptionsInput{

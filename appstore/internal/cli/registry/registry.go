@@ -59,10 +59,12 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/profiles"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/promotedpurchases"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/publish"
+	releasecmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/release"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/releasenotes"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/reviews"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/routingcoverage"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/sandbox"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/schema"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/screenshots"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/signing"
@@ -139,6 +141,7 @@ func Subcommands(version string) []*ffcli.Command {
 		builds.BuildsCommand(),
 		buildbundles.BuildBundlesCommand(),
 		publish.PublishCommand(),
+		releasecmd.ReleaseCommand(),
 		workflow.WorkflowCommand(),
 		versions.VersionsCommand(),
 		productpages.ProductPagesCommand(),
@@ -175,6 +178,7 @@ func Subcommands(version string) []*ffcli.Command {
 		migrate.MigrateCommand(),
 		notify.NotifyCommand(),
 		gamecenter.GameCenterCommand(),
+		schema.SchemaCommand(),
 		VersionCommand(version),
 	}
 

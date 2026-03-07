@@ -1275,6 +1275,7 @@ func TestBuildBuildsQuery(t *testing.T) {
 		WithBuildsNextURL("https://api.appstoreconnect.apple.com/v1/apps/123/builds?cursor=abc"),
 		WithBuildsSort("-uploadedDate"),
 		WithBuildsVersion("42"),
+		WithBuildsPreReleaseVersionVersion("2.4.0"),
 	}
 	for _, opt := range opts {
 		opt(query)
@@ -1291,6 +1292,9 @@ func TestBuildBuildsQuery(t *testing.T) {
 	}
 	if query.version != "42" {
 		t.Fatalf("expected version=42, got %q", query.version)
+	}
+	if query.preReleaseVersion != "2.4.0" {
+		t.Fatalf("expected preReleaseVersion=2.4.0, got %q", query.preReleaseVersion)
 	}
 }
 

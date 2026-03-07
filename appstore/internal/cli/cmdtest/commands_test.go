@@ -453,6 +453,8 @@ func TestBuildsGroupValidationErrors(t *testing.T) {
 }
 
 func TestBuildsWaitValidationErrors(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+
 	tests := []struct {
 		name    string
 		args    []string
@@ -461,12 +463,17 @@ func TestBuildsWaitValidationErrors(t *testing.T) {
 		{
 			name:    "builds wait missing selectors",
 			args:    []string{"builds", "wait"},
-			wantErr: "Error: --build is required, or provide --app and --build-number",
+			wantErr: "Error: --app is required when --build is not provided",
+		},
+		{
+			name:    "builds wait app missing selector hints",
+			args:    []string{"builds", "wait", "--app", "APP_123"},
+			wantErr: "provide at least one app-scoped selector",
 		},
 		{
 			name:    "builds wait selectors mutually exclusive",
 			args:    []string{"builds", "wait", "--build", "BUILD_123", "--app", "APP_123", "--build-number", "42"},
-			wantErr: "--build is mutually exclusive with --app/--build-number",
+			wantErr: "--build is mutually exclusive with app-scoped selectors",
 		},
 		{
 			name:    "builds wait invalid poll interval",
@@ -477,6 +484,11 @@ func TestBuildsWaitValidationErrors(t *testing.T) {
 			name:    "builds wait invalid timeout",
 			args:    []string{"builds", "wait", "--build", "BUILD_123", "--timeout", "0s"},
 			wantErr: "--timeout must be greater than 0",
+		},
+		{
+			name:    "builds wait invalid since timestamp",
+			args:    []string{"builds", "wait", "--app", "APP_123", "--newest", "--since", "nope"},
+			wantErr: "--since must be an RFC3339 timestamp",
 		},
 	}
 
@@ -4975,7 +4987,7 @@ func TestXcodeCloudValidationErrors(t *testing.T) {
 		{
 			name:    "xcode-cloud run missing branch",
 			args:    []string{"xcode-cloud", "run", "--workflow-id", "WF_ID"},
-			wantErr: "--branch or --git-reference-id is required",
+			wantErr: "--branch, --git-reference-id, or --pull-request-id is required",
 		},
 		{
 			name:    "xcode-cloud run workflow by name without app",
@@ -5036,6 +5048,11 @@ func TestXcodeCloudValidationErrors(t *testing.T) {
 			name:    "xcode-cloud build-runs missing workflow-id",
 			args:    []string{"xcode-cloud", "build-runs"},
 			wantErr: "--workflow-id is required",
+		},
+		{
+			name:    "xcode-cloud build-runs get missing id",
+			args:    []string{"xcode-cloud", "build-runs", "get"},
+			wantErr: "--id is required",
 		},
 		{
 			name:    "xcode-cloud build-runs builds missing run-id",
@@ -5199,6 +5216,16 @@ func TestXcodeCloudMutualExclusiveFlags(t *testing.T) {
 			name:    "xcode-cloud run branch and git-reference-id are mutually exclusive",
 			args:    []string{"xcode-cloud", "run", "--workflow-id", "WF_ID", "--branch", "main", "--git-reference-id", "REF_ID"},
 			wantErr: "--branch and --git-reference-id are mutually exclusive",
+		},
+		{
+			name:    "xcode-cloud run branch and pull-request-id are mutually exclusive",
+			args:    []string{"xcode-cloud", "run", "--workflow-id", "WF_ID", "--branch", "main", "--pull-request-id", "PR_ID"},
+			wantErr: "--branch, --git-reference-id, and --pull-request-id are mutually exclusive",
+		},
+		{
+			name:    "xcode-cloud run source-run-id conflicts with workflow",
+			args:    []string{"xcode-cloud", "run", "--source-run-id", "RUN_ID", "--workflow-id", "WF_ID"},
+			wantErr: "--source-run-id is mutually exclusive with --workflow and --workflow-id",
 		},
 		{
 			name:    "xcode-cloud run invalid poll-interval",

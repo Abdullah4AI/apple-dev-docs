@@ -84,10 +84,10 @@ func contextWithXcodeCloudTimeout(ctx context.Context, timeout time.Duration) (c
 	return context.WithTimeout(ctx, timeout)
 }
 
-func getCiBuildRunWithRetry(ctx context.Context, client *asc.Client, buildRunID string) (*asc.CiBuildRunResponse, error) {
+func getCiBuildRunWithRetry(ctx context.Context, client *asc.Client, buildRunID string, opts ...asc.CiBuildRunGetOption) (*asc.CiBuildRunResponse, error) {
 	retryOpts := asc.ResolveRetryOptions()
 	return asc.WithRetry(ctx, func() (*asc.CiBuildRunResponse, error) {
-		resp, err := client.GetCiBuildRun(ctx, buildRunID)
+		resp, err := client.GetCiBuildRun(ctx, buildRunID, opts...)
 		if err != nil {
 			if isTransientNetworkError(err) {
 				return nil, &asc.RetryableError{Err: err}

@@ -111,6 +111,7 @@ type buildsQuery struct {
 	listQuery
 	sort                 string
 	version              string
+	preReleaseVersion    string
 	processingStates     []string
 	preReleasePlatforms  []string
 	preReleaseVersionIDs []string

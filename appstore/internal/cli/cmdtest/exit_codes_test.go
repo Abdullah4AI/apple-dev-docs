@@ -214,6 +214,11 @@ func TestRun_UsageValidationErrorsReturnExitUsage(t *testing.T) {
 			wantErr: "--workflow and --workflow-id are mutually exclusive",
 		},
 		{
+			name:    "xcode-cloud run source-run conflicts with workflow flags",
+			args:    []string{"xcode-cloud", "run", "--source-run-id", "RUN_123", "--workflow-id", "WF_ID"},
+			wantErr: "--source-run-id is mutually exclusive with --workflow and --workflow-id",
+		},
+		{
 			name:    "publish appstore invalid timeout",
 			args:    []string{"publish", "appstore", "--app", "APP_123", "--ipa", "app.ipa", "--version", "1.0.0", "--timeout", "-1s"},
 			wantErr: "--timeout must be greater than 0",
@@ -226,7 +231,7 @@ func TestRun_UsageValidationErrorsReturnExitUsage(t *testing.T) {
 		{
 			name:    "builds wait missing selector",
 			args:    []string{"builds", "wait"},
-			wantErr: "--build is required, or provide --app and --build-number",
+			wantErr: "--app is required when --build is not provided",
 		},
 		{
 			name:    "builds find missing build-number",

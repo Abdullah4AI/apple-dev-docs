@@ -12,6 +12,9 @@ func Validate(input Input, strict bool) Report {
 	checks = append(checks, availabilityChecks(input.AppID, input.AvailabilityID, input.AvailableTerritories)...)
 	checks = append(checks, screenshotPresenceChecks(input.PrimaryLocale, input.VersionLocalizations, input.ScreenshotSets)...)
 	checks = append(checks, screenshotChecks(input.Platform, input.ScreenshotSets)...)
+	checks = append(checks, subscriptionFetchChecks(input.SubscriptionFetchSkipReason)...)
+	checks = append(checks, subscriptionImageChecks(input.Subscriptions)...)
+	checks = append(checks, subscriptionReviewReadinessChecks(input.Subscriptions)...)
 	checks = append(checks, ageRatingChecks(input.AgeRatingDeclaration)...)
 
 	summary := summarize(checks, strict)

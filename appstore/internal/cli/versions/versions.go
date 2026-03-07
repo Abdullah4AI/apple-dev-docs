@@ -232,6 +232,9 @@ func VersionsCreateCommand() *ffcli.Command {
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	copyright := fs.String("copyright", "", "Copyright text (e.g., '2026 My Company')")
 	releaseType := fs.String("release-type", "", "Release type: MANUAL, AFTER_APPROVAL, SCHEDULED")
+	copyMetadataFrom := fs.String("copy-metadata-from", "", "Copy localization metadata from this source version string")
+	copyFields := fs.String("copy-fields", "", "Comma-separated metadata fields to copy: description, keywords, marketingUrl, promotionalText, supportUrl, whatsNew")
+	excludeFields := fs.String("exclude-fields", "", "Comma-separated metadata fields to exclude from copy")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -243,7 +246,9 @@ func VersionsCreateCommand() *ffcli.Command {
 Examples:
   asc versions create --app "123456789" --version "2.0.0"
   asc versions create --app "123456789" --version "2.0.0" --platform IOS
-  asc versions create --app "123456789" --version "2.0.0" --copyright "2026 My Company" --release-type MANUAL`,
+  asc versions create --app "123456789" --version "2.0.0" --copyright "2026 My Company" --release-type MANUAL
+  asc versions create --app "123456789" --version "2.4.0" --platform IOS --copy-metadata-from "2.3.2"
+  asc versions create --app "123456789" --version "2.4.0" --copy-metadata-from "2.3.2" --copy-fields "description,keywords,supportUrl" --exclude-fields "whatsNew"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -261,6 +266,31 @@ Examples:
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
 				return flag.ErrHelp
+			}
+
+			copyMetadataFromValue := strings.TrimSpace(*copyMetadataFrom)
+			copyFieldsValue, err := normalizeVersionMetadataCopyFields(*copyFields, "--copy-fields")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return flag.ErrHelp
+			}
+			excludeFieldsValue, err := normalizeVersionMetadataCopyFields(*excludeFields, "--exclude-fields")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return flag.ErrHelp
+			}
+			if copyMetadataFromValue == "" && (len(copyFieldsValue) > 0 || len(excludeFieldsValue) > 0) {
+				fmt.Fprintln(os.Stderr, "Error: --copy-metadata-from is required when using --copy-fields or --exclude-fields")
+				return flag.ErrHelp
+			}
+
+			selectedCopyFields := []string(nil)
+			if copyMetadataFromValue != "" {
+				selectedCopyFields, err = resolveVersionMetadataCopyFields(copyFieldsValue, excludeFieldsValue)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					return flag.ErrHelp
+				}
 			}
 
 			client, err := shared.GetASCClient()
@@ -292,6 +322,24 @@ Examples:
 				VersionString: resp.Data.Attributes.VersionString,
 				Platform:      string(resp.Data.Attributes.Platform),
 				State:         shared.ResolveAppStoreVersionState(resp.Data.Attributes),
+			}
+			if copyMetadataFromValue != "" {
+				copySummary, err := copyVersionMetadataFromSource(
+					requestCtx,
+					client,
+					resolvedAppID,
+					normalizedPlatform,
+					copyMetadataFromValue,
+					resp.Data.ID,
+					selectedCopyFields,
+				)
+				if err != nil {
+					return fmt.Errorf("versions create: %w", err)
+				}
+				if len(copySummary.SkippedLocales) > 0 {
+					fmt.Fprintf(os.Stderr, "Warning: skipped source locales not enabled on destination: %s\n", strings.Join(copySummary.SkippedLocales, ", "))
+				}
+				result.MetadataCopy = copySummary
 			}
 
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)

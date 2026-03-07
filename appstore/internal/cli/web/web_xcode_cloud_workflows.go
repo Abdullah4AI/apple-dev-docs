@@ -130,32 +130,39 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+			result := &CIWorkflowDescribeResult{}
+			err = withWebSpinner("Loading Xcode Cloud workflow details", func() error {
+				workflow, err := client.GetCIWorkflow(requestCtx, teamID, pid, wfID)
+				if err != nil {
+					return err
+				}
+
+				config, err := webcore.ExtractWorkflowConfig(workflow.Content)
+				if err != nil {
+					return fmt.Errorf("xcode-cloud workflows describe failed: %w", err)
+				}
+
+				result = &CIWorkflowDescribeResult{
+					ProductID:                   pid,
+					WorkflowID:                  wfID,
+					Name:                        config.Name,
+					Description:                 config.Description,
+					Disabled:                    config.Disabled,
+					Locked:                      config.Locked,
+					XcodeVersion:                config.XcodeVersion,
+					MacOSVersion:                config.MacOSVersion,
+					Clean:                       config.Clean,
+					ContainerFilePath:           config.ContainerFilePath,
+					ProductEnvironmentVariables: config.ProductEnvironmentVariables,
+					StartConditions:             config.StartConditions,
+					Actions:                     config.Actions,
+					PostActions:                 config.PostActions,
+					Repo:                        config.Repo,
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud workflows describe")
-			}
-
-			config, err := webcore.ExtractWorkflowConfig(workflow.Content)
-			if err != nil {
-				return fmt.Errorf("xcode-cloud workflows describe failed: %w", err)
-			}
-
-			result := &CIWorkflowDescribeResult{
-				ProductID:                   pid,
-				WorkflowID:                  wfID,
-				Name:                        config.Name,
-				Description:                 config.Description,
-				Disabled:                    config.Disabled,
-				Locked:                      config.Locked,
-				XcodeVersion:                config.XcodeVersion,
-				MacOSVersion:                config.MacOSVersion,
-				Clean:                       config.Clean,
-				ContainerFilePath:           config.ContainerFilePath,
-				ProductEnvironmentVariables: config.ProductEnvironmentVariables,
-				StartConditions:             config.StartConditions,
-				Actions:                     config.Actions,
-				PostActions:                 config.PostActions,
-				Repo:                        config.Repo,
 			}
 
 			return shared.PrintOutputWithRenderers(
@@ -297,51 +304,60 @@ func executeWorkflowToggle(
 	}
 
 	client := newCIClientFn(session)
-	workflow, err := client.GetCIWorkflow(requestCtx, teamID, productID, workflowID)
+	var result *CIWorkflowToggleResult
+	err = withWebSpinner("Updating Xcode Cloud workflow", func() error {
+		workflow, err := client.GetCIWorkflow(requestCtx, teamID, productID, workflowID)
+		if err != nil {
+			return err
+		}
+
+		config, err := webcore.ExtractWorkflowConfig(workflow.Content)
+		if err != nil {
+			return fmt.Errorf("%s failed: %w", errorPrefix, err)
+		}
+
+		before := config.Disabled
+		changed := before != disabled
+		action := "enabled"
+		if disabled {
+			action = "disabled"
+		}
+
+		if changed {
+			newContent, err := webcore.SetWorkflowDisabled(workflow.Content, disabled)
+			if err != nil {
+				return fmt.Errorf("%s failed: %w", errorPrefix, err)
+			}
+			if err := client.UpdateCIWorkflow(requestCtx, teamID, productID, workflowID, newContent); err != nil {
+				return err
+			}
+		} else if disabled {
+			action = "already-disabled"
+		} else {
+			action = "already-enabled"
+		}
+
+		workflowName := strings.TrimSpace(config.Name)
+		if workflowName == "" {
+			workflowName = "unknown"
+		}
+
+		result = &CIWorkflowToggleResult{
+			ProductID:      productID,
+			WorkflowID:     workflowID,
+			WorkflowName:   workflowName,
+			Action:         action,
+			DisabledBefore: before,
+			DisabledAfter:  disabled,
+			Changed:        changed,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, withWebAuthHint(err, errorPrefix)
 	}
 
-	config, err := webcore.ExtractWorkflowConfig(workflow.Content)
-	if err != nil {
-		return nil, fmt.Errorf("%s failed: %w", errorPrefix, err)
-	}
-
-	before := config.Disabled
-	changed := before != disabled
-	action := "enabled"
-	if disabled {
-		action = "disabled"
-	}
-
-	if changed {
-		newContent, err := webcore.SetWorkflowDisabled(workflow.Content, disabled)
-		if err != nil {
-			return nil, fmt.Errorf("%s failed: %w", errorPrefix, err)
-		}
-		if err := client.UpdateCIWorkflow(requestCtx, teamID, productID, workflowID, newContent); err != nil {
-			return nil, withWebAuthHint(err, errorPrefix)
-		}
-	} else if disabled {
-		action = "already-disabled"
-	} else {
-		action = "already-enabled"
-	}
-
-	workflowName := strings.TrimSpace(config.Name)
-	if workflowName == "" {
-		workflowName = "unknown"
-	}
-
-	return &CIWorkflowToggleResult{
-		ProductID:      productID,
-		WorkflowID:     workflowID,
-		WorkflowName:   workflowName,
-		Action:         action,
-		DisabledBefore: before,
-		DisabledAfter:  disabled,
-		Changed:        changed,
-	}, nil
+	return result, nil
 }
 
 func renderWorkflowDescribeTable(result *CIWorkflowDescribeResult) error {

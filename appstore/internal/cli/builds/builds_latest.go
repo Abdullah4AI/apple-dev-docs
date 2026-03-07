@@ -24,6 +24,7 @@ func BuildsLatestCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (required, or ASC_APP_ID env)")
 	version := fs.String("version", "", "Filter by version string (e.g., 1.2.3); requires --platform for deterministic results")
 	platform := fs.String("platform", "", "Filter by platform: IOS, MAC_OS, TV_OS, VISION_OS")
+	processingState := fs.String("processing-state", "", "Filter by processing state: VALID, PROCESSING, FAILED, INVALID, or all")
 	output := shared.BindOutputFlags(fs)
 	next := fs.Bool("next", false, "Return next build number using processed builds and in-flight uploads")
 	initialBuildNumber := fs.Int("initial-build-number", 1, "Initial build number when none exist (used with --next)")
@@ -47,6 +48,10 @@ Platform and version filtering:
   --version alone     Returns latest build for that version (may be any platform)
   --platform + --version  Returns latest build matching both (recommended)
 
+Processing state filtering:
+  --processing-state  Filter by build processing states (VALID, PROCESSING,
+                      FAILED, INVALID) or use "all"
+
 Next build number mode:
   --next              Returns the next build number (latest + 1) using
                       processed builds and in-flight uploads
@@ -66,6 +71,9 @@ Examples:
 
   # Get latest build for a version (any platform - nondeterministic if multi-platform)
   asc builds latest --app "123456789" --version "1.2.3"
+
+  # Get latest build constrained to processing states
+  asc builds latest --app "123456789" --processing-state "PROCESSING,VALID"
 
   # Human-readable output
   asc builds latest --app "123456789" --output table
@@ -98,6 +106,10 @@ Examples:
 			}
 
 			normalizedVersion := strings.TrimSpace(*version)
+			processingStateValues, err := normalizeBuildProcessingStateFilter(*processingState)
+			if err != nil {
+				return err
+			}
 			if *initialBuildNumber < 1 {
 				fmt.Fprintf(os.Stderr, "Error: --initial-build-number must be >= 1\n\n")
 				return flag.ErrHelp
@@ -152,6 +164,9 @@ Examples:
 					asc.WithBuildsSort("-uploadedDate"),
 					asc.WithBuildsLimit(200),
 				}
+				if len(processingStateValues) > 0 {
+					opts = append(opts, asc.WithBuildsProcessingStates(processingStateValues))
+				}
 				if excludeExpiredValue {
 					opts = append(opts, asc.WithBuildsExpired(false))
 				}
@@ -169,6 +184,9 @@ Examples:
 					asc.WithBuildsSort("-uploadedDate"),
 					asc.WithBuildsLimit(1),
 					asc.WithBuildsPreReleaseVersion(preReleaseVersionIDs[0]),
+				}
+				if len(processingStateValues) > 0 {
+					opts = append(opts, asc.WithBuildsProcessingStates(processingStateValues))
 				}
 				if excludeExpiredValue {
 					opts = append(opts, asc.WithBuildsExpired(false))
@@ -197,6 +215,9 @@ Examples:
 						asc.WithBuildsSort("-uploadedDate"),
 						asc.WithBuildsLimit(1),
 						asc.WithBuildsPreReleaseVersion(prvID),
+					}
+					if len(processingStateValues) > 0 {
+						opts = append(opts, asc.WithBuildsProcessingStates(processingStateValues))
 					}
 					if excludeExpiredValue {
 						opts = append(opts, asc.WithBuildsExpired(false))

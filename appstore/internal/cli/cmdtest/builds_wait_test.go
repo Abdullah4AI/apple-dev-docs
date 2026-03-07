@@ -2,6 +2,7 @@ package cmdtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -56,6 +57,19 @@ func TestBuildsWaitByBuildIDPollsUntilValid(t *testing.T) {
 
 	if !strings.Contains(stdout, `"id":"build-1"`) {
 		t.Fatalf("expected build output, got %q", stdout)
+	}
+	waitResult := parseBuildsWaitJSON(t, stdout)
+	if waitResult.BuildID != "build-1" {
+		t.Fatalf("expected buildId=build-1, got %q", waitResult.BuildID)
+	}
+	if waitResult.BuildNumber != "42" {
+		t.Fatalf("expected buildNumber=42, got %q", waitResult.BuildNumber)
+	}
+	if waitResult.ProcessingState != "VALID" {
+		t.Fatalf("expected processingState=VALID, got %q", waitResult.ProcessingState)
+	}
+	if strings.TrimSpace(waitResult.Elapsed) == "" {
+		t.Fatalf("expected non-empty elapsed in output, got %q", waitResult.Elapsed)
 	}
 	if !strings.Contains(stderr, "Waiting for build build-1... (PROCESSING") {
 		t.Fatalf("expected processing progress output, got %q", stderr)
@@ -149,8 +163,250 @@ func TestBuildsWaitByAppAndBuildNumberResolvesThenWaits(t *testing.T) {
 	if !strings.Contains(stdout, `"id":"build-42"`) {
 		t.Fatalf("expected build output, got %q", stdout)
 	}
+	waitResult := parseBuildsWaitJSON(t, stdout)
+	if waitResult.BuildID != "build-42" {
+		t.Fatalf("expected buildId=build-42, got %q", waitResult.BuildID)
+	}
+	if waitResult.BuildNumber != "42" {
+		t.Fatalf("expected buildNumber=42, got %q", waitResult.BuildNumber)
+	}
+	if waitResult.ProcessingState != "VALID" {
+		t.Fatalf("expected processingState=VALID, got %q", waitResult.ProcessingState)
+	}
 	if !strings.Contains(stderr, "Waiting for build build-42... (VALID") {
 		t.Fatalf("expected wait progress output, got %q", stderr)
+	}
+}
+
+func TestBuildsWaitByAppNewestDiscoversThenWaits(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.URL.Path != "/v1/builds" {
+				t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+			}
+			query := req.URL.Query()
+			if query.Get("filter[app]") != "123456789" {
+				t.Fatalf("expected filter[app]=123456789, got %q", query.Get("filter[app]"))
+			}
+			if query.Get("sort") != "-uploadedDate" {
+				t.Fatalf("expected sort=-uploadedDate, got %q", query.Get("sort"))
+			}
+			if query.Get("limit") != "1" {
+				t.Fatalf("expected limit=1, got %q", query.Get("limit"))
+			}
+			body := `{"data":[]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case 2:
+			if req.URL.Path != "/v1/builds" {
+				t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+			}
+			body := `{"data":[{"type":"builds","id":"build-99","attributes":{"uploadedDate":"2026-03-02T18:01:00Z","processingState":"PROCESSING","version":"99"}}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case 3:
+			if req.URL.Path != "/v1/builds/build-99" {
+				t.Fatalf("expected path /v1/builds/build-99, got %s", req.URL.Path)
+			}
+			body := `{"data":{"type":"builds","id":"build-99","attributes":{"processingState":"VALID","version":"99"}}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"builds", "wait",
+			"--app", "123456789",
+			"--newest",
+			"--poll-interval", "1ms",
+			"--timeout", "250ms",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	waitResult := parseBuildsWaitJSON(t, stdout)
+	if waitResult.BuildID != "build-99" {
+		t.Fatalf("expected buildId=build-99, got %q", waitResult.BuildID)
+	}
+	if waitResult.BuildNumber != "99" {
+		t.Fatalf("expected buildNumber=99, got %q", waitResult.BuildNumber)
+	}
+	if waitResult.ProcessingState != "VALID" {
+		t.Fatalf("expected processingState=VALID, got %q", waitResult.ProcessingState)
+	}
+	if !strings.Contains(stderr, "Waiting for build discovery") {
+		t.Fatalf("expected discovery progress output, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "Waiting for build build-99... (VALID") {
+		t.Fatalf("expected wait progress output, got %q", stderr)
+	}
+}
+
+func TestBuildsWaitByAppWithSinceSkipsOlderMatch(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.URL.Path != "/v1/builds" {
+				t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+			}
+			query := req.URL.Query()
+			if query.Get("filter[preReleaseVersion.version]") != "2.4.0" {
+				t.Fatalf("expected filter[preReleaseVersion.version]=2.4.0, got %q", query.Get("filter[preReleaseVersion.version]"))
+			}
+			if query.Get("filter[version]") != "2" {
+				t.Fatalf("expected filter[version]=2, got %q", query.Get("filter[version]"))
+			}
+			body := `{"data":[{"type":"builds","id":"build-old","attributes":{"uploadedDate":"2026-03-02T17:59:00Z","processingState":"PROCESSING","version":"2"}}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case 2:
+			if req.URL.Path != "/v1/builds" {
+				t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+			}
+			body := `{"data":[{"type":"builds","id":"build-new","attributes":{"uploadedDate":"2026-03-02T18:01:00Z","processingState":"PROCESSING","version":"2"}}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case 3:
+			if req.URL.Path != "/v1/builds/build-new" {
+				t.Fatalf("expected path /v1/builds/build-new, got %s", req.URL.Path)
+			}
+			body := `{"data":{"type":"builds","id":"build-new","attributes":{"processingState":"VALID","version":"2"}}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, _ := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"builds", "wait",
+			"--app", "123456789",
+			"--version", "2.4.0",
+			"--build-number", "2",
+			"--since", "2026-03-02T18:00:00Z",
+			"--poll-interval", "1ms",
+			"--timeout", "250ms",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	waitResult := parseBuildsWaitJSON(t, stdout)
+	if waitResult.BuildID != "build-new" {
+		t.Fatalf("expected buildId=build-new, got %q", waitResult.BuildID)
+	}
+	if waitResult.BuildNumber != "2" {
+		t.Fatalf("expected buildNumber=2, got %q", waitResult.BuildNumber)
+	}
+}
+
+func TestBuildsWaitByAppDiscoveryTimeoutReturnsError(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/builds" {
+			t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+		}
+		body := `{"data":[]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, _ := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"builds", "wait",
+			"--app", "123456789",
+			"--newest",
+			"--poll-interval", "1ms",
+			"--timeout", "10ms",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(runErr.Error(), "timed out resolving build selector") {
+		t.Fatalf("expected timeout resolving selector error, got %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout on timeout, got %q", stdout)
 	}
 }
 
@@ -204,4 +460,28 @@ func TestBuildsWaitFailOnInvalidReturnsError(t *testing.T) {
 	if !strings.Contains(stderr, "Waiting for build build-1... (INVALID") {
 		t.Fatalf("expected progress output on stderr, got %q", stderr)
 	}
+}
+
+type buildsWaitJSONResult struct {
+	Data struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Version         string `json:"version"`
+			ProcessingState string `json:"processingState"`
+		} `json:"attributes"`
+	} `json:"data"`
+	BuildID         string `json:"buildId"`
+	BuildNumber     string `json:"buildNumber"`
+	ProcessingState string `json:"processingState"`
+	Elapsed         string `json:"elapsed"`
+}
+
+func parseBuildsWaitJSON(t *testing.T, stdout string) buildsWaitJSONResult {
+	t.Helper()
+
+	var parsed buildsWaitJSONResult
+	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
+		t.Fatalf("failed to parse builds wait output JSON %q: %v", stdout, err)
+	}
+	return parsed
 }

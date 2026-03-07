@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
@@ -16,7 +17,7 @@ type webSessionFlags struct {
 
 func bindWebSessionFlags(fs *flag.FlagSet) webSessionFlags {
 	return webSessionFlags{
-		appleID:       fs.String("apple-id", "", "Apple ID email used to scope a user-owned session cache (optional when a cached session exists)"),
+		appleID:       fs.String("apple-id", "", "Apple Account email used to scope a user-owned session cache (optional when a cached session exists)"),
 		twoFactorCode: fs.String("two-factor-code", "", "2FA code if your account requires verification"),
 	}
 }
@@ -37,6 +38,9 @@ func resolveWebSessionForCommand(ctx context.Context, flags webSessionFlags) (*w
 func withWebAuthHint(err error, operation string) error {
 	if err == nil {
 		return nil
+	}
+	if strings.HasPrefix(err.Error(), operation+" failed:") {
+		return err
 	}
 	var apiErr *webcore.APIError
 	if errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {

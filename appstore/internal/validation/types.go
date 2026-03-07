@@ -42,23 +42,25 @@ type Report struct {
 
 // Input collects the validation inputs.
 type Input struct {
-	AppID                string
-	AppInfoID            string
-	VersionID            string
-	VersionString        string
-	VersionState         string
-	Platform             string
-	PrimaryLocale        string
-	VersionLocalizations []VersionLocalization
-	AppInfoLocalizations []AppInfoLocalization
-	ReviewDetails        *ReviewDetails
-	PrimaryCategoryID    string
-	Build                *Build
-	PriceScheduleID      string
-	AvailabilityID       string
-	AvailableTerritories int
-	ScreenshotSets       []ScreenshotSet
-	AgeRatingDeclaration *AgeRatingDeclaration
+	AppID                       string
+	AppInfoID                   string
+	VersionID                   string
+	VersionString               string
+	VersionState                string
+	Platform                    string
+	PrimaryLocale               string
+	VersionLocalizations        []VersionLocalization
+	AppInfoLocalizations        []AppInfoLocalization
+	ReviewDetails               *ReviewDetails
+	PrimaryCategoryID           string
+	Build                       *Build
+	PriceScheduleID             string
+	AvailabilityID              string
+	AvailableTerritories        int
+	ScreenshotSets              []ScreenshotSet
+	Subscriptions               []Subscription
+	SubscriptionFetchSkipReason string
+	AgeRatingDeclaration        *AgeRatingDeclaration
 }
 
 // VersionLocalization represents version-level metadata.

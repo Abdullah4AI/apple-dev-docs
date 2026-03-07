@@ -221,31 +221,43 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			summary, err := client.GetCIUsageSummary(requestCtx, teamID)
+			alertResult := &CIUsageAlertResult{}
+			err = withWebSpinner("Loading Xcode Cloud usage alert data", func() error {
+				summary, err := client.GetCIUsageSummary(requestCtx, teamID)
+				if err != nil {
+					return err
+				}
+
+				alertResult = buildCIUsageAlertResult(
+					teamID,
+					summary,
+					*warnAt,
+					*criticalAt,
+					failOnLevel,
+					notifyOnLevel,
+				)
+				if *trendMonths > 0 {
+					alertResult.Trend = loadUsageAlertTrend(requestCtx, client, teamID, *trendMonths)
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud usage alert")
 			}
 
-			alertResult := buildCIUsageAlertResult(
-				teamID,
-				summary,
-				*warnAt,
-				*criticalAt,
-				failOnLevel,
-				notifyOnLevel,
-			)
-			if *trendMonths > 0 {
-				alertResult.Trend = loadUsageAlertTrend(requestCtx, client, teamID, *trendMonths)
+			notifyErr := error(nil)
+			if strings.TrimSpace(normalizedSlackWebhook) != "" || strings.TrimSpace(normalizedWebhookURL) != "" {
+				notifyErr = withWebSpinner("Sending usage alert notifications", func() error {
+					return deliverUsageAlertNotifications(
+						requestCtx,
+						alertResult,
+						normalizedSlackWebhook,
+						normalizedWebhookURL,
+						parsedHeaders,
+						notifyOnLevel,
+					)
+				})
 			}
-
-			notifyErr := deliverUsageAlertNotifications(
-				requestCtx,
-				alertResult,
-				normalizedSlackWebhook,
-				normalizedWebhookURL,
-				parsedHeaders,
-				notifyOnLevel,
-			)
 
 			if err := shared.PrintOutputWithRenderers(
 				alertResult,

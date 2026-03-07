@@ -46,6 +46,7 @@ git diff        # Review changes before staging
 3. Add helper functions for table/markdown output
 4. Create command in `internal/cli/<domain>` to expose the endpoint
 5. Write HTTP client tests with mocked responses
+6. If endpoint tests are repetitive, group the request-wiring cases, but keep at least one representative non-empty decode assertion and one representative output-structure assertion where formatting is user-facing
 
 ## Releases
 

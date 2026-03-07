@@ -102,6 +102,7 @@ asc <subcommand> [flags]
 - `submit` - Submit builds for App Store review.
 - `validate` - Validate App Store version readiness before submission.
 - `publish` - End-to-end publish workflows for TestFlight and App Store.
+- `release` - Run high-level App Store release workflows.
 
 ### Monetization
 
@@ -140,6 +141,7 @@ asc <subcommand> [flags]
 
 - `version` - Print version information and exit.
 - `completion` - Print shell completion scripts.
+- `schema` - Inspect App Store Connect API endpoint schemas at runtime.
 
 ### Additional
 
@@ -165,14 +167,14 @@ asc <subcommand> [flags]
 asc apps list --output table
 
 # Upload a build
-asc builds upload --app "123456789" --file "/path/to/MyApp.ipa"
+asc builds upload --app "123456789" --ipa "/path/to/MyApp.ipa"
 
 # Validate and submit an App Store version
 asc validate --app "123456789" --version "1.2.3"
 asc submit --app "123456789" --version "1.2.3"
 
 # Run a local automation workflow
-asc workflow run --file .asc/workflow.json --workflow release
+asc workflow run release
 ```
 
 ## Related Documentation

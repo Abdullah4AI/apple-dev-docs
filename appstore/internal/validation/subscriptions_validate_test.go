@@ -41,3 +41,65 @@ func TestSubscriptionReviewReadinessChecks_IgnoresRemovedFromSale(t *testing.T) 
 		t.Fatalf("expected no checks, got %d (%v)", len(checks), checks)
 	}
 }
+
+func TestSubscriptionImageChecks_WarnsWhenImageMissing(t *testing.T) {
+	checks := subscriptionImageChecks([]Subscription{
+		{ID: "sub-1", Name: "Monthly", ProductID: "com.example.monthly"},
+	})
+	if !hasCheckID(checks, "subscriptions.images.recommended") {
+		t.Fatalf("expected image check, got %v", checks)
+	}
+	if checks[0].Severity != SeverityWarning {
+		t.Fatalf("expected warning severity, got %s", checks[0].Severity)
+	}
+	if checks[0].Remediation == "" {
+		t.Fatalf("expected remediation explaining why image matters, got %+v", checks[0])
+	}
+}
+
+func TestSubscriptionFetchChecks_AddsInfoWhenSkipped(t *testing.T) {
+	checks := subscriptionFetchChecks("subscription permissions unavailable")
+	if !hasCheckID(checks, "subscriptions.readiness.unverified") {
+		t.Fatalf("expected readiness skip check, got %v", checks)
+	}
+	if checks[0].Severity != SeverityInfo {
+		t.Fatalf("expected info severity, got %s", checks[0].Severity)
+	}
+}
+
+func TestSubscriptionImageChecks_AllowsSubscriptionsWithImages(t *testing.T) {
+	checks := subscriptionImageChecks([]Subscription{
+		{ID: "sub-1", HasImage: true},
+	})
+	if len(checks) != 0 {
+		t.Fatalf("expected no checks, got %d (%v)", len(checks), checks)
+	}
+}
+
+func TestSubscriptionImageChecks_IgnoresRemovedFromSale(t *testing.T) {
+	checks := subscriptionImageChecks([]Subscription{
+		{ID: "sub-1", State: "REMOVED_FROM_SALE"},
+		{ID: "sub-2", State: "DEVELOPER_REMOVED_FROM_SALE"},
+	})
+	if len(checks) != 0 {
+		t.Fatalf("expected no checks, got %d (%v)", len(checks), checks)
+	}
+}
+
+func TestSubscriptionImageChecks_AddsInfoWhenImageCheckSkipped(t *testing.T) {
+	checks := subscriptionImageChecks([]Subscription{
+		{
+			ID:                   "sub-1",
+			Name:                 "Monthly",
+			ProductID:            "com.example.monthly",
+			ImageCheckSkipped:    true,
+			ImageCheckSkipReason: "permission denied",
+		},
+	})
+	if !hasCheckID(checks, "subscriptions.images.unverified") {
+		t.Fatalf("expected unverified image check, got %v", checks)
+	}
+	if checks[0].Severity != SeverityInfo {
+		t.Fatalf("expected info severity, got %s", checks[0].Severity)
+	}
+}

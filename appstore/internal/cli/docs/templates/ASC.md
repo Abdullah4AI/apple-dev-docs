@@ -128,6 +128,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `builds` - Manage builds (TestFlight/App Store).
 - `build-bundles` - Manage build bundles and App Clip data.
 - `publish` - End-to-end publish workflows for TestFlight and App Store.
+- `release` - Run high-level App Store release workflows.
 - `workflow` - Run multi-step automation workflows.
 - `versions` - Manage App Store versions.
 - `product-pages` - Manage custom product pages and product page experiments.
@@ -166,6 +167,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `game-center` - Manage Game Center resources.
 - `version` - Print version information and exit.
 - `completion` - Print shell completion scripts.
+- `schema` - Inspect App Store Connect API endpoint schemas at runtime.
 
 ## Global Flags
 
@@ -186,6 +188,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `ASC_UPLOAD_TIMEOUT`, `ASC_UPLOAD_TIMEOUT_SECONDS` - Upload timeout
 - `ASC_DEBUG` - Debug output (`api` enables HTTP logs)
 - `ASC_SPINNER_DISABLED` - Disable interactive stderr spinner
+- `ASC_SKILLS_AUTO_CHECK` - Automatic skills update checks (`true`/`1`/`yes`/`y`/`on` enables, `false`/`0`/`no`/`n`/`off` disables; default enabled)
 
 ## API References (Offline)
 

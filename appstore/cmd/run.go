@@ -12,9 +12,12 @@ import (
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/install"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared/errfmt"
 )
+
+var maybeCheckForSkillUpdates = install.MaybeCheckForSkillUpdates
 
 // Run executes the CLI using the provided args (not including argv[0]) and version string.
 // It returns the intended process exit code.
@@ -64,12 +67,15 @@ func Run(args []string, versionInfo string) int {
 		return ExitSuccess
 	}
 
+	commandName := getCommandName(root, args)
+
 	start := time.Now()
 	runErr := root.Run(runCtx)
 	elapsed := time.Since(start)
 
-	// Get command name (full subcommand path)
-	commandName := getCommandName(root, args)
+	if commandName != "asc" && commandName != "asc install-skills" {
+		maybeCheckForSkillUpdates(runCtx)
+	}
 
 	// Write JUnit report if requested
 	if shared.ReportFormat() == shared.ReportFormatJUnit && shared.ReportFile() != "" {

@@ -14,6 +14,7 @@ Usage:
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from datetime import datetime, timezone
 
 REPO = "rudrankriyam/app-store-connect-cli"
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+SNAPSHOT_FILE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
 
 
 def gh_api(path):
@@ -133,12 +135,17 @@ def load_history():
     if not os.path.isdir(DATA_DIR):
         return history
     for fname in sorted(os.listdir(DATA_DIR)):
-        if fname.endswith(".json"):
-            with open(os.path.join(DATA_DIR, fname)) as f:
-                try:
-                    history.append(json.load(f))
-                except json.JSONDecodeError:
-                    pass
+        # Only include daily snapshot files (YYYY-MM-DD.json), not timeline.json.
+        if not SNAPSHOT_FILE_RE.match(fname):
+            continue
+
+        with open(os.path.join(DATA_DIR, fname)) as f:
+            try:
+                snap = json.load(f)
+                if isinstance(snap, dict):
+                    history.append(snap)
+            except json.JSONDecodeError:
+                pass
     return history
 
 

@@ -7,38 +7,300 @@ import (
 	"testing"
 )
 
-func TestGetSubscriptionLocalizations_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro","locale":"en-US"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/subscriptionLocalizations" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/subscriptionLocalizations, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
+func TestSubscriptionListEndpoints_WithLimit(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		path     string
+		limit    string
+		response string
+		call     func(*testing.T, *Client)
+	}{
+		{
+			name:     "GetSubscriptionLocalizations",
+			path:     "/v1/subscriptions/sub-1/subscriptionLocalizations",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro","locale":"en-US"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionLocalizations(ctx, "sub-1", WithSubscriptionLocalizationsLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionLocalizations() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.Locale != "en-US" {
+					t.Fatalf("expected decoded subscription localization, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionImages",
+			path:     "/v1/subscriptions/sub-1/images",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionImages","id":"img-1","attributes":{"fileName":"image.png","fileSize":1234}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionImages(ctx, "sub-1", WithSubscriptionImagesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionImages() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.FileName != "image.png" {
+					t.Fatalf("expected decoded subscription image, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionIntroductoryOffers",
+			path:     "/v1/subscriptions/sub-1/introductoryOffers",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionIntroductoryOffers","id":"offer-1","attributes":{"duration":"ONE_MONTH","numberOfPeriods":1,"offerMode":"FREE_TRIAL"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionIntroductoryOffers(ctx, "sub-1", WithSubscriptionIntroductoryOffersLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionIntroductoryOffers() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.OfferMode != SubscriptionOfferModeFreeTrial {
+					t.Fatalf("expected decoded introductory offer, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionPromotionalOffers",
+			path:     "/v1/subscriptions/sub-1/promotionalOffers",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionPromotionalOffers","id":"offer-1","attributes":{"name":"Spring","offerCode":"SPRING"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionPromotionalOffers(ctx, "sub-1", WithSubscriptionPromotionalOffersLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPromotionalOffers() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.Name != "Spring" {
+					t.Fatalf("expected decoded promotional offer, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionPromotionalOfferPrices",
+			path:     "/v1/subscriptionPromotionalOffers/offer-1/prices",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"price-1"}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionPromotionalOfferPrices(ctx, "offer-1", WithSubscriptionPromotionalOfferPricesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPromotionalOfferPrices() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "price-1" {
+					t.Fatalf("expected decoded promotional offer price, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionOfferCodes",
+			path:     "/v1/subscriptions/sub-1/offerCodes",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionOfferCodes","id":"code-1","attributes":{"name":"Spring"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionOfferCodes(ctx, "sub-1", WithSubscriptionOfferCodesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionOfferCodes() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.Name != "Spring" {
+					t.Fatalf("expected decoded offer code, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionOfferCodeCustomCodes",
+			path:     "/v1/subscriptionOfferCodes/code-1/customCodes",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionOfferCodeCustomCodes","id":"custom-1","attributes":{"customCode":"SPRING"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionOfferCodeCustomCodes(ctx, "code-1", WithSubscriptionOfferCodeCustomCodesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionOfferCodeCustomCodes() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.CustomCode != "SPRING" {
+					t.Fatalf("expected decoded custom code, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionOfferCodePrices",
+			path:     "/v1/subscriptionOfferCodes/code-1/prices",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionOfferCodePrices","id":"price-1"}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionOfferCodePrices(ctx, "code-1", WithSubscriptionOfferCodePricesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionOfferCodePrices() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "price-1" {
+					t.Fatalf("expected decoded offer code price, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionPrices",
+			path:     "/v1/subscriptions/sub-1/prices",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionPrices","id":"price-1"}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionPrices(ctx, "sub-1", WithSubscriptionPricesLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPrices() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "price-1" {
+					t.Fatalf("expected decoded subscription price, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionPricePoints",
+			path:     "/v1/subscriptions/sub-1/pricePoints",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionPricePoints","id":"point-1"}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionPricePoints(ctx, "sub-1", WithSubscriptionPricePointsLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPricePoints() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "point-1" {
+					t.Fatalf("expected decoded price point, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionPricePointEqualizations",
+			path:     "/v1/subscriptionPricePoints/price-1/equalizations",
+			limit:    "200",
+			response: `{"data":[{"type":"subscriptionPricePoints","id":"eq-1"}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionPricePointEqualizations(ctx, "price-1", WithSubscriptionPricePointsLimit(200))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPricePointEqualizations() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "eq-1" {
+					t.Fatalf("expected decoded equalized price point, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name:     "GetSubscriptionGroupLocalizations",
+			path:     "/v1/subscriptionGroups/group-1/subscriptionGroupLocalizations",
+			limit:    "5",
+			response: `{"data":[{"type":"subscriptionGroupLocalizations","id":"loc-1","attributes":{"name":"Premium","locale":"en-US"}}]}`,
+			call: func(t *testing.T, c *Client) {
+				resp, err := c.GetSubscriptionGroupLocalizations(ctx, "group-1", WithSubscriptionGroupLocalizationsLimit(5))
+				if err != nil {
+					t.Fatalf("GetSubscriptionGroupLocalizations() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.Name != "Premium" {
+					t.Fatalf("expected decoded group localization, got %+v", resp.Data)
+				}
+			},
+		},
+	}
 
-	if _, err := client.GetSubscriptionLocalizations(context.Background(), "sub-1", WithSubscriptionLocalizationsLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionLocalizations() error: %v", err)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTestClient(t, func(req *http.Request) {
+				if req.Method != http.MethodGet {
+					t.Fatalf("expected GET, got %s", req.Method)
+				}
+				if req.URL.Path != tt.path {
+					t.Fatalf("expected path %s, got %s", tt.path, req.URL.Path)
+				}
+				if req.URL.Query().Get("limit") != tt.limit {
+					t.Fatalf("expected limit=%s, got %q", tt.limit, req.URL.Query().Get("limit"))
+				}
+				assertAuthorized(t, req)
+			}, jsonResponse(http.StatusOK, tt.response))
+
+			tt.call(t, client)
+		})
 	}
 }
 
-func TestGetSubscriptionLocalizations_UsesNextURL(t *testing.T) {
-	next := "https://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/subscriptionLocalizations?cursor=abc"
-	response := jsonResponse(http.StatusOK, `{"data":[]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.URL.String() != next {
-			t.Fatalf("expected next URL %q, got %q", next, req.URL.String())
-		}
-		assertAuthorized(t, req)
-	}, response)
+func TestSubscriptionListEndpoints_UseNextURL(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		next string
+		call func(*testing.T, *Client, string)
+	}{
+		{
+			name: "GetSubscriptionLocalizations",
+			next: "https://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/subscriptionLocalizations?cursor=abc",
+			call: func(t *testing.T, c *Client, next string) {
+				resp, err := c.GetSubscriptionLocalizations(ctx, "sub-1", WithSubscriptionLocalizationsNextURL(next))
+				if err != nil {
+					t.Fatalf("GetSubscriptionLocalizations() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].Attributes.Locale != "en-US" {
+					t.Fatalf("expected decoded next-url subscription localization, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name: "GetSubscriptionPrices",
+			next: "https://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/prices?cursor=abc",
+			call: func(t *testing.T, c *Client, next string) {
+				resp, err := c.GetSubscriptionPrices(ctx, "sub-1", WithSubscriptionPricesNextURL(next))
+				if err != nil {
+					t.Fatalf("GetSubscriptionPrices() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "price-1" {
+					t.Fatalf("expected decoded next-url subscription price, got %+v", resp.Data)
+				}
+			},
+		},
+		{
+			name: "GetSubscriptionPricePointEqualizations",
+			next: "https://api.appstoreconnect.apple.com/v1/subscriptionPricePoints/price-1/equalizations?cursor=abc&limit=200",
+			call: func(t *testing.T, c *Client, next string) {
+				resp, err := c.GetSubscriptionPricePointEqualizations(
+					ctx,
+					"price-1",
+					WithSubscriptionPricePointsLimit(200),
+					WithSubscriptionPricePointsNextURL(next),
+				)
+				if err != nil {
+					t.Fatalf("GetSubscriptionPricePointEqualizations() error: %v", err)
+				}
+				if len(resp.Data) != 1 || resp.Data[0].ID != "eq-1" {
+					t.Fatalf("expected decoded next-url price point equalization, got %+v", resp.Data)
+				}
+			},
+		},
+	}
 
-	if _, err := client.GetSubscriptionLocalizations(context.Background(), "sub-1", WithSubscriptionLocalizationsNextURL(next)); err != nil {
-		t.Fatalf("GetSubscriptionLocalizations() error: %v", err)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTestClient(t, func(req *http.Request) {
+				if req.URL.String() != tt.next {
+					t.Fatalf("expected next URL %q, got %q", tt.next, req.URL.String())
+				}
+				assertAuthorized(t, req)
+			}, jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro","locale":"en-US"}}]}`))
+
+			if tt.name == "GetSubscriptionPrices" {
+				client = newTestClient(t, func(req *http.Request) {
+					if req.URL.String() != tt.next {
+						t.Fatalf("expected next URL %q, got %q", tt.next, req.URL.String())
+					}
+					assertAuthorized(t, req)
+				}, jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-1"}]}`))
+			}
+			if tt.name == "GetSubscriptionPricePointEqualizations" {
+				client = newTestClient(t, func(req *http.Request) {
+					if req.URL.String() != tt.next {
+						t.Fatalf("expected next URL %q, got %q", tt.next, req.URL.String())
+					}
+					assertAuthorized(t, req)
+				}, jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"eq-1"}]}`))
+			}
+
+			tt.call(t, client, tt.next)
+		})
 	}
 }
 
@@ -142,26 +404,6 @@ func TestDeleteSubscriptionLocalization(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionImages_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionImages","id":"img-1","attributes":{"fileName":"image.png","fileSize":1234}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/images" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/images, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionImages(context.Background(), "sub-1", WithSubscriptionImagesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionImages() error: %v", err)
-	}
-}
-
 func TestGetSubscriptionImage(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionImages","id":"img-1","attributes":{"fileName":"image.png","fileSize":1234}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -255,26 +497,6 @@ func TestDeleteSubscriptionImage(t *testing.T) {
 
 	if err := client.DeleteSubscriptionImage(context.Background(), "img-1"); err != nil {
 		t.Fatalf("DeleteSubscriptionImage() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionIntroductoryOffers_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionIntroductoryOffers","id":"offer-1","attributes":{"duration":"ONE_MONTH","numberOfPeriods":1,"offerMode":"FREE_TRIAL"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/introductoryOffers" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/introductoryOffers, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionIntroductoryOffers(context.Background(), "sub-1", WithSubscriptionIntroductoryOffersLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionIntroductoryOffers() error: %v", err)
 	}
 }
 
@@ -376,26 +598,6 @@ func TestDeleteSubscriptionIntroductoryOffer(t *testing.T) {
 
 	if err := client.DeleteSubscriptionIntroductoryOffer(context.Background(), "offer-1"); err != nil {
 		t.Fatalf("DeleteSubscriptionIntroductoryOffer() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPromotionalOffers_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPromotionalOffers","id":"offer-1","attributes":{"name":"Spring","duration":"ONE_MONTH","offerMode":"FREE_TRIAL","numberOfPeriods":1,"offerCode":"SPRING"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/promotionalOffers" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/promotionalOffers, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPromotionalOffers(context.Background(), "sub-1", WithSubscriptionPromotionalOffersLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionPromotionalOffers() error: %v", err)
 	}
 }
 
@@ -520,46 +722,6 @@ func TestDeleteSubscriptionPrice(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionPromotionalOfferPrices_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"price-1"}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionPromotionalOffers/offer-1/prices" {
-			t.Fatalf("expected path /v1/subscriptionPromotionalOffers/offer-1/prices, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPromotionalOfferPrices(context.Background(), "offer-1", WithSubscriptionPromotionalOfferPricesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionPromotionalOfferPrices() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionOfferCodes_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionOfferCodes","id":"code-1","attributes":{"name":"Spring"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/offerCodes" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/offerCodes, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionOfferCodes(context.Background(), "sub-1", WithSubscriptionOfferCodesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionOfferCodes() error: %v", err)
-	}
-}
-
 func TestGetSubscriptionOfferCode(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionOfferCodes","id":"code-1","attributes":{"name":"Spring"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -662,101 +824,6 @@ func TestUpdateSubscriptionOfferCode(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionOfferCodeCustomCodes_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionOfferCodeCustomCodes","id":"custom-1","attributes":{"customCode":"SPRING"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionOfferCodes/code-1/customCodes" {
-			t.Fatalf("expected path /v1/subscriptionOfferCodes/code-1/customCodes, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionOfferCodeCustomCodes(context.Background(), "code-1", WithSubscriptionOfferCodeCustomCodesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionOfferCodeCustomCodes() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionOfferCodePrices_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionOfferCodePrices","id":"price-1"}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionOfferCodes/code-1/prices" {
-			t.Fatalf("expected path /v1/subscriptionOfferCodes/code-1/prices, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionOfferCodePrices(context.Background(), "code-1", WithSubscriptionOfferCodePricesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionOfferCodePrices() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPrices_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-1"}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/prices" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/prices, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPrices(context.Background(), "sub-1", WithSubscriptionPricesLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionPrices() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPrices_UsesNextURL(t *testing.T) {
-	next := "https://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/prices?cursor=abc"
-	response := jsonResponse(http.StatusOK, `{"data":[]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.URL.String() != next {
-			t.Fatalf("expected next URL %q, got %q", next, req.URL.String())
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPrices(context.Background(), "sub-1", WithSubscriptionPricesNextURL(next)); err != nil {
-		t.Fatalf("GetSubscriptionPrices() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPricePoints_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"price-1"}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptions/sub-1/pricePoints" {
-			t.Fatalf("expected path /v1/subscriptions/sub-1/pricePoints, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPricePoints(context.Background(), "sub-1", WithSubscriptionPricePointsLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionPricePoints() error: %v", err)
-	}
-}
-
 func TestGetSubscriptionPricePoints_WithTerritoryFilter(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"price-1"}]}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -811,50 +878,6 @@ func TestGetSubscriptionPricePointEqualizations(t *testing.T) {
 	}, response)
 
 	if _, err := client.GetSubscriptionPricePointEqualizations(context.Background(), "price-1"); err != nil {
-		t.Fatalf("GetSubscriptionPricePointEqualizations() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPricePointEqualizations_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"eq-1"}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionPricePoints/price-1/equalizations" {
-			t.Fatalf("expected path /v1/subscriptionPricePoints/price-1/equalizations, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "200" {
-			t.Fatalf("expected limit=200, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPricePointEqualizations(
-		context.Background(),
-		"price-1",
-		WithSubscriptionPricePointsLimit(200),
-	); err != nil {
-		t.Fatalf("GetSubscriptionPricePointEqualizations() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionPricePointEqualizations_UsesNextURL(t *testing.T) {
-	next := "https://api.appstoreconnect.apple.com/v1/subscriptionPricePoints/price-1/equalizations?cursor=abc&limit=200"
-	response := jsonResponse(http.StatusOK, `{"data":[]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.URL.String() != next {
-			t.Fatalf("expected next URL %q, got %q", next, req.URL.String())
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionPricePointEqualizations(
-		context.Background(),
-		"price-1",
-		WithSubscriptionPricePointsLimit(200),
-		WithSubscriptionPricePointsNextURL(next),
-	); err != nil {
 		t.Fatalf("GetSubscriptionPricePointEqualizations() error: %v", err)
 	}
 }
@@ -1100,26 +1123,6 @@ func TestGetSubscriptionPromotedPurchase(t *testing.T) {
 
 	if _, err := client.GetSubscriptionPromotedPurchase(context.Background(), "sub-1"); err != nil {
 		t.Fatalf("GetSubscriptionPromotedPurchase() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionGroupLocalizations_WithLimit(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroupLocalizations","id":"loc-1","attributes":{"name":"Premium","locale":"en-US"}}]}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptionGroupLocalizations" {
-			t.Fatalf("expected path /v1/subscriptionGroups/group-1/subscriptionGroupLocalizations, got %s", req.URL.Path)
-		}
-		if req.URL.Query().Get("limit") != "5" {
-			t.Fatalf("expected limit=5, got %q", req.URL.Query().Get("limit"))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionGroupLocalizations(context.Background(), "group-1", WithSubscriptionGroupLocalizationsLimit(5)); err != nil {
-		t.Fatalf("GetSubscriptionGroupLocalizations() error: %v", err)
 	}
 }
 

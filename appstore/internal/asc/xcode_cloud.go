@@ -495,16 +495,24 @@ type CiBuildRunCreateRequest struct {
 	Data CiBuildRunCreateData `json:"data"`
 }
 
+// CiBuildRunCreateAttributes are optional attributes for creating a CI build run.
+type CiBuildRunCreateAttributes struct {
+	Clean *bool `json:"clean,omitempty"`
+}
+
 // CiBuildRunCreateData is the data portion of a CI build run create request.
 type CiBuildRunCreateData struct {
 	Type          ResourceType                   `json:"type"`
-	Relationships *CiBuildRunCreateRelationships `json:"relationships"`
+	Attributes    *CiBuildRunCreateAttributes    `json:"attributes,omitempty"`
+	Relationships *CiBuildRunCreateRelationships `json:"relationships,omitempty"`
 }
 
 // CiBuildRunCreateRelationships describes relationships for creating a CI build run.
 type CiBuildRunCreateRelationships struct {
-	Workflow          *Relationship `json:"workflow"`
-	SourceBranchOrTag *Relationship `json:"sourceBranchOrTag"`
+	BuildRun          *Relationship `json:"buildRun,omitempty"`
+	Workflow          *Relationship `json:"workflow,omitempty"`
+	SourceBranchOrTag *Relationship `json:"sourceBranchOrTag,omitempty"`
+	PullRequest       *Relationship `json:"pullRequest,omitempty"`
 }
 
 // Query types for Xcode Cloud endpoints
@@ -715,6 +723,28 @@ type ciBuildRunsQuery struct {
 // CiBuildRunsOption is a functional option for GetCiBuildRuns.
 type CiBuildRunsOption func(*ciBuildRunsQuery)
 
+type ciBuildRunGetQuery struct {
+	include           []string
+	fieldsCiBuildRuns []string
+}
+
+// CiBuildRunGetOption is a functional option for GetCiBuildRun.
+type CiBuildRunGetOption func(*ciBuildRunGetQuery)
+
+// WithCiBuildRunInclude includes related resources in the build run detail response.
+func WithCiBuildRunInclude(relationships ...string) CiBuildRunGetOption {
+	return func(q *ciBuildRunGetQuery) {
+		q.include = normalizeUniqueList(append(q.include, relationships...))
+	}
+}
+
+// WithCiBuildRunFields limits returned fields for ciBuildRuns resources.
+func WithCiBuildRunFields(fields ...string) CiBuildRunGetOption {
+	return func(q *ciBuildRunGetQuery) {
+		q.fieldsCiBuildRuns = normalizeUniqueList(append(q.fieldsCiBuildRuns, fields...))
+	}
+}
+
 // WithCiBuildRunsLimit sets the max number of build runs to return.
 func WithCiBuildRunsLimit(limit int) CiBuildRunsOption {
 	return func(q *ciBuildRunsQuery) {
@@ -736,6 +766,13 @@ func WithCiBuildRunsNextURL(next string) CiBuildRunsOption {
 func buildCiBuildRunsQuery(query *ciBuildRunsQuery) string {
 	values := url.Values{}
 	addLimit(values, query.limit)
+	return values.Encode()
+}
+
+func buildCiBuildRunGetQuery(query *ciBuildRunGetQuery) string {
+	values := url.Values{}
+	addCSV(values, "include", query.include)
+	addCSV(values, "fields[ciBuildRuns]", query.fieldsCiBuildRuns)
 	return values.Encode()
 }
 
@@ -1469,8 +1506,17 @@ func (c *Client) GetCiBuildRuns(ctx context.Context, workflowID string, opts ...
 }
 
 // GetCiBuildRun retrieves a CI build run by ID.
-func (c *Client) GetCiBuildRun(ctx context.Context, buildRunID string) (*CiBuildRunResponse, error) {
+func (c *Client) GetCiBuildRun(ctx context.Context, buildRunID string, opts ...CiBuildRunGetOption) (*CiBuildRunResponse, error) {
+	query := &ciBuildRunGetQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	path := fmt.Sprintf("/v1/ciBuildRuns/%s", buildRunID)
+	if queryString := buildCiBuildRunGetQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
+
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -1683,8 +1729,12 @@ type XcodeCloudRunResult struct {
 	BuildNumber       int    `json:"buildNumber,omitempty"`
 	WorkflowID        string `json:"workflowId"`
 	WorkflowName      string `json:"workflowName,omitempty"`
-	GitReferenceID    string `json:"gitReferenceId"`
+	TriggerSource     string `json:"triggerSource,omitempty"`
+	GitReferenceID    string `json:"gitReferenceId,omitempty"`
 	GitReferenceName  string `json:"gitReferenceName,omitempty"`
+	PullRequestID     string `json:"pullRequestId,omitempty"`
+	SourceRunID       string `json:"sourceRunId,omitempty"`
+	Clean             bool   `json:"clean,omitempty"`
 	ExecutionProgress string `json:"executionProgress,omitempty"`
 	CompletionStatus  string `json:"completionStatus,omitempty"`
 	StartReason       string `json:"startReason,omitempty"`

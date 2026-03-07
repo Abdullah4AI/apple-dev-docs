@@ -2,11 +2,15 @@ package apps
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -212,6 +216,9 @@ func AppInfoSetCommand() *ffcli.Command {
 	state := fs.String("state", "", "Filter by app store state(s), comma-separated")
 	locale := fs.String("locale", "", "Locale (e.g., en-US)")
 	copyFromLocale := fs.String("copy-from-locale", "", "Copy submit-required fields (description, keywords, support-url) from this locale when missing")
+	locales := fs.String("locales", "", "Locales (comma-separated, e.g., en-US,de-DE)")
+	fromDir := fs.String("from-dir", "", "Directory with per-locale JSON files (<locale>.json)")
+	dryRun := fs.Bool("dry-run", false, "Show planned per-locale actions without writing changes")
 	description := fs.String("description", "", "App description")
 	keywords := fs.String("keywords", "", "Keywords (comma-separated)")
 	supportURL := fs.String("support-url", "", "Support URL")
@@ -229,7 +236,10 @@ func AppInfoSetCommand() *ffcli.Command {
 Examples:
   asc app-info set --app "APP_ID" --locale "en-US" --whats-new "Bug fixes"
   asc app-info set --app "APP_ID" --locale "fr-FR" --copy-from-locale "en-US" --whats-new "Corrections"
-  asc app-info set --app "APP_ID" --version "1.2.3" --platform IOS --locale "en-US" --description "New release"`,
+  asc app-info set --app "APP_ID" --version "1.2.3" --platform IOS --locale "en-US" --description "New release"
+  asc app-info set --app "APP_ID" --version "1.2.3" --platform IOS --locales "en-US,de-DE" --whats-new "Bug fixes"
+  asc app-info set --app "APP_ID" --version "1.2.3" --platform IOS --from-dir "./metadata/version/1.2.3"
+  asc app-info set --app "APP_ID" --locales "en-US,de-DE" --whats-new "Bug fixes" --dry-run`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -257,36 +267,56 @@ Examples:
 			}
 
 			localeValue := strings.TrimSpace(*locale)
-			if localeValue == "" {
+			localesValue := shared.SplitUniqueCSV(*locales)
+			fromDirValue := strings.TrimSpace(*fromDir)
+			if localeValue != "" && len(localesValue) > 0 {
+				return shared.UsageError("--locale and --locales are mutually exclusive")
+			}
+			if fromDirValue != "" {
+				if localeValue != "" || len(localesValue) > 0 {
+					return shared.UsageError("--from-dir cannot be used with --locale or --locales")
+				}
+			}
+			if fromDirValue == "" && localeValue == "" && len(localesValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
 				return flag.ErrHelp
 			}
-			if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
-				return shared.UsageError(err.Error())
+			if localeValue != "" {
+				if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
+			for _, localeItem := range localesValue {
+				if err := shared.ValidateBuildLocalizationLocale(localeItem); err != nil {
+					return shared.UsageError(err.Error())
+				}
 			}
 			copyFromLocaleValue := strings.TrimSpace(*copyFromLocale)
 			if copyFromLocaleValue != "" {
 				if err := shared.ValidateBuildLocalizationLocale(copyFromLocaleValue); err != nil {
 					return shared.UsageError(err.Error())
 				}
+				if localeValue == "" || len(localesValue) > 0 || fromDirValue != "" || *dryRun {
+					return shared.UsageError("--copy-from-locale can only be used with --locale in single-locale mode")
+				}
 				if strings.EqualFold(copyFromLocaleValue, localeValue) {
 					return shared.UsageError("--copy-from-locale must be different from --locale")
 				}
 			}
 
-			descriptionValue := strings.TrimSpace(*description)
-			keywordsValue := strings.TrimSpace(*keywords)
-			supportURLValue := strings.TrimSpace(*supportURL)
-			marketingURLValue := strings.TrimSpace(*marketingURL)
-			promotionalTextValue := strings.TrimSpace(*promotionalText)
-			whatsNewValue := strings.TrimSpace(*whatsNew)
-			if descriptionValue == "" &&
-				keywordsValue == "" &&
-				supportURLValue == "" &&
-				marketingURLValue == "" &&
-				promotionalTextValue == "" &&
-				whatsNewValue == "" &&
-				copyFromLocaleValue == "" {
+			inlineAttrs := asc.AppStoreVersionLocalizationAttributes{
+				Description:     strings.TrimSpace(*description),
+				Keywords:        strings.TrimSpace(*keywords),
+				SupportURL:      strings.TrimSpace(*supportURL),
+				MarketingURL:    strings.TrimSpace(*marketingURL),
+				PromotionalText: strings.TrimSpace(*promotionalText),
+				WhatsNew:        strings.TrimSpace(*whatsNew),
+			}
+			hasInlineUpdates := appInfoSetHasAnyUpdates(inlineAttrs)
+			if fromDirValue != "" && hasInlineUpdates {
+				return shared.UsageError("--from-dir cannot be used with inline update flags")
+			}
+			if fromDirValue == "" && !hasInlineUpdates && copyFromLocaleValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
 				return flag.ErrHelp
 			}
@@ -312,79 +342,407 @@ Examples:
 				return fmt.Errorf("app-info set: %w", err)
 			}
 
-			localizationOpts := []asc.AppStoreVersionLocalizationsOption{
-				asc.WithAppStoreVersionLocalizationsLimit(200),
-				asc.WithAppStoreVersionLocalizationLocales(appInfoSetRequestedLocales(localeValue, copyFromLocaleValue)),
-			}
-			localizations, err := client.GetAppStoreVersionLocalizations(requestCtx, versionResource.ID, localizationOpts...)
-			if err != nil {
-				return fmt.Errorf("app-info set: failed to fetch localizations: %w", err)
-			}
-			targetLocalization, targetExists := findAppInfoSetLocalizationByLocale(localizations.Data, localeValue)
-
-			if copyFromLocaleValue != "" {
-				sourceLocalization, found := findAppInfoSetLocalizationByLocale(localizations.Data, copyFromLocaleValue)
-				if !found {
-					return fmt.Errorf("app-info set: --copy-from-locale %q was not found for this app version", copyFromLocaleValue)
-				}
-				if shouldBackfillAppInfoSetField(descriptionValue, targetExists, targetLocalization.Attributes.Description) {
-					descriptionValue = strings.TrimSpace(sourceLocalization.Attributes.Description)
-				}
-				if shouldBackfillAppInfoSetField(keywordsValue, targetExists, targetLocalization.Attributes.Keywords) {
-					keywordsValue = strings.TrimSpace(sourceLocalization.Attributes.Keywords)
-				}
-				if shouldBackfillAppInfoSetField(supportURLValue, targetExists, targetLocalization.Attributes.SupportURL) {
-					supportURLValue = strings.TrimSpace(sourceLocalization.Attributes.SupportURL)
-				}
+			// Keep existing single-locale output compatibility unless batch planning is explicitly requested.
+			if fromDirValue == "" && len(localesValue) == 0 && localeValue != "" && !*dryRun {
+				return runAppInfoSetSingleLocale(
+					requestCtx,
+					client,
+					versionResource.ID,
+					localeValue,
+					copyFromLocaleValue,
+					inlineAttrs,
+					output,
+				)
 			}
 
-			attrs := applyAppInfoSetValues(
-				asc.AppStoreVersionLocalizationAttributes{},
-				descriptionValue,
-				keywordsValue,
-				supportURLValue,
-				marketingURLValue,
-				promotionalTextValue,
-				whatsNewValue,
-			)
-
-			effectiveAttributes := asc.AppStoreVersionLocalizationAttributes{Locale: localeValue}
-			if targetExists {
-				effectiveAttributes = targetLocalization.Attributes
-				effectiveAttributes.Locale = localeValue
-			}
-			effectiveAttributes = applyAppInfoSetValues(
-				effectiveAttributes,
-				descriptionValue,
-				keywordsValue,
-				supportURLValue,
-				marketingURLValue,
-				promotionalTextValue,
-				whatsNewValue,
-			)
-
-			if !targetExists {
-				attrs.Locale = localeValue
-				resp, err := client.CreateAppStoreVersionLocalization(requestCtx, versionResource.ID, attrs)
+			var valuesByLocale map[string]asc.AppStoreVersionLocalizationAttributes
+			if fromDirValue != "" {
+				valuesByLocale, err = readAppInfoSetLocalesFromDir(fromDirValue)
 				if err != nil {
-					return fmt.Errorf("app-info set: %w", err)
+					return shared.UsageError(err.Error())
 				}
-				warnAppInfoSetSubmitIncompleteLocale(localeValue, effectiveAttributes)
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			} else {
+				targetLocales := make([]string, 0, len(localesValue)+1)
+				if localeValue != "" {
+					targetLocales = append(targetLocales, localeValue)
+				}
+				targetLocales = append(targetLocales, localesValue...)
+				valuesByLocale = make(map[string]asc.AppStoreVersionLocalizationAttributes, len(targetLocales))
+				for _, targetLocale := range targetLocales {
+					valuesByLocale[targetLocale] = inlineAttrs
+				}
 			}
 
-			localizationID := strings.TrimSpace(targetLocalization.ID)
-			if localizationID == "" {
-				return fmt.Errorf("app-info set: localization id is empty")
-			}
-			resp, err := client.UpdateAppStoreVersionLocalization(requestCtx, localizationID, attrs)
+			batchResult, err := runAppInfoSetBatch(
+				requestCtx,
+				client,
+				resolvedAppID,
+				versionResource.ID,
+				valuesByLocale,
+				*dryRun,
+			)
 			if err != nil {
 				return fmt.Errorf("app-info set: %w", err)
 			}
-			warnAppInfoSetSubmitIncompleteLocale(localeValue, effectiveAttributes)
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			if err := shared.PrintOutput(batchResult, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+			if batchResult.Failed > 0 {
+				summaryErr := fmt.Errorf("app-info set: %d locale(s) failed", batchResult.Failed)
+				fmt.Fprintf(os.Stderr, "Error: %s\n", summaryErr.Error())
+				return shared.NewReportedError(summaryErr)
+			}
+			return nil
 		},
 	}
+}
+
+func runAppInfoSetSingleLocale(
+	ctx context.Context,
+	client *asc.Client,
+	versionID string,
+	locale string,
+	copyFromLocale string,
+	attrs asc.AppStoreVersionLocalizationAttributes,
+	output shared.OutputFlags,
+) error {
+	localizationOpts := []asc.AppStoreVersionLocalizationsOption{
+		asc.WithAppStoreVersionLocalizationsLimit(200),
+		asc.WithAppStoreVersionLocalizationLocales(appInfoSetRequestedLocales(locale, copyFromLocale)),
+	}
+	localizations, err := client.GetAppStoreVersionLocalizations(ctx, versionID, localizationOpts...)
+	if err != nil {
+		return fmt.Errorf("app-info set: failed to fetch localizations: %w", err)
+	}
+
+	targetLocalization, targetExists := findAppInfoSetLocalizationByLocale(localizations.Data, locale)
+
+	descriptionValue := strings.TrimSpace(attrs.Description)
+	keywordsValue := strings.TrimSpace(attrs.Keywords)
+	supportURLValue := strings.TrimSpace(attrs.SupportURL)
+	marketingURLValue := strings.TrimSpace(attrs.MarketingURL)
+	promotionalTextValue := strings.TrimSpace(attrs.PromotionalText)
+	whatsNewValue := strings.TrimSpace(attrs.WhatsNew)
+
+	if copyFromLocale != "" {
+		sourceLocalization, found := findAppInfoSetLocalizationByLocale(localizations.Data, copyFromLocale)
+		if !found {
+			return fmt.Errorf("app-info set: --copy-from-locale %q was not found for this app version", copyFromLocale)
+		}
+		if shouldBackfillAppInfoSetField(descriptionValue, targetExists, targetLocalization.Attributes.Description) {
+			descriptionValue = strings.TrimSpace(sourceLocalization.Attributes.Description)
+		}
+		if shouldBackfillAppInfoSetField(keywordsValue, targetExists, targetLocalization.Attributes.Keywords) {
+			keywordsValue = strings.TrimSpace(sourceLocalization.Attributes.Keywords)
+		}
+		if shouldBackfillAppInfoSetField(supportURLValue, targetExists, targetLocalization.Attributes.SupportURL) {
+			supportURLValue = strings.TrimSpace(sourceLocalization.Attributes.SupportURL)
+		}
+	}
+
+	updateAttrs := applyAppInfoSetValues(
+		asc.AppStoreVersionLocalizationAttributes{},
+		descriptionValue,
+		keywordsValue,
+		supportURLValue,
+		marketingURLValue,
+		promotionalTextValue,
+		whatsNewValue,
+	)
+
+	effectiveAttrs := asc.AppStoreVersionLocalizationAttributes{Locale: locale}
+	if targetExists {
+		effectiveAttrs = targetLocalization.Attributes
+		effectiveAttrs.Locale = locale
+	}
+	effectiveAttrs = applyAppInfoSetValues(
+		effectiveAttrs,
+		descriptionValue,
+		keywordsValue,
+		supportURLValue,
+		marketingURLValue,
+		promotionalTextValue,
+		whatsNewValue,
+	)
+
+	if !targetExists {
+		updateAttrs.Locale = locale
+		resp, createErr := client.CreateAppStoreVersionLocalization(ctx, versionID, updateAttrs)
+		if createErr != nil {
+			return fmt.Errorf("app-info set: %w", createErr)
+		}
+		warnAppInfoSetSubmitIncompleteLocale(locale, effectiveAttrs)
+		return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+	}
+
+	localizationID := strings.TrimSpace(targetLocalization.ID)
+	if localizationID == "" {
+		return fmt.Errorf("app-info set: localization id is empty")
+	}
+	resp, updateErr := client.UpdateAppStoreVersionLocalization(ctx, localizationID, updateAttrs)
+	if updateErr != nil {
+		return fmt.Errorf("app-info set: %w", updateErr)
+	}
+	warnAppInfoSetSubmitIncompleteLocale(locale, effectiveAttrs)
+	return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+}
+
+func runAppInfoSetBatch(
+	ctx context.Context,
+	client *asc.Client,
+	appID string,
+	versionID string,
+	valuesByLocale map[string]asc.AppStoreVersionLocalizationAttributes,
+	dryRun bool,
+) (*asc.AppInfoSetBatchResult, error) {
+	if len(valuesByLocale) == 0 {
+		return nil, fmt.Errorf("no locales to update")
+	}
+
+	localizations, err := client.GetAppStoreVersionLocalizations(
+		ctx,
+		versionID,
+		asc.WithAppStoreVersionLocalizationsLimit(200),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch localizations: %w", err)
+	}
+
+	existingByLocale := make(map[string]string, len(localizations.Data))
+	for _, localization := range localizations.Data {
+		locale := strings.ToLower(strings.TrimSpace(localization.Attributes.Locale))
+		if locale == "" {
+			continue
+		}
+		existingByLocale[locale] = strings.TrimSpace(localization.ID)
+	}
+
+	locales := make([]string, 0, len(valuesByLocale))
+	for locale := range valuesByLocale {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+
+	results := make([]asc.AppInfoSetLocaleResult, len(locales))
+	if dryRun {
+		for idx, locale := range locales {
+			existingID := existingByLocale[strings.ToLower(locale)]
+			action := "create"
+			if existingID != "" {
+				action = "update"
+			}
+			results[idx] = asc.AppInfoSetLocaleResult{
+				Locale:         locale,
+				Action:         action,
+				Status:         "planned",
+				LocalizationID: existingID,
+			}
+		}
+		return buildAppInfoSetBatchResult(appID, versionID, true, results), nil
+	}
+
+	workers := len(locales)
+	if workers > 4 {
+		workers = 4
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for idx, locale := range locales {
+		idx := idx
+		locale := locale
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			attrs := valuesByLocale[locale]
+			existingID := existingByLocale[strings.ToLower(locale)]
+			action := "create"
+			if existingID != "" {
+				action = "update"
+			}
+
+			localeResult := asc.AppInfoSetLocaleResult{
+				Locale: locale,
+				Action: action,
+				Status: "success",
+			}
+
+			if existingID == "" {
+				attrs.Locale = locale
+				resp, createErr := client.CreateAppStoreVersionLocalization(ctx, versionID, attrs)
+				if createErr != nil {
+					localeResult.Status = "failed"
+					localeResult.Error = createErr.Error()
+					results[idx] = localeResult
+					return
+				}
+				localeResult.LocalizationID = strings.TrimSpace(resp.Data.ID)
+				results[idx] = localeResult
+				return
+			}
+
+			resp, updateErr := client.UpdateAppStoreVersionLocalization(ctx, existingID, attrs)
+			if updateErr != nil {
+				localeResult.Status = "failed"
+				localeResult.Error = updateErr.Error()
+				localeResult.LocalizationID = existingID
+				results[idx] = localeResult
+				return
+			}
+			localizationID := strings.TrimSpace(resp.Data.ID)
+			if localizationID == "" {
+				localizationID = existingID
+			}
+			localeResult.LocalizationID = localizationID
+			results[idx] = localeResult
+		}()
+	}
+	wg.Wait()
+
+	return buildAppInfoSetBatchResult(appID, versionID, false, results), nil
+}
+
+func buildAppInfoSetBatchResult(appID string, versionID string, dryRun bool, results []asc.AppInfoSetLocaleResult) *asc.AppInfoSetBatchResult {
+	result := &asc.AppInfoSetBatchResult{
+		AppID:     strings.TrimSpace(appID),
+		VersionID: strings.TrimSpace(versionID),
+		DryRun:    dryRun,
+		Total:     len(results),
+		Results:   results,
+	}
+	for _, item := range results {
+		switch item.Status {
+		case "failed":
+			result.Failed++
+		case "planned":
+			result.Planned++
+		default:
+			result.Succeeded++
+		}
+	}
+	return result
+}
+
+func appInfoSetHasAnyUpdates(attrs asc.AppStoreVersionLocalizationAttributes) bool {
+	return strings.TrimSpace(attrs.Description) != "" ||
+		strings.TrimSpace(attrs.Keywords) != "" ||
+		strings.TrimSpace(attrs.SupportURL) != "" ||
+		strings.TrimSpace(attrs.MarketingURL) != "" ||
+		strings.TrimSpace(attrs.PromotionalText) != "" ||
+		strings.TrimSpace(attrs.WhatsNew) != ""
+}
+
+func readAppInfoSetLocalesFromDir(dirPath string) (map[string]asc.AppStoreVersionLocalizationAttributes, error) {
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("--from-dir path error: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("--from-dir must be a directory")
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	valuesByLocale := make(map[string]asc.AppStoreVersionLocalizationAttributes)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		locale := strings.TrimSpace(strings.TrimSuffix(entry.Name(), ".json"))
+		if locale == "" {
+			continue
+		}
+		if err := shared.ValidateBuildLocalizationLocale(locale); err != nil {
+			return nil, fmt.Errorf("invalid locale %q from --from-dir file %q: %w", locale, entry.Name(), err)
+		}
+		if _, exists := valuesByLocale[locale]; exists {
+			return nil, fmt.Errorf("duplicate locale %q in --from-dir", locale)
+		}
+
+		path := filepath.Join(dirPath, entry.Name())
+		file, err := shared.OpenExistingNoFollow(path)
+		if err != nil {
+			return nil, fmt.Errorf("open %q: %w", entry.Name(), err)
+		}
+		data, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", entry.Name(), err)
+		}
+
+		attrs, err := parseAppInfoSetLocaleJSON(data, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		valuesByLocale[locale] = attrs
+	}
+
+	if len(valuesByLocale) == 0 {
+		return nil, fmt.Errorf("no locale JSON files found in %q", dirPath)
+	}
+	return valuesByLocale, nil
+}
+
+func parseAppInfoSetLocaleJSON(data []byte, fileName string) (asc.AppStoreVersionLocalizationAttributes, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("locale file %q is empty", fileName)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("invalid JSON in %q: %w", fileName, err)
+	}
+	if len(payload) == 0 {
+		return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("locale file %q has no fields", fileName)
+	}
+
+	attrs := asc.AppStoreVersionLocalizationAttributes{}
+	unknownKeys := make([]string, 0)
+	for key, raw := range payload {
+		value, ok := raw.(string)
+		if !ok {
+			return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("field %q in %q must be a string", key, fileName)
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		normalizedKey = strings.ReplaceAll(normalizedKey, "-", "")
+		normalizedKey = strings.ReplaceAll(normalizedKey, "_", "")
+		switch normalizedKey {
+		case "description":
+			attrs.Description = value
+		case "keywords":
+			attrs.Keywords = value
+		case "supporturl":
+			attrs.SupportURL = value
+		case "marketingurl":
+			attrs.MarketingURL = value
+		case "promotionaltext":
+			attrs.PromotionalText = value
+		case "whatsnew":
+			attrs.WhatsNew = value
+		default:
+			unknownKeys = append(unknownKeys, key)
+		}
+	}
+	if len(unknownKeys) > 0 {
+		sort.Strings(unknownKeys)
+		return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("unsupported keys in %q: %s", fileName, strings.Join(unknownKeys, ", "))
+	}
+	if !appInfoSetHasAnyUpdates(attrs) {
+		return asc.AppStoreVersionLocalizationAttributes{}, fmt.Errorf("locale file %q has no update values", fileName)
+	}
+	return attrs, nil
 }
 
 func appInfoSetRequestedLocales(locale, copyFromLocale string) []string {

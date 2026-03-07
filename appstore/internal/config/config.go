@@ -129,6 +129,7 @@ type Config struct {
 
 	VendorNumber          string `json:"vendor_number"`
 	AnalyticsVendorNumber string `json:"analytics_vendor_number"`
+	SkillsCheckedAt       string `json:"skills_checked_at,omitempty"`
 
 	Timeout              DurationValue `json:"timeout"`
 	TimeoutSeconds       DurationValue `json:"timeout_seconds"`

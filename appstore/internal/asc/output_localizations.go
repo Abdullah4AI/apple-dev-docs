@@ -53,6 +53,27 @@ type LocalizationUploadResult struct {
 	Results   []LocalizationUploadLocaleResult `json:"results"`
 }
 
+// AppInfoSetLocaleResult represents a per-locale app-info set operation result.
+type AppInfoSetLocaleResult struct {
+	Locale         string `json:"locale"`
+	Action         string `json:"action"`
+	Status         string `json:"status"`
+	LocalizationID string `json:"localizationId,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// AppInfoSetBatchResult represents CLI output for batched app-info set operations.
+type AppInfoSetBatchResult struct {
+	AppID     string                   `json:"appId,omitempty"`
+	VersionID string                   `json:"versionId,omitempty"`
+	DryRun    bool                     `json:"dryRun"`
+	Total     int                      `json:"total"`
+	Succeeded int                      `json:"succeeded"`
+	Failed    int                      `json:"failed"`
+	Planned   int                      `json:"planned,omitempty"`
+	Results   []AppInfoSetLocaleResult `json:"results"`
+}
+
 func appStoreVersionLocalizationsRows(resp *AppStoreVersionLocalizationsResponse) ([]string, [][]string) {
 	headers := []string{"Locale", "Whats New", "Keywords"}
 	rows := make([][]string, 0, len(resp.Data))
@@ -125,6 +146,21 @@ func localizationUploadResultRows(result *LocalizationUploadResult) ([]string, [
 			item.Locale,
 			item.Action,
 			item.LocalizationID,
+		})
+	}
+	return headers, rows
+}
+
+func appInfoSetBatchResultRows(result *AppInfoSetBatchResult) ([]string, [][]string) {
+	headers := []string{"Locale", "Action", "Status", "Localization ID", "Error"}
+	rows := make([][]string, 0, len(result.Results))
+	for _, item := range result.Results {
+		rows = append(rows, []string{
+			item.Locale,
+			item.Action,
+			item.Status,
+			item.LocalizationID,
+			compactWhitespace(item.Error),
 		})
 	}
 	return headers, rows

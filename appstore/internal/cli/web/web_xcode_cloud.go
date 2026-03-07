@@ -121,7 +121,9 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			result, err := client.GetCIUsageSummary(requestCtx, teamID)
+			result, err := withWebSpinnerValue("Loading Xcode Cloud usage summary", func() (*webcore.CIUsageSummary, error) {
+				return client.GetCIUsageSummary(requestCtx, teamID)
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud usage summary")
 			}
@@ -199,20 +201,28 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			result, err := client.GetCIUsageMonths(requestCtx, teamID, *startMonth, *startYear, *endMonth, *endYear)
+			var result *webcore.CIUsageMonths
+			planTotal := 0
+			err = withWebSpinner("Loading Xcode Cloud monthly usage", func() error {
+				var err error
+				result, err = client.GetCIUsageMonths(requestCtx, teamID, *startMonth, *startYear, *endMonth, *endYear)
+				if err != nil {
+					return err
+				}
+				if len(requestedProductIDs) > 0 {
+					result.ProductUsage = filterProductUsageByIDs(result.ProductUsage, requestedProductIDs)
+				}
+				switch shared.NormalizeOutputFormat(*output.Output) {
+				case "table", "markdown":
+					summary, err := client.GetCIUsageSummary(requestCtx, teamID)
+					if err == nil && summary != nil {
+						planTotal = summary.Plan.Total
+					}
+				}
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud usage months")
-			}
-			if len(requestedProductIDs) > 0 {
-				result.ProductUsage = filterProductUsageByIDs(result.ProductUsage, requestedProductIDs)
-			}
-			planTotal := 0
-			switch shared.NormalizeOutputFormat(*output.Output) {
-			case "table", "markdown":
-				summary, err := client.GetCIUsageSummary(requestCtx, teamID)
-				if err == nil && summary != nil {
-					planTotal = summary.Plan.Total
-				}
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -289,24 +299,32 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			result, err := client.GetCIUsageDays(requestCtx, teamID, primaryProductID, *start, *end)
-			if err != nil {
-				return withWebAuthHint(err, "xcode-cloud usage days")
-			}
+			var result *webcore.CIUsageDays
 			var overall *webcore.CIUsageDays
 			productNames := map[string]string{}
 			planTotal := 0
-			switch shared.NormalizeOutputFormat(*output.Output) {
-			case "table", "markdown":
-				overall, _ = client.GetCIUsageDaysOverall(requestCtx, teamID, *start, *end)
-				summary, err := client.GetCIUsageSummary(requestCtx, teamID)
-				if err == nil && summary != nil {
-					planTotal = summary.Plan.Total
+			err = withWebSpinner("Loading Xcode Cloud daily usage", func() error {
+				var err error
+				result, err = client.GetCIUsageDays(requestCtx, teamID, primaryProductID, *start, *end)
+				if err != nil {
+					return err
 				}
-				products, err := client.ListCIProducts(requestCtx, teamID)
-				if err == nil {
-					productNames = buildProductNameByID(products)
+				switch shared.NormalizeOutputFormat(*output.Output) {
+				case "table", "markdown":
+					overall, _ = client.GetCIUsageDaysOverall(requestCtx, teamID, *start, *end)
+					summary, err := client.GetCIUsageSummary(requestCtx, teamID)
+					if err == nil && summary != nil {
+						planTotal = summary.Plan.Total
+					}
+					products, err := client.ListCIProducts(requestCtx, teamID)
+					if err == nil {
+						productNames = buildProductNameByID(products)
+					}
 				}
+				return nil
+			})
+			if err != nil {
+				return withWebAuthHint(err, "xcode-cloud usage days")
 			}
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -404,14 +422,22 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			result, err := client.GetCIUsageDays(requestCtx, teamID, pid, *start, *end)
+			var result *webcore.CIUsageDays
+			err = withWebSpinner("Loading Xcode Cloud workflow usage", func() error {
+				var err error
+				result, err = client.GetCIUsageDays(requestCtx, teamID, pid, *start, *end)
+				if err != nil {
+					return err
+				}
+
+				// Resolve workflow names from the workflows endpoint.
+				wfNames := buildWorkflowNameByID(requestCtx, client, teamID, pid)
+				populateWorkflowNames(result.WorkflowUsage, wfNames)
+				return nil
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud usage workflows")
 			}
-
-			// Resolve workflow names from the workflows endpoint.
-			wfNames := buildWorkflowNameByID(requestCtx, client, teamID, pid)
-			populateWorkflowNames(result.WorkflowUsage, wfNames)
 
 			wfID := strings.TrimSpace(*workflowID)
 			if wfID != "" {
@@ -439,7 +465,9 @@ Examples:
 			planTotal := 0
 			switch shared.NormalizeOutputFormat(*output.Output) {
 			case "table", "markdown":
-				summary, _ := client.GetCIUsageSummary(requestCtx, teamID)
+				summary, _ := withWebSpinnerValue("Loading Xcode Cloud plan summary", func() (*webcore.CIUsageSummary, error) {
+					return client.GetCIUsageSummary(requestCtx, teamID)
+				})
 				if summary != nil {
 					planTotal = summary.Plan.Total
 				}
@@ -623,7 +651,9 @@ Examples:
 			}
 
 			client := newCIClientFn(session)
-			result, err := client.ListCIProducts(requestCtx, teamID)
+			result, err := withWebSpinnerValue("Loading Xcode Cloud products", func() (*webcore.CIProductListResponse, error) {
+				return client.ListCIProducts(requestCtx, teamID)
+			})
 			if err != nil {
 				return withWebAuthHint(err, "xcode-cloud products")
 			}

@@ -43,8 +43,12 @@ func TestPrintTable_XcodeCloudRunResult(t *testing.T) {
 		BuildNumber:       42,
 		WorkflowID:        "wf-456",
 		WorkflowName:      "CI Build",
+		TriggerSource:     "branch",
 		GitReferenceID:    "ref-789",
 		GitReferenceName:  "main",
+		PullRequestID:     "",
+		SourceRunID:       "",
+		Clean:             true,
 		ExecutionProgress: "PENDING",
 		CompletionStatus:  "",
 		StartReason:       "MANUAL",
@@ -64,6 +68,15 @@ func TestPrintTable_XcodeCloudRunResult(t *testing.T) {
 	if !strings.Contains(output, "CI Build") {
 		t.Fatalf("expected workflow name in output, got: %s", output)
 	}
+	if !strings.Contains(output, "Trigger Source") {
+		t.Fatalf("expected trigger source header in output, got: %s", output)
+	}
+	if !strings.Contains(output, "branch") {
+		t.Fatalf("expected trigger source value in output, got: %s", output)
+	}
+	if !strings.Contains(output, "true") {
+		t.Fatalf("expected clean flag value in output, got: %s", output)
+	}
 	if !strings.Contains(output, "PENDING") {
 		t.Fatalf("expected execution progress in output, got: %s", output)
 	}
@@ -75,8 +88,10 @@ func TestPrintMarkdown_XcodeCloudRunResult(t *testing.T) {
 		BuildNumber:       42,
 		WorkflowID:        "wf-456",
 		WorkflowName:      "CI Build",
+		TriggerSource:     "pull-request",
 		GitReferenceID:    "ref-789",
 		GitReferenceName:  "main",
+		PullRequestID:     "pr-1",
 		ExecutionProgress: "RUNNING",
 		CompletionStatus:  "",
 		StartReason:       "MANUAL",
@@ -92,6 +107,12 @@ func TestPrintMarkdown_XcodeCloudRunResult(t *testing.T) {
 	}
 	if !strings.Contains(output, "run-123") {
 		t.Fatalf("expected build run ID in output, got: %s", output)
+	}
+	if !strings.Contains(output, "pull-request") {
+		t.Fatalf("expected trigger source in output, got: %s", output)
+	}
+	if !strings.Contains(output, "pr-1") {
+		t.Fatalf("expected pull request ID in output, got: %s", output)
 	}
 	if !strings.Contains(output, "RUNNING") {
 		t.Fatalf("expected execution progress in output, got: %s", output)

@@ -162,6 +162,10 @@ func (c *Client) resolveNotaryBaseURL() string {
 
 // newNotaryRequest creates a new HTTP request targeting the Notary API.
 func (c *Client) newNotaryRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if err := validateAPIPath(path); err != nil {
+		return nil, err
+	}
+
 	token, err := GenerateNotaryJWT(c.keyID, c.issuerID, c.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate notary JWT: %w", err)

@@ -194,7 +194,7 @@ func WebAppsCreateCommand() *ffcli.Command {
 	version := fs.String("version", "1.0", "Initial version string")
 	companyName := fs.String("company-name", "", "Company name (optional)")
 
-	appleID := fs.String("apple-id", "", "Apple ID email (required when no cache is available)")
+	appleID := fs.String("apple-id", "", "Apple Account email (required when no cache is available)")
 	twoFactorCode := fs.String("two-factor-code", "", "2FA code if your account requires verification")
 	autoRename := fs.Bool("auto-rename", true, "Retry with unique name suffix if app name is already taken")
 	output := shared.BindOutputFlags(fs)
@@ -265,7 +265,9 @@ Examples:
 				CompanyName:   strings.TrimSpace(*companyName),
 			}
 
-			createdBundleID, err := ensureBundleIDFn(requestCtx, bundleIDValue, nameValue, attrs.Platform)
+			createdBundleID, err := withWebSpinnerValue("Checking or creating Bundle ID", func() (bool, error) {
+				return ensureBundleIDFn(requestCtx, bundleIDValue, nameValue, attrs.Platform)
+			})
 			if err != nil {
 				return fmt.Errorf("web apps create failed: bundle id preflight failed: %w", err)
 			}
@@ -273,7 +275,9 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Bundle ID %q was missing; created automatically.\n", bundleIDValue)
 			}
 
-			app, err := createWebAppFn(requestCtx, client, attrs)
+			app, err := withWebSpinnerValue("Creating app via Apple web API", func() (*webcore.AppResponse, error) {
+				return createWebAppFn(requestCtx, client, attrs)
+			})
 			if err != nil && *autoRename && webcore.IsDuplicateAppNameError(err) {
 				suffix := bundleIDNameSuffix(bundleIDValue)
 				if suffix != "" {
@@ -288,7 +292,9 @@ Examples:
 						}
 						fmt.Fprintf(os.Stderr, "App name in use; retrying with %q...\n", tryName)
 						attrs.Name = tryName
-						app, err = createWebAppFn(requestCtx, client, attrs)
+						app, err = withWebSpinnerValue("Creating app via Apple web API", func() (*webcore.AppResponse, error) {
+							return createWebAppFn(requestCtx, client, attrs)
+						})
 						if err == nil || !webcore.IsDuplicateAppNameError(err) {
 							break
 						}
