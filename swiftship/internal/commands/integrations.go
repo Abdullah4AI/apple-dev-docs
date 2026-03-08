@@ -70,16 +70,16 @@ func init() {
 	integrationsCmd.AddCommand(integrationsRemoveCmd)
 }
 
-func nanowaveRoot() string {
+func appledevRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".nanowave")
+	return filepath.Join(home, ".appledev")
 }
 
 func loadIntegrationStore() *integrations.IntegrationStore {
-	store := integrations.NewIntegrationStore(nanowaveRoot())
+	store := integrations.NewIntegrationStore(appledevRoot())
 	_ = store.Load()
 	return store
 }
@@ -182,7 +182,7 @@ func integrationsStatusRun() error {
 	}
 
 	if !anyConfigured {
-		terminal.Info("No integrations configured. Run: nanowave integrations setup supabase")
+		terminal.Info("No integrations configured. Run: appledev integrations setup supabase")
 		fmt.Println()
 	}
 	return nil

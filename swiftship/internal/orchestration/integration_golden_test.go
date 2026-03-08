@@ -80,7 +80,7 @@ func TestGolden_WriteMCPConfig_Supabase(t *testing.T) {
 	configs := []integrations.MCPServerConfig{
 		{
 			Name:    "supabase",
-			Command: "nanowave",
+			Command: "appledev",
 			Args:    []string{"mcp", "supabase"},
 			Env: map[string]string{
 				"SUPABASE_ACCESS_TOKEN": "sbp_test_token_123",

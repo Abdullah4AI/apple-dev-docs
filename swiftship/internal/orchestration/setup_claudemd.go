@@ -1073,7 +1073,7 @@ if command -v plutil >/dev/null 2>&1; then
   fi
 fi
 
-for cmd in xcodegen npx nanowave; do
+for cmd in xcodegen npx appledev; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     warn "[mcp-health] Missing required command in PATH: $cmd"
     FAIL=1

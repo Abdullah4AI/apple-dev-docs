@@ -29,7 +29,7 @@ func (r *revenuecatProvider) setupGuided(req integrations.SetupRequest) error {
 	req.PrintFn("detail", "1. Open your project in the RevenueCat dashboard")
 	req.PrintFn("detail", "2. Click 'API Keys' in the left sidebar")
 	req.PrintFn("detail", "3. Scroll to 'Secret API keys' and click '+ New secret API key'")
-	req.PrintFn("detail", "4. Name it (e.g. 'nanowave'), select version 'V2', enable write access")
+	req.PrintFn("detail", "4. Name it (e.g. 'appledev'), select version 'V2', enable write access")
 	req.PrintFn("detail", "5. Click 'Generate' and copy the key (starts with sk_)")
 	req.PrintFn("info", "")
 

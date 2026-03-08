@@ -80,8 +80,8 @@ func TestProvider_MCPServer(t *testing.T) {
 func TestProvider_PromptContribution(t *testing.T) {
 	// Set up a temp store with config
 	tmpDir := t.TempDir()
-	nanowaveDir := filepath.Join(tmpDir, ".nanowave")
-	os.MkdirAll(nanowaveDir, 0o755)
+	appledevDir := filepath.Join(tmpDir, ".appledev")
+	os.MkdirAll(appledevDir, 0o755)
 
 	storeData := map[string]any{
 		"providers": map[string]any{
@@ -97,9 +97,9 @@ func TestProvider_PromptContribution(t *testing.T) {
 		},
 	}
 	data, _ := json.MarshalIndent(storeData, "", "  ")
-	os.WriteFile(filepath.Join(nanowaveDir, "integrations.json"), data, 0o644)
+	os.WriteFile(filepath.Join(appledevDir, "integrations.json"), data, 0o644)
 
-	store := integrations.NewIntegrationStore(nanowaveDir)
+	store := integrations.NewIntegrationStore(appledevDir)
 	if err := store.Load(); err != nil {
 		t.Fatalf("store.Load: %v", err)
 	}

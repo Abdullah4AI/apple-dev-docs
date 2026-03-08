@@ -49,11 +49,11 @@ func NewService(cfg *config.Config, opts ...ServiceOpts) (*Service, error) {
 	}
 
 	// Initialize integration manager with all registered providers.
-	// Store lives at ~/.nanowave/ (global, not per-project).
+	// Store lives at ~/.appledev/ (global, not per-project).
 	reg := integrations.NewRegistry()
 	providers.RegisterAll(reg)
 	home, _ := os.UserHomeDir()
-	storeRoot := filepath.Join(home, ".nanowave")
+	storeRoot := filepath.Join(home, ".appledev")
 	intStore := integrations.NewIntegrationStore(storeRoot)
 	_ = intStore.Load()
 	mgr := integrations.NewManager(reg, intStore)
@@ -61,9 +61,9 @@ func NewService(cfg *config.Config, opts ...ServiceOpts) (*Service, error) {
 	return &Service{
 		config:       cfg,
 		claude:       claudeClient,
-		projectStore: storage.NewProjectStore(cfg.NanowaveDir),
-		historyStore: storage.NewHistoryStore(cfg.NanowaveDir),
-		usageStore:   storage.NewUsageStore(cfg.NanowaveDir),
+		projectStore: storage.NewProjectStore(cfg.AppledevDir),
+		historyStore: storage.NewHistoryStore(cfg.AppledevDir),
+		usageStore:   storage.NewUsageStore(cfg.AppledevDir),
 		manager:      mgr,
 		model:        model,
 	}, nil
@@ -131,9 +131,9 @@ func (s *Service) Usage() *storage.SessionUsage {
 // UpdateConfig updates the service config (e.g., after build creates a project).
 func (s *Service) UpdateConfig(cfg *config.Config) {
 	s.config = cfg
-	s.projectStore = storage.NewProjectStore(cfg.NanowaveDir)
-	s.historyStore = storage.NewHistoryStore(cfg.NanowaveDir)
-	s.usageStore = storage.NewUsageStore(cfg.NanowaveDir)
+	s.projectStore = storage.NewProjectStore(cfg.AppledevDir)
+	s.historyStore = storage.NewHistoryStore(cfg.AppledevDir)
+	s.usageStore = storage.NewUsageStore(cfg.AppledevDir)
 }
 
 // SetSimulator sets the simulator device name and persists it.
@@ -190,7 +190,7 @@ func platformBundleIDSuffix(platform string) string {
 
 // build creates a new app from a prompt using the multi-phase pipeline.
 func (s *Service) build(ctx context.Context, prompt string, images []string) error {
-	terminal.Header("Nanowave Build")
+	terminal.Header("appledev build")
 
 	hooks.FireSafe(ctx, hooks.EventBuildStart, map[string]string{
 		"APP_NAME": truncateStr(prompt, 50),
@@ -212,15 +212,15 @@ func (s *Service) build(ctx context.Context, prompt string, images []string) err
 
 	// Switch config to the newly created project directory so state is saved there
 	s.config.SetProject(result.ProjectDir)
-	s.projectStore = storage.NewProjectStore(s.config.NanowaveDir)
-	s.historyStore = storage.NewHistoryStore(s.config.NanowaveDir)
-	s.usageStore = storage.NewUsageStore(s.config.NanowaveDir)
+	s.projectStore = storage.NewProjectStore(s.config.AppledevDir)
+	s.historyStore = storage.NewHistoryStore(s.config.AppledevDir)
+	s.usageStore = storage.NewUsageStore(s.config.AppledevDir)
 
 	// Record usage
 	s.usageStore.RecordUsage(result.TotalCostUSD, result.InputTokens, result.OutputTokens, result.CacheRead, result.CacheCreated)
 
 	// Save state
-	if err := s.config.EnsureNanowaveDir(); err == nil {
+	if err := s.config.EnsureAppledevDir(); err == nil {
 		appName := result.AppName
 		proj := &storage.Project{
 			ID:           1,
@@ -290,7 +290,7 @@ func (s *Service) edit(ctx context.Context, prompt string, images []string) erro
 		return fmt.Errorf("no active project found")
 	}
 
-	terminal.Header("Nanowave")
+	terminal.Header("appledev")
 	terminal.Detail("Project", projectName(project))
 
 	platform, platforms, watchProjectShape := orchestration.DetectProjectBuildHints(project.ProjectPath)
@@ -382,10 +382,10 @@ func (s *Service) ASC(ctx context.Context, prompt string) error {
 func (s *Service) Run(ctx context.Context) error {
 	project, err := s.projectStore.Load()
 	if err != nil || project == nil {
-		return fmt.Errorf("no active project found. Run `nanowave` first")
+		return fmt.Errorf("no active project found. Run `appledev` first")
 	}
 
-	terminal.Header("Nanowave Run")
+	terminal.Header("appledev run")
 	terminal.Detail("Project", projectName(project))
 
 	// Find the .xcodeproj
@@ -589,13 +589,13 @@ func (s *Service) Run(ctx context.Context) error {
 		watchDuration := runLogWatchDuration()
 		if watchDuration > 0 {
 			terminal.Info(fmt.Sprintf("Streaming macOS logs for %s...", watchDuration.Truncate(time.Second)))
-			terminal.Detail("Tip", "Set NANOWAVE_RUN_LOG_WATCH_SECONDS=0 to disable log watching")
+			terminal.Detail("Tip", "Set APPLEDEV_RUN_LOG_WATCH_SECONDS=0 to disable log watching")
 			if streamErr := streamMacOSLogs(ctx, scheme, bundleID, watchDuration); streamErr != nil {
 				terminal.Warning(fmt.Sprintf("Log streaming unavailable: %v", streamErr))
 			}
 		} else if watchDuration < 0 {
 			terminal.Info("Streaming macOS logs until interrupted...")
-			terminal.Detail("Tip", "Set NANOWAVE_RUN_LOG_WATCH_SECONDS=0 to disable or a positive value for timed log watching")
+			terminal.Detail("Tip", "Set APPLEDEV_RUN_LOG_WATCH_SECONDS=0 to disable or a positive value for timed log watching")
 			if streamErr := streamMacOSLogs(ctx, scheme, bundleID, watchDuration); streamErr != nil {
 				terminal.Warning(fmt.Sprintf("Log streaming unavailable: %v", streamErr))
 			}
@@ -646,13 +646,13 @@ func (s *Service) Run(ctx context.Context) error {
 		watchDuration := runLogWatchDuration()
 		if watchDuration > 0 {
 			terminal.Info(fmt.Sprintf("Streaming simulator logs for %s...", watchDuration.Truncate(time.Second)))
-			terminal.Detail("Tip", "Set NANOWAVE_RUN_LOG_WATCH_SECONDS=0 to disable log watching")
+			terminal.Detail("Tip", "Set APPLEDEV_RUN_LOG_WATCH_SECONDS=0 to disable log watching")
 			if streamErr := streamSimulatorLogs(ctx, scheme, bundleID, watchDuration); streamErr != nil {
 				terminal.Warning(fmt.Sprintf("Log streaming unavailable: %v", streamErr))
 			}
 		} else if watchDuration < 0 {
 			terminal.Info("Streaming simulator logs until interrupted...")
-			terminal.Detail("Tip", "Set NANOWAVE_RUN_LOG_WATCH_SECONDS=0 to disable or a positive value for timed log watching")
+			terminal.Detail("Tip", "Set APPLEDEV_RUN_LOG_WATCH_SECONDS=0 to disable or a positive value for timed log watching")
 			if streamErr := streamSimulatorLogs(ctx, scheme, bundleID, watchDuration); streamErr != nil {
 				terminal.Warning(fmt.Sprintf("Log streaming unavailable: %v", streamErr))
 			}
@@ -910,7 +910,7 @@ func projectName(p *storage.Project) string {
 }
 
 func projectDerivedDataPath(projectPath string) string {
-	return filepath.Join(projectPath, ".nanowave", "DerivedData")
+	return filepath.Join(projectPath, ".appledev", "DerivedData")
 }
 
 // findBuiltAppInDerivedData looks for the expected .app bundle in a specific DerivedData path.

@@ -66,7 +66,7 @@ func (h *cancelHolder) Clear() {
 }
 
 func newImageCache() (*imageCache, error) {
-	dir, err := os.MkdirTemp("", "nanowave-images-*")
+	dir, err := os.MkdirTemp("", "appledev-images-*")
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func runInteractive(cmd *cobra.Command) error {
 	// Check for updates in the background (non-blocking)
 	updateCh := make(chan *update.Result, 1)
 	go func() {
-		updateCh <- update.Check("moasq", "nanowave", Version)
+		updateCh <- update.Check("moasq", "appledev", Version)
 	}()
 
 	// Print tool status
@@ -214,7 +214,7 @@ func runInteractive(cmd *cobra.Command) error {
 	cfg, err := config.Load()
 	if err != nil {
 		terminal.Error("Claude Code CLI is not installed.")
-		terminal.Info("Run `nanowave setup` to install all prerequisites.")
+		terminal.Info("Run `appledev setup` to install all prerequisites.")
 		return err
 	}
 
@@ -400,7 +400,7 @@ func runInteractive(cmd *cobra.Command) error {
 		newCfg, _ := config.Load()
 		if newCfg != nil {
 			// If we had a project selected, keep it selected
-			if cfg.NanowaveDir != "" {
+			if cfg.AppledevDir != "" {
 				newCfg.SetProject(cfg.ProjectDir)
 			} else {
 				// After a build, check if a new project appeared and select it

@@ -8,8 +8,8 @@ package secrets
 
 import "fmt"
 
-// serviceName is the keychain service identifier for all nanowave secrets.
-const serviceName = "nanowave"
+// serviceName is the keychain service identifier for all appledev secrets.
+const serviceName = "appledev"
 
 // SecretStore provides secure credential storage.
 type SecretStore interface {
@@ -35,7 +35,7 @@ func SecretKey(provider, appName, field string) string {
 func New(dir string) SecretStore {
 	ks := newKeychainStore()
 	// Probe: try a set+get+delete cycle to verify keychain availability.
-	probeKey := "__nanowave_probe__"
+	probeKey := "__appledev_probe__"
 	if err := ks.Set(probeKey, "ok"); err != nil {
 		return newFileStore(dir)
 	}

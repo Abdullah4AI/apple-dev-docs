@@ -396,7 +396,7 @@ func TestWriteClaudeProjectScaffoldCreatesArtifacts(t *testing.T) {
 	}
 }
 
-func TestWriteMCPConfigUsesPortableNanowaveCommand(t *testing.T) {
+func TestWriteMCPConfigUsesPortableAppledevCommand(t *testing.T) {
 	projectDir := t.TempDir()
 	reg := mcpregistry.New()
 	mcpregistry.RegisterAll(reg)
@@ -408,8 +408,8 @@ func TestWriteMCPConfigUsesPortableNanowaveCommand(t *testing.T) {
 		t.Fatalf("failed to read .mcp.json: %v", err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `"command": "nanowave"`) {
-		t.Errorf(".mcp.json should use portable nanowave command, got:\n%s", text)
+	if !strings.Contains(text, `"command": "appledev"`) {
+		t.Errorf(".mcp.json should use portable appledev command, got:\n%s", text)
 	}
 }
 

@@ -16,17 +16,17 @@ type Config struct {
 	// ClaudePath is the path to the claude binary.
 	ClaudePath string
 
-	// NanowaveRoot is the root nanowave directory (~/.nanowave/ equivalent → ~/nanowave/).
-	NanowaveRoot string
+	// AppledevRoot is the root appledev directory (~/.appledev/ equivalent → ~/appledev/).
+	AppledevRoot string
 
-	// ProjectDir is the project catalog root (~/nanowave/projects/).
+	// ProjectDir is the project catalog root (~/appledev/projects/).
 	// During a build, this is where new project folders are created.
 	// After SetProject(), this points to the specific project directory.
 	ProjectDir string
 
-	// NanowaveDir is the .nanowave/ state directory for the active project.
+	// AppledevDir is the .appledev/ state directory for the active project.
 	// Empty until a project is selected via SetProject().
-	NanowaveDir string
+	AppledevDir string
 }
 
 // ProjectInfo holds metadata about a project in the catalog.
@@ -37,8 +37,8 @@ type ProjectInfo struct {
 }
 
 // Load validates the environment and returns a Config.
-// ProjectDir is set to ~/nanowave/projects/ (the catalog root).
-// NanowaveDir is empty until a project is selected via SetProject().
+// ProjectDir is set to ~/appledev/projects/ (the catalog root).
+// AppledevDir is empty until a project is selected via SetProject().
 func Load() (*Config, error) {
 	claudePath, err := findClaude()
 	if err != nil {
@@ -50,8 +50,8 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	nanowaveRoot := filepath.Join(home, "nanowave")
-	projectDir := filepath.Join(nanowaveRoot, "projects")
+	appledevRoot := filepath.Join(home, "appledev")
+	projectDir := filepath.Join(appledevRoot, "projects")
 
 	// Create the catalog directory if needed
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
@@ -60,20 +60,20 @@ func Load() (*Config, error) {
 
 	return &Config{
 		ClaudePath:   claudePath,
-		NanowaveRoot: nanowaveRoot,
+		AppledevRoot: appledevRoot,
 		ProjectDir:   projectDir,
-		NanowaveDir:  "", // set via SetProject()
+		AppledevDir:  "", // set via SetProject()
 	}, nil
 }
 
 // SetProject switches config to point at a specific project directory.
-// projectPath should be the full path (e.g., ~/nanowave/projects/HabitGrid).
+// projectPath should be the full path (e.g., ~/appledev/projects/HabitGrid).
 func (c *Config) SetProject(projectPath string) {
 	c.ProjectDir = projectPath
-	c.NanowaveDir = filepath.Join(projectPath, ".nanowave")
+	c.AppledevDir = filepath.Join(projectPath, ".appledev")
 }
 
-// ListProjects scans the catalog for valid projects (dirs with .nanowave/project.json).
+// ListProjects scans the catalog for valid projects (dirs with .appledev/project.json).
 func (c *Config) ListProjects() []ProjectInfo {
 	catalogRoot := c.CatalogRoot()
 
@@ -88,7 +88,7 @@ func (c *Config) ListProjects() []ProjectInfo {
 			continue
 		}
 		projDir := filepath.Join(catalogRoot, entry.Name())
-		projectJSON := filepath.Join(projDir, ".nanowave", "project.json")
+		projectJSON := filepath.Join(projDir, ".appledev", "project.json")
 		info, err := os.Stat(projectJSON)
 		if err != nil {
 			continue
@@ -108,27 +108,27 @@ func (c *Config) ListProjects() []ProjectInfo {
 	return projects
 }
 
-// CatalogRoot returns the project catalog root (~/nanowave/projects/).
+// CatalogRoot returns the project catalog root (~/appledev/projects/).
 // This is the original ProjectDir before SetProject() is called.
 func (c *Config) CatalogRoot() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "nanowave", "projects")
+	return filepath.Join(home, "appledev", "projects")
 }
 
-// EnsureNanowaveDir creates the .nanowave/ directory if it doesn't exist.
-func (c *Config) EnsureNanowaveDir() error {
-	if c.NanowaveDir == "" {
+// EnsureAppledevDir creates the .appledev/ directory if it doesn't exist.
+func (c *Config) EnsureAppledevDir() error {
+	if c.AppledevDir == "" {
 		return fmt.Errorf("no project selected")
 	}
-	return os.MkdirAll(c.NanowaveDir, 0o755)
+	return os.MkdirAll(c.AppledevDir, 0o755)
 }
 
-// HasProject returns true if a .nanowave/ directory exists with a project.json.
+// HasProject returns true if a .appledev/ directory exists with a project.json.
 func (c *Config) HasProject() bool {
-	if c.NanowaveDir == "" {
+	if c.AppledevDir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(c.NanowaveDir, "project.json"))
+	_, err := os.Stat(filepath.Join(c.AppledevDir, "project.json"))
 	return err == nil
 }
 

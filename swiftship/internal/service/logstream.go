@@ -18,7 +18,7 @@ import (
 const defaultRunLogWatchSeconds = 30
 
 func runLogWatchDuration() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("NANOWAVE_RUN_LOG_WATCH_SECONDS"))
+	raw := strings.TrimSpace(os.Getenv("APPLEDEV_RUN_LOG_WATCH_SECONDS"))
 	if raw == "" {
 		return time.Duration(defaultRunLogWatchSeconds) * time.Second
 	}

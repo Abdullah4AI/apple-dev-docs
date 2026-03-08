@@ -16,7 +16,7 @@ You MUST set up the Supabase backend BEFORE writing any Swift code. Follow this 
 5. **Create storage policies** — per-user folder enforcement on `storage.objects`
 6. **Create triggers** — for `updated_at`, denormalized counters, etc.
 7. **Verify** with `mcp__supabase__list_tables` and `mcp__supabase__list_storage_buckets`
-8. **Check auth config** with `mcp__supabase__get_auth_config` to confirm providers are enabled (auto-configured by nanowave)
+8. **Check auth config** with `mcp__supabase__get_auth_config` to confirm providers are enabled (auto-configured by appledev)
 
 ### Phase 2: Swift Code
 8. Write `Config/AppConfig.swift` — Supabase URL + anon key
@@ -50,7 +50,7 @@ final class SupabaseService {
 
 ## AppConfig Pattern
 
-Store Supabase credentials as static constants — injected by nanowave during build.
+Store Supabase credentials as static constants — injected by appledev during build.
 
 ```swift
 enum AppConfig {
@@ -69,7 +69,7 @@ enum AppConfig {
 - **All operations are async/await** — no callbacks, no Combine
 - **RLS on every table** — never leave a table without Row Level Security
 - **Use XcodeGen MCP** to add "Sign in with Apple" entitlement when auth is needed
-- **Auth providers are auto-configured** by the nanowave pipeline — use `mcp__supabase__get_auth_config` to verify, use `mcp__supabase__configure_auth_providers` only if manual adjustment is needed
+- **Auth providers are auto-configured** by the appledev pipeline — use `mcp__supabase__get_auth_config` to verify, use `mcp__supabase__configure_auth_providers` only if manual adjustment is needed
 
 ## Available MCP Tools
 

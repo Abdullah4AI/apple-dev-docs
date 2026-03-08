@@ -23,7 +23,7 @@ func (s *supabaseProvider) Meta() integrations.ProviderMeta {
 		Name:        "Supabase",
 		Description: "Open-source backend with auth, PostgreSQL, and storage",
 		SPMPackage:  "supabase-swift",
-		MCPCommand:  "nanowave",
+		MCPCommand:  "appledev",
 		MCPArgs:     []string{"mcp", "supabase"},
 		DocsMCPPkg:  "@anthropic-ai/supabase-docs-mcp",
 	}

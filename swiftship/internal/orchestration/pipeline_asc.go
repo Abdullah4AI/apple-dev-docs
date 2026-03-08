@@ -28,7 +28,7 @@ func (p *Pipeline) ASCFull(ctx context.Context, prompt, projectDir, sessionID st
 	log.Printf("[asc] starting ASCFull prompt=%q projectDir=%s sessionID=%s", prompt, projectDir, sessionID)
 
 	appName := ReadProjectAppName(projectDir)
-	fmt.Printf("\n%sNanowave Connect%s\n", terminal.Bold, terminal.Reset)
+	fmt.Printf("\n%sappledev connect%s\n", terminal.Bold, terminal.Reset)
 	if appName != "" {
 		terminal.Detail("Project", appName)
 	}
@@ -593,14 +593,14 @@ func extractASCSummary(text string) string {
 	return strings.Join(result, "\n  ")
 }
 
-// redirectLogsToFile redirects log output to a file in the project's .nanowave
+// redirectLogsToFile redirects log output to a file in the project's .appledev
 // directory. Returns a function to restore the previous log output.
 // In non-interactive mode, logs stay on stdout.
 func redirectLogsToFile(projectDir string) func() {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return func() {}
 	}
-	logDir := filepath.Join(projectDir, ".nanowave")
+	logDir := filepath.Join(projectDir, ".appledev")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return func() {}
 	}
@@ -1569,7 +1569,7 @@ When adding beta testers, **default to external testing** — it works for any e
 	}
 
 	// Load skills — official ASC CLI skills from github.com/rudrankriyam/app-store-connect-cli-skills
-	// plus nanowave-specific skills (asset-management, asc-publish)
+	// plus appledev-specific skills (asset-management, asc-publish)
 	ascSkills := []struct {
 		dir   string
 		label string
@@ -1592,7 +1592,7 @@ When adding beta testers, **default to external testing** — it works for any e
 		{"skills/features/asc-subscription-localization", "Subscription Localization"},
 		{"skills/features/asc-wall-submit", "Wall of Apps"},
 		{"skills/features/asc-workflow", "Workflow Automation"},
-		// Nanowave-specific skills
+		// appledev-specific skills
 		{"skills/features/asc-publish", "App Store Publishing"},
 		{"skills/features/asset-management", "Asset Management"},
 		{"skills/features/asc-hitl-interaction", "User Interaction Patterns"},
@@ -1665,7 +1665,7 @@ func detectProjectPatterns(projectDir string) (hasSignIn bool, collectsData bool
 			return nil // skip unreadable paths
 		}
 		if info.IsDir() {
-			// Skip hidden dirs, build dirs, and .nanowave
+			// Skip hidden dirs, build dirs, and .appledev
 			base := filepath.Base(path)
 			if strings.HasPrefix(base, ".") || base == "build" || base == "DerivedData" {
 				return filepath.SkipDir

@@ -43,7 +43,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "appledev",
 		Short: "Apple Developer Toolkit - unified CLI for iOS development",
-		Long:  "A unified command-line toolkit combining SwiftShip (app builder) and App Store Connect CLI.",
+		Long:  "A unified command-line toolkit combining SwiftShip (app builder) and Apple Developer Toolkit.",
 		Version: version,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
@@ -61,7 +61,7 @@ func main() {
 	// Add appstore as "store" subcommand (passthrough to ffcli)
 	storeCmd := &cobra.Command{
 		Use:                "store",
-		Short:              "App Store Connect CLI",
+		Short:              "App Store tools",
 		Long:               "A fast, lightweight CLI for App Store Connect. Built for developers and AI agents.",
 		Aliases:            []string{"s"},
 		DisableFlagParsing: true,

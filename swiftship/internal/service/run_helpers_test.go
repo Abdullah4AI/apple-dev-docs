@@ -10,7 +10,7 @@ import (
 func TestProjectDerivedDataPath(t *testing.T) {
 	projectPath := filepath.Join(string(filepath.Separator), "tmp", "SampleApp")
 	got := projectDerivedDataPath(projectPath)
-	want := filepath.Join(projectPath, ".nanowave", "DerivedData")
+	want := filepath.Join(projectPath, ".appledev", "DerivedData")
 	if got != want {
 		t.Fatalf("projectDerivedDataPath() = %q, want %q", got, want)
 	}

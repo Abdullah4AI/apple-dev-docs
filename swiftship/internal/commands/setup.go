@@ -15,7 +15,7 @@ import (
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Install and verify prerequisites",
-	Long:  "Check and install all prerequisites needed to use Nanowave.",
+	Long:  "Check and install all prerequisites needed to use appledev.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSetup()
 	},
@@ -28,7 +28,7 @@ func needsSetup() bool {
 
 // runSetup checks and installs all prerequisites. Returns nil on success.
 func runSetup() error {
-	terminal.Header("Nanowave Setup")
+	terminal.Header("appledev setup")
 	fmt.Println()
 
 	allGood := true
@@ -58,7 +58,7 @@ func runSetup() error {
 				terminal.Error(fmt.Sprintf("failed: %v", err))
 				terminal.Detail("Install manually", "xcode-select --install")
 			} else {
-				terminal.Info("installation dialog opened. Complete the install and re-run `nanowave setup`.")
+				terminal.Info("installation dialog opened. Complete the install and re-run `appledev setup`.")
 			}
 		} else {
 			terminal.Detail("Install manually", "xcode-select --install")
@@ -200,7 +200,7 @@ func runSetup() error {
 	if allGood {
 		terminal.Success("All prerequisites installed! You're ready to build.")
 	} else {
-		terminal.Warning("Some prerequisites are missing. Install them and run `nanowave setup` again.")
+		terminal.Warning("Some prerequisites are missing. Install them and run `appledev setup` again.")
 	}
 
 	return nil

@@ -420,7 +420,7 @@ func TestIntegration_FullProvisionFlow(t *testing.T) {
 	}
 	appID := apps[0].ID
 
-	// Verify the nanowave-provisioned resources are correctly wired
+	// Verify the appledev-provisioned resources are correctly wired
 	t.Run("verify_products_exist", func(t *testing.T) {
 		for _, storeID := range []string{"basic_monthly", "pro_monthly", "premium_yearly"} {
 			p := c.findProductByStoreID(ctx, pid, appID, storeID)
@@ -465,15 +465,15 @@ func TestIntegration_FullProvisionFlow(t *testing.T) {
 			t.Fatalf("parse: %v", err)
 		}
 
-		// Check nanowave packages specifically
-		nanowavePackages := map[string]bool{
+		// Check appledev packages specifically
+		appledevPackages := map[string]bool{
 			"basic_monthly":  false,
 			"pro_monthly":    false,
 			"premium_yearly": false,
 		}
 
 		for _, pkg := range pkgResp.Items {
-			if _, isNanowave := nanowavePackages[pkg.LookupKey]; !isNanowave {
+			if _, isAppledev := appledevPackages[pkg.LookupKey]; !isAppledev {
 				continue
 			}
 			// Check this package has products
@@ -502,13 +502,13 @@ func TestIntegration_FullProvisionFlow(t *testing.T) {
 					t.Errorf("✗ package %s eligibility_criteria = %q (expected 'all')", pkg.LookupKey, item.EligibilityCriteria)
 				}
 				t.Logf("✓ %s -> %s (eligibility=%s)", pkg.LookupKey, item.Product.StoreIdentifier, item.EligibilityCriteria)
-				nanowavePackages[pkg.LookupKey] = true
+				appledevPackages[pkg.LookupKey] = true
 			}
 		}
 
-		for key, found := range nanowavePackages {
+		for key, found := range appledevPackages {
 			if !found {
-				t.Errorf("✗ nanowave package %s not found in offering", key)
+				t.Errorf("✗ appledev package %s not found in offering", key)
 			}
 		}
 	})

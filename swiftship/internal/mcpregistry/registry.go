@@ -8,7 +8,7 @@ package mcpregistry
 // Server describes an always-on internal MCP server.
 type Server struct {
 	Name    string   // MCP server name (e.g. "xcodegen", "asc")
-	Command string   // executable (e.g. "nanowave", "npx")
+	Command string   // executable (e.g. "appledev", "npx")
 	Args    []string // command arguments (e.g. ["mcp", "xcodegen"])
 	Tools   []string // MCP tool names (e.g. "mcp__xcodegen__add_permission")
 }

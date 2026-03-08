@@ -32,7 +32,7 @@ func (s *supabaseProvider) PromptContribution(_ context.Context, req integration
 	if hasMCP {
 		// Auth provider status
 		if len(req.AuthMethods) > 0 {
-			system.WriteString("## Auth Providers (auto-configured by nanowave)\n\n")
+			system.WriteString("## Auth Providers (auto-configured by appledev)\n\n")
 			fmt.Fprintf(&system, "Auth providers already configured: %s.\n", strings.Join(req.AuthMethods, ", "))
 			system.WriteString("Do NOT configure auth providers manually — they are already enabled on the Supabase project.\n\n")
 		}
@@ -96,7 +96,7 @@ func (s *supabaseProvider) PromptContribution(_ context.Context, req integration
 	if hasMCP {
 		if req.BackendProvisioned {
 			userBlock = `
-SUPABASE BACKEND (already provisioned by nanowave):
+SUPABASE BACKEND (already provisioned by appledev):
 Tables, RLS policies, and storage buckets have been created automatically.
 1. Use mcp__supabase__list_tables to see the available tables.
 2. If you need additional tables, indexes, or policies, use mcp__supabase__execute_sql.

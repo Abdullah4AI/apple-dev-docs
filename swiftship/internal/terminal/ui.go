@@ -151,7 +151,7 @@ func Divider() {
 func Banner(version string) {
 	fmt.Println()
 	fmt.Printf("  %s╭─────────────────────────────────╮%s\n", Dim, Reset)
-	fmt.Printf("  %s│%s  Nanowave %s%-22s%s%s│%s\n", Dim, Reset, Bold, "v"+version, Reset, Dim, Reset)
+	fmt.Printf("  %s│%s  appledev %s%-22s%s%s│%s\n", Dim, Reset, Bold, "v"+version, Reset, Dim, Reset)
 	fmt.Printf("  %s│%s  Autonomous iOS app builder     %s│%s\n", Dim, Reset, Dim, Reset)
 	fmt.Printf("  %s╰─────────────────────────────────╯%s\n", Dim, Reset)
 	fmt.Println()

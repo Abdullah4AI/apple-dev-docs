@@ -57,7 +57,7 @@ try await client.auth.update(user: UserAttributes(email: email, password: passwo
 import AuthenticationServices
 
 // REQUIRES: com.apple.developer.applesignin entitlement via XcodeGen MCP
-// Apple provider is auto-configured by nanowave pipeline
+// Apple provider is auto-configured by appledev pipeline
 
 SignInWithAppleButton { request in
     request.requestedScopes = [.email, .fullName]
@@ -85,7 +85,7 @@ if state == .revoked || state == .notFound {
 
 ```swift
 // REQUIRES: GoogleSignIn package dependency
-// Google provider is auto-configured by nanowave pipeline
+// Google provider is auto-configured by appledev pipeline
 import GoogleSignIn
 
 guard let rootVC = UIApplication.shared.connectedScenes

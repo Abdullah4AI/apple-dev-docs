@@ -43,7 +43,7 @@ type Project struct {
 // ProjectStore implements project storage using a local JSON file.
 type ProjectStore struct {
 	mu   sync.Mutex
-	dir  string // .nanowave/ directory
+	dir  string // .appledev/ directory
 	data *Project
 }
 

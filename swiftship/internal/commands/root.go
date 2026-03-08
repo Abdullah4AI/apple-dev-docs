@@ -10,9 +10,9 @@ import (
 var Version = "0.2.0"
 
 var rootCmd = &cobra.Command{
-	Use:     "nanowave",
+	Use:   "appledev",
 	Short:   "Autonomous Apple platform app builder",
-	Long:    "Nanowave builds, edits, and fixes Apple platform apps using Claude Code as the AI backend.",
+	Long:    "appledev builds, edits, and fixes Apple platform apps using Claude Code as the AI backend.",
 	Version: Version,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteractive(cmd)
@@ -30,7 +30,7 @@ var openCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		svc, err := loadProjectService()
 		if err != nil {
-			return fmt.Errorf("no project found. Run `nanowave` first")
+			return fmt.Errorf("no project found. Run `appledev` first")
 		}
 		return svc.Open()
 	},

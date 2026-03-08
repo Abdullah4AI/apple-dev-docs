@@ -70,7 +70,7 @@ func pasteClipboardImage() bool {
 
 	clipboardState.mu.Lock()
 	if clipboardState.tempDir == "" {
-		dir, err := os.MkdirTemp("", "nanowave-clipboard-*")
+		dir, err := os.MkdirTemp("", "appledev-clipboard-*")
 		if err != nil {
 			clipboardState.mu.Unlock()
 			return false

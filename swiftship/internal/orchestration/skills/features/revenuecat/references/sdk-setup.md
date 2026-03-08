@@ -27,7 +27,7 @@ Store the key in `Config/AppConfig.swift` alongside other RevenueCat constants:
 
 ```swift
 enum AppConfig {
-    static let revenueCatAPIKey = "appl_xxxxxxxxxxxx" // real key injected by nanowave
+    static let revenueCatAPIKey = "appl_xxxxxxxxxxxx" // real key injected by appledev
     static let entitlementID = "premium"              // matches RevenueCat dashboard
 
     enum ProductID {
