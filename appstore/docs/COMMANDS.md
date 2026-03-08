@@ -97,12 +97,12 @@ asc <subcommand> [flags]
 
 ### Review and Release
 
+- `release` - Run high-level App Store release workflows.
 - `review` - Manage App Store review details, attachments, and submissions.
 - `reviews` - List and manage App Store customer reviews.
 - `submit` - Submit builds for App Store review.
 - `validate` - Validate App Store version readiness before submission.
 - `publish` - End-to-end publish workflows for TestFlight and App Store.
-- `release` - Run high-level App Store release workflows.
 
 ### Monetization
 
@@ -150,6 +150,7 @@ asc <subcommand> [flags]
 - `release-notes` - Generate and manage App Store release notes.
 - `workflow` - Run multi-step automation workflows.
 - `metadata` - Manage app metadata with deterministic file workflows.
+- `snitch` - Report CLI friction as a GitHub issue.
 
 ## Scripting Tips
 
@@ -169,9 +170,14 @@ asc apps list --output table
 # Upload a build
 asc builds upload --app "123456789" --ipa "/path/to/MyApp.ipa"
 
-# Validate and submit an App Store version
+# Release an App Store version (high-level)
+asc release run --app "123456789" --version "1.2.3" --build "BUILD_ID" --metadata-dir "./metadata/version/1.2.3" --dry-run
+asc release run --app "123456789" --version "1.2.3" --build "BUILD_ID" --metadata-dir "./metadata/version/1.2.3" --confirm
+asc status --app "123456789"
+
+# Lower-level review/submit flow
 asc validate --app "123456789" --version "1.2.3"
-asc submit --app "123456789" --version "1.2.3"
+asc submit create --app "123456789" --version "1.2.3" --build "BUILD_ID" --confirm
 
 # Run a local automation workflow
 asc workflow run release

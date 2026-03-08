@@ -57,7 +57,7 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resolvedGroups, err := resolveBuildBetaGroups(requestCtx, client, trimmedBuildID, groupInputs)
+			resolvedGroups, err := resolveBuildBetaGroups(requestCtx, client, trimmedBuildID, groupInputs, *skipInternal)
 			if err != nil {
 				return fmt.Errorf("builds add-groups: %w", err)
 			}
@@ -128,7 +128,7 @@ func (g resolvedBuildBetaGroup) NameForDisplay() string {
 	return g.ID
 }
 
-func resolveBuildBetaGroups(ctx context.Context, client *asc.Client, buildID string, groups []string) ([]resolvedBuildBetaGroup, error) {
+func resolveBuildBetaGroups(ctx context.Context, client *asc.Client, buildID string, groups []string, skipInternal bool) ([]resolvedBuildBetaGroup, error) {
 	buildApp, err := client.GetBuildApp(ctx, buildID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve app for build %q: %w", buildID, err)
@@ -157,11 +157,11 @@ func resolveBuildBetaGroups(ctx context.Context, client *asc.Client, buildID str
 		}
 	}
 
-	return resolveBuildBetaGroupsFromList(groups, allGroups)
+	return resolveBuildBetaGroupsFromList(groups, allGroups, skipInternal)
 }
 
-func resolveBuildBetaGroupsFromList(inputGroups []string, groups *asc.BetaGroupsResponse) ([]resolvedBuildBetaGroup, error) {
-	resolvedIDs, err := resolveBuildBetaGroupIDsFromList(inputGroups, groups)
+func resolveBuildBetaGroupsFromList(inputGroups []string, groups *asc.BetaGroupsResponse, skipInternal bool) ([]resolvedBuildBetaGroup, error) {
+	resolvedIDs, err := resolveBuildBetaGroupIDsFromList(inputGroups, groups, skipInternal)
 	if err != nil {
 		return nil, err
 	}
@@ -191,19 +191,21 @@ func resolveBuildBetaGroupsFromList(inputGroups []string, groups *asc.BetaGroups
 	return resolvedGroups, nil
 }
 
-func resolveBuildBetaGroupIDsFromList(inputGroups []string, groups *asc.BetaGroupsResponse) ([]string, error) {
+func resolveBuildBetaGroupIDsFromList(inputGroups []string, groups *asc.BetaGroupsResponse, skipInternal bool) ([]string, error) {
 	if groups == nil {
 		return nil, fmt.Errorf("no beta groups returned for app")
 	}
 
 	groupIDs := make(map[string]struct{}, len(groups.Data))
 	groupNameToIDs := make(map[string][]string)
+	groupInternal := make(map[string]bool, len(groups.Data))
 	for _, item := range groups.Data {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			continue
 		}
 		groupIDs[id] = struct{}{}
+		groupInternal[id] = item.Attributes.IsInternalGroup
 
 		name := strings.TrimSpace(item.Attributes.Name)
 		if name == "" {
@@ -234,7 +236,19 @@ func resolveBuildBetaGroupIDsFromList(inputGroups []string, groups *asc.BetaGrou
 			case 1:
 				resolvedID = matches[0]
 			default:
-				return nil, fmt.Errorf("multiple beta groups named %q; use group ID", group)
+				externalMatches := filterExternalGroupIDs(matches, groupInternal)
+				if skipInternal && len(externalMatches) == 1 {
+					resolvedID = externalMatches[0]
+					break
+				}
+
+				hint := "Use the group ID to disambiguate."
+				if !skipInternal && len(externalMatches) == 1 && len(externalMatches) < len(matches) {
+					hint = "Use the group ID to disambiguate, or --skip-internal to exclude internal groups."
+				}
+				return nil, fmt.Errorf("%s\n%s",
+					formatAmbiguousGroupError(group, matches, groupInternal),
+					hint)
 			}
 		}
 
@@ -249,6 +263,29 @@ func resolveBuildBetaGroupIDsFromList(inputGroups []string, groups *asc.BetaGrou
 		return nil, fmt.Errorf("at least one beta group is required")
 	}
 	return resolved, nil
+}
+
+func filterExternalGroupIDs(matchIDs []string, internalByID map[string]bool) []string {
+	external := make([]string, 0, len(matchIDs))
+	for _, id := range matchIDs {
+		if !internalByID[id] {
+			external = append(external, id)
+		}
+	}
+	return external
+}
+
+func formatAmbiguousGroupError(name string, matchIDs []string, internalByID map[string]bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%q matches %d beta groups:", name, len(matchIDs))
+	for _, id := range matchIDs {
+		kind := "external"
+		if internalByID[id] {
+			kind = "internal"
+		}
+		fmt.Fprintf(&b, "\n  %s (%s)", id, kind)
+	}
+	return b.String()
 }
 
 // BuildsRemoveGroupsCommand returns the builds remove-groups subcommand.

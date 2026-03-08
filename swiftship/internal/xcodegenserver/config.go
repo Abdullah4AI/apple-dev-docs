@@ -153,19 +153,19 @@ func generateIOSProjectYAMLCfg(cfg *ProjectConfig) string {
 	writeIOSDestinationSettingsCfg(&b, cfg.DeviceFamily)
 	b.WriteString("    sources:\n")
 	fmt.Fprintf(&b, "      - path: %s\n", appName)
-	b.WriteString("        type: folder\n")
+	b.WriteString("        type: syncedFolder\n")
 	if hasLocalizations {
 		b.WriteString("        excludes:\n")
 		b.WriteString("          - \"*.lproj\"\n")
 		fmt.Fprintf(&b, "      - path: %s\n", appName)
-		b.WriteString("        type: folder\n")
+		b.WriteString("        type: syncedFolder\n")
 		b.WriteString("        includes:\n")
 		b.WriteString("          - \"*.lproj\"\n")
 		b.WriteString("        buildPhase: resources\n")
 	}
 	if hasExtensions {
 		b.WriteString("      - path: Shared\n")
-		b.WriteString("        type: folder\n")
+		b.WriteString("        type: syncedFolder\n")
 		b.WriteString("        optional: true\n")
 	}
 
@@ -183,6 +183,7 @@ func generateIOSProjectYAMLCfg(cfg *ProjectConfig) string {
 	b.WriteString("        INFOPLIST_KEY_UILaunchScreen_Generation: YES\n")
 	deviceFamilyBuildSettingsCfg(&b, cfg.DeviceFamily)
 	b.WriteString("        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n")
+	b.WriteString("        INFOPLIST_KEY_CFBundleIconName: AppIcon\n")
 	b.WriteString("        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor\n")
 	b.WriteString("        ENABLE_PREVIEWS: YES\n")
 	b.WriteString("        SWIFT_EMIT_LOC_STRINGS: YES\n")
@@ -261,9 +262,9 @@ func generateIOSProjectYAMLCfg(cfg *ProjectConfig) string {
 		b.WriteString("    platform: iOS\n")
 		b.WriteString("    sources:\n")
 		fmt.Fprintf(&b, "      - path: %s\n", sourcePath)
-		b.WriteString("        type: folder\n")
+		b.WriteString("        type: syncedFolder\n")
 		b.WriteString("      - path: Shared\n")
-		b.WriteString("        type: folder\n")
+		b.WriteString("        type: syncedFolder\n")
 		b.WriteString("        optional: true\n")
 		b.WriteString("    settings:\n")
 		b.WriteString("      base:\n")
@@ -519,10 +520,10 @@ func generatePairedYAMLCfg(cfg *ProjectConfig) string {
 	b.WriteString("      - iOS\n")
 	b.WriteString("    sources:\n")
 	fmt.Fprintf(&b, "      - path: %s\n", appName)
-	b.WriteString("        type: folder\n")
+	b.WriteString("        type: syncedFolder\n")
 	if hasExtensions {
 		b.WriteString("      - path: Shared\n")
-		b.WriteString("        type: folder\n")
+		b.WriteString("        type: syncedFolder\n")
 		b.WriteString("        optional: true\n")
 	}
 
@@ -540,6 +541,7 @@ func generatePairedYAMLCfg(cfg *ProjectConfig) string {
 	b.WriteString("        TARGETED_DEVICE_FAMILY: \"1\"\n")
 	b.WriteString("        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait\n")
 	b.WriteString("        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n")
+	b.WriteString("        INFOPLIST_KEY_CFBundleIconName: AppIcon\n")
 	b.WriteString("        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor\n")
 	b.WriteString("        ENABLE_PREVIEWS: YES\n")
 	b.WriteString("        SWIFT_EMIT_LOC_STRINGS: YES\n")
@@ -675,6 +677,7 @@ func generatePairedYAMLCfg(cfg *ProjectConfig) string {
 
 func writeWatchOSBuildSettingsCfg(b *strings.Builder) {
 	b.WriteString("        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n")
+	b.WriteString("        INFOPLIST_KEY_CFBundleIconName: AppIcon\n")
 	b.WriteString("        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor\n")
 	b.WriteString("        ENABLE_PREVIEWS: YES\n")
 	b.WriteString("        SWIFT_EMIT_LOC_STRINGS: YES\n")
@@ -692,7 +695,7 @@ func watchExtensionTargetName(appName string) string {
 
 func writeFolderSourceEntryCfg(b *strings.Builder, path string, excludes []string, optional bool) {
 	fmt.Fprintf(b, "      - path: %s\n", path)
-	b.WriteString("        type: folder\n")
+	b.WriteString("        type: syncedFolder\n")
 	if optional {
 		b.WriteString("        optional: true\n")
 	}

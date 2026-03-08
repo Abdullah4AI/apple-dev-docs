@@ -62,6 +62,8 @@ var (
 	privateKeyTempPath  string
 	privateKeyTempKey   string
 	privateKeyTempPaths []string
+	strictAuthWarnMu    sync.Mutex
+	strictAuthWarned    = map[string]struct{}{}
 	selectedProfile     string
 	strictAuth          bool
 	retryLog            OptionalBool
@@ -263,6 +265,41 @@ type OutputFlags struct {
 	Pretty *bool
 }
 
+type validatedOutputValue struct {
+	value   *string
+	pretty  *bool
+	allowed []string
+}
+
+func (v *validatedOutputValue) String() string {
+	if v == nil || v.value == nil {
+		return ""
+	}
+	return *v.value
+}
+
+func (v *validatedOutputValue) Set(value string) error {
+	if v == nil || v.value == nil {
+		return fmt.Errorf("output flag is not initialized")
+	}
+	*v.value = value
+	return nil
+}
+
+func (v *validatedOutputValue) Validate() error {
+	if v == nil || v.value == nil {
+		return nil
+	}
+
+	pretty := false
+	if v.pretty != nil {
+		pretty = *v.pretty
+	}
+
+	_, err := validateOutputFormatAllowed(*v.value, pretty, v.allowed...)
+	return err
+}
+
 // MetadataOutputFlags stores pointers to metadata output-related flag values.
 type MetadataOutputFlags struct {
 	OutputFormat *string
@@ -311,27 +348,7 @@ func resolveCredentials() (resolvedCredentials, error) {
 	var actualKeyID, actualIssuerID, actualKeyPath, actualKeyPEM string
 	profile := resolveProfileName()
 	var envCreds envCredentials
-	envResolved := false
 	sources := credentialSource{}
-
-	if profile == "" && auth.ShouldBypassKeychain() {
-		resolved, err := resolveEnvCredentials()
-		if err != nil {
-			return resolvedCredentials{}, fmt.Errorf("invalid private key environment: %w", err)
-		}
-		envCreds = resolved
-		envResolved = true
-		if envCreds.complete {
-			sources.keyID = "env"
-			sources.issuerID = "env"
-			sources.keyMaterial = "env"
-			return resolvedCredentials{
-				keyID:    envCreds.keyID,
-				issuerID: envCreds.issuerID,
-				keyPath:  envCreds.keyPath,
-			}, nil
-		}
-	}
 
 	// Priority 1: Stored credentials (keychain/config)
 	cfg, storedSource, err := getCredentialsWithSourceFn(profile)
@@ -343,6 +360,9 @@ func resolveCredentials() (resolvedCredentials, error) {
 		// silently falling back to env/config credentials.
 		if errors.Is(err, auth.ErrKeychainAccessDenied) {
 			return resolvedCredentials{}, fmt.Errorf("keychain access denied; set ASC_BYPASS_KEYCHAIN=1 to bypass: %w", err)
+		}
+		if !allowsEnvFallbackForStoredError(err) {
+			return resolvedCredentials{}, err
 		}
 	} else if cfg != nil {
 		actualKeyID = cfg.KeyID
@@ -358,13 +378,11 @@ func resolveCredentials() (resolvedCredentials, error) {
 
 	// Priority 2: Environment variables (fallback for CI/CD or when keychain unavailable)
 	if actualKeyID == "" || actualIssuerID == "" || (actualKeyPath == "" && actualKeyPEM == "") {
-		if !envResolved {
-			resolved, err := resolveEnvCredentials()
-			if err != nil {
-				return resolvedCredentials{}, fmt.Errorf("invalid private key environment: %w", err)
-			}
-			envCreds = resolved
+		resolved, err := resolveEnvCredentials()
+		if err != nil {
+			return resolvedCredentials{}, fmt.Errorf("invalid private key environment: %w", err)
 		}
+		envCreds = resolved
 		if actualKeyID == "" && envCreds.keyID != "" {
 			actualKeyID = envCreds.keyID
 			sources.keyID = "env"
@@ -395,6 +413,10 @@ func resolveCredentials() (resolvedCredentials, error) {
 		keyPath:  actualKeyPath,
 		keyPEM:   actualKeyPEM,
 	}, nil
+}
+
+func allowsEnvFallbackForStoredError(err error) bool {
+	return errors.Is(err, config.ErrNotFound) || errors.Is(err, auth.ErrDefaultCredentialsNotFound)
 }
 
 func getASCClient() (*asc.Client, error) {
@@ -585,14 +607,36 @@ func strictAuthEnabled() bool {
 	case "0", "f", "false", "no", "n", "off":
 		return false
 	default:
-		fmt.Fprintf(
-			os.Stderr,
-			"Warning: invalid %s value %q (expected true/false, 1/0, yes/no, y/n, or on/off); strict auth disabled\n",
-			strictAuthEnvVar,
-			value,
-		)
+		warnInvalidStrictAuthValueOnce(value)
 		return false
 	}
+}
+
+func warnInvalidStrictAuthValueOnce(value string) {
+	if value == "" {
+		return
+	}
+
+	strictAuthWarnMu.Lock()
+	if _, ok := strictAuthWarned[value]; ok {
+		strictAuthWarnMu.Unlock()
+		return
+	}
+	strictAuthWarned[value] = struct{}{}
+	strictAuthWarnMu.Unlock()
+
+	fmt.Fprintf(
+		os.Stderr,
+		"Warning: invalid %s value %q (expected true/false, 1/0, yes/no, y/n, or on/off); strict auth disabled\n",
+		strictAuthEnvVar,
+		value,
+	)
+}
+
+func resetInvalidStrictAuthWarnings() {
+	strictAuthWarnMu.Lock()
+	defer strictAuthWarnMu.Unlock()
+	strictAuthWarned = map[string]struct{}{}
 }
 
 func printOutput(data any, format string, pretty bool) error {
@@ -763,19 +807,44 @@ func resolveDefaultOutput() string {
 
 // BindOutputFlagsWith registers a custom output-format flag and --pretty.
 func BindOutputFlagsWith(fs *flag.FlagSet, flagName, defaultValue, usage string) OutputFlags {
+	return BindOutputFlagsWithAllowed(fs, flagName, defaultValue, usage, "json", "table", "markdown")
+}
+
+// BindOutputFlagsWithAllowed registers a custom output-format flag and --pretty
+// with an explicit allowed format set.
+func BindOutputFlagsWithAllowed(fs *flag.FlagSet, flagName, defaultValue, usage string, allowed ...string) OutputFlags {
 	name := strings.TrimSpace(flagName)
 	if name == "" {
 		name = "output"
 	}
+
+	if len(allowed) == 0 {
+		allowed = []string{"json", "table", "markdown"}
+	}
+
+	outputValue := defaultValue
+	prettyValue := false
+	fs.Var(&validatedOutputValue{
+		value:   &outputValue,
+		pretty:  &prettyValue,
+		allowed: slices.Clone(allowed),
+	}, name, usage)
+
 	return OutputFlags{
-		Output: fs.String(name, defaultValue, usage),
-		Pretty: BindPrettyJSONFlag(fs),
+		Output: &outputValue,
+		Pretty: bindPrettyJSONFlagWithValue(fs, &prettyValue),
 	}
 }
 
 // BindPrettyJSONFlag registers a --pretty flag for JSON rendering.
 func BindPrettyJSONFlag(fs *flag.FlagSet) *bool {
-	return fs.Bool("pretty", false, "Pretty-print JSON output")
+	value := false
+	return bindPrettyJSONFlagWithValue(fs, &value)
+}
+
+func bindPrettyJSONFlagWithValue(fs *flag.FlagSet, value *bool) *bool {
+	fs.BoolVar(value, "pretty", false, "Pretty-print JSON output")
+	return value
 }
 
 // BindOutputFlags registers --output and --pretty flags on the provided flagset.
@@ -785,10 +854,74 @@ func BindOutputFlags(fs *flag.FlagSet) OutputFlags {
 
 // BindMetadataOutputFlags registers --output-format and --pretty flags on the provided flagset.
 func BindMetadataOutputFlags(fs *flag.FlagSet) MetadataOutputFlags {
-	output := BindOutputFlagsWith(fs, "output-format", "json", "Output format for metadata: json (default), table, markdown")
+	output := BindOutputFlagsWithAllowed(fs, "output-format", "json", "Output format for metadata: json (default), table, markdown", "json", "table", "markdown")
 	return MetadataOutputFlags{
 		OutputFormat: output.Output,
 		Pretty:       output.Pretty,
+	}
+}
+
+// ValidateBoundOutputFlags validates any output-format flags bound via the
+// shared output helpers on the provided flagset.
+func ValidateBoundOutputFlags(fs *flag.FlagSet) error {
+	if fs == nil {
+		return nil
+	}
+
+	var validationErr error
+	fs.VisitAll(func(f *flag.Flag) {
+		if validationErr != nil {
+			return
+		}
+
+		validator, ok := f.Value.(interface{ Validate() error })
+		if !ok {
+			return
+		}
+
+		validationErr = validator.Validate()
+	})
+	return validationErr
+}
+
+func validateCommandOutputPath(commands []*ffcli.Command) error {
+	for _, cmd := range commands {
+		if cmd == nil {
+			continue
+		}
+		if err := ValidateBoundOutputFlags(cmd.FlagSet); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WrapCommandOutputValidation ensures shared output flags are validated before
+// command execution so invalid format combinations fail before side effects.
+func WrapCommandOutputValidation(cmd *ffcli.Command) {
+	wrapCommandOutputValidation(cmd, nil)
+}
+
+func wrapCommandOutputValidation(cmd *ffcli.Command, parents []*ffcli.Command) {
+	if cmd == nil {
+		return
+	}
+
+	path := append(append([]*ffcli.Command(nil), parents...), cmd)
+	for _, sub := range cmd.Subcommands {
+		wrapCommandOutputValidation(sub, path)
+	}
+
+	if cmd.Exec == nil {
+		return
+	}
+
+	originalExec := cmd.Exec
+	cmd.Exec = func(ctx context.Context, args []string) error {
+		if err := validateCommandOutputPath(path); err != nil {
+			return UsageError(err.Error())
+		}
+		return originalExec(ctx, args)
 	}
 }
 

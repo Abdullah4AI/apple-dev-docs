@@ -45,7 +45,7 @@
     "app": "Cat on Chair",
     "link": "https://apps.apple.com/ca/app/cat-on-chair-focus-timer/id6746562271",
     "creator": "Ryan Yao",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/aa/9b/c7/aa9bc7c3-f8d8-2a7c-3a7b-ca7dec264363/AppIcon-0-0-1x_U007epad-0-1-0-85-220.jpeg/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/02/3d/6e/023d6ea0-1a98-d132-613c-d01b115d2e0d/AppIcon-0-0-1x_U007epad-0-1-0-85-220.jpeg/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {
@@ -55,11 +55,25 @@
     "platform": ["macOS", "iOS"]
   },
   {
+    "app": "Color Match Game: Chroma",
+    "link": "https://apps.apple.com/us/app/color-match-game-chroma/id1500196580",
+    "creator": "rudrankriyam",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e0/22/11/e02211b9-8e91-5250-17ed-a6105cd42922/Chroma-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
+  },
+  {
     "app": "Contact Sheet",
     "link": "https://apps.apple.com/us/app/contact-sheet-generator/id6744368077",
     "creator": "sambitcreate",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/cd/14/5e/cd145e49-9277-f536-bcf8-0c323a1985b0/AppIconUpdate-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg",
     "platform": ["iOS", "macOS"]
+  },
+  {
+    "app": "Cubby",
+    "link": "https://apps.apple.com/app/id6751732388",
+    "creator": "barronlroth",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/2b/cf/8b/2bcf8b94-8050-926d-bce1-b95266a061d0/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg",
+    "platform": ["iOS"]
   },
   {
     "app": "Dandelion",
@@ -141,7 +155,7 @@
     "app": "HRM Battery",
     "link": "https://apps.apple.com/app/id6758920011",
     "creator": "dnesdan",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/60/00/f8/6000f80c-e382-cc92-442f-5d75385e8343/AppIcon-0-0-1x_U007ewatch-0-1-P3-85-220.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/7b/43/73/7b4373fc-26e2-030b-7162-2f0ab0a7681d/AppIcon-0-0-1x_U007ewatch-0-1-P3-85-220.png/512x512bb.jpg",
     "platform": ["watchOS"]
   },
   {
@@ -336,7 +350,7 @@
     "app": "SnaPOP: Screenshot Editor",
     "link": "https://apps.apple.com/app/snapop/id6756635978",
     "creator": "randomor",
-    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/cf/d0/ac/cfd0ac51-231d-45c7-886f-979042cf0a46/snapop-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/83/d3/34/83d334a4-f19b-047a-8d62-75f1866d1c37/snapop-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg",
     "platform": ["iOS"]
   },
   {

@@ -46,7 +46,8 @@ Do not memorize flags. Always use `--help` for the current interface.
 | List TestFlight apps | `asc testflight apps list` |
 | List beta groups | `asc testflight beta-groups list --app "APP_ID"` |
 | List internal beta groups | `asc testflight beta-groups list --app "APP_ID" --internal` |
-| Submit for review | `asc submit create --app "APP_ID" --version "VERSION" --build "BUILD_ID" --confirm` |
+| Release (full pipeline) | `asc release run --app "APP_ID" --version "VERSION" --build "BUILD_ID" --metadata-dir "./metadata/version/VERSION" --dry-run` |
+| Submit for review (low-level) | `asc submit create --app "APP_ID" --version "VERSION" --build "BUILD_ID" --confirm` |
 | Weekly insights summary | `asc insights weekly --app "APP_ID" --source analytics --week "YYYY-MM-DD"` |
 | Download localizations | `asc localizations download --version "VERSION_ID" --path "./localizations"` |
 
@@ -59,11 +60,25 @@ asc apps
 asc builds list --app "APP_ID" --sort -uploadedDate --limit 5
 ```
 
-### Attach Build and Submit for Review
+### Release (high-level: ensure version + apply metadata + attach + validate + submit)
+
+```bash
+# Dry-run first to preview all planned steps
+asc release run --app "APP_ID" --version "1.0.0" --build "BUILD_ID" --metadata-dir "./metadata/version/1.0.0" --dry-run
+
+# Run the full pipeline
+asc release run --app "APP_ID" --version "1.0.0" --build "BUILD_ID" --metadata-dir "./metadata/version/1.0.0" --confirm
+
+# Monitor status after submission
+asc status --app "APP_ID"
+```
+
+Lower-level alternatives for scripting or partial workflows:
 
 ```bash
 asc versions list --app "APP_ID"
 asc versions attach-build --version-id "VERSION_ID" --build "BUILD_ID"
+asc validate --app "APP_ID" --version "1.0.0"
 asc submit create --app "APP_ID" --version "1.0.0" --build "BUILD_ID" --confirm
 ```
 
@@ -168,6 +183,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `version` - Print version information and exit.
 - `completion` - Print shell completion scripts.
 - `schema` - Inspect App Store Connect API endpoint schemas at runtime.
+- `snitch` - Report CLI friction as a GitHub issue.
 
 ## Global Flags
 

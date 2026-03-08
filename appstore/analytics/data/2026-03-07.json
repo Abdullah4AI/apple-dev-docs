@@ -1,7 +1,7 @@
 {
   "date": "2026-03-07",
-  "timestamp": "2026-03-07T00:00:32.728634+00:00",
-  "stars": 2655,
+  "timestamp": "2026-03-07T23:59:11.083690+00:00",
+  "stars": 2673,
   "today": {
     "views": 0,
     "views_uniques": 0,
@@ -14,38 +14,69 @@
     "referrers": {},
     "paths": {}
   },
-  "total_downloads": 6901,
+  "total_downloads": 6989,
   "releases": [
+    {
+      "tag": "0.37.3",
+      "published_at": "2026-03-07T22:20:20Z",
+      "assets": [
+        {
+          "name": "asc_0.37.3_checksums.txt",
+          "download_count": 2
+        },
+        {
+          "name": "asc_0.37.3_linux_amd64",
+          "download_count": 2
+        },
+        {
+          "name": "asc_0.37.3_linux_arm64",
+          "download_count": 2
+        },
+        {
+          "name": "asc_0.37.3_macOS_amd64",
+          "download_count": 1
+        },
+        {
+          "name": "asc_0.37.3_macOS_arm64",
+          "download_count": 8
+        },
+        {
+          "name": "asc_0.37.3_windows_amd64.exe",
+          "download_count": 0
+        }
+      ],
+      "total_downloads": 15
+    },
     {
       "tag": "0.37.2",
       "published_at": "2026-03-06T23:49:49Z",
       "assets": [
         {
           "name": "asc_0.37.2_checksums.txt",
-          "download_count": 0
+          "download_count": 11
         },
         {
           "name": "asc_0.37.2_linux_amd64",
-          "download_count": 0
+          "download_count": 5
         },
         {
           "name": "asc_0.37.2_linux_arm64",
-          "download_count": 0
+          "download_count": 3
         },
         {
           "name": "asc_0.37.2_macOS_amd64",
-          "download_count": 0
+          "download_count": 2
         },
         {
           "name": "asc_0.37.2_macOS_arm64",
-          "download_count": 0
+          "download_count": 30
         },
         {
           "name": "asc_0.37.2_windows_amd64.exe",
-          "download_count": 0
+          "download_count": 2
         }
       ],
-      "total_downloads": 0
+      "total_downloads": 53
     },
     {
       "tag": "0.37.1",
@@ -61,11 +92,11 @@
         },
         {
           "name": "asc_0.37.1_linux_arm64",
-          "download_count": 2
+          "download_count": 3
         },
         {
           "name": "asc_0.37.1_macOS_amd64",
-          "download_count": 0
+          "download_count": 1
         },
         {
           "name": "asc_0.37.1_macOS_arm64",
@@ -76,7 +107,7 @@
           "download_count": 0
         }
       ],
-      "total_downloads": 42
+      "total_downloads": 44
     },
     {
       "tag": "0.37.0",
@@ -88,11 +119,11 @@
         },
         {
           "name": "asc_0.37.0_linux_amd64",
-          "download_count": 5
+          "download_count": 6
         },
         {
           "name": "asc_0.37.0_linux_arm64",
-          "download_count": 1
+          "download_count": 2
         },
         {
           "name": "asc_0.37.0_macOS_amd64",
@@ -100,14 +131,14 @@
         },
         {
           "name": "asc_0.37.0_macOS_arm64",
-          "download_count": 43
+          "download_count": 44
         },
         {
           "name": "asc_0.37.0_windows_amd64.exe",
-          "download_count": 1
+          "download_count": 2
         }
       ],
-      "total_downloads": 75
+      "total_downloads": 79
     },
     {
       "tag": "0.36.3",
@@ -890,11 +921,11 @@
       "assets": [
         {
           "name": "asc_0.28.12_checksums.txt",
-          "download_count": 55
+          "download_count": 63
         },
         {
           "name": "asc_0.28.12_linux_amd64",
-          "download_count": 25
+          "download_count": 29
         },
         {
           "name": "asc_0.28.12_linux_arm64",
@@ -906,14 +937,14 @@
         },
         {
           "name": "asc_0.28.12_macOS_arm64",
-          "download_count": 153
+          "download_count": 155
         },
         {
           "name": "asc_0.28.12_windows_amd64.exe",
           "download_count": 5
         }
       ],
-      "total_downloads": 246
+      "total_downloads": 260
     },
     {
       "tag": "0.28.11",

@@ -69,6 +69,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/screenshots"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/signing"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/snitch"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/status"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/submit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/subscriptions"
@@ -181,6 +182,7 @@ func Subcommands(version string) []*ffcli.Command {
 		hookscli.HooksCommand(),
 		gamecenter.GameCenterCommand(),
 		schema.SchemaCommand(),
+		snitch.SnitchCommand(version),
 		VersionCommand(version),
 	}
 

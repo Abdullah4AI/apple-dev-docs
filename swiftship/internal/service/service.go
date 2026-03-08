@@ -13,7 +13,6 @@ import (
 
 	"os/user"
 
-	"github.com/Abdullah4AI/apple-developer-toolkit/internal/hooks"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/claude"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/config"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/integrations"
@@ -69,9 +68,24 @@ func NewService(cfg *config.Config, opts ...ServiceOpts) (*Service, error) {
 	}, nil
 }
 
-// Send auto-routes to build (no project), question (detected question), or edit.
+// Send auto-routes to build (no project) or handles the request on an existing project.
 // images is an optional list of absolute paths to image files to include.
 func (s *Service) Send(ctx context.Context, prompt string, images []string) error {
+	// Guard: refuse mixed build+ASC requests — publishing must be a separate step.
+	pipeline := orchestration.NewPipeline(s.claude, s.config, s.model)
+	intent, err := pipeline.QuickIntentCheck(ctx, prompt)
+	if err == nil && intent != nil && intent.HasASCIntent {
+		terminal.Warning("App Store Connect operations must be run separately from build/edit.")
+		terminal.Info("Build your app first, then use /connect for publishing and App Store management.")
+		fmt.Println()
+		terminal.Info("Examples:")
+		fmt.Printf("  %s/connect check my app status%s\n", terminal.Bold, terminal.Reset)
+		fmt.Printf("  %s/connect submit to TestFlight%s\n", terminal.Bold, terminal.Reset)
+		fmt.Printf("  %s/connect publish to App Store%s\n", terminal.Bold, terminal.Reset)
+		fmt.Println()
+		return nil
+	}
+
 	if !s.config.HasProject() {
 		if err := s.build(ctx, prompt, images); err != nil {
 			return err
@@ -177,20 +191,10 @@ func platformBundleIDSuffix(platform string) string {
 func (s *Service) build(ctx context.Context, prompt string, images []string) error {
 	terminal.Header("Nanowave Build")
 
-	hooks.FireSafe(ctx, hooks.EventBuildStart, map[string]string{
-		"APP_NAME": truncateStr(prompt, 50),
-		"PLATFORM": "ios",
-	})
-
 	pipeline := orchestration.NewPipeline(s.claude, s.config, s.model)
 	pipeline.SetManager(s.manager)
-	result, err := pipeline.Build(ctx, prompt, images)
+	result, err := pipeline.Action(ctx, prompt, orchestration.ActionContext{}, images)
 	if err != nil {
-		hooks.FireSafe(ctx, hooks.EventBuildCompileFailure, map[string]string{
-			"APP_NAME": truncateStr(prompt, 50),
-			"STATUS":   "failure",
-			"ERROR":    err.Error(),
-		})
 		terminal.Error(fmt.Sprintf("Build failed: %v", err))
 		return err
 	}
@@ -230,13 +234,6 @@ func (s *Service) build(ctx context.Context, prompt string, images []string) err
 		})
 	}
 
-	hooks.FireSafe(ctx, hooks.EventBuildDone, map[string]string{
-		"APP_NAME":        result.AppName,
-		"STATUS":          "success",
-		"PLATFORM":        result.Platform,
-		"FILES_GENERATED": fmt.Sprintf("%d", result.CompletedFiles),
-	})
-
 	// Print results
 	fmt.Println()
 	terminal.Success(fmt.Sprintf("%s is ready!", result.AppName))
@@ -268,19 +265,29 @@ func (s *Service) build(ctx context.Context, prompt string, images []string) err
 	return nil
 }
 
-// edit modifies an existing project.
+// edit handles all work on an existing project — edits, fixes, refactors, etc.
 func (s *Service) edit(ctx context.Context, prompt string, images []string) error {
 	project, err := s.projectStore.Load()
 	if err != nil || project == nil {
 		return fmt.Errorf("no active project found")
 	}
 
-	terminal.Header("Nanowave Edit")
+	terminal.Header("Nanowave")
 	terminal.Detail("Project", projectName(project))
+
+	platform, platforms, watchProjectShape := orchestration.DetectProjectBuildHints(project.ProjectPath)
 
 	pipeline := orchestration.NewPipeline(s.claude, s.config, s.model)
 	pipeline.SetManager(s.manager)
-	result, err := pipeline.Edit(ctx, prompt, project.ProjectPath, project.SessionID, images)
+	ac := orchestration.ActionContext{
+		ProjectDir:        project.ProjectPath,
+		AppName:           orchestration.ReadProjectAppName(project.ProjectPath),
+		SessionID:         project.SessionID,
+		Platform:          platform,
+		Platforms:         platforms,
+		WatchProjectShape: watchProjectShape,
+	}
+	result, err := pipeline.Action(ctx, prompt, ac, images)
 	if err != nil {
 		terminal.Error(fmt.Sprintf("Edit failed: %v", err))
 		return err
@@ -295,14 +302,11 @@ func (s *Service) edit(ctx context.Context, prompt string, images []string) erro
 		s.projectStore.Save(project)
 	}
 
-	// Show summary of what was done
-	printSummary(result.Summary)
+	// Show summary
+	terminal.Success(fmt.Sprintf("Edit complete — %d files", result.CompletedFiles))
 
 	s.historyStore.Append(storage.HistoryMessage{Role: "user", Content: prompt})
-	summary := truncateStr(result.Summary, 200)
-	if summary == "" {
-		summary = fmt.Sprintf("Applied edit: %s", truncateStr(prompt, 50))
-	}
+	summary := fmt.Sprintf("Applied edit: %s (%d files)", truncateStr(prompt, 50), result.CompletedFiles)
 	s.historyStore.Append(storage.HistoryMessage{
 		Role:    "assistant",
 		Content: summary,
@@ -311,47 +315,34 @@ func (s *Service) edit(ctx context.Context, prompt string, images []string) erro
 	return nil
 }
 
-// Fix auto-fixes build errors in the current project.
-func (s *Service) Fix(ctx context.Context) error {
+// ASC runs the App Store Connect flow directly in the terminal.
+func (s *Service) ASC(ctx context.Context, prompt string) error {
 	project, err := s.projectStore.Load()
 	if err != nil || project == nil {
-		return fmt.Errorf("no active project found. Run `nanowave` first")
+		return fmt.Errorf("no active project found")
 	}
 
-	terminal.Header("Nanowave Fix")
-	terminal.Detail("Project", projectName(project))
-
-	hooks.FireSafe(ctx, hooks.EventBuildFixStart, map[string]string{
-		"APP_NAME": projectName(project),
-	})
-
 	pipeline := orchestration.NewPipeline(s.claude, s.config, s.model)
-	pipeline.SetManager(s.manager)
-	result, err := pipeline.Fix(ctx, project.ProjectPath, project.SessionID)
+
+	if prompt == "" {
+		prompt = "Submit this app to TestFlight for beta testing."
+	}
+
+	result, err := pipeline.ASCFull(ctx, prompt, project.ProjectPath, project.SessionID)
 	if err != nil {
-		hooks.FireSafe(ctx, hooks.EventBuildCompileFailure, map[string]string{
-			"APP_NAME": projectName(project),
-			"STATUS":   "failure",
-			"ERROR":    err.Error(),
-		})
-		terminal.Error(fmt.Sprintf("Fix failed: %v", err))
+		terminal.Error(fmt.Sprintf("ASC operation failed: %v", err))
 		return err
 	}
 
 	// Record usage
 	s.usageStore.RecordUsage(result.TotalCostUSD, result.InputTokens, result.OutputTokens, result.CacheRead, result.CacheCreated)
-
-	// Update session ID for conversation continuity
 	if result.SessionID != "" {
 		project.SessionID = result.SessionID
 		s.projectStore.Save(project)
 	}
 
-	hooks.FireSafe(ctx, hooks.EventBuildFixDone, map[string]string{
-		"APP_NAME": projectName(project),
-		"STATUS":   "success",
-	})
-
+	// Print summary
+	printSummary(result.Summary)
 	return nil
 }
 
@@ -472,10 +463,20 @@ func (s *Service) Run(ctx context.Context) error {
 	} else {
 		spinner.StopWithMessage(fmt.Sprintf("%s%s!%s Build failed — auto-fixing...", terminal.Bold, terminal.Yellow, terminal.Reset))
 
-		// Auto-fix: use Claude to diagnose and repair
+		// Auto-fix: use Claude to diagnose and repair via Action
 		pipeline := orchestration.NewPipeline(s.claude, s.config, s.model)
 		pipeline.SetManager(s.manager)
-		fixResult, fixErr := pipeline.Fix(ctx, project.ProjectPath, project.SessionID)
+		fixPrompt := "Build the project, read any compilation errors, and fix all of them. Rebuild and repeat until the build succeeds."
+		fixPlatform, fixPlatforms, fixWatchShape := orchestration.DetectProjectBuildHints(project.ProjectPath)
+		fixAC := orchestration.ActionContext{
+			ProjectDir:        project.ProjectPath,
+			AppName:           orchestration.ReadProjectAppName(project.ProjectPath),
+			SessionID:         project.SessionID,
+			Platform:          fixPlatform,
+			Platforms:         fixPlatforms,
+			WatchProjectShape: fixWatchShape,
+		}
+		fixResult, fixErr := pipeline.Action(ctx, fixPrompt, fixAC, nil)
 		if fixErr != nil {
 			terminal.Error("Auto-fix failed")
 			return fmt.Errorf("xcodebuild failed: %w\n%s", err, string(buildOutput))
@@ -505,7 +506,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 		if retryErr != nil {
 			spinner.StopWithMessage(fmt.Sprintf("%s%s✗%s Build still failing after auto-fix", terminal.Bold, terminal.Red, terminal.Reset))
-			terminal.Info("Run `nanowave fix` to try again")
+			terminal.Info("Try describing the issue to fix it")
 			return fmt.Errorf("xcodebuild failed after fix: %w\n%s", retryErr, string(retryOutput))
 		}
 		spinner.StopWithMessage(fmt.Sprintf("%s%s✓%s Build fixed!", terminal.Bold, terminal.Green, terminal.Reset))
@@ -514,11 +515,6 @@ func (s *Service) Run(ctx context.Context) error {
 	if err == nil {
 		terminal.Success("Build succeeded")
 	}
-
-	hooks.FireSafe(ctx, hooks.EventBuildRunStart, map[string]string{
-		"APP_NAME": appName,
-		"PLATFORM": platform,
-	})
 
 	bundleID := project.BundleID
 	if bundleID == "" {
@@ -547,10 +543,6 @@ func (s *Service) Run(ctx context.Context) error {
 
 		spinner.Stop()
 		terminal.Success("Launched macOS app")
-		hooks.FireSafe(ctx, hooks.EventBuildRunSuccess, map[string]string{
-			"APP_NAME": appName,
-			"PLATFORM": platform,
-		})
 
 		// Stream native macOS logs
 		watchDuration := runLogWatchDuration()
@@ -605,10 +597,6 @@ func (s *Service) Run(ctx context.Context) error {
 
 		spinner.Stop()
 		terminal.Success(fmt.Sprintf("Launched on %s", simulator))
-		hooks.FireSafe(ctx, hooks.EventBuildRunSuccess, map[string]string{
-			"APP_NAME": appName,
-			"PLATFORM": platform,
-		})
 
 		watchDuration := runLogWatchDuration()
 		if watchDuration > 0 {

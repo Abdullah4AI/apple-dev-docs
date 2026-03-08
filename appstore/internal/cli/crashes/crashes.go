@@ -17,7 +17,7 @@ import (
 func CrashesCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("crashes", flag.ExitOnError)
 
-	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
+	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (or ASC_APP_ID env)")
 	output := shared.BindOutputFlags(fs)
 	deviceModel := fs.String("device-model", "", "Filter by device model(s), comma-separated")
 	osVersion := fs.String("os-version", "", "Filter by OS version(s), comma-separated")
@@ -42,7 +42,8 @@ helping you identify and fix issues in your app.
 
 Examples:
   asc crashes --app "123456789"
-  asc crashes --app "123456789" > crashes.json
+  asc crashes --app "com.example.app"
+  asc crashes --app "My App" > crashes.json
   asc crashes --app "123456789" --device-model "iPhone15,3" --os-version "17.2"
   asc crashes --app "123456789" --sort -createdDate --limit 5
   asc crashes --next "<links.next>"
@@ -73,6 +74,13 @@ Examples:
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
+
+			if resolvedAppID != "" && strings.TrimSpace(*next) == "" {
+				resolvedAppID, err = shared.ResolveAppIDWithLookup(requestCtx, client, resolvedAppID)
+				if err != nil {
+					return fmt.Errorf("crashes: %w", err)
+				}
+			}
 
 			opts := []asc.CrashOption{
 				asc.WithCrashDeviceModels(shared.SplitCSV(*deviceModel)),

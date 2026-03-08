@@ -125,8 +125,8 @@ func TestResolvePublishBetaGroupIDsFromList_MissingGroup(t *testing.T) {
 func TestResolvePublishBetaGroupIDsFromList_AmbiguousName(t *testing.T) {
 	groups := &asc.BetaGroupsResponse{
 		Data: []asc.Resource[asc.BetaGroupAttributes]{
-			{ID: "GROUP_A", Attributes: asc.BetaGroupAttributes{Name: "QA"}},
-			{ID: "GROUP_B", Attributes: asc.BetaGroupAttributes{Name: "QA"}},
+			{ID: "GROUP_A", Attributes: asc.BetaGroupAttributes{Name: "QA", IsInternalGroup: true}},
+			{ID: "GROUP_B", Attributes: asc.BetaGroupAttributes{Name: "QA", IsInternalGroup: false}},
 		},
 	}
 
@@ -134,8 +134,21 @@ func TestResolvePublishBetaGroupIDsFromList_AmbiguousName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for ambiguous beta group name")
 	}
-	if !strings.Contains(err.Error(), `multiple beta groups named "qa"; use group ID`) {
-		t.Fatalf("unexpected error: %v", err)
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, `"qa" matches 2 beta groups`) {
+		t.Fatalf("expected ambiguous header, got %v", err)
+	}
+	if !strings.Contains(errMsg, "GROUP_A (internal)") {
+		t.Fatalf("expected internal label for GROUP_A, got %v", err)
+	}
+	if !strings.Contains(errMsg, "GROUP_B (external)") {
+		t.Fatalf("expected external label for GROUP_B, got %v", err)
+	}
+	if !strings.Contains(errMsg, "Use the group ID to disambiguate.") {
+		t.Fatalf("expected disambiguation hint, got %v", err)
+	}
+	if strings.Contains(errMsg, "--skip-internal") {
+		t.Fatalf("did not expect --skip-internal hint for publish testflight, got %v", err)
 	}
 }
 

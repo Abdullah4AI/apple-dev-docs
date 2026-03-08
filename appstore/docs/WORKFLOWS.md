@@ -74,7 +74,7 @@ Notes:
       ]
     },
     "release": {
-      "description": "Submit a version for App Store review",
+      "description": "Run the full App Store release pipeline (validate, attach, submit)",
       "steps": [
         {
           "workflow": "preflight",
@@ -83,8 +83,8 @@ Notes:
           }
         },
         {
-          "name": "submit",
-          "run": "asc submit create --app $APP_ID --version $VERSION --build $BUILD_ID --confirm"
+          "name": "release",
+          "run": "asc release run --app $APP_ID --version $VERSION --build $BUILD_ID --metadata-dir ./metadata/version/$VERSION --confirm"
         }
       ]
     },
@@ -100,6 +100,12 @@ Notes:
     }
   }
 }
+```
+
+After running the `release` workflow, monitor submission progress with:
+
+```bash
+asc status --app "APP_ID"
 ```
 
 ## Semantics

@@ -4487,7 +4487,7 @@ func TestAuthSwitchUnknownProfile(t *testing.T) {
 	})
 }
 
-func TestAuthStatusShowsEnvPreference(t *testing.T) {
+func TestAuthStatusShowsEnvFallbackNote(t *testing.T) {
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "missing.json"))
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 	t.Setenv("ASC_PROFILE", "")
@@ -4519,8 +4519,8 @@ func TestAuthStatusShowsEnvPreference(t *testing.T) {
 	if !strings.Contains(stdout, "Environment credentials detected") {
 		t.Fatalf("expected env credentials note, got %q", stdout)
 	}
-	if !strings.Contains(stdout, "Environment credentials detected (ASC_KEY_ID present)") {
-		t.Fatalf("expected redacted env credentials note, got %q", stdout)
+	if !strings.Contains(stdout, "stored config credentials are preferred") {
+		t.Fatalf("expected fallback note to explain stored-config precedence, got %q", stdout)
 	}
 	if strings.Contains(stdout, "ENVKEY") || strings.Contains(stdout, "ENVISS") {
 		t.Fatalf("expected redacted env identifiers, got %q", stdout)
