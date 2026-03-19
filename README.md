@@ -159,7 +159,7 @@ Mention authentication, a database, or a paid feature, and the toolkit wires up 
 <td align="center"><a href="https://supabase.com"><img src="https://cdn.simpleicons.org/supabase/3FCF8E" width="40"><br><b>Supabase</b></a><br><sub>Auth, database, storage</sub></td>
 <td align="center"><img src="https://cdn.simpleicons.org/telegram/26A5E4" width="40"><br><b>Telegram</b><br><sub>Build & review notifications</sub></td>
 <td align="center"><img src="https://upload.wikimedia.org/wikipedia/commons/d/d5/Slack_icon_2019.svg" width="40" alt="Slack"><br><b>Slack</b><br><sub>Team notifications</sub></td>
-<td align="center"><img src="https://cdn.simpleicons.org/lark/3370FF" width="40"><br><b>Feishu / Lark</b><br><sub>Team notifications</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/飞书-3370FF?style=for-the-badge&logoColor=white" width="40" alt="Feishu"><br><b>Feishu / Lark</b><br><sub>Team notifications</sub></td>
 <td align="center"><img src="https://cdn.simpleicons.org/git/F05032" width="40"><br><b>Git</b><br><sub>Auto-tagging releases</sub></td>
 </tr>
 </table>
