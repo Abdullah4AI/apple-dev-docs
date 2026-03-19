@@ -80,6 +80,44 @@ bash scripts/setup.sh
 | App Store Connect | API key (.p8) | No |
 | App Builder | LLM API key + Xcode | No |
 
+## Supported Platforms
+
+Mention any Apple platform in your prompt — combine as many as you want:
+
+<table>
+<tr>
+<td align="center"><img src="https://img.shields.io/badge/-iPhone-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPhone"><br><sub>Default</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-iPad-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPad"><br><sub>"iPad"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Apple%20Watch-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple Watch"><br><sub>"Apple Watch"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Mac-000?style=for-the-badge&logo=apple&logoColor=white" alt="Mac"><br><sub>"Mac"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Apple%20TV-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple TV"><br><sub>"Apple TV"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Vision%20Pro-000?style=for-the-badge&logo=apple&logoColor=white" alt="Vision Pro"><br><sub>"Vision Pro"</sub></td>
+</tr>
+</table>
+
+## Frameworks
+
+Apps use Apple-first frameworks wherever possible:
+
+<table>
+<tr>
+<td align="center"><a href="https://developer.apple.com/xcode/swiftui/"><img src="https://developer.apple.com/assets/elements/icons/swiftui/swiftui-96x96_2x.png" width="36"><br><b>SwiftUI</b></a><br><sub>UI</sub></td>
+<td align="center"><a href="https://developer.apple.com/xcode/swiftdata/"><img src="https://developer.apple.com/assets/elements/icons/swiftdata/swiftdata-96x96_2x.png" width="36"><br><b>SwiftData</b></a><br><sub>Persistence</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/charts"><img src="https://developer.apple.com/assets/elements/icons/swift-charts/swift-charts-96x96_2x.png" width="36"><br><b>Swift Charts</b></a><br><sub>Data viz</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/mapkit"><img src="https://developer.apple.com/assets/elements/icons/mapkit/mapkit-96x96_2x.png" width="36"><br><b>MapKit</b></a><br><sub>Maps</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/healthkit"><img src="https://developer.apple.com/assets/elements/icons/healthkit/healthkit-96x96_2x.png" width="36"><br><b>HealthKit</b></a><br><sub>Health</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/widgetkit"><img src="https://developer.apple.com/assets/elements/icons/widgetkit/widgetkit-96x96_2x.png" width="36"><br><b>WidgetKit</b></a><br><sub>Widgets</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="https://developer.apple.com/documentation/avfoundation"><img src="https://developer.apple.com/assets/elements/icons/avfoundation/avfoundation-96x96_2x.png" width="36"><br><b>AVFoundation</b></a><br><sub>Camera & media</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/photokit"><img src="https://developer.apple.com/assets/elements/icons/photokit/photokit-96x96_2x.png" width="36"><br><b>PhotosUI</b></a><br><sub>Photo picker</sub></td>
+<td align="center"><a href="https://developer.apple.com/documentation/activitykit"><img src="https://developer.apple.com/assets/elements/icons/activitykit/activitykit-96x96_2x.png" width="36"><br><b>ActivityKit</b></a><br><sub>Live Activities</sub></td>
+<td align="center"><a href="https://developer.apple.com/machine-learning/core-ml/"><img src="https://developer.apple.com/assets/elements/icons/core-ml/core-ml-96x96_2x.png" width="36"><br><b>CoreML</b></a><br><sub>ML</sub></td>
+<td align="center"><a href="https://developer.apple.com/augmented-reality/arkit/"><img src="https://developer.apple.com/assets/elements/icons/arkit/arkit-96x96_2x.png" width="36"><br><b>ARKit</b></a><br><sub>AR</sub></td>
+<td align="center"><a href="https://developer.apple.com/augmented-reality/realitykit/"><img src="https://developer.apple.com/assets/elements/icons/realitykit/realitykit-96x96_2x.png" width="36"><br><b>RealityKit</b></a><br><sub>3D & spatial</sub></td>
+</tr>
+</table>
+
 ## Documentation Search
 
 Search Apple frameworks, symbols, and WWDC sessions locally. No API key needed.
@@ -148,19 +186,6 @@ Build complete multi-platform Apple apps from natural language.
   ✓ Build complete — 16 files
   ✓ RecipeBook is ready!
 ```
-
-### Platforms
-
-<table>
-<tr>
-<td align="center"><img src="https://img.shields.io/badge/-iPhone-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPhone"><br><sub>Default</sub></td>
-<td align="center"><img src="https://img.shields.io/badge/-iPad-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPad"><br><sub>"iPad"</sub></td>
-<td align="center"><img src="https://img.shields.io/badge/-Apple%20Watch-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple Watch"><br><sub>"Apple Watch"</sub></td>
-<td align="center"><img src="https://img.shields.io/badge/-Mac-000?style=for-the-badge&logo=apple&logoColor=white" alt="Mac"><br><sub>"Mac"</sub></td>
-<td align="center"><img src="https://img.shields.io/badge/-Apple%20TV-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple TV"><br><sub>"Apple TV"</sub></td>
-<td align="center"><img src="https://img.shields.io/badge/-Vision%20Pro-000?style=for-the-badge&logo=apple&logoColor=white" alt="Vision Pro"><br><sub>"Vision Pro"</sub></td>
-</tr>
-</table>
 
 ### How It Works
 
