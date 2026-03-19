@@ -1,6 +1,36 @@
+<div align="center">
+
+<br>
+
 # Apple Developer Toolkit
 
-All-in-one Apple developer CLI: documentation search, WWDC videos, App Store Connect management, autonomous iOS app builder, and lifecycle hooks with Telegram notifications. Ships as a **single unified binary** (`appledev`).
+**Three tools, one binary. Docs, App Store, and app builder**
+
+Search Apple docs, manage App Store Connect, and build multi-platform apps from natural language
+
+<br>
+
+[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Swift](https://img.shields.io/badge/Swift-6-FA7343?style=flat&logo=swift&logoColor=white)](https://swift.org)
+[![macOS](https://img.shields.io/badge/macOS-only-000000?style=flat&logo=apple&logoColor=white)](https://developer.apple.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat)](LICENSE)
+
+</div>
+
+<br>
+
+```
+$ appledev build
+
+> A habit tracker with streak counting and weekly grid
+
+  ✓ Analyzed: StreakGrid
+  ✓ Plan ready (11 files, 3 models)
+  ✓ Build complete — 11 files
+  ✓ Launched on iPhone 17 Pro
+```
+
+Ships as a single unified binary `appledev` with three independent tools. Each works on its own with different credential requirements.
 
 ## Install
 
@@ -8,48 +38,207 @@ All-in-one Apple developer CLI: documentation search, WWDC videos, App Store Con
 brew install Abdullah4AI/tap/appledev
 ```
 
-```bash
-clawhub install apple-developer-toolkit
-```
-
-## Quick Start
+<details>
+<summary>Install from source</summary>
 
 ```bash
-appledev build                    # Build an iOS app from a description
-appledev store apps               # List your App Store Connect apps
-appledev hooks init               # Set up lifecycle hooks
-appledev notify telegram --message "Hello"  # Send a Telegram notification
-node cli.js search "NavigationStack"        # Search Apple docs
+git clone https://github.com/Abdullah4AI/apple-developer-toolkit.git
+cd apple-developer-toolkit
+bash scripts/setup.sh
 ```
+
+</details>
 
 ## What's Inside
 
-| Tool | Command | Description |
-|------|---------|-------------|
-| **Docs** | `node cli.js` | Apple docs + 1,267 WWDC sessions (2014-2025) |
-| **Store** | `appledev store` | 120+ App Store Connect commands |
-| **Builder** | `appledev build` | AI-powered iOS/macOS/watchOS/tvOS/visionOS app generation |
-| **Hooks** | `appledev hooks` | Lifecycle hooks with Telegram/Slack notifications |
+<table>
+<tr>
+<td align="center" width="33%">
+<br>
+<b>Documentation</b><br>
+<sub>Apple docs + 1,267 WWDC sessions (2014-2025)</sub><br><br>
+<code>node cli.js search</code>
+</td>
+<td align="center" width="33%">
+<br>
+<b>App Store Connect</b><br>
+<sub>120+ commands for builds, TestFlight, submissions</sub><br><br>
+<code>appledev store</code>
+</td>
+<td align="center" width="33%">
+<br>
+<b>App Builder</b><br>
+<sub>Natural language to compiled SwiftUI apps</sub><br><br>
+<code>appledev build</code>
+</td>
+</tr>
+</table>
+
+| Feature | Credentials | Works Without Setup |
+|---|---|---|
+| Documentation Search | None | Yes |
+| App Store Connect | API key (.p8) | No |
+| App Builder | LLM API key + Xcode | No |
+
+## Documentation Search
+
+Search Apple frameworks, symbols, and WWDC sessions locally. No API key needed.
+
+```bash
+node cli.js search "NavigationStack"        # Framework search
+node cli.js symbols "UIView"                # Symbol lookup
+node cli.js doc "/documentation/swiftui/view" # Full docs
+node cli.js overview "SwiftUI"              # Framework overview
+node cli.js samples "SwiftUI"               # Sample code
+```
+
+```bash
+node cli.js wwdc-search "concurrency"       # Search WWDC talks
+node cli.js wwdc-year 2025                  # Browse by year
+node cli.js wwdc-topic "swiftui-ui-frameworks" # Browse by topic
+```
+
+## App Store Connect
+
+120+ commands covering the full App Store Connect API.
+
+```bash
+# Authenticate
+appledev store auth login --name "MyApp" \
+  --key-id "KEY_ID" --issuer-id "ISSUER_ID" \
+  --private-key ./AuthKey.p8
+
+# Ship to TestFlight
+appledev store publish testflight \
+  --app "APP_ID" --ipa app.ipa --group "Beta" --wait
+
+# Submit to App Store
+appledev store publish appstore \
+  --app "APP_ID" --ipa app.ipa --submit --confirm --wait
+
+# Pre-submission validation
+appledev store validate --app "APP_ID" --version-id "VER_ID"
+```
+
+<details>
+<summary>All command categories</summary>
+
+| Category | Commands |
+|---|---|
+| **Getting Started** | auth, doctor, init, docs |
+| **Apps** | apps, app-setup, versions, localizations, screenshots, video-previews |
+| **TestFlight** | testflight, builds, sandbox, feedback, crashes |
+| **Review & Release** | review, reviews, submit, validate, publish, status |
+| **Signing** | signing, bundle-ids, certificates, profiles, notarization |
+| **Monetization** | iap, subscriptions, offer-codes, win-back-offers, pricing |
+| **Analytics** | analytics, insights, finance, performance |
+| **Automation** | xcode-cloud, webhooks, workflow, metadata, diff, migrate |
+
+</details>
+
+## App Builder
+
+Build complete multi-platform Apple apps from natural language.
+
+```
+> A recipe app with ingredients list, step-by-step instructions, and a timer
+
+  ✓ Analyzed: RecipeBook
+  ✓ Plan ready (16 files, 4 models)
+  ✓ Build complete — 16 files
+  ✓ RecipeBook is ready!
+```
+
+### Platforms
+
+<table>
+<tr>
+<td align="center"><img src="https://img.shields.io/badge/-iPhone-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPhone"><br><sub>Default</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-iPad-000?style=for-the-badge&logo=apple&logoColor=white" alt="iPad"><br><sub>"iPad"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Apple%20Watch-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple Watch"><br><sub>"Apple Watch"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Mac-000?style=for-the-badge&logo=apple&logoColor=white" alt="Mac"><br><sub>"Mac"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Apple%20TV-000?style=for-the-badge&logo=apple&logoColor=white" alt="Apple TV"><br><sub>"Apple TV"</sub></td>
+<td align="center"><img src="https://img.shields.io/badge/-Vision%20Pro-000?style=for-the-badge&logo=apple&logoColor=white" alt="Vision Pro"><br><sub>"Vision Pro"</sub></td>
+</tr>
+</table>
+
+### How It Works
+
+```
+describe  →  analyze  →  plan  →  build  →  fix  →  run
+   ↑            │          │        │        │       │
+ prompt     app name    files    Swift    xcode-   iOS
+            features    models   code     build    Simulator
+```
+
+| Phase | What happens |
+|---|---|
+| **Analyze** | Extracts app name, features, and core flow from your description |
+| **Plan** | Produces a file-level build plan with models, navigation, and packages |
+| **Build** | Generates Swift source, asset catalog, and Xcode project |
+| **Fix** | Compiles with `xcodebuild` and auto-repairs until green |
+| **Run** | Boots the simulator and launches the app |
+
+### Commands
+
+| Command | |
+|---|---|
+| `appledev build` | Interactive mode |
+| `appledev build chat` | Edit an existing project |
+| `appledev build fix` | Auto-fix compilation errors |
+| `appledev build run` | Build and launch in simulator |
+| `appledev build open` | Open in Xcode |
+| `appledev build setup` | Install prerequisites |
+
+<details>
+<summary>Interactive commands</summary>
+
+| Command | |
+|---|---|
+| `/run` | Build and launch in simulator |
+| `/fix` | Auto-fix compilation errors |
+| `/ask <question>` | Query your project (read-only) |
+| `/open` | Open in Xcode |
+| `/model <name>` | Switch AI model |
+| `/info` | Show project info |
+| `/usage` | Token usage and cost |
+
+</details>
 
 ## Lifecycle Hooks
 
-Hooks fire automatically when you build, upload, submit, or release. Get Telegram notifications, auto-distribute to TestFlight, git-tag releases, and chain operations into pipelines.
-
-### Setup
+42 events across 4 categories. Get notified on Telegram, auto-distribute to TestFlight, git-tag releases, and chain operations into pipelines.
 
 ```bash
-appledev hooks init --template indie    # Creates ~/.appledev/hooks.yaml
+# Set up hooks with a template
+bash scripts/hook-init.sh --template indie
+
+# Fire a hook manually
+bash scripts/hook-runner.sh build.done STATUS=success APP_NAME=MyApp
+
+# Dry run
+bash scripts/hook-runner.sh --dry-run build.done STATUS=success
 ```
 
-### 31 Events
+### Templates
 
-| Category | Events |
-|----------|--------|
-| **Build** | `build.start`, `build.compile.success`, `build.compile.failure`, `build.fix.start`, `build.fix.done`, `build.run.success`, `build.done` |
-| **Store** | `store.upload.start/done/failure`, `store.processing.done`, `store.testflight.distribute`, `store.submit.start/done/failure`, `store.review.approved/rejected`, `store.release.done`, `store.validate.pass/fail` |
-| **Pipeline** | `pipeline.start`, `pipeline.step.done`, `pipeline.done`, `pipeline.failure` |
+| Template | Focus |
+|---|---|
+| `indie` | Solo dev — Telegram notifications, auto TestFlight |
+| `team` | Team — Slack + Telegram, git tagging, changelog |
+| `ci` | CI/CD — Logging, test running, no interactive notifications |
 
-### Config Example
+### Built-in Scripts
+
+| Script | Purpose |
+|---|---|
+| `notify-telegram.sh` | Send Telegram notification |
+| `git-tag-release.sh` | Create and push git tag |
+| `run-swift-tests.sh` | Run Swift tests |
+| `generate-changelog.sh` | Generate changelog from git history |
+
+<details>
+<summary>Config example</summary>
 
 ```yaml
 version: 1
@@ -63,170 +252,43 @@ hooks:
   build.done:
     - name: notify-build
       notify: telegram
-      template: "{{if eq .STATUS \"success\"}}✅{{else}}❌{{end}} {{.APP_NAME}} build {{.STATUS}}"
-      when: always
-
-  store.upload.done:
-    - name: auto-testflight
-      run: "appledev store publish testflight --app {{.APP_ID}} --build {{.BUILD_ID}} --group Beta"
-      when: success
+      template: "{{if eq .STATUS \"success\"}}✅{{else}}❌{{end}} {{.APP_NAME}} build"
 
   store.review.approved:
     - name: tag-release
       run: "git tag v{{.VERSION}} && git push origin v{{.VERSION}}"
-    - name: notify
-      notify: telegram
-      template: "🎉 {{.APP_NAME}} v{{.VERSION}} approved"
 ```
 
-### Templates
+Config locations:
+- **Global:** `~/.appledev/hooks.yaml`
+- **Project:** `.appledev/hooks.yaml`
 
-| Template | For | Includes |
-|----------|-----|----------|
-| `indie` | Solo developers | Telegram notifications + auto TestFlight |
-| `team` | Teams | Slack + Telegram, git tagging, changelog |
-| `ci` | CI/CD pipelines | Logging, test running, no interactive notifications |
+</details>
 
-### CLI Commands
+## AI Agent References
 
-```bash
-appledev hooks init [--template indie|team|ci] [--project]
-appledev hooks list [--event "store.*"]
-appledev hooks fire <event> [KEY=VALUE...]
-appledev hooks fire --dry-run build.done STATUS=success
-appledev hooks validate
-appledev notify telegram --message "Deploy done"
-appledev notify slack --webhook $URL --message "Build ready"
-```
-
-### Config Locations
-
-| Scope | Path | Behavior |
-|-------|------|----------|
-| Global | `~/.appledev/hooks.yaml` | Applies to all projects |
-| Project | `.appledev/hooks.yaml` | Extends/overrides global |
-
-## Documentation Search
-
-Search Apple Developer Documentation and WWDC sessions locally. No API key needed.
-
-```bash
-node cli.js search "NavigationStack"
-node cli.js symbols "UIView"
-node cli.js doc "/documentation/swiftui/navigationstack"
-node cli.js overview "SwiftUI"
-node cli.js samples "SwiftUI"
-node cli.js wwdc-search "concurrency"
-node cli.js wwdc-year 2025
-node cli.js wwdc-topic "swiftui-ui-frameworks"
-```
-
-## App Store Connect
-
-120+ commands covering the entire App Store Connect API.
-
-### Auth
-
-```bash
-appledev store auth login --name "MyApp" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8
-```
-
-### Common Workflows
-
-```bash
-# List apps
-appledev store apps
-
-# Upload and distribute to TestFlight
-appledev store publish testflight --app "APP_ID" --ipa "app.ipa" --group "Beta" --wait
-
-# Submit for App Store review
-appledev store publish appstore --app "APP_ID" --ipa "app.ipa" --submit --confirm --wait
-
-# Pre-submission validation
-appledev store validate --app "APP_ID" --version-id "VER_ID" --strict
-
-# Release pipeline dashboard
-appledev store status --app "APP_ID" --output table
-
-# Analytics
-appledev store insights weekly --app "APP_ID" --source analytics
-
-# Multi-step workflow automation
-appledev store workflow run beta BUILD_ID:123 GROUP_ID:abc
-```
-
-### Full Command Reference
-
-| Category | Commands |
-|----------|----------|
-| Getting Started | auth, doctor, init, docs |
-| Apps | apps, app-setup, app-tags, app-info, app-infos, versions, localizations, screenshots, video-previews |
-| TestFlight | testflight, builds, build-bundles, pre-release-versions, sandbox, feedback, crashes |
-| Review & Release | review, reviews, submit, validate, publish, status |
-| Signing | signing, bundle-ids, certificates, profiles, merchant-ids, pass-type-ids, notarization |
-| Monetization | iap, subscriptions, offer-codes, win-back-offers, promoted-purchases, app-events, pricing, pre-orders |
-| Analytics | analytics, insights, finance, performance |
-| Automation | xcode-cloud, webhooks, notify, workflow, metadata, diff, migrate |
-| Team | account, users, actors, devices |
-
-## iOS App Builder
-
-Build complete multi-platform Apple apps from natural language. Powered by Claude Code.
-
-```bash
-appledev build                     # Describe your app and build it
-appledev build chat                # Edit an existing app interactively
-appledev build fix                 # Auto-fix compilation errors
-appledev build run                 # Build and launch in simulator
-appledev build open                # Open in Xcode
-appledev build setup               # Install prerequisites
-```
-
-### Supported Platforms
-
-iOS, iPadOS, macOS, watchOS, tvOS, visionOS
-
-### How It Works
-
-```
-describe → analyze → plan → build → fix → run
-```
-
-1. **Analyze** - Extracts app name, features, platform from your description
-2. **Plan** - Produces file-level build plan with data models and navigation
-3. **Build** - Generates Swift/SwiftUI source files and project config
-4. **Fix** - Compiles and auto-repairs until build succeeds
-5. **Run** - Boots simulator and launches the app
-
-## Reference Files
-
-50+ reference files for AI agents building Apple apps:
+52 reference files for AI-assisted development:
 
 | Reference | Count | Content |
-|-----------|-------|---------|
-| `references/ios-rules/` | 38 files | iOS development rules (accessibility, app review, gestures, haptics, etc.) |
-| `references/swiftui-guides/` | 12 files | SwiftUI best practices (Liquid Glass, navigation, state management, animations, etc.) |
-| `references/app-store-connect.md` | 1 file | Complete App Store Connect CLI reference |
-| `references/hooks-reference.md` | 1 file | All 31 hook events with context variables |
+|---|---|---|
+| `references/ios-rules/` | 38 | iOS development rules (accessibility, dark mode, localization, etc.) |
+| `references/swiftui-guides/` | 12 | SwiftUI best practices (Liquid Glass, navigation, state management, etc.) |
+| `references/app-store-connect.md` | 1 | Complete CLI reference |
+| `references/hooks-reference.md` | 1 | All hook events with context variables |
 
 ## Requirements
 
 | Feature | Requires |
-|---------|----------|
-| Documentation search | Node.js 18+ |
+|---|---|
+| Documentation | Node.js 18+ |
 | App Store Connect | API key (.p8 file) |
-| iOS app builder | Xcode + LLM API key |
-| Hooks | Nothing (works out of the box) |
-
-## Building from Source
-
-```bash
-git clone https://github.com/Abdullah4AI/apple-developer-toolkit.git
-cd apple-developer-toolkit
-bash scripts/setup.sh
-```
+| App Builder | Xcode + LLM API key |
+| Hooks | Nothing |
 
 ## License
 
 MIT
+
+<div align="center">
+<sub>Built by <a href="https://abdullah4.ai">Abdullah AlRashoudi</a></sub>
+</div>
