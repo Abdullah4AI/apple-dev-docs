@@ -118,6 +118,29 @@ Apps use Apple-first frameworks wherever possible:
 </tr>
 </table>
 
+## Deploy
+
+Ship to the App Store and TestFlight without leaving the terminal.
+
+<table>
+<tr>
+<td align="center"><img src="https://cdn.simpleicons.org/appstore/0D96F6" width="40" alt="App Store"><br><b>App Store</b><br><sub>Full submission</sub></td>
+<td align="center"><img src="https://developer.apple.com/assets/elements/icons/testflight/testflight-96x96_2x.png" width="40" alt="TestFlight"><br><b>TestFlight</b><br><sub>Beta distribution</sub></td>
+</tr>
+</table>
+
+## Integrations
+
+Hooks fire on build, upload, submit, and release. Connect to your notification and automation tools:
+
+<table>
+<tr>
+<td align="center"><img src="https://cdn.simpleicons.org/telegram/26A5E4" width="40"><br><b>Telegram</b><br><sub>Build & review notifications</sub></td>
+<td align="center"><img src="https://cdn.simpleicons.org/slack/4A154B" width="40"><br><b>Slack</b><br><sub>Team notifications</sub></td>
+<td align="center"><img src="https://cdn.simpleicons.org/git/F05032" width="40"><br><b>Git</b><br><sub>Auto-tagging releases</sub></td>
+</tr>
+</table>
+
 ## Documentation Search
 
 Search Apple frameworks, symbols, and WWDC sessions locally. No API key needed.
