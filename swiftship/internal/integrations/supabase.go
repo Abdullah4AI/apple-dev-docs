@@ -137,7 +137,7 @@ func SetupSupabase(
 			printFn("success", "Supabase access token saved")
 		} else {
 			printFn("warning", "No access token provided — backend auto-provisioning will not work")
-			printFn("info", "You can add it later with: appledev integrations setup supabase")
+			printFn("info", "You can add it later with: nanowave integrations setup supabase")
 			return fmt.Errorf("supabase access token required for project setup")
 		}
 	}
@@ -453,7 +453,7 @@ func generatePassword() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback to a static password if crypto/rand fails (shouldn't happen)
-		return "appledev-db-password-2024"
+		return "nanowave-db-password-2024"
 	}
 	return hex.EncodeToString(b)
 }
@@ -534,7 +534,7 @@ func isValidPAT(token string) bool {
 
 // readSupabasePAT reads the Supabase PAT from multiple sources in priority order:
 // 1. SUPABASE_ACCESS_TOKEN env var (CI/CD override)
-// 2. OS-native credential store via go-keyring (appledev's own cached copy)
+// 2. OS-native credential store via go-keyring (nanowave's own cached copy)
 // 3. Supabase CLI's keyring entries (profile "supabase" or legacy "access-token")
 // 4. ~/.supabase/access-token file (Supabase CLI file fallback)
 // 5. ~/.config/supabase/access-token file (XDG fallback)
@@ -546,7 +546,7 @@ func readSupabasePAT() string {
 	}
 
 	// 2. Our own cached token in OS-native credential store
-	if token := readFromKeychain("appledev", "supabase-pat"); token != "" && isValidPAT(token) {
+	if token := readFromKeychain("nanowave", "supabase-pat"); token != "" && isValidPAT(token) {
 		return token
 	}
 
@@ -613,11 +613,11 @@ func promptPAT() string {
 }
 
 // saveSupabasePAT persists the PAT in the OS-native credential store (keyring).
-// Falls back to ~/.appledev/supabase-pat file if keyring is unavailable.
+// Falls back to ~/.nanowave/supabase-pat file if keyring is unavailable.
 // Always cleans up the legacy plain-text file when keyring succeeds.
 func saveSupabasePAT(pat string) {
 	// Try OS-native credential store first (secure)
-	if err := keyring.Set("appledev", "supabase-pat", pat); err == nil {
+	if err := keyring.Set("nanowave", "supabase-pat", pat); err == nil {
 		// Clean up legacy plain-text file now that keyring works
 		removeLegacyPATFile()
 		return
@@ -627,19 +627,19 @@ func saveSupabasePAT(pat string) {
 	if err != nil {
 		return
 	}
-	dir := filepath.Join(home, ".appledev")
+	dir := filepath.Join(home, ".nanowave")
 	os.MkdirAll(dir, 0700)
 	os.WriteFile(filepath.Join(dir, "supabase-pat"), []byte(pat), 0600)
 }
 
-// removeLegacyPATFile deletes the old plain-text ~/.appledev/supabase-pat file
+// removeLegacyPATFile deletes the old plain-text ~/.nanowave/supabase-pat file
 // left over from previous versions or failed keyring saves.
 func removeLegacyPATFile() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	os.Remove(filepath.Join(home, ".appledev", "supabase-pat"))
+	os.Remove(filepath.Join(home, ".nanowave", "supabase-pat"))
 }
 
 // validateSupabaseConnection tests that the project URL and anon key are valid.
@@ -668,11 +668,11 @@ func validateSupabaseConnection(projectURL, anonKey string) error {
 // keyring entries, cached PAT file, and the integration config from the store.
 func RevokeSupabase(store *IntegrationStore, appName string) error {
 	// Remove our cached PAT from OS keyring
-	_ = keyring.Delete("appledev", "supabase-pat")
+	_ = keyring.Delete("nanowave", "supabase-pat")
 
 	// Remove cached PAT file
 	if home, err := os.UserHomeDir(); err == nil {
-		os.Remove(filepath.Join(home, ".appledev", "supabase-pat"))
+		os.Remove(filepath.Join(home, ".nanowave", "supabase-pat"))
 	}
 
 	// Remove integration config from store

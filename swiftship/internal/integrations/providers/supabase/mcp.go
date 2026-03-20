@@ -36,7 +36,7 @@ var supabaseAgentTools = []string{
 func (s *supabaseProvider) MCPServer(_ context.Context, req integrations.MCPRequest) (*integrations.MCPServerConfig, error) {
 	cfg := &integrations.MCPServerConfig{
 		Name:    "supabase",
-		Command: "appledev",
+		Command: "nanowave",
 		Args:    []string{"mcp", "supabase"},
 	}
 	if req.PAT != "" && req.ProjectRef != "" {

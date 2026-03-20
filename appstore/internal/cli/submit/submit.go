@@ -995,6 +995,11 @@ func printSubmissionErrorHints(err error, appID string) {
 			fmt.Sprintf("If your app uses third-party content: asc apps update --id %s --content-rights USES_THIRD_PARTY_CONTENT", appID),
 		)
 	}
+	if strings.Contains(errMsg, "usesNonExemptEncryption") {
+		hints = append(hints,
+			"Set Uses Non-Exempt Encryption for the attached build in App Store Connect, then retry submission.",
+		)
+	}
 	if strings.Contains(errMsg, "appDataUsage") {
 		hints = append(hints, fmt.Sprintf("Complete App Privacy at: https://appstoreconnect.apple.com/apps/%s/appPrivacy", appID))
 	}

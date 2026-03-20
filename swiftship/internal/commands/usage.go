@@ -18,11 +18,11 @@ var usageCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfigWithProject()
 		if err != nil {
-			terminal.Info("No projects yet. Run `appledev` to create one.")
+			terminal.Info("No projects yet. Run `nanowave` to create one.")
 			return nil
 		}
 
-		usageStore := storage.NewUsageStore(cfg.AppledevDir)
+		usageStore := storage.NewUsageStore(cfg.NanowaveDir)
 
 		// Current session
 		current := usageStore.Current()

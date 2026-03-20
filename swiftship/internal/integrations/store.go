@@ -30,32 +30,32 @@ type storeData struct {
 // secretRefPrefix marks a PAT field as a reference to a secret store key.
 const secretRefPrefix = "secret:"
 
-// IntegrationStore persists integration configs to ~/.appledev/integrations.json.
+// IntegrationStore persists integration configs to ~/.nanowave/integrations.json.
 // Sensitive fields (PAT) are stored in the OS keychain (or file fallback) and
 // replaced with "secret:<key>" references in the JSON file.
 type IntegrationStore struct {
 	mu      sync.Mutex
-	dir     string // directory containing the store file (e.g. ~/.appledev)
+	dir     string // directory containing the store file (e.g. ~/.nanowave)
 	data    *storeData
 	secrets secrets.SecretStore
 }
 
 // NewIntegrationStore creates a store rooted at the given directory.
 // It initializes the best available secret store (OS keychain or file fallback).
-func NewIntegrationStore(appledevRoot string) *IntegrationStore {
+func NewIntegrationStore(nanowaveRoot string) *IntegrationStore {
 	return &IntegrationStore{
-		dir: appledevRoot,
+		dir: nanowaveRoot,
 		data: &storeData{
 			Providers: make(map[ProviderID]map[string]*IntegrationConfig),
 		},
-		secrets: secrets.New(appledevRoot),
+		secrets: secrets.New(nanowaveRoot),
 	}
 }
 
 // NewIntegrationStoreWithSecrets creates a store with a custom secret store (for testing).
-func NewIntegrationStoreWithSecrets(appledevRoot string, ss secrets.SecretStore) *IntegrationStore {
+func NewIntegrationStoreWithSecrets(nanowaveRoot string, ss secrets.SecretStore) *IntegrationStore {
 	return &IntegrationStore{
-		dir: appledevRoot,
+		dir: nanowaveRoot,
 		data: &storeData{
 			Providers: make(map[ProviderID]map[string]*IntegrationConfig),
 		},

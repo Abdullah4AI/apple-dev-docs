@@ -4,7 +4,7 @@ package mcpregistry
 func XcodeGen() Server {
 	return Server{
 		Name:    "xcodegen",
-		Command: "appledev",
+		Command: "nanowave",
 		Args:    []string{"mcp", "xcodegen"},
 		Tools: []string{
 			"mcp__xcodegen__add_permission",

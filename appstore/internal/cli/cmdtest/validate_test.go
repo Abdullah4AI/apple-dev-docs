@@ -1315,6 +1315,61 @@ func TestValidateFailsWhenReviewDetailsMissingContactEmail(t *testing.T) {
 	}
 }
 
+func TestValidateFailsWhenDemoCredentialsMissingAfterOptIn(t *testing.T) {
+	fixture := validValidateFixture()
+	fixture.reviewDetails = `{"data":{"type":"appStoreReviewDetails","id":"review-detail-1","attributes":{"contactFirstName":"A","contactLastName":"B","contactEmail":"a@example.com","contactPhone":"123","demoAccountName":"","demoAccountPassword":"","demoAccountRequired":true,"notes":"Reviewer signs in with the seeded account below."}}}`
+
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+
+	var runErr error
+	stdout, _ := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatalf("expected error")
+	}
+	if _, ok := errors.AsType[ReportedError](runErr); !ok {
+		t.Fatalf("expected ReportedError, got %v", runErr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("failed to parse JSON output: %v", err)
+	}
+
+	foundFields := map[string]bool{
+		"demoAccountName":     false,
+		"demoAccountPassword": false,
+	}
+	for _, check := range report.Checks {
+		if _, ok := foundFields[check.Field]; !ok {
+			continue
+		}
+		foundFields[check.Field] = true
+		if !strings.Contains(check.Remediation, "demoAccountRequired=true") {
+			t.Fatalf("expected remediation for %s to mention explicit opt-in, got %q", check.Field, check.Remediation)
+		}
+		if !strings.Contains(check.Remediation, "notes") {
+			t.Fatalf("expected remediation for %s to mention notes as supplemental guidance, got %q", check.Field, check.Remediation)
+		}
+	}
+	for field, found := range foundFields {
+		if !found {
+			t.Fatalf("expected missing-field check for %s, got %+v", field, report.Checks)
+		}
+	}
+}
+
 func TestValidateFailsWhenPrimaryCategoryMissing(t *testing.T) {
 	fixture := validValidateFixture()
 	fixture.primaryCategory = `{"data":null}`

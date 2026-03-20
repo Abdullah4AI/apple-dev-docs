@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/agentruntime"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/appleauth"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/asc"
-	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/claude"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/screenshots"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/terminal"
 	"golang.org/x/term"
@@ -28,7 +28,7 @@ func (p *Pipeline) ASCFull(ctx context.Context, prompt, projectDir, sessionID st
 	log.Printf("[asc] starting ASCFull prompt=%q projectDir=%s sessionID=%s", prompt, projectDir, sessionID)
 
 	appName := ReadProjectAppName(projectDir)
-	fmt.Printf("\n%sappledev connect%s\n", terminal.Bold, terminal.Reset)
+	fmt.Printf("\n%sNanowave Connect%s\n", terminal.Bold, terminal.Reset)
 	if appName != "" {
 		terminal.Detail("Project", appName)
 	}
@@ -328,7 +328,7 @@ Use these flags with xcodebuild: -authenticationKeyPath %s -authenticationKeyID 
 
 	fmt.Printf("\n  %sRunning%s\n", terminal.Bold, terminal.Reset)
 
-	progress := terminal.NewProgressDisplay("asc", 0)
+	progress := p.newProgressDisplay("asc", 0)
 	progress.Start()
 	progressCb := newProgressCallback(progress)
 
@@ -336,15 +336,15 @@ Use these flags with xcodebuild: -authenticationKeyPath %s -authenticationKeyID 
 	// When true, the HITL callback skips re-rendering the question text.
 	textRendered := false
 
-	resp, err := p.claude.RunInteractive(ctx, wrappedPrompt, claude.InteractiveOpts{
-		GenerateOpts: claude.GenerateOpts{
+	resp, err := p.runtime.RunInteractive(ctx, wrappedPrompt, agentruntime.InteractiveOpts{
+		GenerateOpts: agentruntime.GenerateOpts{
 			AppendSystemPrompt: systemPrompt,
 			MaxTurns:           200,
-			Model:              p.buildModel(),
+			Model:              p.modelForPhase(agentruntime.PhaseBuild),
 			WorkDir:            projectDir,
 			AllowedTools:       allowedTools,
 		},
-	}, func(ev claude.StreamEvent) {
+	}, func(ev agentruntime.StreamEvent) {
 		switch ev.Type {
 		case "assistant":
 			// Claude finished a text block — render the full text directly.
@@ -358,7 +358,7 @@ Use these flags with xcodebuild: -authenticationKeyPath %s -authenticationKeyID 
 			// Claude is using a tool — restart progress if it was stopped for text
 			if textRendered {
 				fmt.Printf("\n  %sRunning%s\n", terminal.Bold, terminal.Reset)
-				progress = terminal.NewProgressDisplay("asc", 0)
+				progress = p.newProgressDisplay("asc", 0)
 				progress.Start()
 				progressCb = newProgressCallback(progress)
 				textRendered = false
@@ -454,7 +454,7 @@ Use these flags with xcodebuild: -authenticationKeyPath %s -authenticationKeyID 
 		}
 
 		fmt.Printf("\n  %sRunning%s\n", terminal.Bold, terminal.Reset)
-		progress = terminal.NewProgressDisplay("asc", 0)
+		progress = p.newProgressDisplay("asc", 0)
 		progress.Start()
 		progressCb = newProgressCallback(progress)
 		return userInput
@@ -477,8 +477,6 @@ Use these flags with xcodebuild: -authenticationKeyPath %s -authenticationKeyID 
 		fmt.Println()
 		fmt.Print(terminal.RenderMarkdown(summary))
 	}
-
-	showCost(resp)
 
 	return &asc.Result{
 		Summary:      resp.Result,
@@ -593,14 +591,14 @@ func extractASCSummary(text string) string {
 	return strings.Join(result, "\n  ")
 }
 
-// redirectLogsToFile redirects log output to a file in the project's .appledev
+// redirectLogsToFile redirects log output to a file in the project's .nanowave
 // directory. Returns a function to restore the previous log output.
 // In non-interactive mode, logs stay on stdout.
 func redirectLogsToFile(projectDir string) func() {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return func() {}
 	}
-	logDir := filepath.Join(projectDir, ".appledev")
+	logDir := filepath.Join(projectDir, ".nanowave")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return func() {}
 	}
@@ -1569,37 +1567,37 @@ When adding beta testers, **default to external testing** — it works for any e
 	}
 
 	// Load skills — official ASC CLI skills from github.com/rudrankriyam/app-store-connect-cli-skills
-	// plus appledev-specific skills (asset-management, asc-publish)
+	// plus nanowave-specific skills (asset-management, asc-publish)
 	ascSkills := []struct {
 		dir   string
 		label string
 	}{
 		// Official ASC CLI skills
-		{"skills/features/asc-cli-usage", "CLI Usage"},
-		{"skills/features/asc-xcode-build", "Xcode Build and Export"},
-		{"skills/features/asc-build-lifecycle", "Build Lifecycle"},
-		{"skills/features/asc-signing-setup", "Signing Setup"},
-		{"skills/features/asc-testflight-orchestration", "Release and TestFlight Orchestration"},
-		{"skills/features/asc-id-resolver", "ID Resolution"},
-		{"skills/features/asc-submission-health", "Submission Health"},
-		{"skills/features/asc-metadata-sync", "Metadata Sync and Localization"},
-		{"skills/features/asc-shots-pipeline", "Screenshot Pipeline"},
-		{"skills/features/asc-app-create-ui", "App Creation"},
-		{"skills/features/asc-crash-triage", "Crash Triage"},
-		{"skills/features/asc-notarization", "macOS Notarization"},
-		{"skills/features/asc-ppp-pricing", "PPP Pricing"},
-		{"skills/features/asc-revenuecat-catalog-sync", "RevenueCat Catalog Sync"},
-		{"skills/features/asc-subscription-localization", "Subscription Localization"},
-		{"skills/features/asc-wall-submit", "Wall of Apps"},
-		{"skills/features/asc-workflow", "Workflow Automation"},
-		// appledev-specific skills
-		{"skills/features/asc-publish", "App Store Publishing"},
-		{"skills/features/asset-management", "Asset Management"},
-		{"skills/features/asc-hitl-interaction", "User Interaction Patterns"},
-		{"skills/features/asc-screenshot-upload", "Screenshot Upload"},
-		{"skills/features/asc-manual-actions", "Manual Actions and Dashboard Tasks"},
-		{"skills/features/asc-submission-prereqs", "Submission Prerequisites"},
-		{"skills/features/asc-version-routing", "Version State Routing"},
+		{"data/features/asc-cli-usage", "CLI Usage"},
+		{"data/features/asc-xcode-build", "Xcode Build and Export"},
+		{"data/features/asc-build-lifecycle", "Build Lifecycle"},
+		{"data/features/asc-signing-setup", "Signing Setup"},
+		{"data/features/asc-testflight-orchestration", "Release and TestFlight Orchestration"},
+		{"data/features/asc-id-resolver", "ID Resolution"},
+		{"data/features/asc-submission-health", "Submission Health"},
+		{"data/features/asc-metadata-sync", "Metadata Sync and Localization"},
+		{"data/features/asc-shots-pipeline", "Screenshot Pipeline"},
+		{"data/features/asc-app-create-ui", "App Creation"},
+		{"data/features/asc-crash-triage", "Crash Triage"},
+		{"data/features/asc-notarization", "macOS Notarization"},
+		{"data/features/asc-ppp-pricing", "PPP Pricing"},
+		{"data/features/asc-revenuecat-catalog-sync", "RevenueCat Catalog Sync"},
+		{"data/features/asc-subscription-localization", "Subscription Localization"},
+		{"data/features/asc-wall-submit", "Wall of Apps"},
+		{"data/features/asc-workflow", "Workflow Automation"},
+		// Nanowave-specific skills
+		{"data/features/asc-publish", "App Store Publishing"},
+		{"data/features/asset-management", "Asset Management"},
+		{"data/features/asc-hitl-interaction", "User Interaction Patterns"},
+		{"data/features/asc-screenshot-upload", "Screenshot Upload"},
+		{"data/features/asc-manual-actions", "Manual Actions and Dashboard Tasks"},
+		{"data/features/asc-submission-prereqs", "Submission Prerequisites"},
+		{"data/features/asc-version-routing", "Version State Routing"},
 	}
 	loadedCount := 0
 	for _, skill := range ascSkills {
@@ -1665,7 +1663,7 @@ func detectProjectPatterns(projectDir string) (hasSignIn bool, collectsData bool
 			return nil // skip unreadable paths
 		}
 		if info.IsDir() {
-			// Skip hidden dirs, build dirs, and .appledev
+			// Skip hidden dirs, build dirs, and .nanowave
 			base := filepath.Base(path)
 			if strings.HasPrefix(base, ".") || base == "build" || base == "DerivedData" {
 				return filepath.SkipDir

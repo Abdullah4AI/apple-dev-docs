@@ -19,7 +19,7 @@ type ProviderMeta struct {
 	Name        string   // Human-readable name (e.g. "Supabase")
 	Description string   // Short description
 	SPMPackage  string   // SPM package key (e.g. "supabase-swift")
-	MCPCommand  string   // MCP server command (e.g. "appledev")
+	MCPCommand  string   // MCP server command (e.g. "nanowave")
 	MCPArgs     []string // MCP server args (e.g. ["mcp", "supabase"])
 	DocsMCPPkg  string   // NPM package for docs MCP (optional)
 }
@@ -113,7 +113,7 @@ type MCPRequest struct {
 // MCPServerConfig describes an MCP server entry for .mcp.json.
 type MCPServerConfig struct {
 	Name    string            // server name key (e.g. "supabase")
-	Command string            // executable (e.g. "appledev")
+	Command string            // executable (e.g. "nanowave")
 	Args    []string          // arguments (e.g. ["mcp", "supabase"])
 	Env     map[string]string // environment variables
 }

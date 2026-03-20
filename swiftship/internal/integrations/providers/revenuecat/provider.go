@@ -23,7 +23,7 @@ func (r *revenuecatProvider) Meta() integrations.ProviderMeta {
 		Name:        "RevenueCat",
 		Description: "In-app purchases, subscriptions, and paywalls",
 		SPMPackage:  "purchases-ios",
-		MCPCommand:  "appledev",
+		MCPCommand:  "nanowave",
 		MCPArgs:     []string{"mcp", "revenuecat"},
 	}
 }

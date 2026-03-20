@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/claude"
+	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/agentruntime"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/integrations"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/mcpregistry"
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/terminal"
@@ -104,14 +104,14 @@ func (p *Pipeline) finalize(ctx context.Context, projectDir, appName string) {
 	}
 
 	// Git operations are best-effort
-	resp, _ := p.claude.Generate(ctx, fmt.Sprintf(`Run these git commands in order:
+	resp, _ := p.runtime.Generate(ctx, fmt.Sprintf(`Run these git commands in order:
 1. git init
 2. git add -A
 3. git commit -m "Initial build: %s"
 
-Just run the commands, no explanation needed.`, appName), claude.GenerateOpts{
+Just run the commands, no explanation needed.`, appName), agentruntime.GenerateOpts{
 		MaxTurns:     3,
-		Model:        "haiku",
+		Model:        p.modelForPhase(agentruntime.PhaseIntent),
 		WorkDir:      projectDir,
 		AllowedTools: []string{"Bash"},
 	})

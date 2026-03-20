@@ -102,7 +102,7 @@ func RunOnboarding(ctx context.Context, client *Client, appleID string) (*Onboar
 	}
 
 	// Step 2: Create API key
-	nickname := fmt.Sprintf("appledev-%d", time.Now().Unix())
+	nickname := fmt.Sprintf("nanowave-%d", time.Now().Unix())
 	log.Printf("[appleauth] RunOnboarding: creating API key nickname=%s", nickname)
 	keyBody := map[string]any{
 		"data": map[string]any{
@@ -213,7 +213,7 @@ func RunOnboarding(ctx context.Context, client *Client, appleID string) (*Onboar
 
 	// Step 3: Register the key with the asc CLI
 	log.Printf("[appleauth] RunOnboarding: registering key with asc CLI")
-	tmpFile, err := os.CreateTemp("", "appledev-onboard-*.p8")
+	tmpFile, err := os.CreateTemp("", "nanowave-onboard-*.p8")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file for key: %w", err)
 	}

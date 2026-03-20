@@ -200,10 +200,10 @@ func TestReadFromKeychain_AllAccountNames(t *testing.T) {
 	}
 }
 
-func TestReadFromKeychain_AppledevService(t *testing.T) {
+func TestReadFromKeychain_NanowaveService(t *testing.T) {
 	// Our own service entry should also fail gracefully
-	if got := readFromKeychain("appledev", "supabase-pat"); got != "" {
-		t.Errorf("readFromKeychain(appledev, supabase-pat) = %q, want empty", got)
+	if got := readFromKeychain("nanowave", "supabase-pat"); got != "" {
+		t.Errorf("readFromKeychain(nanowave, supabase-pat) = %q, want empty", got)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestSaveSupabasePAT_FallsBackToFile(t *testing.T) {
 	saveSupabasePAT(validPAT)
 
 	// On Linux CI, keyring.Set fails so it falls back to file
-	path := filepath.Join(tmpHome, ".appledev", "supabase-pat")
+	path := filepath.Join(tmpHome, ".nanowave", "supabase-pat")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("expected file fallback after keyring failure: %v", err)
@@ -240,7 +240,7 @@ func TestSaveSupabasePAT_OverwriteExisting(t *testing.T) {
 	saveSupabasePAT(validPAT)
 	saveSupabasePAT(validPAT2)
 
-	path := filepath.Join(tmpHome, ".appledev", "supabase-pat")
+	path := filepath.Join(tmpHome, ".nanowave", "supabase-pat")
 	data, _ := os.ReadFile(path)
 	if string(data) != validPAT2 {
 		t.Errorf("saved PAT = %q, want %q", string(data), validPAT2)
@@ -265,7 +265,7 @@ func TestFileReadCachesToKeyringFallback(t *testing.T) {
 	}
 
 	// On Linux CI, saveSupabasePAT falls back to file — verify it was cached
-	cachePath := filepath.Join(tmpHome, ".appledev", "supabase-pat")
+	cachePath := filepath.Join(tmpHome, ".nanowave", "supabase-pat")
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		t.Fatalf("expected cache file after file-based read: %v", err)

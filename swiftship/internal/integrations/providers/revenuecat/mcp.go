@@ -40,7 +40,7 @@ var revenuecatAgentTools = []string{
 func (r *revenuecatProvider) MCPServer(_ context.Context, req integrations.MCPRequest) (*integrations.MCPServerConfig, error) {
 	cfg := &integrations.MCPServerConfig{
 		Name:    "revenuecat",
-		Command: "appledev",
+		Command: "nanowave",
 		Args:    []string{"mcp", "revenuecat"},
 	}
 	if req.PAT != "" && req.ProjectURL != "" {

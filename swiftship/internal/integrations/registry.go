@@ -6,7 +6,7 @@ type CuratedIntegration struct {
 	Name        string
 	Description string
 	SPMPackage  string   // key in package_registry.go
-	MCPCommand  string   // e.g. "appledev"
+	MCPCommand  string   // e.g. "nanowave"
 	MCPArgs     []string // e.g. ["mcp", "supabase"]
 	DocsMCPPkg  string   // NPM package for docs MCP (optional)
 }
@@ -18,7 +18,7 @@ var integrationRegistry = map[ProviderID]*CuratedIntegration{
 		Name:        "Supabase",
 		Description: "Open-source backend with auth, PostgreSQL, and storage",
 		SPMPackage:  "supabase-swift",
-		MCPCommand:  "appledev",
+		MCPCommand:  "nanowave",
 		MCPArgs:     []string{"mcp", "supabase"},
 		DocsMCPPkg:  "@anthropic-ai/supabase-docs-mcp",
 	},
@@ -27,7 +27,7 @@ var integrationRegistry = map[ProviderID]*CuratedIntegration{
 		Name:        "RevenueCat",
 		Description: "In-app purchases, subscriptions, and paywalls",
 		SPMPackage:  "purchases-ios",
-		MCPCommand:  "appledev",
+		MCPCommand:  "nanowave",
 		MCPArgs:     []string{"mcp", "revenuecat"},
 	},
 }

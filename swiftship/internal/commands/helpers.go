@@ -15,10 +15,11 @@ func loadConfigWithProject() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Agentic = AgenticFlag()
 
 	projects := cfg.ListProjects()
 	if len(projects) == 0 {
-		return nil, fmt.Errorf("no projects found. Run `appledev` first to create a project")
+		return nil, fmt.Errorf("no projects found. Run `nanowave` first to create a project")
 	}
 
 	// Use the most recent project
@@ -31,10 +32,16 @@ func loadProjectService(opts ...service.ServiceOpts) (*service.Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(opts) == 0 {
+		opts = append(opts, service.ServiceOpts{
+			Runtime: AgentFlag(),
+			Model:   ModelFlag(),
+		})
+	}
 	return service.NewService(cfg, opts...)
 }
 
 func printNoProjectFoundCreateFirst() {
 	terminal.Error("No project found.")
-	terminal.Info("Run `appledev` first to create a project.")
+	terminal.Info("Run `nanowave` first to create a project.")
 }

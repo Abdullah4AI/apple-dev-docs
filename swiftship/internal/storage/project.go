@@ -33,6 +33,8 @@ type Project struct {
 	Platforms             []string               `json:"platforms,omitempty"`
 	DeviceFamily          string                 `json:"device_family,omitempty"`
 	SessionID             string                 `json:"session_id,omitempty"`
+	RuntimeKind           string                 `json:"runtime_kind,omitempty"`
+	ModelID               string                 `json:"model_id,omitempty"`
 	Simulator             string                 `json:"simulator,omitempty"`
 	ConversationSummary   string                 `json:"conversation_summary,omitempty"`
 	ASCAppID              string                 `json:"asc_app_id,omitempty"`
@@ -43,7 +45,7 @@ type Project struct {
 // ProjectStore implements project storage using a local JSON file.
 type ProjectStore struct {
 	mu   sync.Mutex
-	dir  string // .appledev/ directory
+	dir  string // .nanowave/ directory
 	data *Project
 }
 
