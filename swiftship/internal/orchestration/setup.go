@@ -9,7 +9,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/swiftship/internal/skills"
 )
 
-// skillsFS aliases the skills package FS for backward compatibility within orchestration.
+// skillsFS aliases the skills package FS for use within orchestration.
 var skillsFS = skills.FS
 
 func platformSummary(platform, deviceFamily string) string {

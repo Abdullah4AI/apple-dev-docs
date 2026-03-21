@@ -47,8 +47,8 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 		terminal.Header("Nanowave Build")
 	}
 
-	// Resolve configured integrations BEFORE composing the prompt —
-	// the system prompt needs to know which backends are available.
+	// Resolve already-configured integrations — the system prompt tells the agent
+	// about unconfigured backends and instructs the user to run /supabase or /revenuecat.
 	var activeProviders []integrations.ActiveProvider
 	if s.manager != nil {
 		activeProviders = s.manager.ResolveExisting(ac.AppName)
@@ -70,10 +70,13 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 		tools = append(tools, s.manager.AgentTools(activeProviders)...)
 	}
 
-	// Inject nanowave tool descriptions into the system prompt for all runtimes.
-	// nw_* tools (scaffold, setup_integration, etc.) are invoked via CLI:
-	//   echo '{"key":"value"}' | nanowave tool <tool_name>
-	systemPrompt += nwtool.NewDefaultRegistry().ToolDescriptionsMarkdown()
+	// For non-Claude runtimes (Codex, OpenCode), inject nw_* tool descriptions
+	// as markdown so the LLM can invoke them via CLI: echo JSON | nanowave tool <name>
+	// For Claude Code, nw_* tools are registered as MCP tools and don't need
+	// prompt-based descriptions — Claude Code discovers them via --mcp-config.
+	if s.runtimeKind != agentruntime.KindClaude {
+		systemPrompt += nwtool.NewDefaultRegistry().ToolDescriptionsMarkdown()
+	}
 
 	var workDir string
 	// Snapshot existing projects before build so we can detect the new one after
@@ -89,6 +92,19 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 		workDir = s.config.CatalogRoot()
 		os.MkdirAll(workDir, 0o755)
 		preExistingProjects = listCatalogDirs(workDir)
+
+		// Write .mcp.json and .claude/settings.json to the catalog root BEFORE
+		// the agentic call so MCPs are available from turn 1, even before creating
+		// the project directory via nw_scaffold_project.
+		_ = orchestration.WriteMCPConfigExternal(workDir)
+		_ = orchestration.WriteSettingsSharedExternal(workDir)
+	}
+
+	// Explicitly pass the .mcp.json path so Claude Code loads MCP servers
+	// reliably — auto-discovery from WorkDir is not guaranteed.
+	mcpConfigPath := filepath.Join(workDir, ".mcp.json")
+	if _, err := os.Stat(mcpConfigPath); os.IsNotExist(err) {
+		mcpConfigPath = "" // don't pass if file doesn't exist
 	}
 
 	// Progress display — "agentic" mode shows tool activity without rigid phase numbers
@@ -105,6 +121,7 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 		Model:        s.phaseModel(agentruntime.PhaseBuild),
 		AllowedTools: tools,
 		WorkDir:      workDir,
+		MCPConfig:    mcpConfigPath,
 		Images:       images,
 		SessionID:    ac.SessionID,
 	}, streamCb)
@@ -124,6 +141,7 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 			Model:        s.phaseModel(agentruntime.PhaseBuild),
 			AllowedTools: tools,
 			WorkDir:      workDir,
+			MCPConfig:    mcpConfigPath,
 			Images:       images,
 		}, streamCb)
 	}
@@ -183,6 +201,7 @@ func (s *Service) AgenticSend(ctx context.Context, prompt string, images []strin
 					Name:        &appName,
 					Status:      "active",
 					ProjectPath: projectDir,
+					BundleID:    orchestration.ReadProjectBundleID(projectDir),
 					SessionID:   resp.SessionID,
 					RuntimeKind: string(s.runtimeKind),
 					ModelID:     s.CurrentModel(),
