@@ -11,6 +11,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+var fetchAvailableTerritoriesFn = fetchAvailableTerritories
+
 func fetchAvailableTerritories(ctx context.Context, client *asc.Client, appID string) (string, int, error) {
 	availabilityID := ""
 	availableTerritories := 0

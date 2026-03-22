@@ -49,49 +49,13 @@ func NewService(cfg *config.Config, opts ...ServiceOpts) (*Service, error) {
 	projectStore := storage.NewProjectStore(cfg.NanowaveDir)
 	project, _ := projectStore.Load()
 
-	runtimeKind := cfg.RuntimeKind
-	model := ""
-	if project != nil {
-		if project.RuntimeKind != "" {
-			runtimeKind = agentruntime.NormalizeKind(project.RuntimeKind)
-		}
-		if strings.TrimSpace(project.ModelID) != "" {
-			model = strings.TrimSpace(project.ModelID)
-		}
-	}
-	explicitModel := model != ""
+	resolvedOpts := ServiceOpts{}
 	if len(opts) > 0 {
-		if strings.TrimSpace(opts[0].Runtime) != "" {
-			runtimeKind = agentruntime.NormalizeKind(opts[0].Runtime)
-		}
-		if strings.TrimSpace(opts[0].Model) != "" {
-			model = strings.TrimSpace(opts[0].Model)
-			explicitModel = true
-		}
+		resolvedOpts = opts[0]
 	}
-	if runtimeKind == "" {
-		runtimeKind = agentruntime.KindClaude
-	}
-	if !explicitModel {
-		model = strings.TrimSpace(cfg.DefaultModelForRuntime(runtimeKind))
-	}
-
-	runtimePath := cfg.RuntimePath
-	if runtimeKind != cfg.RuntimeKind || strings.TrimSpace(runtimePath) == "" {
-		runtimePath, _ = agentruntime.FindBinary(runtimeKind)
-	}
-	if strings.TrimSpace(runtimePath) == "" {
-		desc := agentruntime.DescriptorForKind(runtimeKind)
-		return nil, fmt.Errorf("%s CLI is not installed. Install with: %s", desc.DisplayName, desc.InstallCommand)
-	}
-
-	runtimeClient, err := agentruntime.New(runtimeKind, runtimePath)
+	selection, err := resolveRuntimeSelection(cfg, project, resolvedOpts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize %s runtime: %w", runtimeKind, err)
-	}
-	runtimeModels := cfg.RuntimeModelOptions(runtimeKind, runtimeClient.SuggestedModels())
-	if model == "" || !runtimeSupportsModel(runtimeModels, model) {
-		model = runtimeClient.DefaultModel(agentruntime.PhaseBuild)
+		return nil, err
 	}
 
 	// Initialize integration manager with all registered providers.
@@ -106,13 +70,13 @@ func NewService(cfg *config.Config, opts ...ServiceOpts) (*Service, error) {
 
 	return &Service{
 		config:       cfg,
-		runtime:      runtimeClient,
+		runtime:      selection.client,
 		projectStore: projectStore,
 		historyStore: storage.NewHistoryStore(cfg.NanowaveDir),
 		usageStore:   storage.NewUsageStore(cfg.NanowaveDir),
 		manager:      mgr,
-		runtimeKind:  runtimeKind,
-		model:        model,
+		runtimeKind:  selection.kind,
+		model:        selection.model,
 	}, nil
 }
 
@@ -124,7 +88,6 @@ func (s *Service) Send(ctx context.Context, prompt string, images []string) erro
 	// All builds/edits go through the agentic path: a single LLM call with all tools.
 	return s.AgenticSend(ctx, prompt, images)
 }
-
 
 // SetModel changes the model at runtime.
 func (s *Service) SetModel(model string) {
@@ -158,11 +121,23 @@ func (s *Service) CurrentRuntime() agentruntime.Kind {
 	return s.runtimeKind
 }
 
-func (s *Service) CurrentRuntimeDisplayName() string {
-	if s.runtime == nil {
-		return agentruntime.DescriptorForKind(s.runtimeKind).DisplayName
+func (s *Service) CurrentRuntimeStatus() RuntimeStatus {
+	if s.runtime != nil {
+		return runtimeStatusFrom(s.runtimeKind, s.runtime.BinaryPath(), s.runtime)
 	}
-	return s.runtime.DisplayName()
+	path := s.config.RuntimePath
+	if s.runtimeKind != s.config.RuntimeKind || strings.TrimSpace(path) == "" {
+		path, _ = agentruntime.FindBinary(s.runtimeKind)
+	}
+	return runtimeStatusFrom(s.runtimeKind, path, nil)
+}
+
+func (s *Service) SupportedRuntimes() []RuntimeStatus {
+	return SupportedRuntimeStatuses()
+}
+
+func (s *Service) CurrentRuntimeDisplayName() string {
+	return s.CurrentRuntimeStatus().DisplayName
 }
 
 // IntegrationManager returns the integration manager (may be nil).
@@ -195,7 +170,15 @@ func (s *Service) RuntimeModels() []agentruntime.ModelOption {
 	if s.runtime == nil {
 		return nil
 	}
-	return s.config.RuntimeModelOptions(s.runtimeKind, s.runtime.SuggestedModels())
+	models := s.config.RuntimeModelOptions(s.runtimeKind, s.runtime.SuggestedModels())
+	current := strings.TrimSpace(s.CurrentModel())
+	if current == "" {
+		return models
+	}
+	return agentruntime.MergeModelOptions([]agentruntime.ModelOption{{
+		ID:          current,
+		Description: "Current model",
+	}}, models)
 }
 
 func (s *Service) SetRuntime(kind string) error {
@@ -326,7 +309,6 @@ func platformBundleIDSuffix(platform string) string {
 		return ""
 	}
 }
-
 
 // ASC runs the App Store Connect flow directly in the terminal.
 func (s *Service) ASC(ctx context.Context, prompt string) error {

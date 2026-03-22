@@ -401,6 +401,86 @@ func TestTryResumeSessionReturnsExpiredErrorForUnauthorizedCache(t *testing.T) {
 	}
 }
 
+func TestLoadCachedSessionHydratesJarWithoutValidation(t *testing.T) {
+	withArraySessionKeyring(t)
+	t.Setenv(webSessionBackendEnv, "keychain")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{
+		{Name: "myacinfo", Value: "cached-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)},
+	})
+
+	if err := PersistSession(&AuthSession{
+		Client:    &http.Client{Jar: jar},
+		UserEmail: "user@example.com",
+	}); err != nil {
+		t.Fatalf("PersistSession error: %v", err)
+	}
+
+	session, ok, err := LoadCachedSession("user@example.com")
+	if err != nil {
+		t.Fatalf("LoadCachedSession error: %v", err)
+	}
+	if !ok || session == nil {
+		t.Fatal("expected cached session to load")
+	}
+	if session.UserEmail != "user@example.com" {
+		t.Fatalf("expected stored email user@example.com, got %q", session.UserEmail)
+	}
+	if session.Client == nil || session.Client.Jar == nil {
+		t.Fatal("expected hydrated client jar")
+	}
+	if got := cookieValue(session.Client.Jar.Cookies(targetURL), "myacinfo"); got != "cached-token" {
+		t.Fatalf("expected hydrated cookie value, got %q", got)
+	}
+}
+
+func TestLoadLastCachedSessionHydratesJarWithoutValidation(t *testing.T) {
+	withArraySessionKeyring(t)
+	t.Setenv(webSessionBackendEnv, "keychain")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{
+		{Name: "myacinfo", Value: "cached-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)},
+	})
+
+	if err := PersistSession(&AuthSession{
+		Client:    &http.Client{Jar: jar},
+		UserEmail: "user@example.com",
+	}); err != nil {
+		t.Fatalf("PersistSession error: %v", err)
+	}
+
+	session, ok, err := LoadLastCachedSession()
+	if err != nil {
+		t.Fatalf("LoadLastCachedSession error: %v", err)
+	}
+	if !ok || session == nil {
+		t.Fatal("expected last cached session to load")
+	}
+	if session.UserEmail != "user@example.com" {
+		t.Fatalf("expected stored email user@example.com, got %q", session.UserEmail)
+	}
+	if session.Client == nil || session.Client.Jar == nil {
+		t.Fatal("expected hydrated client jar")
+	}
+	if got := cookieValue(session.Client.Jar.Cookies(targetURL), "myacinfo"); got != "cached-token" {
+		t.Fatalf("expected hydrated cookie value, got %q", got)
+	}
+}
+
 func TestTryResumeLastSessionMigratesLegacyKeychainEntriesToSharedStore(t *testing.T) {
 	kr := withArraySessionKeyring(t)
 	withSessionInfoStub(t, "user@example.com", 42)

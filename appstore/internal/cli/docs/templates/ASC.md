@@ -98,6 +98,7 @@ asc submit create --app "APP_ID" --version "1.0.0" --build "BUILD_ID" --confirm
 asc testflight groups list --app "APP_ID"
 asc testflight groups list --app "APP_ID" --internal
 asc builds add-groups --build "BUILD_ID" --group "GROUP_ID"
+asc builds add-groups --build "BUILD_ID" --group "GROUP_ID" --submit --confirm
 ```
 
 ### Migrate Metadata (Fastlane)
