@@ -11,6 +11,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 )
 
 // PricingSetCommandConfig configures pricing set commands.
@@ -36,7 +37,7 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 	tier := fs.Int("tier", 0, "Pricing tier number (1-based, mutually exclusive with --price-point, --price, and --free)")
 	price := fs.String("price", "", "Customer price (e.g., 0.99, mutually exclusive with --price-point, --tier, and --free) to select price point")
 	free := fs.Bool("free", false, "Set app price to Free ($0), mutually exclusive with --price-point, --tier, and --price")
-	baseTerritory := fs.String("base-territory", "", "Base territory ID (e.g., USA)")
+	baseTerritory := fs.String("base-territory", "", "Base territory input (accepts alpha-2, alpha-3, or exact English country name; e.g., US, USA, United States)")
 	startDate := fs.String("start-date", "", config.StartDateHelp)
 	refresh := fs.Bool("refresh", false, "Force refresh of tier cache")
 	output := BindOutputFlags(fs)
@@ -68,10 +69,18 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 				return flag.ErrHelp
 			}
 
-			baseTerritoryValue := strings.TrimSpace(*baseTerritory)
-			if requiresExplicitBaseTerritory(config, baseTerritoryValue, tierValue, priceValue, freeValue) {
+			baseTerritoryInput := strings.TrimSpace(*baseTerritory)
+			if requiresExplicitBaseTerritory(config, baseTerritoryInput, tierValue, priceValue, freeValue) {
 				fmt.Fprintln(os.Stderr, "Error: --base-territory is required")
 				return flag.ErrHelp
+			}
+			baseTerritoryValue := baseTerritoryInput
+			if baseTerritoryInput != "" {
+				normalizedBaseTerritory, normalizeErr := ascterritory.Normalize(baseTerritoryInput)
+				if normalizeErr != nil {
+					return UsageError(normalizeErr.Error())
+				}
+				baseTerritoryValue = normalizedBaseTerritory
 			}
 
 			startDateValue := strings.TrimSpace(*startDate)

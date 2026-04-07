@@ -40,6 +40,10 @@ func ValidateCommand() *ffcli.Command {
 	strict := fs.Bool("strict", false, "Treat warnings as errors (exit non-zero)")
 	output := shared.BindOutputFlags(fs)
 
+	testFlight := wrapValidateSubcommand(ValidateTestFlightCommand(), fs)
+	iap := wrapValidateSubcommand(ValidateIAPCommand(), fs)
+	subscriptions := wrapValidateSubcommand(ValidateSubscriptionsCommand(), fs)
+
 	return &ffcli.Command{
 		Name:       "validate",
 		ShortUsage: "asc validate --app \"APP_ID\" (--version-id \"VERSION_ID\" | --version \"VERSION\") [flags]",
@@ -48,6 +52,8 @@ func ValidateCommand() *ffcli.Command {
 
 This is the canonical command for App Store submission readiness.
 Use it instead of ` + "`asc submit preflight`" + `.
+
+The default validate response includes an ordered remediation plan, so the first step is the next thing to fix.
 
 Checks:
   - Metadata length limits
@@ -79,9 +85,9 @@ Subscriptions:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
-			ValidateTestFlightCommand(),
-			ValidateIAPCommand(),
-			ValidateSubscriptionsCommand(),
+			testFlight,
+			iap,
+			subscriptions,
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
@@ -124,6 +130,72 @@ Subscriptions:
 			})
 		},
 	}
+}
+
+func wrapValidateSubcommand(cmd *ffcli.Command, parentFlags *flag.FlagSet) *ffcli.Command {
+	if cmd == nil || cmd.Exec == nil {
+		return cmd
+	}
+
+	originalExec := cmd.Exec
+	cmd.Exec = func(ctx context.Context, args []string) error {
+		if message := validateParentFlagUsageMessage(parentFlags); message != "" {
+			return shared.UsageError(message)
+		}
+		return originalExec(ctx, args)
+	}
+	return cmd
+}
+
+func validateParentFlagUsageMessage(parentFlags *flag.FlagSet) string {
+	if parentFlags == nil {
+		return ""
+	}
+
+	moveAfterSubcommand := make([]string, 0, 4)
+	topLevelOnly := make([]string, 0, 5)
+	parentFlags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "app", "output", "pretty", "strict":
+			moveAfterSubcommand = append(moveAfterSubcommand, "--"+f.Name)
+		case "version", "version-id", "platform":
+			topLevelOnly = append(topLevelOnly, "--"+f.Name)
+		}
+	})
+
+	if len(moveAfterSubcommand) == 0 && len(topLevelOnly) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, 2)
+	if len(moveAfterSubcommand) > 0 {
+		parts = append(parts, fmt.Sprintf("%s must be passed after the validate subcommand name", formatValidateFlagList(moveAfterSubcommand)))
+	}
+	if len(topLevelOnly) > 0 {
+		parts = append(parts, fmt.Sprintf("%s %s only valid for asc validate", formatValidateFlagList(topLevelOnly), validateFlagVerb(topLevelOnly)))
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+func formatValidateFlagList(flags []string) string {
+	switch len(flags) {
+	case 0:
+		return ""
+	case 1:
+		return flags[0]
+	case 2:
+		return flags[0] + " and " + flags[1]
+	default:
+		return strings.Join(flags[:len(flags)-1], ", ") + ", and " + flags[len(flags)-1]
+	}
+}
+
+func validateFlagVerb(flags []string) string {
+	if len(flags) == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func runValidate(ctx context.Context, opts validateOptions) error {

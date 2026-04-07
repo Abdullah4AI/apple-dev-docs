@@ -286,6 +286,23 @@ func TestAssetsScreenshotsSizesRejectsAllWithDisplayType(t *testing.T) {
 	}
 }
 
+func TestAssetsScreenshotsSizesRejectsInvalidDisplayTypeAsUsageError(t *testing.T) {
+	stdout, stderr, runErr := runRootCommand(t, []string{
+		"screenshots", "sizes",
+		"--display-type", "not-a-device",
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "unsupported screenshot display type") {
+		t.Fatalf("expected invalid display-type error, got %q", stderr)
+	}
+}
+
 func TestAssetsScreenshotsUploadRejectsInvalidDimensionsBeforeNetwork(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -341,6 +358,35 @@ func TestAssetsScreenshotsUploadRejectsInvalidDimensionsBeforeNetwork(t *testing
 	}
 	if atomic.LoadInt32(&calls) != 0 {
 		t.Fatalf("expected no network calls, got %d", calls)
+	}
+}
+
+func TestAssetsScreenshotsUploadRejectsInvalidDeviceTypeAsUsageError(t *testing.T) {
+	dir := t.TempDir()
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"screenshots", "upload",
+			"--version-localization", "LOC_ID",
+			"--path", dir,
+			"--device-type", "not-a-device",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "unsupported screenshot display type") {
+		t.Fatalf("expected invalid device-type error, got %q", stderr)
 	}
 }
 

@@ -648,7 +648,7 @@ func TestWinBackOffersPricesPaginateFromNextWithoutIDPhase63(t *testing.T) {
 }
 
 func TestWinBackOffersPricesRelationshipsRejectsInvalidNextURLPhase63(t *testing.T) {
-	runGameCenterAchievementsInvalidNextURLCases(
+	runInvalidNextURLUsageErrorCases(
 		t,
 		[]string{"subscriptions", "offers", "win-back", "prices-links"},
 		"subscriptions offers win-back prices-links: --next",

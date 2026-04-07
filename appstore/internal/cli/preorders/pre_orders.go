@@ -25,7 +25,7 @@ func PreOrdersCommand() *ffcli.Command {
 Examples:
   asc pre-orders get --app "123456789"
   asc pre-orders list --availability "AVAILABILITY_ID"
-  asc pre-orders enable --app "123456789" --territory "USA,GBR" --release-date "2026-06-01"
+  asc pre-orders enable --app "123456789" --territory "US,France" --release-date "2026-06-01"
   asc pre-orders update --territory-availability "TERRITORY_AVAILABILITY_ID" --pre-order-enabled true --release-date "2026-03-01"
   asc pre-orders disable --territory-availability "TERRITORY_AVAILABILITY_ID"
   asc pre-orders end --territory-availability "TA_1,TA_2"`,
@@ -145,7 +145,7 @@ func PreOrdersEnableCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pre-orders enable", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	territory := fs.String("territory", "", "Territory IDs (comma-separated, e.g., USA,GBR)")
+	territory := fs.String("territory", "", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
 	releaseDate := fs.String("release-date", "", "Release date (YYYY-MM-DD)")
 	var availableInNewTerritories shared.OptionalBool
 	fs.Var(&availableInNewTerritories, "available-in-new-territories", "[deprecated, ignored] Previously set available-in-new-territories")
@@ -153,7 +153,7 @@ func PreOrdersEnableCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "enable",
-		ShortUsage: "asc pre-orders enable --app \"APP_ID\" --territory \"USA,GBR\" --release-date \"2026-06-01\"",
+		ShortUsage: "asc pre-orders enable --app \"APP_ID\" --territory \"US,France\" --release-date \"2026-06-01\"",
 		ShortHelp:  "Enable pre-orders for territories.",
 		LongHelp: `Enable pre-orders for territories.
 
@@ -161,8 +161,8 @@ Enables pre-orders on the specified territories by setting preOrderEnabled=true,
 available=true, and the given release date on each territory availability.
 
 Examples:
-  asc pre-orders enable --app "123456789" --territory "USA" --release-date "2026-06-01"
-  asc pre-orders enable --app "123456789" --territory "USA,GBR,DEU" --release-date "2026-06-01"`,
+  asc pre-orders enable --app "123456789" --territory "United States" --release-date "2026-06-01"
+  asc pre-orders enable --app "123456789" --territory "US,France,DEU" --release-date "2026-06-01"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -189,7 +189,10 @@ Examples:
 				return fmt.Errorf("pre-orders enable: %w", err)
 			}
 
-			territories := shared.SplitCSVUpper(*territory)
+			territories, err := shared.NormalizeASCTerritoryCSV(*territory)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if len(territories) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territory must include at least one value")
 				return flag.ErrHelp

@@ -25,6 +25,19 @@ func testFlightPublishResultRows(result *TestFlightPublishResult) ([]string, [][
 }
 
 func appStorePublishResultRows(result *AppStorePublishResult) ([]string, [][]string) {
+	if result.DryRun {
+		headers := []string{"Dry Run", "Mode", "Version", "Build Number", "Will Wait", "Will Submit"}
+		rows := [][]string{{
+			fmt.Sprintf("%t", result.DryRun),
+			string(result.Mode),
+			result.BuildVersion,
+			result.BuildNumber,
+			fmt.Sprintf("%t", publishPlanContainsStep(result.Plan, "wait_for_build_processing")),
+			fmt.Sprintf("%t", publishPlanContainsStep(result.Plan, "submit_review")),
+		}}
+		return headers, rows
+	}
+
 	headers := []string{"Build ID", "Version", "Build Number", "Version ID", "Submission ID", "Uploaded", "Attached", "Submitted"}
 	rows := [][]string{{
 		result.BuildID,
@@ -37,6 +50,27 @@ func appStorePublishResultRows(result *AppStorePublishResult) ([]string, [][]str
 		fmt.Sprintf("%t", result.Submitted),
 	}}
 	return headers, rows
+}
+
+func publishPlanRows(plan []PublishPlanStep) ([]string, [][]string) {
+	if len(plan) == 0 {
+		return []string{"Step", "Status", "Message"}, nil
+	}
+
+	rows := make([][]string, 0, len(plan))
+	for _, step := range plan {
+		rows = append(rows, []string{step.Name, step.Status, step.Message})
+	}
+	return []string{"Step", "Status", "Message"}, rows
+}
+
+func publishPlanContainsStep(plan []PublishPlanStep, name string) bool {
+	for _, step := range plan {
+		if step.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func publishArchiveStageRows(stage *PublishArchiveStageResult) ([]string, [][]string) {

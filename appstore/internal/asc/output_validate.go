@@ -11,6 +11,10 @@ func init() {
 	registerDirect(func(v *validation.Report, render func([]string, [][]string)) error {
 		h, r := validationSummaryRows(v)
 		render(h, r)
+		if len(v.Remediation.Steps) > 0 {
+			rh, rr := validationRemediationRows(v)
+			render(rh, rr)
+		}
 		oh, or := validationCheckRows(v)
 		render(oh, or)
 		return nil
@@ -44,7 +48,7 @@ func init() {
 }
 
 func validationSummaryRows(report *validation.Report) ([]string, [][]string) {
-	headers := []string{"App ID", "Version ID", "Version", "Platform", "Errors", "Warnings", "Infos", "Blocking", "Strict"}
+	headers := []string{"App ID", "Version ID", "Version", "Platform", "Errors", "Warnings", "Infos", "Blocking", "Actionable", "Strict"}
 	rows := [][]string{{
 		report.AppID,
 		report.VersionID,
@@ -54,6 +58,7 @@ func validationSummaryRows(report *validation.Report) ([]string, [][]string) {
 		fmt.Sprintf("%d", report.Summary.Warnings),
 		fmt.Sprintf("%d", report.Summary.Infos),
 		fmt.Sprintf("%d", report.Summary.Blocking),
+		fmt.Sprintf("%d", report.Remediation.TotalActionable),
 		formatBool(report.Strict),
 	}}
 	return headers, rows
@@ -75,6 +80,29 @@ func validationCheckRows(report *validation.Report) ([]string, [][]string) {
 			formatResource(check.ResourceType, check.ResourceID),
 			check.Message,
 			check.Remediation,
+		})
+	}
+	return headers, rows
+}
+
+func validationRemediationRows(report *validation.Report) ([]string, [][]string) {
+	headers := []string{"Order", "Severity", "Blocking", "Check ID", "Locale", "Field", "Resource", "Message", "Remediation"}
+	if report == nil || len(report.Remediation.Steps) == 0 {
+		return headers, nil
+	}
+
+	rows := make([][]string, 0, len(report.Remediation.Steps))
+	for _, step := range report.Remediation.Steps {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", step.Order),
+			string(step.Severity),
+			formatBool(step.Blocking),
+			step.CheckID,
+			step.Locale,
+			step.Field,
+			formatResource(step.ResourceType, step.ResourceID),
+			step.Message,
+			step.Remediation,
 		})
 	}
 	return headers, rows

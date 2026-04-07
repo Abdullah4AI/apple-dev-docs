@@ -23,7 +23,7 @@ Examples:
   asc subscriptions pricing summary --app "APP_ID"
   asc subscriptions pricing prices list --subscription-id "SUB_ID"
   asc subscriptions pricing prices set --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID"
-  asc subscriptions pricing price-points list --subscription-id "SUB_ID" --territory "USA"
+  asc subscriptions pricing price-points list --subscription-id "SUB_ID" --territory "United States"
   asc subscriptions pricing availability view --subscription-id "SUB_ID"
   asc subscriptions pricing equalize --subscription-id "SUB_ID" --base-price "3.49"`,
 		FlagSet:   fs,

@@ -483,7 +483,7 @@ func TestSubscriptionsPricePointsListTerritoryFilter(t *testing.T) {
 		if err := root.Parse([]string{
 			"subscriptions", "pricing", "price-points", "list",
 			"--subscription-id", "8000000001",
-			"--territory", "USA",
+			"--territory", "United States",
 			"--output", "json",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -518,17 +518,17 @@ func TestSubscriptionsPricePointsEqualizationsPaginate(t *testing.T) {
 		}
 
 		switch req.URL.RawQuery {
-		case "limit=200":
+		case "limit=8000":
 			if req.URL.Path != "/v1/subscriptionPricePoints/pp-1/equalizations" {
 				t.Fatalf("unexpected first page path: %s", req.URL.Path)
 			}
-			body := `{"data":[{"type":"subscriptionPricePointEqualizations","id":"eq-1","attributes":{"territory":"USA"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/subscriptionPricePoints/pp-1/equalizations?cursor=AQ&limit=200"}}`
+			body := `{"data":[{"type":"subscriptionPricePointEqualizations","id":"eq-1","attributes":{"territory":"USA"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/subscriptionPricePoints/pp-1/equalizations?cursor=AQ&limit=8000"}}`
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(body)),
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			}, nil
-		case "cursor=AQ&limit=200":
+		case "cursor=AQ&limit=8000":
 			if req.URL.Path != "/v1/subscriptionPricePoints/pp-1/equalizations" {
 				t.Fatalf("unexpected second page path: %s", req.URL.Path)
 			}

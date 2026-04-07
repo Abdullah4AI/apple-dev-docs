@@ -40,7 +40,9 @@ App Store workflow:
   asc screenshots list --version-localization "LOC_ID"
   asc screenshots sizes
   asc screenshots sizes --all
+  asc screenshots validate --path "./screenshots/iphone" --device-type "IPHONE_65"
   asc screenshots upload --version-localization "LOC_ID" --path "./screenshots/iphone" --device-type "IPHONE_65"
+  asc screenshots upload --app "123456789" --version "1.2.3" --path "./screenshots" --device-type "IPHONE_65"
   asc screenshots upload --version-localization "LOC_ID" --path "./screenshots/ipad" --device-type "IPAD_PRO_3GEN_129"
   asc screenshots download --version-localization "LOC_ID" --output-dir "./screenshots/downloaded"
   asc screenshots delete --id "SCREENSHOT_ID" --confirm
@@ -62,6 +64,7 @@ default; use --all only when you need the full matrix.`,
 			assets.AssetsScreenshotsApplyCommand(),
 			assets.AssetsScreenshotsListCommand(),
 			assets.AssetsScreenshotsSizesCommand(),
+			assets.AssetsScreenshotsValidateCommand(),
 			assets.AssetsScreenshotsUploadCommand(),
 			assets.AssetsScreenshotsDownloadCommand(),
 			assets.AssetsScreenshotsDeleteCommand(),

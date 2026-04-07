@@ -72,7 +72,7 @@ func SandboxUpdateCommand() *ffcli.Command {
 
 	testerID := fs.String("id", "", "Sandbox tester ID")
 	email := fs.String("email", "", "Tester email address")
-	territory := fs.String("territory", "", "App Store territory code (e.g., USA, JPN)")
+	territory := fs.String("territory", "", "App Store territory input (accepts alpha-2, alpha-3, or exact English country name)")
 	subscriptionRenewalRate := fs.String("subscription-renewal-rate", "", "Subscription renewal rate (MONTHLY_RENEWAL_EVERY_ONE_HOUR, MONTHLY_RENEWAL_EVERY_THIRTY_MINUTES, MONTHLY_RENEWAL_EVERY_FIFTEEN_MINUTES, MONTHLY_RENEWAL_EVERY_FIVE_MINUTES, MONTHLY_RENEWAL_EVERY_THREE_MINUTES)")
 	var interruptPurchases shared.OptionalBool
 	fs.Var(&interruptPurchases, "interrupt-purchases", "Interrupt purchases (true/false)")
@@ -85,7 +85,7 @@ func SandboxUpdateCommand() *ffcli.Command {
 		LongHelp: `Update sandbox tester settings (v2 API).
 
 Examples:
-  asc sandbox update --id "SANDBOX_TESTER_ID" --territory "USA"
+  asc sandbox update --id "SANDBOX_TESTER_ID" --territory "US"
   asc sandbox update --email "tester@example.com" --interrupt-purchases
   asc sandbox update --id "SANDBOX_TESTER_ID" --subscription-renewal-rate "MONTHLY_RENEWAL_EVERY_ONE_HOUR"`,
 		FlagSet:   fs,

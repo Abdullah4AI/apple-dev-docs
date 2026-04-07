@@ -627,13 +627,27 @@ func (c *Client) GetInAppPurchasePricePoints(ctx context.Context, iapID string, 
 }
 
 // GetInAppPurchasePricePointEqualizations retrieves equalized price points for a price point.
-func (c *Client) GetInAppPurchasePricePointEqualizations(ctx context.Context, pricePointID string) (*InAppPurchasePricePointsResponse, error) {
+func (c *Client) GetInAppPurchasePricePointEqualizations(ctx context.Context, pricePointID string, opts ...IAPPricePointsOption) (*InAppPurchasePricePointsResponse, error) {
+	query := &iapPricePointsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	pricePointID = strings.TrimSpace(pricePointID)
-	if pricePointID == "" {
+	if query.nextURL == "" && pricePointID == "" {
 		return nil, fmt.Errorf("pricePointID is required")
 	}
 
 	path := fmt.Sprintf("/v1/inAppPurchasePricePoints/%s/equalizations", pricePointID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("in-app-purchase-price-point-equalizations: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildIAPPricePointsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
+
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err

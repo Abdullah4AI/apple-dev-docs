@@ -461,6 +461,45 @@ func TestGetInAppPurchasePricePointEqualizations(t *testing.T) {
 	}
 }
 
+func TestGetInAppPurchasePricePointEqualizations_WithQueryOptions(t *testing.T) {
+	t.Run("limit", func(t *testing.T) {
+		client := newTestClient(t, func(req *http.Request) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET, got %s", req.Method)
+			}
+			if req.URL.Path != "/v1/inAppPurchasePricePoints/price-1/equalizations" {
+				t.Fatalf("expected path /v1/inAppPurchasePricePoints/price-1/equalizations, got %s", req.URL.Path)
+			}
+			if got := req.URL.Query().Get("limit"); got != "175" {
+				t.Fatalf("expected limit=175, got %q", got)
+			}
+			assertAuthorized(t, req)
+		}, jsonResponse(http.StatusOK, `{"data":[]}`))
+
+		if _, err := client.GetInAppPurchasePricePointEqualizations(context.Background(), "price-1", WithIAPPricePointsLimit(175)); err != nil {
+			t.Fatalf("GetInAppPurchasePricePointEqualizations() error: %v", err)
+		}
+	})
+
+	t.Run("next", func(t *testing.T) {
+		nextURL := "https://api.appstoreconnect.apple.com/v1/inAppPurchasePricePoints/price-1/equalizations?cursor=AQ&limit=175"
+
+		client := newTestClient(t, func(req *http.Request) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET, got %s", req.Method)
+			}
+			if req.URL.String() != nextURL {
+				t.Fatalf("expected next URL %s, got %s", nextURL, req.URL.String())
+			}
+			assertAuthorized(t, req)
+		}, jsonResponse(http.StatusOK, `{"data":[]}`))
+
+		if _, err := client.GetInAppPurchasePricePointEqualizations(context.Background(), "price-1", WithIAPPricePointsNextURL(nextURL)); err != nil {
+			t.Fatalf("GetInAppPurchasePricePointEqualizations() error: %v", err)
+		}
+	})
+}
+
 func TestGetInAppPurchasePriceScheduleManualPrices_WithLimit(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[]}`)
 	client := newTestClient(t, func(req *http.Request) {

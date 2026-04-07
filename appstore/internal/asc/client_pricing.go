@@ -97,9 +97,25 @@ func (c *Client) GetAppPricePoint(ctx context.Context, pricePointID string) (*Ap
 }
 
 // GetAppPricePointEqualizations retrieves equalized price points for a price point.
-func (c *Client) GetAppPricePointEqualizations(ctx context.Context, pricePointID string) (*AppPricePointsV3Response, error) {
+func (c *Client) GetAppPricePointEqualizations(ctx context.Context, pricePointID string, opts ...PricePointsOption) (*AppPricePointsV3Response, error) {
+	query := &pricePointsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	pricePointID = strings.TrimSpace(pricePointID)
+	if query.nextURL == "" && pricePointID == "" {
+		return nil, fmt.Errorf("pricePointID is required")
+	}
 	path := fmt.Sprintf("/v3/appPricePoints/%s/equalizations", pricePointID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("appPricePointEqualizations: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildPricePointsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {

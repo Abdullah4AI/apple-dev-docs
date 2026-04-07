@@ -45,6 +45,7 @@ func Validate(input Input, strict bool) Report {
 		VersionString: input.VersionString,
 		Platform:      input.Platform,
 		Summary:       summary,
+		Remediation:   BuildRemediation(checks, strict),
 		Checks:        checks,
 		Strict:        strict,
 	}

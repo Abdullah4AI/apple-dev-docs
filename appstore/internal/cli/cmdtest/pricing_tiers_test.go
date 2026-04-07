@@ -88,6 +88,48 @@ func TestPricingTiersCommand_Success(t *testing.T) {
 	}
 }
 
+func TestPricingTiersCommand_NormalizesTerritory(t *testing.T) {
+	setupAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/appPricePoints") {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		if got := req.URL.Query().Get("filter[territory]"); got != "USA" {
+			t.Fatalf("expected normalized filter[territory]=USA, got %q", got)
+		}
+		body := `{
+			"data":[
+				{"type":"appPricePoints","id":"pp-099","attributes":{"customerPrice":"0.99","proceeds":"0.70"}}
+			],
+			"links":{"next":""}
+		}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	t.Setenv("HOME", t.TempDir())
+
+	if err := root.Parse([]string{
+		"pricing", "tiers",
+		"--app", "app-1",
+		"--territory", "United States",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if err := root.Run(context.Background()); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+}
+
 func TestPricingScheduleCreate_TierFlag(t *testing.T) {
 	setupAuth(t)
 

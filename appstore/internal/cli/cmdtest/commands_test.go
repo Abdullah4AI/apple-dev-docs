@@ -1412,6 +1412,11 @@ func TestPricingValidationErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name:    "pricing price-points equalizations missing price-point",
+			args:    []string{"pricing", "price-points", "equalizations"},
+			wantErr: "Error: --price-point is required",
+		},
+		{
 			name:    "pricing schedule get missing app and id",
 			args:    []string{"pricing", "schedule", "view"},
 			wantErr: "Error: --app or --id is required",
@@ -3318,6 +3323,11 @@ func TestLocalizationsValidationErrors(t *testing.T) {
 			wantErr: "--locale is required",
 		},
 		{
+			name:    "localizations supported-locales missing version",
+			args:    []string{"localizations", "supported-locales"},
+			wantErr: "--version is required",
+		},
+		{
 			name:    "localizations list missing app for app-info",
 			args:    []string{"localizations", "list", "--type", "app-info"},
 			wantErr: "--app is required",
@@ -3336,6 +3346,16 @@ func TestLocalizationsValidationErrors(t *testing.T) {
 			name:    "localizations upload missing path",
 			args:    []string{"localizations", "upload", "--version", "VERSION_ID"},
 			wantErr: "--path is required",
+		},
+		{
+			name:    "metadata keywords push missing version id",
+			args:    []string{"metadata", "keywords", "push", "--input", "keywords.json"},
+			wantErr: "--version-id is required",
+		},
+		{
+			name:    "metadata keywords push missing input",
+			args:    []string{"metadata", "keywords", "push", "--version-id", "VERSION_ID"},
+			wantErr: "--input is required",
 		},
 		{
 			name:    "localizations upload missing version",
@@ -3410,6 +3430,9 @@ func TestLocalizationsCreateInvalidLocale(t *testing.T) {
 }
 
 func TestScreenshotsAndVideoPreviewsValidationErrors(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "missing-config.json"))
+
 	tests := []struct {
 		name    string
 		args    []string
@@ -3424,6 +3447,16 @@ func TestScreenshotsAndVideoPreviewsValidationErrors(t *testing.T) {
 			name:    "screenshots upload missing localization",
 			args:    []string{"screenshots", "upload", "--path", "./screenshots", "--device-type", "IPHONE_65"},
 			wantErr: "--version-localization is required",
+		},
+		{
+			name:    "screenshots validate missing path",
+			args:    []string{"screenshots", "validate", "--device-type", "IPHONE_65"},
+			wantErr: "--path is required",
+		},
+		{
+			name:    "screenshots validate missing device type",
+			args:    []string{"screenshots", "validate", "--path", "./screenshots"},
+			wantErr: "--device-type is required",
 		},
 		{
 			name:    "screenshots upload missing path",

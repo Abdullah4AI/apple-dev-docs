@@ -251,6 +251,10 @@ func versionLengthIssues(filePath, version, locale string, loc VersionLocalizati
 		WhatsNew:        loc.WhatsNew,
 		PromotionalText: loc.PromotionalText,
 	}) {
+		message := fmt.Sprintf("%s exceeds %d %s", issue.Field, issue.Limit, issue.Unit)
+		if issue.Field == "keywords" {
+			message = fmt.Sprintf("keywords exceed %d %s", issue.Limit, issue.Unit)
+		}
 		issues = append(issues, ValidateIssue{
 			Scope:    versionDirName,
 			File:     filePath,
@@ -258,7 +262,7 @@ func versionLengthIssues(filePath, version, locale string, loc VersionLocalizati
 			Version:  version,
 			Field:    issue.Field,
 			Severity: issueSeverityError,
-			Message:  fmt.Sprintf("%s exceeds %d characters", issue.Field, issue.Limit),
+			Message:  message,
 			Length:   issue.Length,
 			Limit:    issue.Limit,
 		})

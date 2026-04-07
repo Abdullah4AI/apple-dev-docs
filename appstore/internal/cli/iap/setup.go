@@ -10,6 +10,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -101,7 +102,7 @@ func IAPSetupCommand() *ffcli.Command {
 	nameAlias := fs.String("name", "", "Display name alias")
 	description := fs.String("description", "", "Description for the first localization")
 
-	baseTerritory := fs.String("base-territory", "", "Base territory ID for the initial price schedule (e.g., USA)")
+	baseTerritory := fs.String("base-territory", "", "Base territory input for the initial price schedule (accepts alpha-2, alpha-3, or exact English country name)")
 	pricePointID := fs.String("price-point-id", "", "Explicit price point ID for the initial price schedule")
 	tier := fs.Int("tier", 0, "Pricing tier number for the initial price schedule")
 	price := fs.String("price", "", "Customer price for the initial price schedule")
@@ -132,7 +133,7 @@ confirmed final state.
 Examples:
   asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime"
   asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime" --locale "en-US" --display-name "Second Draft Pro" --description "Unlock everything"
-  asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime" --locale "en-US" --display-name "Second Draft Pro" --price "3.99" --base-territory "USA" --start-date "2026-03-01"`,
+  asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime" --locale "en-US" --display-name "Second Draft Pro" --price "3.99" --base-territory "United States" --start-date "2026-03-01"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -148,6 +149,13 @@ Examples:
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
+			baseTerritoryValue := strings.TrimSpace(*baseTerritory)
+			if baseTerritoryValue != "" {
+				baseTerritoryValue, err = ascterritory.Normalize(baseTerritoryValue)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
 
 			opts := iapSetupOptions{
 				AppID:            shared.ResolveAppID(*appID),
@@ -157,7 +165,7 @@ Examples:
 				Locale:           strings.TrimSpace(*locale),
 				DisplayName:      displayNameValue,
 				Description:      strings.TrimSpace(*description),
-				BaseTerritory:    strings.ToUpper(strings.TrimSpace(*baseTerritory)),
+				BaseTerritory:    baseTerritoryValue,
 				PricePointID:     strings.TrimSpace(*pricePointID),
 				Tier:             *tier,
 				Price:            strings.TrimSpace(*price),

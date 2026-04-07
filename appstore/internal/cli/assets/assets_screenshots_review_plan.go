@@ -84,7 +84,7 @@ func AssetsScreenshotsPlanCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	version := fs.String("version", "", "App Store version string")
 	versionID := fs.String("version-id", "", "App Store version ID")
-	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
+	platform := fs.String("platform", "", "Platform for --version lookups: IOS, MAC_OS, TV_OS, VISION_OS (defaults to IOS with --version)")
 	reviewOutputDir := fs.String("review-output-dir", defaultReviewOutputDir, "Directory containing review artifacts")
 	manifestPath := fs.String("manifest-path", "", "Optional manifest path (default: <review-output-dir>/manifest.json)")
 	approvalPath := fs.String("approval-path", "", "Optional approvals path (default: <review-output-dir>/approved.json)")
@@ -150,7 +150,7 @@ func AssetsScreenshotsApplyCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	version := fs.String("version", "", "App Store version string")
 	versionID := fs.String("version-id", "", "App Store version ID")
-	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
+	platform := fs.String("platform", "", "Platform for --version lookups: IOS, MAC_OS, TV_OS, VISION_OS (defaults to IOS with --version)")
 	reviewOutputDir := fs.String("review-output-dir", defaultReviewOutputDir, "Directory containing review artifacts")
 	manifestPath := fs.String("manifest-path", "", "Optional manifest path (default: <review-output-dir>/manifest.json)")
 	approvalPath := fs.String("approval-path", "", "Optional approvals path (default: <review-output-dir>/approved.json)")
@@ -232,7 +232,7 @@ func executeScreenshotReviewPlan(ctx context.Context, opts screenshotReviewPlanO
 		return nil, flag.ErrHelp
 	}
 
-	normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(opts.Platform)
+	normalizedPlatform, err := resolveAppScopedScreenshotPlatform(versionValue, opts.Platform)
 	if err != nil {
 		return nil, shared.UsageError(err.Error())
 	}

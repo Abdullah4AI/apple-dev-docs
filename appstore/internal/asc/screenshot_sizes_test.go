@@ -58,6 +58,23 @@ func TestValidateScreenshotDimensionsSuggestsMatchingDisplayType(t *testing.T) {
 	}
 }
 
+func TestValidateScreenshotDimensionsForSizeUsesKnownDimensions(t *testing.T) {
+	err := ValidateScreenshotDimensionsForSize("known-size.png", 1206, 2622, "APP_IPHONE_67")
+	if err == nil {
+		t.Fatal("expected dimension validation error, got nil")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "known-size.png") {
+		t.Fatalf("expected file path in error, got %q", message)
+	}
+	if !strings.Contains(message, "1206x2622") {
+		t.Fatalf("expected known dimensions in error, got %q", message)
+	}
+	if !strings.Contains(message, "This size matches: APP_IPHONE_61") {
+		t.Fatalf("expected display type suggestion in error, got %q", message)
+	}
+}
+
 func TestValidateScreenshotDimensionsAcceptsLatestIPhone67Sizes(t *testing.T) {
 	testCases := []struct {
 		name   string

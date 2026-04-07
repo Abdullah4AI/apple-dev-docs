@@ -35,43 +35,46 @@ func CollectAssetFiles(path string) ([]string, error) {
 	return collectAssetFiles(path)
 }
 
-func collectAssetFiles(path string) ([]string, error) {
+func collectAssetPaths(path string) ([]string, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("refusing to read symlink %q", path)
+	if !info.IsDir() {
+		return []string{path}, nil
 	}
-	if info.IsDir() {
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return nil, err
-		}
-		files := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			fullPath := filepath.Join(path, entry.Name())
-			if err := asc.ValidateImageFile(fullPath); err != nil {
-				return nil, err
-			}
-			files = append(files, fullPath)
-		}
-		if len(files) == 0 {
-			return nil, fmt.Errorf("no files found in %q", path)
-		}
-		sort.Strings(files)
-		return files, nil
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("expected regular file: %q", path)
-	}
-	if err := asc.ValidateImageFile(path); err != nil {
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
 		return nil, err
 	}
-	return []string{path}, nil
+
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		files = append(files, filepath.Join(path, entry.Name()))
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func collectAssetFiles(path string) ([]string, error) {
+	files, err := collectAssetPaths(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no files found in %q", path)
+	}
+	for _, filePath := range files {
+		if err := asc.ValidateImageFile(filePath); err != nil {
+			return nil, err
+		}
+	}
+	return files, nil
 }
 
 func waitForAssetDeliveryState(ctx context.Context, assetID string, fetch func(context.Context) (*asc.AssetDeliveryState, error)) (string, error) {

@@ -246,3 +246,20 @@ func TestReadVersionLocalizationPatchAcceptsCaseInsensitiveKeys(t *testing.T) {
 		t.Fatalf("expected canonical field key whatsNew in setFields, got %+v", patch.setFields)
 	}
 }
+
+func TestReadVersionLocalizationPatchRejectsOverLimitKeywordCharacters(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ja.json")
+	body := `{"keywords":"` + strings.Repeat("語", 101) + `"}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err := readVersionLocalizationPatchFromFile(path)
+	if err == nil {
+		t.Fatal("expected keyword limit error")
+	}
+	if !strings.Contains(err.Error(), "keywords exceed 100 characters") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

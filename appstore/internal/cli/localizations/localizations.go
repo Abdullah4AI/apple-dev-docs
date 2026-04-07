@@ -26,6 +26,7 @@ func LocalizationsCommand() *ffcli.Command {
 Examples:
   asc localizations list --version "VERSION_ID"
   asc localizations create --version "VERSION_ID" --locale "ja"
+  asc localizations supported-locales --version "VERSION_ID"
   asc localizations search-keywords list --localization-id "LOCALIZATION_ID"
   asc localizations preview-sets list --localization-id "LOCALIZATION_ID"
   asc localizations preview-sets get --id "PREVIEW_SET_ID"
@@ -38,6 +39,7 @@ Examples:
 			LocalizationsListCommand(),
 			LocalizationsCreateCommand(),
 			LocalizationsUpdateCommand(),
+			LocalizationsSupportedLocalesCommand(),
 			LocalizationsSearchKeywordsCommand(),
 			LocalizationsPreviewSetsCommand(),
 			LocalizationsScreenshotSetsCommand(),
@@ -449,6 +451,14 @@ Examples:
 					return flag.ErrHelp
 				}
 
+				valuesByLocale, err := shared.ReadLocalizationStrings(*path, locales)
+				if err != nil {
+					return fmt.Errorf("localizations upload: %w", err)
+				}
+				if err := shared.ValidateVersionLocalizationValueSet(valuesByLocale); err != nil {
+					return shared.UsageError(err.Error())
+				}
+
 				client, err := shared.GetASCClient()
 				if err != nil {
 					return fmt.Errorf("localizations upload: %w", err)
@@ -457,12 +467,11 @@ Examples:
 				requestCtx, cancel := shared.ContextWithTimeout(ctx)
 				defer cancel()
 
-				valuesByLocale, err := shared.ReadLocalizationStrings(*path, locales)
-				if err != nil {
-					return fmt.Errorf("localizations upload: %w", err)
+				submitOpts := shared.SubmitReadinessOptions{}
+				if sharedVersionLocalizationValuesNeedUpdateContext(valuesByLocale) {
+					submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, strings.TrimSpace(*versionID), "", "")
 				}
-
-				results, err := shared.UploadVersionLocalizations(requestCtx, client, strings.TrimSpace(*versionID), valuesByLocale, *dryRun)
+				results, warnings, err := shared.UploadPrevalidatedVersionLocalizationsWithWarnings(requestCtx, client, strings.TrimSpace(*versionID), valuesByLocale, *dryRun, submitOpts)
 				if err != nil {
 					return fmt.Errorf("localizations upload: %w", err)
 				}
@@ -474,7 +483,10 @@ Examples:
 					Results:   results,
 				}
 
-				return shared.PrintOutput(&result, *output.Output, *output.Pretty)
+				if err := shared.PrintOutput(&result, *output.Output, *output.Pretty); err != nil {
+					return err
+				}
+				return shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings)
 			case shared.LocalizationTypeAppInfo:
 				resolvedAppID := shared.ResolveAppID(*appID)
 				if resolvedAppID == "" {
@@ -519,4 +531,13 @@ Examples:
 			}
 		},
 	}
+}
+
+func sharedVersionLocalizationValuesNeedUpdateContext(valuesByLocale map[string]map[string]string) bool {
+	for _, values := range valuesByLocale {
+		if strings.TrimSpace(values["whatsNew"]) == "" {
+			return true
+		}
+	}
+	return false
 }

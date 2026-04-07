@@ -109,7 +109,7 @@ func TestSubscriptionsPricingByIDSuccess(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "summary", "--subscription-id", "8000000001"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "summary", "--subscription-id", "8000000001", "--territory", "US"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

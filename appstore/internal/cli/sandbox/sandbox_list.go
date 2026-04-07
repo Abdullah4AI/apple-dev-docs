@@ -17,7 +17,7 @@ func SandboxListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	email := fs.String("email", "", "Filter by tester email")
-	territory := fs.String("territory", "", "Filter by territory (e.g., USA, JPN)")
+	territory := fs.String("territory", "", "Filter by territory (accepts alpha-2, alpha-3, or exact English country name)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -32,7 +32,7 @@ func SandboxListCommand() *ffcli.Command {
 Examples:
   asc sandbox list
   asc sandbox list --email "tester@example.com"
-  asc sandbox list --territory "USA"
+  asc sandbox list --territory "United States"
   asc sandbox list --limit 50
   asc sandbox list --paginate`,
 		FlagSet:   fs,

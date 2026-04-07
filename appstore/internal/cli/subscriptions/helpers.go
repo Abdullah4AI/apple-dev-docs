@@ -204,25 +204,19 @@ func normalizeSubscriptionCustomerEligibilities(value string) ([]asc.Subscriptio
 }
 
 func parseSubscriptionOfferCodePrices(value string) ([]asc.SubscriptionOfferCodePrice, error) {
-	entries := shared.SplitCSV(value)
+	entries, err := shared.ParseASCTerritoryValueCSV(value)
+	if err != nil {
+		return nil, err
+	}
 	if len(entries) == 0 {
 		return nil, nil
 	}
 
 	prices := make([]asc.SubscriptionOfferCodePrice, 0, len(entries))
 	for _, entry := range entries {
-		parts := strings.SplitN(entry, ":", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("--prices must use TERRITORY:PRICE_POINT_ID entries")
-		}
-		territoryID := strings.ToUpper(strings.TrimSpace(parts[0]))
-		pricePointID := strings.TrimSpace(parts[1])
-		if territoryID == "" || pricePointID == "" {
-			return nil, fmt.Errorf("--prices must use TERRITORY:PRICE_POINT_ID entries")
-		}
 		prices = append(prices, asc.SubscriptionOfferCodePrice{
-			TerritoryID:  territoryID,
-			PricePointID: pricePointID,
+			TerritoryID:  entry.TerritoryID,
+			PricePointID: entry.Value,
 		})
 	}
 

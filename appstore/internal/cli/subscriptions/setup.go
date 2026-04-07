@@ -9,6 +9,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -122,14 +123,14 @@ func SubscriptionsSetupCommand() *ffcli.Command {
 	nameAlias := fs.String("name", "", "Display name alias")
 	description := fs.String("description", "", "Description for the first subscription localization")
 
-	priceTerritory := fs.String("price-territory", "", "Territory used to resolve and verify the initial subscription price (e.g., USA)")
+	priceTerritory := fs.String("price-territory", "", "Territory used to resolve and verify the initial subscription price (accepts alpha-2, alpha-3, or exact English country name)")
 	pricePointID := fs.String("price-point-id", "", "Explicit price point ID for the initial subscription price")
 	tier := fs.Int("tier", 0, "Pricing tier number for the initial subscription price")
 	price := fs.String("price", "", "Customer price for the initial subscription price")
 	startDate := fs.String("start-date", "", "Start date for the initial subscription price (YYYY-MM-DD)")
 	refresh := fs.Bool("refresh", false, "Force refresh of the subscription price-point tier cache when resolving --tier or --price")
 
-	territories := fs.String("territories", "", "Availability territories to enable after creation, comma-separated")
+	territories := fs.String("territories", "", "Availability territories to enable after creation (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
 	availableInNewTerritories := fs.Bool("available-in-new-territories", false, "Include new territories automatically when creating availability")
 	noVerify := fs.Bool("no-verify", false, "Skip post-create readback verification for faster execution")
 	output := shared.BindOutputFlags(fs)
@@ -157,7 +158,7 @@ matters more than confirmed final state.
 Examples:
   asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --subscription-period ONE_MONTH
   asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --subscription-period ONE_MONTH --locale "en-US" --display-name "Pro Monthly" --description "Unlock everything"
-  asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --price "3.99" --price-territory "USA" --territories "USA,CAN"
+  asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --price "3.99" --price-territory "United States" --territories "US,Canada"
   asc subscriptions setup --group-id "GROUP_ID" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --subscription-period ONE_MONTH --no-verify`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -179,6 +180,18 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 
+			priceTerritoryValue := strings.TrimSpace(*priceTerritory)
+			if priceTerritoryValue != "" {
+				priceTerritoryValue, err = ascterritory.Normalize(priceTerritoryValue)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
+			territoryValues, err := shared.NormalizeASCTerritoryCSV(*territories)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+
 			opts := subscriptionsSetupOptions{
 				AppID:                     shared.ResolveAppID(*appID),
 				GroupID:                   strings.TrimSpace(*groupID),
@@ -189,11 +202,11 @@ Examples:
 				Locale:                    strings.TrimSpace(*locale),
 				DisplayName:               displayNameValue,
 				Description:               strings.TrimSpace(*description),
-				PriceTerritory:            strings.ToUpper(strings.TrimSpace(*priceTerritory)),
+				PriceTerritory:            priceTerritoryValue,
 				PricePointID:              strings.TrimSpace(*pricePointID),
 				Tier:                      *tier,
 				Price:                     strings.TrimSpace(*price),
-				Territories:               shared.SplitCSVUpper(*territories),
+				Territories:               territoryValues,
 				AvailableInNewTerritories: *availableInNewTerritories,
 				RefreshTierCache:          *refresh,
 				NoVerify:                  *noVerify,

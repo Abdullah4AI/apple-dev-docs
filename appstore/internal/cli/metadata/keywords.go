@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -100,19 +100,33 @@ type MetadataKeywordsWarning struct {
 	MissingFields []string `json:"missingFields,omitempty"`
 }
 
+// MetadataKeywordsMutationResult describes one remote keyword mutation attempt.
+type MetadataKeywordsMutationResult struct {
+	Locale         string `json:"locale"`
+	Action         string `json:"action"`
+	Status         string `json:"status"`
+	LocalizationID string `json:"localizationId,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
 // MetadataKeywordsPlanResult describes keyword-only remote changes.
 type MetadataKeywordsPlanResult struct {
-	AppID     string                    `json:"appId"`
-	Version   string                    `json:"version"`
-	VersionID string                    `json:"versionId"`
-	Dir       string                    `json:"dir"`
-	DryRun    bool                      `json:"dryRun"`
-	Applied   bool                      `json:"applied,omitempty"`
-	Adds      []PlanItem                `json:"adds"`
-	Updates   []PlanItem                `json:"updates"`
-	APICalls  []PlanAPICall             `json:"apiCalls,omitempty"`
-	Actions   []ApplyAction             `json:"actions,omitempty"`
-	Warnings  []MetadataKeywordsWarning `json:"warnings,omitempty"`
+	AppID               string                           `json:"appId"`
+	Version             string                           `json:"version"`
+	VersionID           string                           `json:"versionId"`
+	Dir                 string                           `json:"dir"`
+	DryRun              bool                             `json:"dryRun"`
+	Applied             bool                             `json:"applied,omitempty"`
+	Total               int                              `json:"total,omitempty"`
+	Succeeded           int                              `json:"succeeded,omitempty"`
+	Failed              int                              `json:"failed,omitempty"`
+	FailureArtifactPath string                           `json:"failureArtifactPath,omitempty"`
+	Adds                []PlanItem                       `json:"adds"`
+	Updates             []PlanItem                       `json:"updates"`
+	APICalls            []PlanAPICall                    `json:"apiCalls,omitempty"`
+	Actions             []ApplyAction                    `json:"actions,omitempty"`
+	Results             []MetadataKeywordsMutationResult `json:"results,omitempty"`
+	Warnings            []MetadataKeywordsWarning        `json:"warnings,omitempty"`
 }
 
 // MetadataKeywordsSyncResult combines import and remote planning/apply.
@@ -142,14 +156,15 @@ type metadataKeywordsLocalizeOptions struct {
 }
 
 type metadataKeywordsPlanOptions struct {
-	AppID      string
-	Version    string
-	Platform   string
-	Dir        string
-	DryRun     bool
-	Apply      bool
-	Confirm    bool
-	LocalState map[string]keywordLocalState
+	AppID                string
+	Version              string
+	Platform             string
+	Dir                  string
+	DryRun               bool
+	Apply                bool
+	Confirm              bool
+	FailureArtifactScope string
+	LocalState           map[string]keywordLocalState
 }
 
 type keywordLocalState struct {
@@ -167,13 +182,39 @@ type keywordImportPayload struct {
 type metadataKeywordFieldDetails struct {
 	field      string
 	count      int
-	length     int
 	duplicates []string
 }
 
 type metadataKeywordImportedData struct {
 	locales  map[string][]string
 	sideData []MetadataKeywordSideDataRecord
+}
+
+type metadataKeywordsApplyFailureArtifact struct {
+	AppID       string                           `json:"appId"`
+	Version     string                           `json:"version"`
+	VersionID   string                           `json:"versionId"`
+	Dir         string                           `json:"dir"`
+	Total       int                              `json:"total"`
+	Succeeded   int                              `json:"succeeded"`
+	Failed      int                              `json:"failed"`
+	GeneratedAt string                           `json:"generatedAt"`
+	Results     []MetadataKeywordsMutationResult `json:"results"`
+}
+
+type metadataKeywordsApplySummary struct {
+	Total     int
+	Succeeded int
+	Failed    int
+	Actions   []ApplyAction
+	Results   []MetadataKeywordsMutationResult
+}
+
+func shouldPrintMetadataKeywordsPlanResult(result MetadataKeywordsPlanResult, err error) bool {
+	if err == nil {
+		return true
+	}
+	return result.Total > 0 || result.Succeeded > 0 || result.Failed > 0 || len(result.Results) > 0 || result.FailureArtifactPath != ""
 }
 
 // MetadataKeywordSideDataRecord captures non-publishable research fields from imports.
@@ -202,8 +243,11 @@ func MetadataKeywordsCommand() *ffcli.Command {
 		ShortHelp:  "Manage canonical version-localization keyword metadata.",
 		LongHelp: `Manage canonical version-localization keyword metadata.
 
-This workflow manages the canonical version-localization ` + "`keywords`" + ` field
-inside ` + "`./metadata/version/<version>/<locale>.json`" + ` files.
+This workflow manages the canonical version-localization ` + "`keywords`" + ` field.
+
+Most commands operate on local ` + "`./metadata/version/<version>/<locale>.json`" + `
+files. The direct-remote ` + "`push`" + ` helper writes locale-keyed keyword input
+straight to App Store Connect by App Store version ID.
 
 It does not front the raw App Store Connect ` + "`searchKeywords`" + `
 relationship APIs. Those low-level surfaces remain available under:
@@ -212,18 +256,22 @@ relationship APIs. Those low-level surfaces remain available under:
 
 Examples:
   asc metadata keywords import --dir "./metadata" --version "1.2.3" --locale "en-US" --input "./keywords.csv"
+  asc metadata keywords audit --app "APP_ID" --version "1.2.3"
   asc metadata keywords plan --app "APP_ID" --version "1.2.3" --dir "./metadata"
   asc metadata keywords localize --dir "./metadata" --version "1.2.3" --from-locale "en-US" --to-locales "fr-FR,de-DE"
   asc metadata keywords apply --app "APP_ID" --version "1.2.3" --dir "./metadata" --confirm
+  asc metadata keywords push --version-id "VERSION_ID" --input "./keywords.json"
   asc metadata keywords sync --app "APP_ID" --version "1.2.3" --dir "./metadata" --input "./keywords.json" --format json --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			MetadataKeywordsImportCommand(),
+			MetadataKeywordsAuditCommand(),
 			MetadataKeywordsPlanCommand(),
 			MetadataKeywordsDiffCommand(),
 			MetadataKeywordsLocalizeCommand(),
 			MetadataKeywordsApplyCommand(),
+			MetadataKeywordsPushCommand(),
 			MetadataKeywordsSyncCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -499,27 +547,37 @@ Examples:
 				return shared.UsageError("metadata keywords apply does not accept positional arguments")
 			}
 			result, err := executeMetadataKeywordsPlan(ctx, metadataKeywordsPlanOptions{
-				AppID:    *appID,
-				Version:  *version,
-				Platform: *platform,
-				Dir:      *dir,
-				DryRun:   false,
-				Apply:    true,
-				Confirm:  *confirm,
+				AppID:                *appID,
+				Version:              *version,
+				Platform:             *platform,
+				Dir:                  *dir,
+				DryRun:               false,
+				Apply:                true,
+				Confirm:              *confirm,
+				FailureArtifactScope: "metadata-keywords-apply",
 			})
-			if err != nil {
-				if errors.Is(err, flag.ErrHelp) {
-					return err
-				}
+			if err != nil && errors.Is(err, flag.ErrHelp) {
+				return err
+			}
+			if !shouldPrintMetadataKeywordsPlanResult(result, err) {
 				return fmt.Errorf("metadata keywords apply: %w", err)
 			}
-			return shared.PrintOutputWithRenderers(
+			if printErr := shared.PrintOutputWithRenderers(
 				result,
 				*output.Output,
 				*output.Pretty,
 				func() error { return printMetadataKeywordsPlanTable(result) },
 				func() error { return printMetadataKeywordsPlanMarkdown(result) },
-			)
+			); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return fmt.Errorf("metadata keywords apply: %w", err)
+			}
+			if result.Failed > 0 {
+				return shared.NewReportedError(fmt.Errorf("metadata keywords apply: %d locale(s) failed", result.Failed))
+			}
+			return nil
 		},
 	}
 }
@@ -599,19 +657,20 @@ Examples:
 			}
 
 			planResult, err := executeMetadataKeywordsPlan(ctx, metadataKeywordsPlanOptions{
-				AppID:      resolvedAppID,
-				Version:    versionValue,
-				Platform:   platformValue,
-				Dir:        dirValue,
-				DryRun:     *dryRun || !*confirm,
-				Apply:      !*dryRun && *confirm,
-				Confirm:    *confirm,
-				LocalState: importPayload.states,
+				AppID:                resolvedAppID,
+				Version:              versionValue,
+				Platform:             platformValue,
+				Dir:                  dirValue,
+				DryRun:               *dryRun || !*confirm,
+				Apply:                !*dryRun && *confirm,
+				Confirm:              *confirm,
+				FailureArtifactScope: "metadata-keywords-sync",
+				LocalState:           importPayload.states,
 			})
-			if err != nil {
-				if errors.Is(err, flag.ErrHelp) {
-					return err
-				}
+			if err != nil && errors.Is(err, flag.ErrHelp) {
+				return err
+			}
+			if !shouldPrintMetadataKeywordsPlanResult(planResult, err) {
 				return fmt.Errorf("metadata keywords sync: %w", err)
 			}
 
@@ -619,14 +678,20 @@ Examples:
 				Import: importPayload.result,
 				Plan:   &planResult,
 			}
-			if err := shared.PrintOutputWithRenderers(
+			if printErr := shared.PrintOutputWithRenderers(
 				result,
 				*output.Output,
 				*output.Pretty,
 				func() error { return printMetadataKeywordsSyncTable(result) },
 				func() error { return printMetadataKeywordsSyncMarkdown(result) },
-			); err != nil {
-				return err
+			); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return fmt.Errorf("metadata keywords sync: %w", err)
+			}
+			if planResult.Failed > 0 {
+				return shared.NewReportedError(fmt.Errorf("metadata keywords sync: %d locale(s) failed", planResult.Failed))
 			}
 			return nil
 		},
@@ -895,7 +960,11 @@ func executeMetadataKeywordsPlan(ctx context.Context, opts metadataKeywordsPlanO
 	)
 	sortPlanItems(adds)
 	sortPlanItems(updates)
-	warnings := buildMetadataKeywordWarnings(localState, remoteVersion)
+	submitOpts := shared.SubmitReadinessOptions{}
+	if versionCreateWarningsNeedUpdateContext(localPatches, remoteVersion) {
+		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, versionIDValue, resolvedAppID, platformValue)
+	}
+	warnings := buildMetadataKeywordWarnings(localState, remoteVersion, submitOpts)
 
 	result := MetadataKeywordsPlanResult{
 		AppID:     resolvedAppID,
@@ -913,14 +982,186 @@ func executeMetadataKeywordsPlan(ctx context.Context, opts metadataKeywordsPlanO
 		return result, nil
 	}
 
-	actions, err := applyVersionChanges(requestCtx, client, versionIDValue, versionValue, localPatches, filteredRemoteItems, false)
-	if err != nil {
-		return MetadataKeywordsPlanResult{}, err
-	}
-	result.Applied = true
+	applySummary := applyMetadataKeywordChanges(ctx, client, versionIDValue, versionValue, localPatches, filteredRemoteItems)
 	result.DryRun = false
-	result.Actions = actions
+	result.Total = applySummary.Total
+	result.Succeeded = applySummary.Succeeded
+	result.Failed = applySummary.Failed
+	result.Actions = applySummary.Actions
+	if applySummary.Failed == 0 {
+		result.Applied = true
+		return result, nil
+	}
+	result.Results = applySummary.Results
+	artifactPath, err := writeMetadataKeywordsApplyFailureArtifact(result, opts.FailureArtifactScope)
+	if err != nil {
+		return result, fmt.Errorf("write failure artifact: %w", err)
+	}
+	result.FailureArtifactPath = artifactPath
 	return result, nil
+}
+
+func applyMetadataKeywordChanges(
+	ctx context.Context,
+	client *asc.Client,
+	versionID string,
+	version string,
+	local map[string]versionLocalPatch,
+	remoteItems []asc.Resource[asc.AppStoreVersionLocalizationAttributes],
+) metadataKeywordsApplySummary {
+	remoteByLocale := make(map[string]remoteLocalizationState, len(remoteItems))
+	for _, item := range remoteItems {
+		locale := strings.TrimSpace(item.Attributes.Locale)
+		if locale == "" {
+			continue
+		}
+		remoteByLocale[locale] = remoteLocalizationState{
+			id: item.ID,
+			fields: versionFields(VersionLocalization{
+				Description:     item.Attributes.Description,
+				Keywords:        item.Attributes.Keywords,
+				MarketingURL:    item.Attributes.MarketingURL,
+				PromotionalText: item.Attributes.PromotionalText,
+				SupportURL:      item.Attributes.SupportURL,
+				WhatsNew:        item.Attributes.WhatsNew,
+			}),
+		}
+	}
+
+	locales := sortedLocaleUnion(local, remoteByLocale)
+	summary := metadataKeywordsApplySummary{
+		Actions: make([]ApplyAction, 0, len(locales)),
+		Results: make([]MetadataKeywordsMutationResult, 0, len(locales)),
+	}
+
+	for _, locale := range locales {
+		localPatch, localExists := local[locale]
+		remoteState, remoteExists := remoteByLocale[locale]
+		if !localExists {
+			continue
+		}
+
+		remoteFields := cloneStringMap(remoteState.fields)
+		adds, updates := countIntentChanges(keywordPlanFields, localPatch.setFields, remoteFields)
+		if adds == 0 && updates == 0 {
+			continue
+		}
+
+		result := MetadataKeywordsMutationResult{Locale: locale}
+		summary.Total++
+
+		switch {
+		case !remoteExists:
+			result.Action = "create"
+
+			createLoc := localPatch.localization
+			if hasVersionContent(localPatch.createLocalization) {
+				createLoc = localPatch.createLocalization
+			}
+
+			createCtx, createCancel := shared.ContextWithTimeout(ctx)
+			resp, createErr := client.CreateAppStoreVersionLocalization(createCtx, versionID, versionAttributes(locale, createLoc, true))
+			createCancel()
+			if createErr != nil {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf(
+					"create version localization %s (fields: %s): %v",
+					locale,
+					formatAttemptedFieldMap(keywordPlanFields, localPatch.setFields),
+					createErr,
+				)
+				summary.Failed++
+				summary.Results = append(summary.Results, result)
+				continue
+			}
+
+			result.Status = "succeeded"
+			result.LocalizationID = strings.TrimSpace(resp.Data.ID)
+			summary.Succeeded++
+			summary.Actions = append(summary.Actions, ApplyAction{
+				Scope:          versionDirName,
+				Locale:         locale,
+				Version:        version,
+				Action:         "create",
+				LocalizationID: result.LocalizationID,
+			})
+		case remoteExists:
+			result.Action = "update"
+
+			updateCtx, updateCancel := shared.ContextWithTimeout(ctx)
+			resp, updateErr := client.UpdateAppStoreVersionLocalization(updateCtx, remoteState.id, versionAttributes(locale, localPatch.localization, false))
+			updateCancel()
+			if updateErr != nil {
+				result.Status = "failed"
+				result.LocalizationID = remoteState.id
+				result.Error = fmt.Sprintf(
+					"update version localization %s (fields: %s): %v",
+					locale,
+					formatAttemptedFieldMap(keywordPlanFields, localPatch.setFields),
+					updateErr,
+				)
+				summary.Failed++
+				summary.Results = append(summary.Results, result)
+				continue
+			}
+
+			result.Status = "succeeded"
+			result.LocalizationID = strings.TrimSpace(resp.Data.ID)
+			if result.LocalizationID == "" {
+				result.LocalizationID = remoteState.id
+			}
+			summary.Succeeded++
+			summary.Actions = append(summary.Actions, ApplyAction{
+				Scope:          versionDirName,
+				Locale:         locale,
+				Version:        version,
+				Action:         "update",
+				LocalizationID: result.LocalizationID,
+			})
+		}
+
+		summary.Results = append(summary.Results, result)
+	}
+
+	return summary
+}
+
+func writeMetadataKeywordsApplyFailureArtifact(result MetadataKeywordsPlanResult, scope string) (string, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "metadata-keywords-apply"
+	}
+
+	artifact := metadataKeywordsApplyFailureArtifact{
+		AppID:       result.AppID,
+		Version:     result.Version,
+		VersionID:   result.VersionID,
+		Dir:         result.Dir,
+		Total:       result.Total,
+		Succeeded:   result.Succeeded,
+		Failed:      result.Failed,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Results:     append([]MetadataKeywordsMutationResult(nil), result.Results...),
+	}
+
+	data, err := encodeCanonicalJSON(artifact)
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(
+		".asc",
+		"reports",
+		scope,
+		fmt.Sprintf("failures-%d.json", time.Now().UTC().UnixNano()),
+	)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := writeFileNoFollow(path, data); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func validateMetadataKeywordDirVersion(dir string, version string) (string, string, error) {
@@ -1613,29 +1854,16 @@ func remoteVersionItemsToVersionMap(items []asc.Resource[asc.AppStoreVersionLoca
 	return result
 }
 
-func buildMetadataKeywordWarnings(states map[string]keywordLocalState, remote map[string]VersionLocalization) []MetadataKeywordsWarning {
-	locales := make([]string, 0, len(states))
-	for locale := range states {
-		locales = append(locales, locale)
-	}
-	sort.Strings(locales)
-
-	warnings := make([]MetadataKeywordsWarning, 0)
-	for _, locale := range locales {
-		if _, exists := remote[locale]; exists {
-			continue
-		}
-		state := states[locale]
-		missing := shared.MissingSubmitRequiredLocalizationFields(versionAttributes(locale, state.full, true))
-		if len(missing) == 0 {
-			continue
-		}
-		missingCSV := strings.Join(missing, ", ")
+func buildMetadataKeywordWarnings(states map[string]keywordLocalState, remote map[string]VersionLocalization, submitOpts shared.SubmitReadinessOptions) []MetadataKeywordsWarning {
+	patches := keywordLocalStateToPatches(states)
+	createWarnings := versionCreateWarningsForPatches(patches, remote, shared.SubmitReadinessCreateModePlanned, submitOpts)
+	warnings := make([]MetadataKeywordsWarning, 0, len(createWarnings))
+	for _, warning := range createWarnings {
 		warnings = append(warnings, MetadataKeywordsWarning{
 			Action:        "create",
-			Locale:        locale,
-			Message:       fmt.Sprintf("create would leave locale %q missing submit-required fields: %s", locale, missingCSV),
-			MissingFields: missing,
+			Locale:        warning.Locale,
+			Message:       shared.FormatSubmitReadinessCreateWarning(warning),
+			MissingFields: append([]string(nil), warning.MissingFields...),
 		})
 	}
 	return warnings
@@ -1723,8 +1951,8 @@ func buildMetadataKeywordField(keywords []string) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	if details.length > validation.LimitKeywords {
-		return "", 0, fmt.Errorf("keywords exceed %d characters", validation.LimitKeywords)
+	if err := validation.ValidateKeywordField(details.field); err != nil {
+		return "", 0, err
 	}
 	return details.field, details.count, nil
 }
@@ -1738,7 +1966,6 @@ func buildMetadataKeywordFieldDetails(keywords []string) (metadataKeywordFieldDe
 	return metadataKeywordFieldDetails{
 		field:      field,
 		count:      len(normalized),
-		length:     utf8.RuneCountInString(field),
 		duplicates: duplicates,
 	}, nil
 }
@@ -1749,13 +1976,13 @@ func buildMetadataKeywordPreview(keywords []string) (string, int, int, []string,
 		return "", 0, 0, nil, nil, err
 	}
 	issues := make([]MetadataKeywordIssue, 0, 1)
-	if details.length > validation.LimitKeywords {
+	if issue := validation.KeywordFieldLengthIssue(details.field); issue != nil {
 		issues = append(issues, MetadataKeywordIssue{
 			Severity:     "error",
-			Message:      fmt.Sprintf("keywords exceed %d characters", validation.LimitKeywords),
+			Message:      fmt.Sprintf("keywords exceed %d %s", issue.Limit, issue.Unit),
 			KeywordField: details.field,
-			Length:       details.length,
-			Limit:        validation.LimitKeywords,
+			Length:       issue.Length,
+			Limit:        issue.Limit,
 		})
 	}
 	return details.field, details.count, len(details.duplicates), details.duplicates, issues, nil
@@ -1767,8 +1994,8 @@ func parseMetadataKeywordField(field string) ([]string, error) {
 		return nil, err
 	}
 	joined := strings.Join(normalized, ",")
-	if utf8.RuneCountInString(joined) > validation.LimitKeywords {
-		return nil, fmt.Errorf("keywords exceed %d characters", validation.LimitKeywords)
+	if err := validation.ValidateKeywordField(joined); err != nil {
+		return nil, err
 	}
 	return normalized, nil
 }
@@ -1855,6 +2082,14 @@ func printMetadataKeywordsPlanTable(result MetadataKeywordsPlanResult) error {
 	if result.Applied {
 		fmt.Printf("Applied: %t\n\n", result.Applied)
 	}
+	if result.Total > 0 {
+		fmt.Printf("Succeeded: %d\n", result.Succeeded)
+		fmt.Printf("Failed: %d\n", result.Failed)
+		if result.FailureArtifactPath != "" {
+			fmt.Printf("Failure Artifact: %s\n", result.FailureArtifactPath)
+		}
+		fmt.Println()
+	}
 
 	pushResult := PushPlanResult{
 		AppID:    result.AppID,
@@ -1872,7 +2107,10 @@ func printMetadataKeywordsPlanTable(result MetadataKeywordsPlanResult) error {
 		fmt.Println()
 		asc.RenderTable([]string{"operation", "scope", "count"}, buildAPICallRows(result.APICalls))
 	}
-	if len(result.Actions) > 0 {
+	if len(result.Results) > 0 {
+		fmt.Println()
+		asc.RenderTable([]string{"locale", "action", "status", "localizationId", "error"}, buildMetadataKeywordMutationRows(result.Results))
+	} else if len(result.Actions) > 0 {
 		fmt.Println()
 		asc.RenderTable([]string{"scope", "locale", "version", "action", "localizationId"}, buildApplyActionRows(result.Actions))
 	}
@@ -1891,6 +2129,13 @@ func printMetadataKeywordsPlanMarkdown(result MetadataKeywordsPlanResult) error 
 	if result.Applied {
 		fmt.Printf("**Applied:** %t\n\n", result.Applied)
 	}
+	if result.Total > 0 {
+		fmt.Printf("**Succeeded:** %d\n\n", result.Succeeded)
+		fmt.Printf("**Failed:** %d\n\n", result.Failed)
+		if result.FailureArtifactPath != "" {
+			fmt.Printf("**Failure Artifact:** %s\n\n", result.FailureArtifactPath)
+		}
+	}
 
 	pushResult := PushPlanResult{
 		AppID:    result.AppID,
@@ -1908,7 +2153,10 @@ func printMetadataKeywordsPlanMarkdown(result MetadataKeywordsPlanResult) error 
 		fmt.Println()
 		asc.RenderMarkdown([]string{"operation", "scope", "count"}, buildAPICallRows(result.APICalls))
 	}
-	if len(result.Actions) > 0 {
+	if len(result.Results) > 0 {
+		fmt.Println()
+		asc.RenderMarkdown([]string{"locale", "action", "status", "localizationId", "error"}, buildMetadataKeywordMutationRows(result.Results))
+	} else if len(result.Actions) > 0 {
 		fmt.Println()
 		asc.RenderMarkdown([]string{"scope", "locale", "version", "action", "localizationId"}, buildApplyActionRows(result.Actions))
 	}
@@ -1927,6 +2175,20 @@ func buildMetadataKeywordWarningRows(warnings []MetadataKeywordsWarning) [][]str
 			warning.Locale,
 			warning.Message,
 			strings.Join(warning.MissingFields, ","),
+		})
+	}
+	return rows
+}
+
+func buildMetadataKeywordMutationRows(results []MetadataKeywordsMutationResult) [][]string {
+	rows := make([][]string, 0, len(results))
+	for _, result := range results {
+		rows = append(rows, []string{
+			result.Locale,
+			result.Action,
+			result.Status,
+			result.LocalizationID,
+			result.Error,
 		})
 	}
 	return rows

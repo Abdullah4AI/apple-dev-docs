@@ -27,9 +27,9 @@ Examples:
   asc eula get --id "EULA_ID"
   asc eula get --app "APP_ID"
   asc eula list --app "APP_ID"
-  asc eula create --app "APP_ID" --agreement-text "Terms..." --territory "USA,CAN"
+  asc eula create --app "APP_ID" --agreement-text "Terms..." --territory "US,Canada"
   asc eula update --id "EULA_ID" --agreement-text "Updated terms"
-  asc eula update --id "EULA_ID" --territory "USA,CAN"
+  asc eula update --id "EULA_ID" --territory "US,Canada"
   asc eula delete --id "EULA_ID" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -151,17 +151,17 @@ func EULACreateCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	agreementText := fs.String("agreement-text", "", "Agreement text")
-	territories := fs.String("territory", "", "Territory IDs, comma-separated")
+	territories := fs.String("territory", "", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "create",
-		ShortUsage: "asc eula create --app \"APP_ID\" --agreement-text \"Terms\" --territory \"USA,CAN\"",
+		ShortUsage: "asc eula create --app \"APP_ID\" --agreement-text \"Terms\" --territory \"US,Canada\"",
 		ShortHelp:  "Create an EULA for an app.",
 		LongHelp: `Create an End User License Agreement (EULA).
 
 Examples:
-  asc eula create --app "APP_ID" --agreement-text "Terms..." --territory "USA,CAN"`,
+  asc eula create --app "APP_ID" --agreement-text "Terms..." --territory "US,Canada"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -176,7 +176,10 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			territoryIDs := shared.SplitCSV(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territory is required")
 				return flag.ErrHelp
@@ -206,18 +209,18 @@ func EULAUpdateCommand() *ffcli.Command {
 
 	id := fs.String("id", "", "EULA ID")
 	agreementText := fs.String("agreement-text", "", "Agreement text")
-	territories := fs.String("territory", "", "Territory IDs, comma-separated")
+	territories := fs.String("territory", "", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "update",
-		ShortUsage: "asc eula update --id \"EULA_ID\" [--agreement-text \"Terms\"] [--territory \"USA,CAN\"]",
+		ShortUsage: "asc eula update --id \"EULA_ID\" [--agreement-text \"Terms\"] [--territory \"US,Canada\"]",
 		ShortHelp:  "Update an EULA.",
 		LongHelp: `Update an End User License Agreement (EULA).
 
 Examples:
   asc eula update --id "EULA_ID" --agreement-text "Updated terms"
-  asc eula update --id "EULA_ID" --territory "USA,CAN"`,
+  asc eula update --id "EULA_ID" --territory "US,Canada"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -233,7 +236,10 @@ Examples:
 				agreementValue = &value
 			}
 
-			territoryIDs := shared.SplitCSV(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if agreementValue == nil && len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --agreement-text or --territory is required")
 				return flag.ErrHelp

@@ -99,6 +99,74 @@ func TestAppInfoSetCopyFromLocaleBackfillsRequiredFields(t *testing.T) {
 	}
 }
 
+func TestAppInfoSetCopyFromLocaleWarnsWhenUpdateRequiresWhatsNew(t *testing.T) {
+	setupAppInfoSetAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	var createBody string
+	http.DefaultTransport = appInfoSetRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1":
+			return appInfoSetJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"2.0","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/appStoreVersions":
+			if !strings.Contains(req.URL.RawQuery, "filter%5BappStoreState%5D=") {
+				return nil, fmt.Errorf("unexpected app versions query: %s", req.URL.RawQuery)
+			}
+			return appInfoSetJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"released-version","attributes":{"versionString":"1.0","platform":"IOS","appStoreState":"READY_FOR_SALE"}}],"links":{"next":""}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/appStoreVersionLocalizations":
+			return appInfoSetJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-en","attributes":{"locale":"en-US","description":"English description","keywords":"english,keywords","supportUrl":"https://example.com/support"}}]}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appStoreVersionLocalizations":
+			body, _ := io.ReadAll(req.Body)
+			createBody = string(body)
+			return appInfoSetJSONResponse(http.StatusCreated, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-fr","attributes":{"locale":"fr-FR","description":"English description","keywords":"english,keywords","supportUrl":"https://example.com/support"}}}`)
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"apps", "info", "edit",
+			"--version-id", "version-1",
+			"--locale", "fr-FR",
+			"--copy-from-locale", "en-US",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if !strings.Contains(createBody, `"description":"English description"`) {
+		t.Fatalf("expected copied description in request body, got: %s", createBody)
+	}
+	if !strings.Contains(createBody, `"keywords":"english,keywords"`) {
+		t.Fatalf("expected copied keywords in request body, got: %s", createBody)
+	}
+	if !strings.Contains(createBody, `"supportUrl":"https://example.com/support"`) {
+		t.Fatalf("expected copied supportUrl in request body, got: %s", createBody)
+	}
+	if !strings.Contains(stderr, "created locale fr-FR now participates in submission validation") {
+		t.Fatalf("expected create warning in stderr, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "whatsNew") {
+		t.Fatalf("expected whatsNew requirement in warning, got: %q", stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v (stdout=%q)", err, stdout)
+	}
+}
+
 func TestAppInfoSetCopyFromLocaleErrorsWhenSourceLocaleMissing(t *testing.T) {
 	setupAppInfoSetAuth(t)
 
@@ -180,8 +248,8 @@ func TestAppInfoSetWarnsWhenLocaleRemainsSubmitIncomplete(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(stderr, "Warning: locale fr-FR is missing submit-required fields") {
-		t.Fatalf("expected submit-required warning in stderr, got: %q", stderr)
+	if !strings.Contains(stderr, "created locale fr-FR now participates in submission validation") {
+		t.Fatalf("expected create warning in stderr, got: %q", stderr)
 	}
 	if !strings.Contains(stderr, "description") || !strings.Contains(stderr, "keywords") || !strings.Contains(stderr, "supportUrl") {
 		t.Fatalf("expected missing field list in warning, got: %q", stderr)

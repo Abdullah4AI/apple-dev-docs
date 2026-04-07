@@ -22,7 +22,7 @@ func ResolveAppIDWithExactLookup(ctx context.Context, client appLookupClient, ap
 	if resolved == "" {
 		return "", nil
 	}
-	if isNumericAppID(resolved) {
+	if IsNumericAppID(resolved) {
 		return resolved, nil
 	}
 	if client == nil {
@@ -74,7 +74,7 @@ func ResolveAppIDWithLookup(ctx context.Context, client appLookupClient, appID s
 	if resolved == "" {
 		return "", nil
 	}
-	if isNumericAppID(resolved) {
+	if IsNumericAppID(resolved) {
 		return resolved, nil
 	}
 	if client == nil {
@@ -224,7 +224,8 @@ func findFuzzyAppNameMatches(ctx context.Context, client appLookupClient, name s
 	return ids, nil
 }
 
-func isNumericAppID(value string) bool {
+// IsNumericAppID reports whether a value is a non-empty decimal app ID.
+func IsNumericAppID(value string) bool {
 	if value == "" {
 		return false
 	}

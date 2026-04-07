@@ -19,7 +19,7 @@ func resolveAppID(ctx context.Context, client *asc.Client, appFlag string, confi
 		return strings.TrimSpace(appFlag), nil
 	}
 	if strings.TrimSpace(config.AppIdentifier) != "" {
-		if isNumeric(config.AppIdentifier) {
+		if shared.IsNumericAppID(config.AppIdentifier) {
 			return config.AppIdentifier, nil
 		}
 		if client == nil {
@@ -136,8 +136,9 @@ func buildAppInfoFilePlans(localizations []AppInfoFastlaneLocalization) []Locali
 	return plans
 }
 
-func uploadVersionLocalizations(ctx context.Context, client *asc.Client, versionID string, localizations []FastlaneLocalization, localeToID map[string]string) ([]LocalizationUploadItem, error) {
+func uploadVersionLocalizations(ctx context.Context, client *asc.Client, versionID string, localizations []FastlaneLocalization, localeToID map[string]string, submitOpts shared.SubmitReadinessOptions) ([]LocalizationUploadItem, []shared.SubmitReadinessCreateWarning, error) {
 	results := make([]LocalizationUploadItem, 0, len(localizations))
+	warnings := make([]shared.SubmitReadinessCreateWarning, 0, len(localizations))
 	for _, loc := range localizations {
 		attrs := asc.AppStoreVersionLocalizationAttributes{
 			Locale:          loc.Locale,
@@ -148,21 +149,27 @@ func uploadVersionLocalizations(ctx context.Context, client *asc.Client, version
 			SupportURL:      loc.SupportURL,
 			MarketingURL:    loc.MarketingURL,
 		}
+		if err := shared.ValidateVersionLocalizationAttributes(attrs); err != nil {
+			return nil, nil, fmt.Errorf("migrate import: locale %q: %w", loc.Locale, err)
+		}
 		action := "create"
 		localizationID := localeToID[loc.Locale]
 		if localizationID != "" {
 			action = "update"
 			_, err := client.UpdateAppStoreVersionLocalization(ctx, localizationID, attrs)
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to update %s: %w", loc.Locale, err)
+				return nil, nil, fmt.Errorf("migrate import: failed to update %s: %w", loc.Locale, err)
 			}
 		} else {
 			resp, err := client.CreateAppStoreVersionLocalization(ctx, versionID, attrs)
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to create %s: %w", loc.Locale, err)
+				return nil, nil, fmt.Errorf("migrate import: failed to create %s: %w", loc.Locale, err)
 			}
 			localizationID = resp.Data.ID
 			localeToID[loc.Locale] = localizationID
+			if warning, ok := shared.SubmitReadinessCreateWarningForLocaleWithOptions(loc.Locale, attrs, shared.SubmitReadinessCreateModeApplied, submitOpts); ok {
+				warnings = append(warnings, warning)
+			}
 		}
 
 		results = append(results, LocalizationUploadItem{
@@ -172,7 +179,7 @@ func uploadVersionLocalizations(ctx context.Context, client *asc.Client, version
 			LocalizationID: localizationID,
 		})
 	}
-	return results, nil
+	return results, shared.NormalizeSubmitReadinessCreateWarnings(warnings), nil
 }
 
 func uploadAppInfoLocalizations(ctx context.Context, client *asc.Client, appID string, appInfoLocs []AppInfoFastlaneLocalization) ([]LocalizationUploadItem, error) {
@@ -440,16 +447,4 @@ func isNotFoundReviewDetail(err error) bool {
 		}
 	}
 	return false
-}
-
-func isNumeric(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, ch := range value {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	return true
 }

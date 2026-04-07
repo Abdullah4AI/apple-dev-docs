@@ -65,6 +65,31 @@ func TestLengthValidationCountsMultibyteRunes(t *testing.T) {
 	}
 }
 
+func TestValidateDirAcceptsArabicKeywordsWithinCharacterLimit(t *testing.T) {
+	dir := t.TempDir()
+	version := "1.2.3"
+
+	if err := os.MkdirAll(filepath.Join(dir, versionDirName, version), 0o755); err != nil {
+		t.Fatalf("mkdir version dir: %v", err)
+	}
+
+	body := `{"description":"وصف عربي","keywords":"تغريدات,ردود,اعجابات,فلترة,بحث,ارشفة,ازالة,سجل,ريتويت,لايكات,منشن,خصوصية,منشورات,قديمة,حساب"}`
+	if err := os.WriteFile(filepath.Join(dir, versionDirName, version, "ar-SA.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write Arabic localization: %v", err)
+	}
+
+	result, err := validateDir(dir, false)
+	if err != nil {
+		t.Fatalf("validateDir() error: %v", err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("expected no issues, got %+v", result.Issues)
+	}
+	if !result.Valid {
+		t.Fatalf("expected valid metadata result, got %+v", result)
+	}
+}
+
 func TestValidateDirTreatsDefaultLocaleCaseInsensitively(t *testing.T) {
 	dir := t.TempDir()
 	version := "1.2.3"

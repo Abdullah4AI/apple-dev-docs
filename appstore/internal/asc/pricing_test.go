@@ -131,6 +131,63 @@ func TestGetAppPricePointEqualizations(t *testing.T) {
 	}
 }
 
+func TestGetAppPricePointEqualizations_WithQueryOptions(t *testing.T) {
+	resp := AppPricePointsV3Response{
+		Data: []Resource[AppPricePointV3Attributes]{
+			{Type: ResourceTypeAppPricePoints, ID: "pp-eq-1"},
+		},
+	}
+	body, _ := json.Marshal(resp)
+
+	t.Run("missing price point ID without next URL", func(t *testing.T) {
+		client := newTestClient(t, func(req *http.Request) {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}, jsonResponse(http.StatusOK, string(body)))
+
+		_, err := client.GetAppPricePointEqualizations(context.Background(), "")
+		if err == nil || err.Error() != "pricePointID is required" {
+			t.Fatalf("expected missing price point ID error, got %v", err)
+		}
+	})
+
+	t.Run("limit", func(t *testing.T) {
+		client := newTestClient(t, func(req *http.Request) {
+			assertAuthorized(t, req)
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET, got %s", req.Method)
+			}
+			if req.URL.Path != "/v3/appPricePoints/pp-1/equalizations" {
+				t.Fatalf("expected path /v3/appPricePoints/pp-1/equalizations, got %s", req.URL.Path)
+			}
+			if got := req.URL.Query().Get("limit"); got != "175" {
+				t.Fatalf("expected limit=175, got %q", got)
+			}
+		}, jsonResponse(http.StatusOK, string(body)))
+
+		if _, err := client.GetAppPricePointEqualizations(context.Background(), "pp-1", WithPricePointsLimit(175)); err != nil {
+			t.Fatalf("GetAppPricePointEqualizations() error: %v", err)
+		}
+	})
+
+	t.Run("next", func(t *testing.T) {
+		nextURL := "https://api.appstoreconnect.apple.com/v3/appPricePoints/pp-1/equalizations?cursor=AQ&limit=175"
+
+		client := newTestClient(t, func(req *http.Request) {
+			assertAuthorized(t, req)
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET, got %s", req.Method)
+			}
+			if req.URL.String() != nextURL {
+				t.Fatalf("expected next URL %s, got %s", nextURL, req.URL.String())
+			}
+		}, jsonResponse(http.StatusOK, string(body)))
+
+		if _, err := client.GetAppPricePointEqualizations(context.Background(), "pp-1", WithPricePointsNextURL(nextURL)); err != nil {
+			t.Fatalf("GetAppPricePointEqualizations() error: %v", err)
+		}
+	})
+}
+
 func TestGetAppPriceSchedule(t *testing.T) {
 	resp := AppPriceScheduleResponse{
 		Data: Resource[AppPriceScheduleAttributes]{

@@ -29,6 +29,12 @@ type Summary struct {
 	Blocking int `json:"blocking"`
 }
 
+// Remediation summarizes actionable validation steps in priority order.
+type Remediation struct {
+	TotalActionable int               `json:"totalActionable"`
+	Steps           []RemediationStep `json:"steps"`
+}
+
 // Report is the top-level validation output.
 type Report struct {
 	AppID         string        `json:"appId"`
@@ -36,6 +42,7 @@ type Report struct {
 	VersionString string        `json:"versionString,omitempty"`
 	Platform      string        `json:"platform,omitempty"`
 	Summary       Summary       `json:"summary"`
+	Remediation   Remediation   `json:"remediation"`
 	Checks        []CheckResult `json:"checks"`
 	Strict        bool          `json:"strict,omitempty"`
 }

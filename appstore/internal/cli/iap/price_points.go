@@ -10,6 +10,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -44,7 +45,7 @@ func IAPPricePointsListCommand() *ffcli.Command {
 
 	iapID := fs.String("iap-id", "", "In-app purchase ID, product ID, or exact current name")
 	appID := addIAPLookupAppFlag(fs)
-	territory := fs.String("territory", "", "Territory ID (e.g., USA)")
+	territory := fs.String("territory", "", "Territory input (accepts alpha-2, alpha-3, or exact English country name)")
 	price := fs.String("price", "", "Filter by exact customer price (e.g., 4.99)")
 	minPrice := fs.String("min-price", "", "Filter by minimum customer price")
 	maxPrice := fs.String("max-price", "", "Filter by maximum customer price")
@@ -64,8 +65,8 @@ a range. These filters are applied client-side after fetching.
 
 Examples:
   asc iap pricing price-points list --iap-id "IAP_ID"
-  asc iap pricing price-points list --iap-id "IAP_ID" --territory "USA"
-  asc iap pricing price-points list --iap-id "IAP_ID" --territory "USA" --paginate --price "4.99"
+  asc iap pricing price-points list --iap-id "IAP_ID" --territory "United States"
+  asc iap pricing price-points list --iap-id "IAP_ID" --territory "FR" --paginate --price "4.99"
   asc iap pricing price-points list --iap-id "IAP_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -111,8 +112,12 @@ Examples:
 				asc.WithIAPPricePointsLimit(*limit),
 				asc.WithIAPPricePointsNextURL(*next),
 			}
-			territoryID := strings.ToUpper(strings.TrimSpace(*territory))
+			territoryID := strings.TrimSpace(*territory)
 			if territoryID != "" {
+				territoryID, err = ascterritory.Normalize(territoryID)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
 				opts = append(opts, asc.WithIAPPricePointsTerritory(territoryID))
 			}
 
@@ -167,42 +172,22 @@ func filterIAPPricePoints(resp *asc.InAppPurchasePricePointsResponse, pf shared.
 
 // IAPPricePointsEqualizationsCommand returns the price point equalizations subcommand.
 func IAPPricePointsEqualizationsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("price-points equalizations", flag.ExitOnError)
-
-	pricePointID := fs.String("id", "", "In-app purchase price point ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "equalizations",
-		ShortUsage: "asc iap pricing price-points equalizations --id \"PRICE_POINT_ID\"",
-		ShortHelp:  "List equalized price points for an in-app purchase price point.",
-		LongHelp: `List equalized price points for an in-app purchase price point.
-
-Examples:
-  asc iap pricing price-points equalizations --id "PRICE_POINT_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			id := strings.TrimSpace(*pricePointID)
-			if id == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return flag.ErrHelp
+	return shared.BuildPricePointEqualizationsCommand(shared.PricePointEqualizationsCommandConfig{
+		FlagSetName: "price-points equalizations",
+		Name:        "equalizations",
+		ShortUsage:  `asc iap pricing price-points equalizations --id "PRICE_POINT_ID"`,
+		BaseExample: `asc iap pricing price-points equalizations --id "PRICE_POINT_ID"`,
+		Subject:     "an in-app purchase price point",
+		ParentFlag:  "id",
+		ParentUsage: "In-app purchase price point ID",
+		LimitMax:    8000,
+		ErrorPrefix: "iap price-points equalizations",
+		FetchPage: func(ctx context.Context, client *asc.Client, pricePointID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.IAPPricePointsOption{
+				asc.WithIAPPricePointsLimit(limit),
+				asc.WithIAPPricePointsNextURL(next),
 			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("iap price-points equalizations: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.GetInAppPurchasePricePointEqualizations(requestCtx, id)
-			if err != nil {
-				return fmt.Errorf("iap price-points equalizations: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return client.GetInAppPurchasePricePointEqualizations(ctx, pricePointID, opts...)
 		},
-	}
+	})
 }

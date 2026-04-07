@@ -238,7 +238,11 @@ Examples:
 				}
 			}
 
-			uploaded, err := uploadVersionLocalizations(requestCtx, client, resolvedVersionID, localizations, localeToID)
+			submitOpts := shared.SubmitReadinessOptions{}
+			if migrateVersionLocalizationsNeedUpdateContext(localizations, localeToID) {
+				submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, resolvedVersionID, resolvedAppID, "")
+			}
+			uploaded, warnings, err := uploadVersionLocalizations(requestCtx, client, resolvedVersionID, localizations, localeToID, submitOpts)
 			if err != nil {
 				return err
 			}
@@ -260,9 +264,24 @@ Examples:
 			result.ReviewInfoResult = reviewResult
 			result.ScreenshotResults = screenshotResults
 
-			return printMigrateOutput(result, *output.Output, *output.Pretty)
+			if err := printMigrateOutput(result, *output.Output, *output.Pretty); err != nil {
+				return err
+			}
+			return shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings)
 		},
 	}
+}
+
+func migrateVersionLocalizationsNeedUpdateContext(localizations []FastlaneLocalization, localeToID map[string]string) bool {
+	for _, loc := range localizations {
+		if strings.TrimSpace(localeToID[loc.Locale]) != "" {
+			continue
+		}
+		if strings.TrimSpace(loc.WhatsNew) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // MigrateExportCommand returns the migrate export subcommand.
@@ -801,15 +820,15 @@ func validateVersionLocalization(loc FastlaneLocalization) []ValidationIssue {
 		})
 	}
 
-	keywordsLength := utf8.RuneCountInString(loc.Keywords)
-	if keywordsLength > validation.LimitKeywords {
+	if issue := validation.KeywordFieldLengthIssue(loc.Keywords); issue != nil {
+		limitUnit := strings.TrimSuffix(issue.Unit, "s")
 		issues = append(issues, ValidationIssue{
 			Locale:   loc.Locale,
 			Field:    "keywords",
 			Severity: "error",
-			Message:  fmt.Sprintf("exceeds %d character limit", validation.LimitKeywords),
-			Length:   keywordsLength,
-			Limit:    validation.LimitKeywords,
+			Message:  fmt.Sprintf("exceeds %d-%s limit", issue.Limit, limitUnit),
+			Length:   issue.Length,
+			Limit:    issue.Limit,
 		})
 	}
 

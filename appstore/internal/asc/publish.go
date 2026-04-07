@@ -32,6 +32,13 @@ type PublishExportStageResult struct {
 	DirectUpload      bool   `json:"directUpload"`
 }
 
+// PublishPlanStep captures a high-level dry-run step for publish flows.
+type PublishPlanStep struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
 // TestFlightPublishStageResult duplicates the publish summary inside
 // local-build mode so agents can inspect stage-specific output.
 type TestFlightPublishStageResult struct {
@@ -77,6 +84,7 @@ type TestFlightPublishResult struct {
 // AppStorePublishResult captures the App Store publish workflow output.
 type AppStorePublishResult struct {
 	Mode         PublishMode                 `json:"mode,omitempty"`
+	DryRun       bool                        `json:"dryRun,omitempty"`
 	BuildVersion string                      `json:"buildVersion,omitempty"`
 	BuildNumber  string                      `json:"buildNumber,omitempty"`
 	BuildID      string                      `json:"buildId"`
@@ -85,6 +93,7 @@ type AppStorePublishResult struct {
 	Uploaded     bool                        `json:"uploaded"`
 	Attached     bool                        `json:"attached"`
 	Submitted    bool                        `json:"submitted"`
+	Plan         []PublishPlanStep           `json:"plan,omitempty"`
 	Archive      *PublishArchiveStageResult  `json:"archive,omitempty"`
 	Export       *PublishExportStageResult   `json:"export,omitempty"`
 	Publish      *AppStorePublishStageResult `json:"publish,omitempty"`

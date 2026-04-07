@@ -33,7 +33,7 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 	fs := flag.NewFlagSet(config.FlagSetName, flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	territory := fs.String("territory", "", "Territory IDs (comma-separated, e.g., USA,GBR)")
+	territory := fs.String("territory", "", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names, e.g., US,USA,France)")
 	allTerritories := fs.Bool("all-territories", false, "Apply to all territories (overrides --territory)")
 	var available OptionalBool
 	fs.Var(&available, "available", "Set availability: true or false")
@@ -71,7 +71,11 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 
 			var territories []string
 			if !*allTerritories {
-				territories = splitCSVUpper(*territory)
+				normalizedTerritories, normalizeErr := normalizeASCTerritoryCSV(*territory)
+				if normalizeErr != nil {
+					return UsageError(normalizeErr.Error())
+				}
+				territories = normalizedTerritories
 				if len(territories) == 0 {
 					fmt.Fprintln(os.Stderr, "Error: --territory must include at least one value")
 					return flag.ErrHelp

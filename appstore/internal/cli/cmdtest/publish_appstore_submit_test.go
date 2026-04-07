@@ -2,6 +2,7 @@ package cmdtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -164,6 +165,201 @@ func TestPublishAppStoreSubmitUsesModernReviewSubmissionFlow(t *testing.T) {
 	}
 	if !strings.Contains(joined, "POST /v1/reviewSubmissions") {
 		t.Fatalf("expected modern review submission create request, requests: %v", recordedRequests)
+	}
+}
+
+func TestPublishAppStoreSubmitDryRunPrintsPlanWithoutMutations(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	ipaPath := filepath.Join(t.TempDir(), "app.ipa")
+	if err := os.WriteFile(ipaPath, []byte("test"), 0o600); err != nil {
+		t.Fatalf("write ipa fixture: %v", err)
+	}
+
+	requests := newRequestLog(10)
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests.Add(req.Method + " " + req.URL.Path)
+		if resp, err, ok := respondToPublishAppLookup(t, req); ok {
+			return resp, err
+		}
+		t.Fatalf("unexpected HTTP request during dry-run: %s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
+		return nil, nil
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var stdout string
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"publish", "appstore",
+			"--app", "app-1",
+			"--ipa", ipaPath,
+			"--version", "1.2.3",
+			"--build-number", "42",
+			"--submit",
+			"--dry-run",
+			"--wait",
+			"--poll-interval", "1ms",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if strings.Contains(stderr, "Uploading ") {
+		t.Fatalf("expected dry-run to avoid upload progress output, got %q", stderr)
+	}
+
+	var payload struct {
+		DryRun       bool   `json:"dryRun"`
+		BuildID      string `json:"buildId"`
+		BuildVersion string `json:"buildVersion"`
+		BuildNumber  string `json:"buildNumber"`
+		Uploaded     bool   `json:"uploaded"`
+		Attached     bool   `json:"attached"`
+		Submitted    bool   `json:"submitted"`
+		Plan         []struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v\nstdout=%s", err, stdout)
+	}
+	if !payload.DryRun {
+		t.Fatal("expected dryRun=true")
+	}
+	if payload.BuildID != "" {
+		t.Fatalf("expected empty buildId before upload in dry-run, got %q", payload.BuildID)
+	}
+	if payload.BuildVersion != "1.2.3" {
+		t.Fatalf("expected buildVersion 1.2.3, got %q", payload.BuildVersion)
+	}
+	if payload.BuildNumber != "42" {
+		t.Fatalf("expected buildNumber 42, got %q", payload.BuildNumber)
+	}
+	if payload.Uploaded || payload.Attached || payload.Submitted {
+		t.Fatalf("expected no completed mutations in dry-run, got uploaded=%t attached=%t submitted=%t", payload.Uploaded, payload.Attached, payload.Submitted)
+	}
+
+	planNames := make([]string, 0, len(payload.Plan))
+	for _, step := range payload.Plan {
+		planNames = append(planNames, step.Name)
+		if step.Status != "planned" {
+			t.Fatalf("expected planned step status, got %q for %q", step.Status, step.Name)
+		}
+		if strings.TrimSpace(step.Message) == "" {
+			t.Fatalf("expected non-empty plan message for %q", step.Name)
+		}
+	}
+	expectedPlanNames := []string{
+		"upload_build",
+		"wait_for_build_processing",
+		"ensure_version",
+		"attach_build",
+		"submit_review",
+	}
+	if strings.Join(planNames, ",") != strings.Join(expectedPlanNames, ",") {
+		t.Fatalf("expected plan %v, got %v", expectedPlanNames, planNames)
+	}
+
+	recordedRequests := requests.Snapshot()
+	if len(recordedRequests) != 1 || recordedRequests[0] != "GET /v1/apps" {
+		t.Fatalf("expected dry-run lookup-only request log, got %v", recordedRequests)
+	}
+}
+
+func TestPublishAppStoreDryRunNumericAppIDDoesNotRequireAuth(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_PROFILE", "")
+	t.Setenv("ASC_KEY_ID", "")
+	t.Setenv("ASC_ISSUER_ID", "")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+	t.Setenv("ASC_PRIVATE_KEY", "")
+	t.Setenv("ASC_PRIVATE_KEY_B64", "")
+	t.Setenv("ASC_STRICT_AUTH", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	ipaPath := filepath.Join(t.TempDir(), "app.ipa")
+	if err := os.WriteFile(ipaPath, []byte("test"), 0o600); err != nil {
+		t.Fatalf("write ipa fixture: %v", err)
+	}
+
+	requests := newRequestLog(5)
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests.Add(req.Method + " " + req.URL.Path)
+		t.Fatalf("unexpected HTTP request during authless dry-run: %s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
+		return nil, nil
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var stdout string
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"publish", "appstore",
+			"--app", "123456789",
+			"--ipa", ipaPath,
+			"--version", "1.2.3",
+			"--build-number", "42",
+			"--submit",
+			"--dry-run",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("expected authless dry-run to succeed, got %v", runErr)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("expected empty stderr for authless dry-run, got %q", stderr)
+	}
+
+	var payload struct {
+		DryRun       bool   `json:"dryRun"`
+		BuildVersion string `json:"buildVersion"`
+		BuildNumber  string `json:"buildNumber"`
+		Submitted    bool   `json:"submitted"`
+		Plan         []struct {
+			Name string `json:"name"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v\nstdout=%s", err, stdout)
+	}
+	if !payload.DryRun {
+		t.Fatal("expected dryRun=true")
+	}
+	if payload.BuildVersion != "1.2.3" {
+		t.Fatalf("expected buildVersion 1.2.3, got %q", payload.BuildVersion)
+	}
+	if payload.BuildNumber != "42" {
+		t.Fatalf("expected buildNumber 42, got %q", payload.BuildNumber)
+	}
+	if payload.Submitted {
+		t.Fatal("expected submitted=false in dry-run")
+	}
+	if len(payload.Plan) == 0 {
+		t.Fatal("expected non-empty plan in dry-run output")
+	}
+	if payload.Plan[len(payload.Plan)-1].Name != "submit_review" {
+		t.Fatalf("expected last dry-run step to submit review, got %q", payload.Plan[len(payload.Plan)-1].Name)
+	}
+
+	if recordedRequests := requests.Snapshot(); len(recordedRequests) != 0 {
+		t.Fatalf("expected authless dry-run to avoid all HTTP requests, got %v", recordedRequests)
 	}
 }
 

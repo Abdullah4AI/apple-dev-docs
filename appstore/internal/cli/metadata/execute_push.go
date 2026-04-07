@@ -29,27 +29,34 @@ type PushExecutionOptions struct {
 // This is the command-agnostic execution path used by metadata push and
 // release orchestration.
 func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult, error) {
+	result, _, err := ExecutePushWithWarnings(ctx, opts)
+	return result, err
+}
+
+// ExecutePushWithWarnings computes a metadata push plan plus create-scope
+// submission warnings for callers that need to emit them after output succeeds.
+func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (PushPlanResult, []shared.SubmitReadinessCreateWarning, error) {
 	errorPrefix := metadataMutationErrorPrefix(opts.CommandName)
 	resolvedAppID := shared.ResolveAppID(opts.AppID)
 	if resolvedAppID == "" {
-		return PushPlanResult{}, shared.UsageError("--app is required (or set ASC_APP_ID)")
+		return PushPlanResult{}, nil, shared.UsageError("--app is required (or set ASC_APP_ID)")
 	}
 
 	versionValue := strings.TrimSpace(opts.Version)
 	if versionValue == "" {
-		return PushPlanResult{}, shared.UsageError("--version is required")
+		return PushPlanResult{}, nil, shared.UsageError("--version is required")
 	}
 
 	dirValue := strings.TrimSpace(opts.Dir)
 	if dirValue == "" {
-		return PushPlanResult{}, shared.UsageError("--dir is required")
+		return PushPlanResult{}, nil, shared.UsageError("--dir is required")
 	}
 
 	platformValue := strings.TrimSpace(opts.Platform)
 	if platformValue != "" {
 		normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(platformValue)
 		if err != nil {
-			return PushPlanResult{}, shared.UsageError(err.Error())
+			return PushPlanResult{}, nil, shared.UsageError(err.Error())
 		}
 		platformValue = normalizedPlatform
 	}
@@ -60,17 +67,17 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 	}
 	includes, err := parseIncludes(includeValue)
 	if err != nil {
-		return PushPlanResult{}, shared.UsageError(err.Error())
+		return PushPlanResult{}, nil, shared.UsageError(err.Error())
 	}
 
 	localBundle, err := loadLocalMetadata(dirValue, versionValue)
 	if err != nil {
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
 	client, err := shared.GetASCClient()
 	if err != nil {
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
 	requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -79,9 +86,9 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 	versionIDValue, versionStateValue, err := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return PushPlanResult{}, err
+			return PushPlanResult{}, nil, err
 		}
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 	appInfoIDValue, err := resolveMetadataPushAppInfoID(
 		requestCtx,
@@ -96,18 +103,18 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 	)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return PushPlanResult{}, err
+			return PushPlanResult{}, nil, err
 		}
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
 	remoteAppInfoItems, err := fetchAppInfoLocalizations(requestCtx, client, appInfoIDValue)
 	if err != nil {
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 	remoteVersionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
 	if err != nil {
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, err)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
 	remoteAppInfo := make(map[string]AppInfoLocalization, len(remoteAppInfoItems))
@@ -129,6 +136,15 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 
 	localAppInfo := applyDefaultAppInfoFallback(localBundle.appInfo, localBundle.defaultAppInfo, remoteAppInfo, opts.AllowDeletes)
 	localVersion := applyDefaultVersionFallback(localBundle.version, localBundle.defaultVersion, remoteVersion, opts.AllowDeletes)
+	warningMode := shared.SubmitReadinessCreateModePlanned
+	if !opts.DryRun {
+		warningMode = shared.SubmitReadinessCreateModeApplied
+	}
+	submitOpts := shared.SubmitReadinessOptions{}
+	if versionCreateWarningsNeedUpdateContext(localVersion, remoteVersion) {
+		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, versionIDValue, resolvedAppID, platformValue)
+	}
+	warnings := versionCreateWarningsForPatches(localVersion, remoteVersion, warningMode, submitOpts)
 
 	adds, updates, deletes, appInfoCalls := buildScopePlan(
 		appInfoDirName,
@@ -169,15 +185,15 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 	}
 
 	if opts.DryRun {
-		return result, nil
+		return result, warnings, nil
 	}
 
 	if len(result.Deletes) > 0 {
 		if !opts.AllowDeletes {
-			return PushPlanResult{}, shared.UsageError("--allow-deletes is required to apply delete operations")
+			return PushPlanResult{}, nil, shared.UsageError("--allow-deletes is required to apply delete operations")
 		}
 		if !opts.Confirm {
-			return PushPlanResult{}, shared.UsageError("--confirm is required when applying delete operations")
+			return PushPlanResult{}, nil, shared.UsageError("--confirm is required when applying delete operations")
 		}
 	}
 
@@ -194,12 +210,12 @@ func ExecutePush(ctx context.Context, opts PushExecutionOptions) (PushPlanResult
 		opts.AllowDeletes,
 	)
 	if applyErr != nil {
-		return PushPlanResult{}, fmt.Errorf("%s: %w", errorPrefix, applyErr)
+		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, applyErr)
 	}
 	result.Applied = true
 	result.Actions = actions
 
-	return result, nil
+	return result, warnings, nil
 }
 
 func metadataMutationErrorPrefix(commandName string) string {

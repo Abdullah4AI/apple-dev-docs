@@ -23,7 +23,7 @@ func IAPAvailabilityCommand() *ffcli.Command {
 
 Examples:
   asc iap pricing availability view --iap-id "IAP_ID"
-  asc iap pricing availability set --iap-id "IAP_ID" --territories "USA,CAN"`,
+  asc iap pricing availability set --iap-id "IAP_ID" --territories "US,Canada"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -90,18 +90,18 @@ func IAPAvailabilitySetCommand() *ffcli.Command {
 
 	appID := addIAPLookupAppFlag(fs)
 	iapID := fs.String("iap-id", "", "In-app purchase ID, product ID, or exact current name")
-	territories := fs.String("territories", "", "Territory IDs (comma-separated)")
+	territories := fs.String("territories", "", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
 	availableInNew := fs.Bool("available-in-new-territories", false, "Include new territories automatically")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "set",
-		ShortUsage: "asc iap pricing availability set --iap-id \"IAP_ID\" --territories \"USA,CAN\"",
+		ShortUsage: "asc iap pricing availability set --iap-id \"IAP_ID\" --territories \"US,Canada\"",
 		ShortHelp:  "Set in-app purchase availability in territories.",
 		LongHelp: `Set in-app purchase availability in territories.
 
 Examples:
-  asc iap pricing availability set --iap-id "IAP_ID" --territories "USA,CAN"`,
+  asc iap pricing availability set --iap-id "IAP_ID" --territories "US,Canada"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -115,7 +115,10 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			territoryIDs := shared.SplitCSVUpper(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territories is required")
 				return flag.ErrHelp

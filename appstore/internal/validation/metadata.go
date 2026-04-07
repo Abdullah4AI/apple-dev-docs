@@ -10,13 +10,14 @@ type MetadataLengthIssue struct {
 	Field  string
 	Length int
 	Limit  int
+	Unit   string
 }
 
 // VersionLocalizationLengthIssues returns over-limit fields for one version localization.
 func VersionLocalizationLengthIssues(loc VersionLocalization) []MetadataLengthIssue {
 	return metadataLengthIssues([]metadataLengthField{
 		{field: "description", value: loc.Description, limit: LimitDescription},
-		{field: "keywords", value: loc.Keywords, limit: LimitKeywords},
+		{field: "keywords", value: loc.Keywords, limit: LimitKeywords, length: KeywordFieldLength, unit: keywordLengthUnit},
 		{field: "whatsNew", value: loc.WhatsNew, limit: LimitWhatsNew},
 		{field: "promotionalText", value: loc.PromotionalText, limit: LimitPromotionalText},
 	})
@@ -31,22 +32,33 @@ func AppInfoLocalizationLengthIssues(loc AppInfoLocalization) []MetadataLengthIs
 }
 
 type metadataLengthField struct {
-	field string
-	value string
-	limit int
+	field  string
+	value  string
+	limit  int
+	length func(string) int
+	unit   string
 }
 
 func metadataLengthIssues(fields []metadataLengthField) []MetadataLengthIssue {
 	issues := make([]MetadataLengthIssue, 0, len(fields))
 	for _, field := range fields {
-		length := utf8.RuneCountInString(field.value)
+		lengthFn := field.length
+		if lengthFn == nil {
+			lengthFn = utf8.RuneCountInString
+		}
+		length := lengthFn(field.value)
 		if length <= field.limit {
 			continue
+		}
+		unit := field.unit
+		if unit == "" {
+			unit = "characters"
 		}
 		issues = append(issues, MetadataLengthIssue{
 			Field:  field.field,
 			Length: length,
 			Limit:  field.limit,
+			Unit:   unit,
 		})
 	}
 	return issues
@@ -66,8 +78,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "description",
 					ResourceType: "appStoreVersionLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("description exceeds %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten description to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("description exceeds %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten description to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			case "keywords":
 				checks = append(checks, CheckResult{
@@ -77,8 +89,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "keywords",
 					ResourceType: "appStoreVersionLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("keywords exceed %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten keywords to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("keywords exceed %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten keywords to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			case "whatsNew":
 				checks = append(checks, CheckResult{
@@ -88,8 +100,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "whatsNew",
 					ResourceType: "appStoreVersionLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("what's new exceeds %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten what's new to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("what's new exceeds %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten what's new to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			case "promotionalText":
 				checks = append(checks, CheckResult{
@@ -99,8 +111,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "promotionalText",
 					ResourceType: "appStoreVersionLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("promotional text exceeds %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten promotional text to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("promotional text exceeds %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten promotional text to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			}
 		}
@@ -117,8 +129,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "name",
 					ResourceType: "appInfoLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("name exceeds %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten name to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("name exceeds %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten name to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			case "subtitle":
 				checks = append(checks, CheckResult{
@@ -128,8 +140,8 @@ func metadataLengthChecks(versionLocs []VersionLocalization, appInfoLocs []AppIn
 					Field:        "subtitle",
 					ResourceType: "appInfoLocalization",
 					ResourceID:   loc.ID,
-					Message:      fmt.Sprintf("subtitle exceeds %d characters", issue.Limit),
-					Remediation:  fmt.Sprintf("Shorten subtitle to %d characters or fewer", issue.Limit),
+					Message:      fmt.Sprintf("subtitle exceeds %d %s", issue.Limit, issue.Unit),
+					Remediation:  fmt.Sprintf("Shorten subtitle to %d %s or fewer", issue.Limit, issue.Unit),
 				})
 			}
 		}

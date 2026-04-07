@@ -2,6 +2,7 @@ package cmdtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -209,5 +210,116 @@ func TestReviewDetailsUpdateAllowsDemoAccountRequiredWhenExistingCredentialsAreP
 	}
 	if !strings.Contains(stdout, `"id":"detail-1"`) {
 		t.Fatalf("expected detail id in output, got %q", stdout)
+	}
+}
+
+func TestReviewDetailsForVersionReturnsNotConfiguredStateWhenUnset(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		switch req.URL.Path {
+		case "/v1/appStoreVersions/version-1/appStoreReviewDetail":
+			return jsonResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
+		case "/v1/appStoreVersions/version-1":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.0"}}}`)
+		default:
+			t.Fatalf("unexpected path %s", req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"review", "details-for-version", "--version-id", "version-1", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if !strings.Contains(stderr, "Warning: App Store review detail is not configured for version \"version-1\".") {
+		t.Fatalf("expected not-configured warning, got %q", stderr)
+	}
+
+	var payload struct {
+		VersionID  string `json:"versionId"`
+		Configured bool   `json:"configured"`
+		Message    string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+	if payload.VersionID != "version-1" {
+		t.Fatalf("expected versionId version-1, got %q", payload.VersionID)
+	}
+	if payload.Configured {
+		t.Fatal("expected configured=false")
+	}
+	if payload.Message == "" {
+		t.Fatal("expected message")
+	}
+}
+
+func TestReviewDetailsForVersionPreservesErrorForUnknownVersionID(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		switch req.URL.Path {
+		case "/v1/appStoreVersions/missing-version/appStoreReviewDetail":
+			return jsonResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
+		case "/v1/appStoreVersions/missing-version":
+			return jsonResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
+		default:
+			t.Fatalf("unexpected path %s", req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"review", "details-for-version", "--version-id", "missing-version", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(runErr.Error(), "review details-for-version: failed to fetch:") {
+		t.Fatalf("expected wrapped fetch error, got %v", runErr)
+	}
+	if strings.Contains(runErr.Error(), "not configured") {
+		t.Fatalf("expected unknown version to remain a hard error, got %v", runErr)
 	}
 }

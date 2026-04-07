@@ -13,6 +13,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -62,7 +63,7 @@ price points.
 Examples:
   asc subscriptions pricing summary --app "APP_ID"
   asc subscriptions pricing summary --subscription-id "SUB_ID"
-  asc subscriptions pricing summary --app "APP_ID" --territory "USA" --output table`,
+  asc subscriptions pricing summary --app "APP_ID" --territory "United States" --output table`,
 	)
 }
 
@@ -76,7 +77,7 @@ func buildSubscriptionsPricingSummaryCommand(
 
 	appID := fs.String("app", "", subscriptionLookupAppUsage)
 	subscriptionID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
-	territory := fs.String("territory", "USA", "Territory for pricing (e.g., USA)")
+	territory := fs.String("territory", "USA", "Territory for pricing (accepts alpha-2, alpha-3, or exact English country name)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -95,9 +96,13 @@ func buildSubscriptionsPricingSummaryCommand(
 				return flag.ErrHelp
 			}
 
-			territoryFilter := strings.ToUpper(strings.TrimSpace(*territory))
-			if territoryFilter == "" {
-				territoryFilter = "USA"
+			territoryInput := strings.TrimSpace(*territory)
+			if territoryInput == "" {
+				territoryInput = "USA"
+			}
+			territoryFilter, err := ascterritory.Normalize(territoryInput)
+			if err != nil {
+				return shared.UsageError(err.Error())
 			}
 
 			client, err := shared.GetASCClient()

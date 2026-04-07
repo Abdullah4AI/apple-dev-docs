@@ -610,6 +610,73 @@ func TestIAPSetupCreateLocalizationAndPricingSuccess(t *testing.T) {
 	}
 }
 
+func TestIAPSetupNormalizesBaseTerritory(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("HOME", t.TempDir())
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodPost || req.URL.Path != "/v2/inAppPurchases" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.Path)
+			}
+			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"inAppPurchases","id":"iap-1","attributes":{"name":"Pro Lifetime","productId":"lifetime","inAppPurchaseType":"NON_CONSUMABLE"}}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v2/inAppPurchases/iap-1/pricePoints" {
+				t.Fatalf("unexpected price-points request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[territory]"); got != "USA" {
+				t.Fatalf("expected normalized filter[territory]=USA, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"inAppPurchasePricePoints","id":"pp-399","attributes":{"customerPrice":"3.99","proceeds":"2.79"}}],"links":{"next":""}}`), nil
+		case 3:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/inAppPurchasePriceSchedules" {
+				t.Fatalf("unexpected price schedule request: %s %s", req.Method, req.URL.Path)
+			}
+			var payload asc.InAppPurchasePriceScheduleCreateRequest
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode price schedule payload: %v", err)
+			}
+			if got := payload.Data.Relationships.BaseTerritory.Data.ID; got != "USA" {
+				t.Fatalf("expected normalized base territory USA, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"inAppPurchasePriceSchedules","id":"sched-1","attributes":{}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	if err := root.Parse([]string{
+		"iap", "setup",
+		"--app", "app-1",
+		"--type", "NON_CONSUMABLE",
+		"--reference-name", "Pro Lifetime",
+		"--product-id", "lifetime",
+		"--price", "3.99",
+		"--base-territory", "United States",
+		"--no-verify",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if err := root.Run(context.Background()); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected 3 setup requests, got %d", requestCount)
+	}
+}
+
 func TestIAPSetupRefreshesContextsAcrossPricingAndVerification(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

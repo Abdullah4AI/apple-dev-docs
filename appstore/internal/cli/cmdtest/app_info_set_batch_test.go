@@ -127,6 +127,95 @@ func TestRunAppInfoSetFromDirConflictReturnsUsageExitCode(t *testing.T) {
 	}
 }
 
+func TestRunAppInfoSetRejectsOverLimitKeywordBytesBeforeAuthResolution(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_KEY_ID", "")
+	t.Setenv("ASC_ISSUER_ID", "")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+	t.Setenv("ASC_PRIVATE_KEY", "")
+	t.Setenv("ASC_PRIVATE_KEY_B64", "")
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	_, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{
+			"apps", "info", "edit",
+			"--app", "APP_ID",
+			"--locale", "ja",
+			"--keywords", strings.Repeat("語", 101),
+		}, "1.2.3")
+		if code != cmd.ExitUsage {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+		}
+	})
+
+	if !strings.Contains(stderr, "keywords exceed 100 characters") {
+		t.Fatalf("expected keyword character-limit error, got %q", stderr)
+	}
+	if requestCount != 0 {
+		t.Fatalf("expected no HTTP requests, got %d", requestCount)
+	}
+}
+
+func TestRunAppInfoSetFromDirRejectsOverLimitKeywordCharactersBeforeAuthResolution(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_KEY_ID", "")
+	t.Setenv("ASC_ISSUER_ID", "")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+	t.Setenv("ASC_PRIVATE_KEY", "")
+	t.Setenv("ASC_PRIVATE_KEY_B64", "")
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	inputDir := t.TempDir()
+	content := `{"description":"Japanese description","keywords":"` + strings.Repeat("語", 101) + `"}`
+	if err := os.WriteFile(filepath.Join(inputDir, "ja.json"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write ja file: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	_, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{
+			"apps", "info", "edit",
+			"--app", "APP_ID",
+			"--from-dir", inputDir,
+		}, "1.2.3")
+		if code != cmd.ExitUsage {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+		}
+	})
+
+	if !strings.Contains(stderr, "keywords exceed 100 characters") {
+		t.Fatalf("expected keyword character-limit error, got %q", stderr)
+	}
+	if requestCount != 0 {
+		t.Fatalf("expected no HTTP requests, got %d", requestCount)
+	}
+}
+
 func TestAppInfoSetBatchDryRunInlineLocales(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -185,8 +274,11 @@ func TestAppInfoSetBatchDryRunInlineLocales(t *testing.T) {
 		}
 	})
 
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
+	if !strings.Contains(stderr, "creating locale de-DE would make it participate in submission validation") {
+		t.Fatalf("expected planned create warning, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "description, keywords, supportUrl") {
+		t.Fatalf("expected missing fields in warning, got %q", stderr)
 	}
 
 	var payload map[string]any
@@ -232,6 +324,77 @@ func TestAppInfoSetBatchDryRunInlineLocales(t *testing.T) {
 	}
 	if byLocale["de-DE"]["action"] != "create" || byLocale["de-DE"]["status"] != "planned" {
 		t.Fatalf("expected de-DE to be planned create, got %+v", byLocale["de-DE"])
+	}
+}
+
+func TestAppInfoSetBatchApplyCreateWarningsStaySorted(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	createCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/apps/app-1/appStoreVersions":
+			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"ver-1","attributes":{"createdDate":"2026-02-01T00:00:00Z"}}]}`), nil
+		case "/v1/appStoreVersions/ver-1/appStoreVersionLocalizations":
+			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[]}`), nil
+		case "/v1/appStoreVersionLocalizations":
+			if req.Method != http.MethodPost {
+				t.Fatalf("expected POST for create, got %s", req.Method)
+			}
+			createCount++
+			body := `{"data":{"type":"appStoreVersionLocalizations","id":"loc-created","attributes":{"locale":"created"}}}`
+			return appInfoSetBatchJSONResponse(http.StatusCreated, body), nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"apps", "info", "edit",
+			"--app", "app-1",
+			"--locales", "fr-FR,de-DE",
+			"--whats-new", "Bug fixes and improvements",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if createCount != 2 {
+		t.Fatalf("expected 2 create calls, got %d", createCount)
+	}
+	firstIdx := strings.Index(stderr, "created locale de-DE now participates in submission validation")
+	secondIdx := strings.Index(stderr, "created locale fr-FR now participates in submission validation")
+	if firstIdx == -1 || secondIdx == -1 {
+		t.Fatalf("expected warnings for both locales, got %q", stderr)
+	}
+	if firstIdx > secondIdx {
+		t.Fatalf("expected warnings sorted by locale, got %q", stderr)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+	if intValue(payload["succeeded"]) != 2 {
+		t.Fatalf("expected succeeded=2, got %v", payload["succeeded"])
+	}
+	if intValue(payload["failed"]) != 0 {
+		t.Fatalf("expected failed=0, got %v", payload["failed"])
 	}
 }
 
@@ -385,7 +548,12 @@ func TestRunAppInfoSetBatchPartialFailureReturnsExitError(t *testing.T) {
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case "/v1/apps/app-1/appStoreVersions":
-			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"ver-1","attributes":{"createdDate":"2026-02-01T00:00:00Z"}}]}`), nil
+			if req.URL.Query().Get("filter[appStoreState]") != "" {
+				return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[]}`), nil
+			}
+			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"ver-1","attributes":{"createdDate":"2026-02-01T00:00:00Z","platform":"IOS"}}]}`), nil
+		case "/v1/appStoreVersions/ver-1":
+			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"ver-1","attributes":{"createdDate":"2026-02-01T00:00:00Z","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}}}}`), nil
 		case "/v1/appStoreVersions/ver-1/appStoreVersionLocalizations":
 			return appInfoSetBatchJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-en","attributes":{"locale":"en-US"}}]}`), nil
 		case "/v1/appStoreVersionLocalizations/loc-en":

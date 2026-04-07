@@ -156,6 +156,78 @@ func TestScreenshotsPlanBuildsApprovedUploadGroups(t *testing.T) {
 	}
 }
 
+func TestScreenshotsPlanVersionIDUsesResolvedPlatformWithoutExplicitPlatform(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	reviewDir, _ := writeScreenshotReviewArtifactsWithPlannedDisplayType(t, 2880, 1800, 2880, 1800, []string{"APP_DESKTOP"})
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/appStoreVersions/version-mac":
+			return statusJSONResponse(`{"data":{"type":"appStoreVersions","id":"version-mac","attributes":{"versionString":"2.0.0","platform":"MAC_OS"},"relationships":{"app":{"data":{"type":"apps","id":"123456789"}}}}}`), nil
+		case "/v1/appStoreVersions/version-mac/appStoreVersionLocalizations":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersionLocalizations","id":"LOC_123","attributes":{"locale":"en-US"}}]}`), nil
+		case "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"screenshots", "plan",
+			"--app", "123456789",
+			"--version-id", "version-mac",
+			"--review-output-dir", reviewDir,
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+	if payload["versionId"] != "version-mac" {
+		t.Fatalf("expected versionId version-mac, got %v", payload["versionId"])
+	}
+	if payload["version"] != "2.0.0" {
+		t.Fatalf("expected version 2.0.0, got %v", payload["version"])
+	}
+	if payload["platform"] != "MAC_OS" {
+		t.Fatalf("expected platform MAC_OS, got %v", payload["platform"])
+	}
+
+	groups, ok := payload["groups"].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("expected one planned group, got %T %v", payload["groups"], payload["groups"])
+	}
+	group := groups[0].(map[string]any)
+	if group["displayType"] != "APP_DESKTOP" {
+		t.Fatalf("expected displayType APP_DESKTOP, got %v", group["displayType"])
+	}
+}
+
 func TestScreenshotsApplyUploadsApprovedArtifacts(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

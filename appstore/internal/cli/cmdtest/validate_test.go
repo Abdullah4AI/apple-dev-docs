@@ -368,6 +368,161 @@ func TestValidateVersionAndVersionIDMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestValidateOutputsOrderedRemediationByDefault(t *testing.T) {
+	fixture := validValidateFixture()
+	fixture.version = strings.Replace(fixture.version, `"versionString":"1.0"`, `"versionString":"1.2.3"`, 1)
+	fixture.versions = strings.Replace(fixture.versions, `"versionString":"1.0"`, `"versionString":"1.2.3"`, 1)
+	fixture.versionLocs = `{"data":[{"type":"appStoreVersionLocalizations","id":"ver-loc-1","attributes":{"locale":"en-US","description":"","keywords":"keyword","whatsNew":"","promotionalText":"Promo","supportUrl":"https://support.example.com","marketingUrl":"https://marketing.example.com"}}]}`
+	fixture.primaryCategory = ""
+	fixture.build = ""
+
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected blocking remediation output to return an error")
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("failed to parse JSON output: %v", err)
+	}
+	if report.Remediation.TotalActionable < 4 {
+		t.Fatalf("expected multiple actionable steps, got %+v", report.Remediation)
+	}
+	if len(report.Remediation.Steps) < 4 {
+		t.Fatalf("expected ordered remediation steps, got %+v", report.Remediation.Steps)
+	}
+	if report.Remediation.Steps[0].CheckID != "metadata.required.description" {
+		t.Fatalf("expected description remediation first, got %+v", report.Remediation.Steps[0])
+	}
+	if report.Remediation.Steps[1].CheckID != "categories.primary_missing" {
+		t.Fatalf("expected category remediation second, got %+v", report.Remediation.Steps[1])
+	}
+	if report.Remediation.Steps[2].CheckID != "build.required.missing" {
+		t.Fatalf("expected build remediation third, got %+v", report.Remediation.Steps[2])
+	}
+
+	var whatsNewStep validation.RemediationStep
+	foundWhatsNew := false
+	for _, step := range report.Remediation.Steps {
+		if step.CheckID == "metadata.required.whats_new" {
+			whatsNewStep = step
+			foundWhatsNew = true
+			break
+		}
+	}
+	if !foundWhatsNew {
+		t.Fatalf("expected what's new remediation in plan, got %+v", report.Remediation.Steps)
+	}
+	if whatsNewStep.Blocking {
+		t.Fatalf("expected what's new remediation to be non-blocking by default, got %+v", whatsNewStep)
+	}
+	if whatsNewStep.Order <= report.Remediation.Steps[2].Order {
+		t.Fatalf("expected warning remediation after blocking errors, got %+v", report.Remediation.Steps)
+	}
+}
+
+func TestValidateTableOutputsRemediationByDefault(t *testing.T) {
+	fixture := validValidateFixture()
+	fixture.version = strings.Replace(fixture.version, `"versionString":"1.0"`, `"versionString":"1.2.3"`, 1)
+	fixture.versions = strings.Replace(fixture.versions, `"versionString":"1.0"`, `"versionString":"1.2.3"`, 1)
+	fixture.versionLocs = `{"data":[{"type":"appStoreVersionLocalizations","id":"ver-loc-1","attributes":{"locale":"en-US","description":"","keywords":"keyword","whatsNew":"","promotionalText":"Promo","supportUrl":"https://support.example.com","marketingUrl":"https://marketing.example.com"}}]}`
+	fixture.primaryCategory = ""
+	fixture.build = ""
+
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--output", "table"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected blocking remediation output to return an error")
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "Actionable") {
+		t.Fatalf("expected remediation count in summary table, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "Order") {
+		t.Fatalf("expected remediation plan table, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "metadata.required.description") {
+		t.Fatalf("expected description remediation row, got %q", stdout)
+	}
+}
+
+func TestValidateSubcommandsRejectParentValidateFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "top-level version selector before subcommand",
+			args:    []string{"validate", "--version-id", "ver-1", "testflight", "--app", "app-1", "--build", "build-1"},
+			wantErr: "--version-id is only valid for asc validate",
+		},
+		{
+			name:    "shared flag before subcommand",
+			args:    []string{"validate", "--strict", "testflight", "--app", "app-1", "--build", "build-1"},
+			wantErr: "--strict must be passed after the validate subcommand name",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(test.args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected ErrHelp, got %v", err)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantErr) {
+				t.Fatalf("expected error %q, got %q", test.wantErr, stderr)
+			}
+		})
+	}
+}
+
 func TestValidateOutputsJSONAndTable(t *testing.T) {
 	fixture := validValidateFixture()
 	client := newValidateTestClient(t, fixture)

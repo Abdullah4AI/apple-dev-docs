@@ -59,7 +59,7 @@ func WebAppsAvailabilityCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web apps availability create", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	territory := fs.String("territory", "", "Initial available territory IDs (comma-separated, e.g., USA,GBR)")
+	territory := fs.String("territory", "", "Initial available territories (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
 	var availableInNewTerritories shared.OptionalBool
 	fs.Var(&availableInNewTerritories, "available-in-new-territories", "Set availability for new territories: true or false")
 	authFlags := bindWebSessionFlags(fs)
@@ -67,7 +67,7 @@ func WebAppsAvailabilityCreateCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "create",
-		ShortUsage: "asc web apps availability create --app APP_ID --territory \"USA,GBR\" [flags]",
+		ShortUsage: "asc web apps availability create --app APP_ID --territory \"US,France\" [flags]",
 		ShortHelp:  "[experimental] Create initial app availability via web API.",
 		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
 
@@ -75,8 +75,8 @@ Create the initial app availability record for an app that does not yet have one
 The territories passed with --territory become initially available.
 
 Examples:
-  asc web apps availability create --app "123456789" --territory "USA" --available-in-new-territories false
-  asc web apps availability create --app "123456789" --territory "USA,GBR" --available-in-new-territories true
+  asc web apps availability create --app "123456789" --territory "United States" --available-in-new-territories false
+  asc web apps availability create --app "123456789" --territory "US,France" --available-in-new-territories true
 
 ` + webWarningText,
 		FlagSet:   fs,
@@ -97,7 +97,10 @@ Examples:
 				return shared.UsageError("--available-in-new-territories is required (true or false)")
 			}
 
-			territoryIDs := shared.SplitCSVUpper(*territory)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territory)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if len(territoryIDs) == 0 {
 				return shared.UsageError("--territory must include at least one value")
 			}

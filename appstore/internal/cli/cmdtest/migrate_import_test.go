@@ -241,6 +241,12 @@ func TestMigrateImportUploadsAndSkipsExistingScreenshots(t *testing.T) {
 		t.Fatalf("mkdir metadata: %v", err)
 	}
 	writeFile(t, filepath.Join(metadataDir, "description.txt"), "English description")
+	if err := os.MkdirAll(filepath.Join(fastlaneDir, "screenshots"), 0o755); err != nil {
+		t.Fatalf("mkdir screenshots root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(fastlaneDir, "screenshots"), 0o755); err != nil {
+		t.Fatalf("mkdir screenshots root: %v", err)
+	}
 	writeFile(t, filepath.Join(metadataDir, "name.txt"), "App Name")
 
 	reviewDir := filepath.Join(fastlaneDir, "metadata", "review_information")
@@ -365,6 +371,159 @@ func TestMigrateImportUploadsAndSkipsExistingScreenshots(t *testing.T) {
 	}
 	if len(result.ScreenshotResults[0].Skipped) != 1 {
 		t.Fatalf("expected 1 skipped screenshot, got %d", len(result.ScreenshotResults[0].Skipped))
+	}
+}
+
+func TestMigrateImportWarnsForMetadataCreates(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	root := t.TempDir()
+	fastlaneDir := filepath.Join(root, "fastlane")
+	metadataDir := filepath.Join(fastlaneDir, "metadata", "en-US")
+	if err := os.MkdirAll(metadataDir, 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+	writeFile(t, filepath.Join(metadataDir, "description.txt"), "English description")
+	if err := os.MkdirAll(filepath.Join(fastlaneDir, "screenshots"), 0o755); err != nil {
+		t.Fatalf("mkdir screenshots root: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	createCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/VERSION_ID/appStoreVersionLocalizations":
+			return migrateJSONResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appStoreVersionLocalizations":
+			createCount++
+			return migrateJSONResponse(http.StatusCreated, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"English description"}}}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+	})
+
+	rootCmd := RootCommand("1.2.3")
+	rootCmd.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := rootCmd.Parse([]string{
+			"migrate", "import",
+			"--app", "APP_ID",
+			"--version-id", "VERSION_ID",
+			"--fastlane-dir", fastlaneDir,
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := rootCmd.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if createCount != 1 {
+		t.Fatalf("expected one metadata create request, got %d", createCount)
+	}
+	if !strings.Contains(stderr, "created locale en-US now participates in submission validation") {
+		t.Fatalf("expected create warning on stderr, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "keywords, supportUrl") {
+		t.Fatalf("expected missing fields in warning, got %q", stderr)
+	}
+
+	var result migrate.MigrateImportResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Uploaded) != 1 || result.Uploaded[0].Action != "create" || result.Uploaded[0].Locale != "en-US" {
+		t.Fatalf("expected single created upload result, got %+v", result.Uploaded)
+	}
+}
+
+func TestMigrateImportDoesNotWarnForScreenshotBootstrapCreates(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	root := t.TempDir()
+	fastlaneDir := filepath.Join(root, "fastlane")
+	if err := os.MkdirAll(filepath.Join(fastlaneDir, "metadata"), 0o755); err != nil {
+		t.Fatalf("mkdir metadata root: %v", err)
+	}
+	screenshotsDir := filepath.Join(fastlaneDir, "screenshots", "en-US")
+	if err := os.MkdirAll(screenshotsDir, 0o755); err != nil {
+		t.Fatalf("mkdir screenshots: %v", err)
+	}
+	writePNGForMigrate(t, filepath.Join(screenshotsDir, "iphone_65_screen.png"), 1242, 2688)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host == "upload.example.com" {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+			}, nil
+		}
+
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/VERSION_ID/appStoreVersionLocalizations":
+			return migrateJSONResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appStoreVersionLocalizations":
+			return migrateJSONResponse(http.StatusCreated, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-shot","attributes":{"locale":"en-US"}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/loc-shot/appScreenshotSets":
+			return migrateJSONResponse(http.StatusOK, `{"data":[]}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshotSets":
+			return migrateJSONResponse(http.StatusCreated, `{"data":{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
+			return migrateJSONResponse(http.StatusCreated, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png","fileSize":1234,"uploadOperations":[{"method":"PUT","url":"https://upload.example.com/upload/shot-1","length":1234,"offset":0}]}}}`), nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/shot-1":
+			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png"}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/shot-1":
+			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png","assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return migrateJSONResponse(http.StatusNoContent, ""), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+	})
+
+	rootCmd := RootCommand("1.2.3")
+	rootCmd.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := rootCmd.Parse([]string{
+			"migrate", "import",
+			"--app", "APP_ID",
+			"--version-id", "VERSION_ID",
+			"--fastlane-dir", fastlaneDir,
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := rootCmd.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var result migrate.MigrateImportResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Uploaded) != 0 {
+		t.Fatalf("expected no metadata uploads, got %+v", result.Uploaded)
+	}
+	if len(result.ScreenshotResults) != 1 {
+		t.Fatalf("expected one screenshot result, got %+v", result.ScreenshotResults)
 	}
 }
 

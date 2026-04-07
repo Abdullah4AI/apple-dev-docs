@@ -218,8 +218,34 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetCustomerReviewResponseForReview(requestCtx, strings.TrimSpace(*reviewID))
+			reviewIDValue := strings.TrimSpace(*reviewID)
+			resp, err := client.GetCustomerReviewResponseForReview(requestCtx, reviewIDValue)
 			if err != nil {
+				if asc.IsNotFound(err) {
+					if _, reviewErr := client.GetCustomerReview(requestCtx, reviewIDValue); reviewErr != nil {
+						return fmt.Errorf("reviews response for-review: failed to fetch: %w", reviewErr)
+					}
+					message := reviewResponseNotConfiguredMessage(reviewIDValue)
+					warnNotConfigured(message)
+					result := reviewResponseNotConfiguredResult{
+						ReviewID:   reviewIDValue,
+						Configured: false,
+						Message:    message,
+					}
+					return shared.PrintOutputWithRenderers(
+						result,
+						*output.Output,
+						*output.Pretty,
+						func() error {
+							renderNotConfiguredState("Review Response", "reviewId", reviewIDValue, message, false)
+							return nil
+						},
+						func() error {
+							renderNotConfiguredState("Review Response", "reviewId", reviewIDValue, message, true)
+							return nil
+						},
+					)
+				}
 				return fmt.Errorf("reviews response for-review: failed to fetch: %w", err)
 			}
 

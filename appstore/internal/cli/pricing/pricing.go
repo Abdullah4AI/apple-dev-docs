@@ -12,6 +12,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -27,19 +28,19 @@ Examples:
   asc pricing current --app "123456789"
   asc pricing territories list
   asc pricing price-points --app "123456789"
-  asc pricing price-points --app "123456789" --territory "USA"
+  asc pricing price-points --app "123456789" --territory "France"
   asc pricing price-points get --price-point "PRICE_POINT_ID"
   asc pricing price-points equalizations --price-point "PRICE_POINT_ID"
-  asc pricing tiers --app "123456789" --territory "USA"
+  asc pricing tiers --app "123456789" --territory "US"
   asc pricing schedule get --app "123456789"
   asc pricing schedule get --id "SCHEDULE_ID"
-  asc pricing schedule create --app "123456789" --price-point "PRICE_POINT_ID" --base-territory "USA" --start-date "2024-03-01"
-  asc pricing schedule create --app "123456789" --free --base-territory "USA" --start-date "2024-03-01"
+  asc pricing schedule create --app "123456789" --price-point "PRICE_POINT_ID" --base-territory "United States" --start-date "2024-03-01"
+  asc pricing schedule create --app "123456789" --free --base-territory "US" --start-date "2024-03-01"
   asc pricing schedule manual-prices --schedule "SCHEDULE_ID"
   asc pricing schedule automatic-prices --schedule "SCHEDULE_ID"
   asc pricing availability get --app "123456789"
   asc pricing availability get --id "AVAILABILITY_ID"
-  asc pricing availability set --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
+  asc pricing availability set --app "123456789" --territory "US,France,DEU" --available true --available-in-new-territories true
   asc pricing availability set --app "123456789" --all-territories --available true --available-in-new-territories true
   asc pricing availability territory-availabilities --availability "AVAILABILITY_ID"`,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -150,7 +151,7 @@ func PricingPricePointsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pricing price-points", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	territory := fs.String("territory", "", "Filter by territory (e.g., USA)")
+	territory := fs.String("territory", "", "Filter by territory (accepts alpha-2, alpha-3, or exact English country name)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Next page URL from a previous response")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -164,7 +165,7 @@ func PricingPricePointsCommand() *ffcli.Command {
 
 Examples:
   asc pricing price-points --app "123456789"
-  asc pricing price-points --app "123456789" --territory "USA"
+  asc pricing price-points --app "123456789" --territory "United States"
   asc pricing price-points --app "123456789" --paginate
   asc pricing price-points get --price-point "PRICE_POINT_ID"
   asc pricing price-points equalizations --price-point "PRICE_POINT_ID"`,
@@ -196,10 +197,18 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
+			territoryID := strings.TrimSpace(*territory)
+			if territoryID != "" {
+				territoryID, err = ascterritory.Normalize(territoryID)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
+
 			opts := []asc.PricePointsOption{
 				asc.WithPricePointsLimit(*limit),
 				asc.WithPricePointsNextURL(*next),
-				asc.WithPricePointsTerritory(*territory),
+				asc.WithPricePointsTerritory(territoryID),
 			}
 
 			if *paginate {
@@ -273,44 +282,24 @@ Examples:
 
 // PricingPricePointsEqualizationsCommand returns the price point equalizations subcommand.
 func PricingPricePointsEqualizationsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("pricing price-points equalizations", flag.ExitOnError)
-
-	pricePointID := fs.String("price-point", "", "App price point ID")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "equalizations",
-		ShortUsage: "asc pricing price-points equalizations --price-point PRICE_POINT_ID",
-		ShortHelp:  "List equalized price points for a price point.",
-		LongHelp: `List equalized price points for a price point.
-
-Examples:
-  asc pricing price-points equalizations --price-point "PRICE_POINT_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			trimmedPricePointID := strings.TrimSpace(*pricePointID)
-			if trimmedPricePointID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --price-point is required")
-				return flag.ErrHelp
+	return shared.BuildPricePointEqualizationsCommand(shared.PricePointEqualizationsCommandConfig{
+		FlagSetName: "pricing price-points equalizations",
+		Name:        "equalizations",
+		ShortUsage:  "asc pricing price-points equalizations --price-point PRICE_POINT_ID",
+		BaseExample: `asc pricing price-points equalizations --price-point "PRICE_POINT_ID"`,
+		Subject:     "a price point",
+		ParentFlag:  "price-point",
+		ParentUsage: "App price point ID",
+		LimitMax:    200,
+		ErrorPrefix: "pricing price-points equalizations",
+		FetchPage: func(ctx context.Context, client *asc.Client, pricePointID string, limit int, next string) (asc.PaginatedResponse, error) {
+			opts := []asc.PricePointsOption{
+				asc.WithPricePointsLimit(limit),
+				asc.WithPricePointsNextURL(next),
 			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("pricing price-points equalizations: %w", err)
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.GetAppPricePointEqualizations(requestCtx, trimmedPricePointID)
-			if err != nil {
-				return fmt.Errorf("pricing price-points equalizations: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return client.GetAppPricePointEqualizations(ctx, pricePointID, opts...)
 		},
-	}
+	})
 }
 
 // PricingScheduleCommand returns the pricing schedule command group.
@@ -325,7 +314,7 @@ Examples:
   asc pricing schedule get --app "123456789"
   asc pricing schedule get --id "SCHEDULE_ID"
   asc pricing schedule create --app "123456789" --price-point "PRICE_POINT_ID" --start-date "2024-03-01"
-  asc pricing schedule create --app "123456789" --free --base-territory "USA" --start-date "2024-03-01"
+  asc pricing schedule create --app "123456789" --free --base-territory "US" --start-date "2024-03-01"
   asc pricing schedule manual-prices --schedule "SCHEDULE_ID"
   asc pricing schedule automatic-prices --schedule "SCHEDULE_ID"`,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -408,8 +397,8 @@ func PricingScheduleCreateCommand() *ffcli.Command {
 		LongHelp: `Create an app price schedule.
 
 Examples:
-  asc pricing schedule create --app "123456789" --price-point "PRICE_POINT_ID" --base-territory "USA" --start-date "2024-03-01"
-  asc pricing schedule create --app "123456789" --free --base-territory "USA" --start-date "2024-03-01"`,
+  asc pricing schedule create --app "123456789" --price-point "PRICE_POINT_ID" --base-territory "United States" --start-date "2024-03-01"
+  asc pricing schedule create --app "123456789" --free --base-territory "US" --start-date "2024-03-01"`,
 		ErrorPrefix:          "pricing schedule create",
 		StartDateHelp:        "Start date (YYYY-MM-DD)",
 		RequireBaseTerritory: true,
@@ -607,7 +596,7 @@ func PricingAvailabilityCommand() *ffcli.Command {
 Examples:
   asc pricing availability get --app "123456789"
   asc pricing availability get --id "AVAILABILITY_ID"
-  asc pricing availability set --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
+  asc pricing availability set --app "123456789" --territory "US,France,DEU" --available true --available-in-new-territories true
   asc pricing availability set --app "123456789" --all-territories --available true --available-in-new-territories true
   asc pricing availability territory-availabilities --availability "AVAILABILITY_ID"
 
@@ -748,7 +737,7 @@ func PricingAvailabilitySetCommand() *ffcli.Command {
 		LongHelp: `Set app availability for territories.
 
 Examples:
-  asc pricing availability set --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
+  asc pricing availability set --app "123456789" --territory "US,France,DEU" --available true --available-in-new-territories true
   asc pricing availability set --app "123456789" --all-territories --available true --available-in-new-territories true
 
 Note:

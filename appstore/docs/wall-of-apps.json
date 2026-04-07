@@ -10,6 +10,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/5c/ce/67/5cce6782-729c-07af-1e0b-7322b8ffd914/SixtysixStreaksIcon-0-0-1x_U007emarketing-0-9-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "AdMate App",
+    "link": "https://apps.apple.com/us/app/admate-app/id6705137320?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/fb/86/59/fb865967-771a-6e3f-d5b6-325f5c60287f/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "aether: Remote Deck ControlPad",
     "link": "https://apps.apple.com/us/app/aether-remote-deck-controlpad/id6761128470?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4e/44/bd/4e44bde8-ee38-ba9a-c1f1-ff8485e5e5ff/aetherIcon-0-0-1x_U007ephone-0-1-P3-85-220.png/512x512bb.jpg"
@@ -269,6 +274,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/c3/12/31/c31231ef-8a43-d6dd-84e2-23728b669d59/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-85-220-0.png/512x512bb.jpg"
   },
   {
+    "app": "EchoKeep: Smarter RSS Reader",
+    "link": "https://apps.apple.com/us/app/echokeep-smarter-rss-reader/id6752524967?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/23/4a/dc/234adc2b-ac03-64c7-b503-05112d5ad183/EchoKeep-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "EduSwipe: AI Flashcards & SRS",
     "link": "https://apps.apple.com/us/app/eduswipe-ai-flashcards-srs/id6744727106?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/23/60/71/236071d7-7827-efd9-4c8f-03db0cee6aa9/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -299,6 +309,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/8d/e5/c9/8de5c9bd-5ad9-3371-378a-b30f074a671a/AppIcon-0-0-1x_U007epad-0-11-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "FitPretty",
+    "link": "https://apps.apple.com/app/id6654895919",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/7f/a8/5a/7fa85a04-f258-17dd-f120-63c68061241b/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Fix My Treadmill",
     "link": "https://apps.apple.com/us/app/fix-my-treadmill/id6758863304?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/20/33/96/203396ba-0542-cf69-356b-355b9948201b/AppIcon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -317,6 +332,11 @@
     "app": "FocusCursor: Highlight &Markup",
     "link": "https://apps.apple.com/us/app/focuscursor-highlight-markup/id6743495172?mt=12&uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/38/68/9e/38689e2a-598d-b3cd-58ac-ae551225d7b7/AppIcon-0-0-85-220-0-5-0-2x.png/512x512bb.png"
+  },
+  {
+    "app": "Forerunner: Running & Wellness",
+    "link": "https://apps.apple.com/us/app/forerunner-running-wellness/id6745802851?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/06/bb/79/06bb796e-81a0-8812-5c4a-6148ee92e8bf/AppIcon-0-0-1x_U007epad-0-0-0-1-0-P3-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Foundation Lab",
@@ -388,6 +408,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/ea/cd/e9/eacde9d6-4e33-e631-55fc-05aa961523a5/AppIcon-0-0-1x_U007ephone-0-0-0-1-0-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Haven: Setup Codes",
+    "link": "https://apps.apple.com/us/app/haven-setup-codes/id6760440926?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/72/e6/1f/72e61fe0-7f0e-bb59-732d-c89ed669ed59/Haven-0-0-1x_U007epad-0-0-0-1-0-sRGB-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "HoverCalc",
     "link": "https://apps.apple.com/us/app/hovercalc/id6759318126?mt=12&uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4d/d5/0f/4dd50f26-4b76-e382-9774-5894156f11df/AppIcon-0-0-85-220-0-5-0-2x.png/512x512bb.png"
@@ -411,6 +436,11 @@
     "app": "Idle Coffee Empire Clicker",
     "link": "https://apps.apple.com/us/app/idle-coffee-empire-clicker/id6761031587?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4f/c9/94/4fc994dc-39e7-a593-8dd9-b5feff9e579a/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Imposter Game: Fakeout Party",
+    "link": "https://apps.apple.com/us/app/imposter-game-fakeout-party/id6761190861?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f1/8c/08/f18c08d9-6a65-3444-a15e-bb4d0540e180/AppIcon-Default-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Impulses: Stop Impulse Buying",
@@ -513,6 +543,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/70/6a/e1/706ae16e-f081-eef4-6970-9d6896c4dbf4/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Mahjong AI - Mahjong Assistant",
+    "link": "https://apps.apple.com/app/id6758575182",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/12/8e/fb/128efb33-a5ee-d321-2720-924431d772dd/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Masseter: Jaw Clench Tracker",
     "link": "https://apps.apple.com/us/app/masseter-jaw-clench-tracker/id6758920098?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/9d/34/53/9d345362-2b78-96c5-5294-33d2e084bb90/AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -606,6 +641,11 @@
     "app": "Notch: Target Scoring Tracker",
     "link": "https://apps.apple.com/us/app/notch-target-scoring-tracker/id6747980153?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d7/83/48/d783480d-74fa-4033-44ce-f4154c3ab7de/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Noteit - AI Journal",
+    "link": "https://apps.apple.com/app/id1659178001",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/59/57/b4/5957b419-040d-763a-3c16-cf799bdaaa76/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "OffScreen: Screen Time Control",
@@ -727,6 +767,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/7a/04/14/7a04148e-e548-f6bf-8c0e-c26b9157a7cb/AppIcon-0-1x_U007ephone-0-1-85-220-0.png/512x512bb.jpg"
   },
   {
+    "app": "Printer Tools App",
+    "link": "https://apps.apple.com/us/app/printer-tools-app/id6745528803?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0c/4b/03/0c4b03c9-821c-d641-4c9a-27eb39885edc/AppIcon-0-1x_U007epad-0-1-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "PrivaNota: Private AI Notes",
     "link": "https://apps.apple.com/us/app/privanota-private-ai-notes/id6752555660",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/7f/e6/22/7fe622bc-1260-bcfd-a8e2-c179ba33e727/PrivaNota-0.6-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -747,6 +792,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/38/1c/5b/381c5b87-8ab7-7351-138b-0cef5c4d5084/AppIcon-1x_U007ephone-0-1-85-220-0.jpeg/512x512bb.jpg"
   },
   {
+    "app": "QontactR",
+    "link": "https://apps.apple.com/us/app/qontactr/id1169525139?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/dd/e8/78/dde87816-0e87-d38d-9b0a-a0fc93dfd60e/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Quick RSS - RSS Reader",
     "link": "https://apps.apple.com/us/app/quick-rss-rss-reader/id6670696072?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d6/55/7f/d6557fd2-7a41-2057-7ca4-0b67c1c0638c/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -765,6 +815,11 @@
     "app": "QuitNicPouches Pouch Tracker",
     "link": "https://apps.apple.com/us/app/quitnicpouches-pouch-tracker/id6753104415?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/99/f4/3b/99f43be3-8cd4-448c-26db-bbe190492794/AppIcon-0-0-1x_U007ephone-0-1-P3-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "RateTier",
+    "link": "https://apps.apple.com/us/app/ratetier/id6759999815?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/eb/49/d8/eb49d8c5-20bb-c2f7-068f-d24a970abb2f/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "rawcast — Terminal Weather",
@@ -832,6 +887,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/95/ed/7c/95ed7cad-90a7-5d3b-8742-444542d3dc55/AppIcon-0-0-85-220-0-0-5-0-2x-0-0-0.png/512x512bb.png"
   },
   {
+    "app": "Scooter Tools",
+    "link": "https://apps.apple.com/us/app/scooter-tools/id6452079114?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/cf/8e/88/cf8e88b7-50bc-e82f-f37b-734549d82fcd/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "SF Catalog",
     "link": "https://apps.apple.com/us/app/sf-catalog/id6759371914?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/69/3d/6b/693d6bb5-f68d-1ce3-0ec3-2382a45ffc3d/AppIcon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -840,6 +900,11 @@
     "app": "Sharing Me: Shared Journal",
     "link": "https://apps.apple.com/us/app/sharing-me-shared-journal/id6756325680?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/53/33/66/53336647-1330-96ad-575f-1bdb47d653d1/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Shua - arXiv Paper Reader",
+    "link": "https://apps.apple.com/us/app/shua-arxiv-paper-reader/id6759848629?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/66/fc/74/66fc74ce-6a9d-7344-618d-5b0e5af2110b/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Silk: Relationship Tracker",
@@ -934,6 +999,11 @@
     "app": "Super Shot: EXIF Photo Frame",
     "link": "https://apps.apple.com/us/app/super-shot-exif-photo-frame/id6760384143?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/49/01/f9/4901f9f9-8d90-7283-bbec-6e506aec4391/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "SweatCount - Workout Calendar",
+    "link": "https://apps.apple.com/us/app/sweatcount-workout-calendar/id6755407742?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/9c/4a/88/9c4a88f0-7ce8-6c72-8eb4-6462b67625e5/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "SwiftBiu",
@@ -1061,6 +1131,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/27/ed/a2/27eda257-5dd2-5150-7b0e-977f35636552/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Voice Reminder Planner: Echo",
+    "link": "https://apps.apple.com/us/app/voice-reminder-planner-echo/id6752544263?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/05/25/f3/0525f38c-b2cd-3b22-c1d7-420535cc43f4/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "VoiceBee: AI Voice Keyboard",
     "link": "https://apps.apple.com/us/app/voicebee-ai-voice-keyboard/id6760564766?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/dd/b5/26/ddb52642-a03e-5ff7-ad0c-d973c80726c6/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -1109,6 +1184,11 @@
     "app": "Zenther: AI Calorie Tracker",
     "link": "https://apps.apple.com/us/app/zenther-ai-calorie-tracker/id6748252780?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/c6/49/14/c6491404-390d-82e2-3c3c-1b6053594311/Zenther-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "知了，RSS智能聚合阅读",
+    "link": "https://apps.apple.com/app/id1525056652",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/11/3e/43/113e432e-0c18-db1b-fff8-0dec1e3d1fcb/AppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "시선 - 사진 한 장, 시 한 줄",

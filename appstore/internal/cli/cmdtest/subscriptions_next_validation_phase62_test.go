@@ -192,7 +192,7 @@ func TestSubscriptionsLocalizationsListPaginateFromNextWithoutSubscriptionIDPhas
 }
 
 func TestSubscriptionsOfferCodesCustomCodesRejectsInvalidNextURLPhase62(t *testing.T) {
-	runGameCenterAchievementsInvalidNextURLCases(
+	runInvalidNextURLUsageErrorCases(
 		t,
 		[]string{"subscriptions", "offers", "offer-codes", "custom-codes", "list"},
 		"subscriptions offers offer-codes custom-codes list: --next",

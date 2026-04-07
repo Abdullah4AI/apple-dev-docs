@@ -387,6 +387,131 @@ func TestPrintTable_SkippedAssetUploadResultShowsSkippedState(t *testing.T) {
 	}
 }
 
+func TestPrintTableAndMarkdown_AppScreenshotFanoutUploadResultIncludesFlattenedFileRows(t *testing.T) {
+	resp := &AppScreenshotFanoutUploadResult{
+		AppID:       "123456789",
+		Version:     "1.2.3",
+		VersionID:   "version-1",
+		Platform:    "IOS",
+		DisplayType: "APP_IPHONE_65",
+		Localizations: []AppScreenshotLocalizationUploadResult{
+			{
+				Locale:                "en-US",
+				VersionLocalizationID: "loc-en",
+				SetID:                 "set-en",
+				DisplayType:           "APP_IPHONE_65",
+				Results: []AssetUploadResultItem{
+					{FileName: "01-home.png", AssetID: "shot-en-1", State: "COMPLETE"},
+				},
+			},
+		},
+	}
+
+	renderers := []struct {
+		name string
+		fn   func(any) error
+	}{
+		{name: "table", fn: PrintTable},
+		{name: "markdown", fn: PrintMarkdown},
+	}
+
+	for _, renderer := range renderers {
+		renderer := renderer
+		t.Run(renderer.name, func(t *testing.T) {
+			assertRenderedNonJSONContains(t, renderer.fn, resp, "Locale", "en-US", "01-home.png", "shot-en-1")
+		})
+	}
+}
+
+func TestPrintTableAndMarkdown_AppScreenshotFanoutUploadResultShowsFailureArtifactsAndFailures(t *testing.T) {
+	resp := &AppScreenshotFanoutUploadResult{
+		AppID:       "123456789",
+		Version:     "1.2.3",
+		VersionID:   "version-1",
+		Platform:    "IOS",
+		DisplayType: "APP_IPHONE_65",
+		Localizations: []AppScreenshotLocalizationUploadResult{
+			{
+				Locale:                "fr-FR",
+				VersionLocalizationID: "loc-fr",
+				SetID:                 "set-fr",
+				DisplayType:           "APP_IPHONE_65",
+				Total:                 2,
+				Uploaded:              1,
+				Pending:               1,
+				Failed:                1,
+				FailureArtifactPath:   ".asc/reports/screenshots-upload/failures-fr.json",
+				Results: []AssetUploadResultItem{
+					{FileName: "01-home.png", AssetID: "shot-fr-1", State: "COMPLETE"},
+				},
+				Failures: []AssetUploadFailureItem{
+					{FileName: "02-settings.png", FilePath: "/tmp/02-settings.png", Error: "create failed"},
+				},
+			},
+		},
+	}
+
+	renderers := []struct {
+		name string
+		fn   func(any) error
+	}{
+		{name: "table", fn: PrintTable},
+		{name: "markdown", fn: PrintMarkdown},
+	}
+
+	for _, renderer := range renderers {
+		renderer := renderer
+		t.Run(renderer.name, func(t *testing.T) {
+			assertRenderedNonJSONContains(
+				t,
+				renderer.fn,
+				resp,
+				"Failure Artifact",
+				".asc/reports/screenshots-upload/failures-fr.json",
+				"02-settings.png",
+				"/tmp/02-settings.png",
+				"create failed",
+			)
+		})
+	}
+}
+
+func TestPrintTable_AppScreenshotUploadResultShowsFailureArtifactAndFailures(t *testing.T) {
+	resp := &AppScreenshotUploadResult{
+		VersionLocalizationID: "LOC_123",
+		SetID:                 "SET_123",
+		DisplayType:           "APP_IPHONE_65",
+		Resumed:               true,
+		Total:                 3,
+		Uploaded:              1,
+		Pending:               2,
+		Failed:                1,
+		FailureArtifactPath:   ".asc/reports/screenshots-upload/failures-1.json",
+		Results: []AssetUploadResultItem{
+			{FileName: "01-home.png", AssetID: "SHOT_123", State: "COMPLETE"},
+		},
+		Failures: []AssetUploadFailureItem{
+			{FileName: "02-settings.png", FilePath: "/tmp/02-settings.png", Error: "create failed"},
+		},
+	}
+
+	output := captureStdout(t, func() error {
+		return PrintTable(resp)
+	})
+
+	for _, want := range []string{
+		"Failure Artifact",
+		".asc/reports/screenshots-upload/failures-1.json",
+		"02-settings.png",
+		"/tmp/02-settings.png",
+		"create failed",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected output to contain %q, got: %s", want, output)
+		}
+	}
+}
+
 func TestPrintTableAndMarkdown_BuildUploadResultIncludesOperations(t *testing.T) {
 	resp := &BuildUploadResult{
 		UploadID: "UPLOAD_123",

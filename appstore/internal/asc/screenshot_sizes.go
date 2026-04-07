@@ -156,23 +156,18 @@ func suggestDisplayTypesForDimensions(width, height int, currentDisplayType stri
 	return suggestions
 }
 
-// ValidateScreenshotDimensions checks that the image matches an allowed size.
-func ValidateScreenshotDimensions(path, displayType string) error {
-	dims, err := ReadImageDimensions(path)
-	if err != nil {
-		return err
-	}
+func validateScreenshotDimensionsForSize(path string, width, height int, displayType string) error {
 	allowed, ok := ScreenshotDimensions(displayType)
 	if !ok {
 		return fmt.Errorf("unsupported screenshot display type %q", displayType)
 	}
 	for _, dim := range allowed {
-		if dim.Width == dims.Width && dim.Height == dims.Height {
+		if dim.Width == width && dim.Height == height {
 			return nil
 		}
 	}
 
-	suggestions := suggestDisplayTypesForDimensions(dims.Width, dims.Height, displayType)
+	suggestions := suggestDisplayTypesForDimensions(width, height, displayType)
 	suggestionMessage := ""
 	if len(suggestions) > 0 {
 		suggestionMessage = fmt.Sprintf(" This size matches: %s.", strings.Join(suggestions, ", "))
@@ -181,11 +176,25 @@ func ValidateScreenshotDimensions(path, displayType string) error {
 	return fmt.Errorf(
 		"screenshot %q has unsupported size %dx%d for %s (allowed: %s). See \"asc screenshots sizes --display-type %s\".%s",
 		path,
-		dims.Width,
-		dims.Height,
+		width,
+		height,
 		displayType,
 		formatScreenshotDimensions(allowed),
 		displayType,
 		suggestionMessage,
 	)
+}
+
+// ValidateScreenshotDimensionsForSize checks a known image size against a display type.
+func ValidateScreenshotDimensionsForSize(path string, width, height int, displayType string) error {
+	return validateScreenshotDimensionsForSize(path, width, height, displayType)
+}
+
+// ValidateScreenshotDimensions checks that the image matches an allowed size.
+func ValidateScreenshotDimensions(path, displayType string) error {
+	dims, err := ReadImageDimensions(path)
+	if err != nil {
+		return err
+	}
+	return validateScreenshotDimensionsForSize(path, dims.Width, dims.Height, displayType)
 }

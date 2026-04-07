@@ -55,18 +55,18 @@ func PricingCurrentCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	allTerritories := fs.Bool("all-territories", false, "Show current prices for all territories")
-	territory := fs.String("territory", "", "Comma-separated territory filter(s) (e.g., USA,GBR)")
+	territory := fs.String("territory", "", "Comma-separated territory filter(s); accepts alpha-2, alpha-3, or exact English country names (e.g., US,USA,France)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "current",
-		ShortUsage: `asc pricing current --app "APP_ID" [--all-territories] [--territory "USA,GBR"]`,
+		ShortUsage: `asc pricing current --app "APP_ID" [--all-territories] [--territory "US,France"]`,
 		ShortHelp:  "Show the current app price.",
 		LongHelp: `Show the current app price.
 
 Examples:
   asc pricing current --app "123456789"
-  asc pricing current --app "123456789" --territory "USA,GBR"
+  asc pricing current --app "123456789" --territory "US,France"
   asc pricing current --app "123456789" --all-territories --output table`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -77,11 +77,15 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			requestedTerritories := uniqueUpperList(shared.SplitCSVUpper(*territory))
 			if *allTerritories && strings.TrimSpace(*territory) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --territory and --all-territories are mutually exclusive")
 				return flag.ErrHelp
 			}
+			requestedTerritories, err := shared.NormalizeASCTerritoryCSV(*territory)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			requestedTerritories = uniqueUpperList(requestedTerritories)
 			if strings.TrimSpace(*territory) != "" && len(requestedTerritories) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territory must include at least one territory code")
 				return flag.ErrHelp

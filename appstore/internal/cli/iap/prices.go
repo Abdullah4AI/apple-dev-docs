@@ -16,6 +16,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -73,7 +74,7 @@ func IAPPricesCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", iapLookupAppUsage)
 	iapID := fs.String("iap-id", "", "In-app purchase ID, product ID, or exact current name")
-	territory := fs.String("territory", "", "Territory filter (e.g., USA)")
+	territory := fs.String("territory", "", "Territory filter (accepts alpha-2, alpha-3, or exact English country name)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -85,7 +86,7 @@ func IAPPricesCommand() *ffcli.Command {
 Examples:
   asc iap pricing summary --app "APP_ID"
   asc iap pricing summary --iap-id "IAP_ID"
-  asc iap pricing summary --app "APP_ID" --territory "USA" --output table`,
+  asc iap pricing summary --app "APP_ID" --territory "France" --output table`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -107,6 +108,13 @@ Examples:
 				requestedIAPID, err = resolveIAPLookupIDWithTimeout(ctx, client, requestedAppID, requestedIAPID)
 				if err != nil {
 					return err
+				}
+			}
+			territoryFilter := strings.TrimSpace(*territory)
+			if territoryFilter != "" {
+				territoryFilter, err = ascterritory.Normalize(territoryFilter)
+				if err != nil {
+					return shared.UsageError(err.Error())
 				}
 			}
 
@@ -143,7 +151,7 @@ Examples:
 				requestCtx,
 				client,
 				iaps,
-				strings.ToUpper(strings.TrimSpace(*territory)),
+				territoryFilter,
 				time.Now().UTC(),
 			)
 			if err != nil {

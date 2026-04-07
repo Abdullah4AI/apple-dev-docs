@@ -10,6 +10,7 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -179,7 +180,7 @@ func SubscriptionsIntroductoryOffersCreateCommand() *ffcli.Command {
 	numberOfPeriods := fs.Int("number-of-periods", 0, "Number of periods (required)")
 	startDate := fs.String("start-date", "", "Start date (YYYY-MM-DD)")
 	endDate := fs.String("end-date", "", "End date (YYYY-MM-DD)")
-	territory := fs.String("territory", "", "Territory ID for price override")
+	territory := fs.String("territory", "", "Territory input for price override (accepts alpha-2, alpha-3, or exact English country name)")
 	pricePoint := fs.String("price-point", "", "Subscription price point ID")
 	output := shared.BindOutputFlags(fs)
 
@@ -235,6 +236,14 @@ Examples:
 				}
 			}
 
+			territoryID := strings.TrimSpace(*territory)
+			if territoryID != "" {
+				territoryID, err = ascterritory.Normalize(territoryID)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("subscriptions introductory-offers create: %w", err)
@@ -264,7 +273,7 @@ Examples:
 				requestCtx,
 				id,
 				attrs,
-				strings.TrimSpace(*territory),
+				territoryID,
 				strings.TrimSpace(*pricePoint),
 			)
 			if err != nil {

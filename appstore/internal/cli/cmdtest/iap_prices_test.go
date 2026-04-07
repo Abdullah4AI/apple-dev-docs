@@ -181,6 +181,67 @@ func TestIAPPricesByIDSuccess(t *testing.T) {
 	}
 }
 
+func TestIAPPricesByIDNormalizesTerritory(t *testing.T) {
+	setupAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v2/inAppPurchases/9000000001":
+			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"inAppPurchases","id":"9000000001","attributes":{"name":"Lifetime Unlock","productId":"com.example.lifetime","inAppPurchaseType":"NON_CONSUMABLE"}}}`), nil
+		case "/v2/inAppPurchases/9000000001/iapPriceSchedule":
+			return jsonHTTPResponse(http.StatusOK, `{
+				"data":{"type":"inAppPurchasePriceSchedules","id":"schedule-1","relationships":{"baseTerritory":{"data":{"type":"territories","id":"USA"}}}},
+				"included":[{"type":"territories","id":"USA","attributes":{"currency":"USD"}}]
+			}`), nil
+		case "/v1/inAppPurchasePriceSchedules/schedule-1/manualPrices":
+			return jsonHTTPResponse(http.StatusOK, `{
+				"data":[
+					{
+						"type":"inAppPurchasePrices",
+						"id":"iap-price-1",
+						"attributes":{"startDate":"2024-01-01","manual":true},
+						"relationships":{
+							"territory":{"data":{"type":"territories","id":"USA"}},
+							"inAppPurchasePricePoint":{"data":{"type":"inAppPurchasePricePoints","id":"pp-1"}}
+						}
+					}
+				],
+				"included":[{"type":"territories","id":"USA","attributes":{"currency":"USD"}}],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/inAppPurchasePriceSchedules/schedule-1/automaticPrices":
+			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case "/v2/inAppPurchases/9000000001/pricePoints":
+			if got := req.URL.Query().Get("filter[territory]"); got != "USA" {
+				t.Fatalf("expected normalized filter[territory]=USA, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{
+				"data":[{"type":"inAppPurchasePricePoints","id":"pp-1","attributes":{"customerPrice":"9.99","proceeds":"8.49"}}],
+				"included":[{"type":"territories","id":"USA","attributes":{"currency":"USD"}}],
+				"links":{"next":""}
+			}`), nil
+		default:
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	if err := root.Parse([]string{"iap", "pricing", "summary", "--iap-id", "9000000001", "--territory", "US"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if err := root.Run(context.Background()); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+}
+
 func TestIAPPricesTableOutput(t *testing.T) {
 	setupAuth(t)
 

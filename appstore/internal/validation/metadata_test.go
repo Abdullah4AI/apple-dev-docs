@@ -52,7 +52,7 @@ func TestMetadataLengthChecks_ValidUnicode(t *testing.T) {
 	loc := VersionLocalization{
 		Locale:          "ja-JP",
 		Description:     strings.Repeat("界", LimitDescription),
-		Keywords:        strings.Repeat("語", LimitKeywords),
+		Keywords:        strings.Repeat("語", 33),
 		WhatsNew:        strings.Repeat("新", LimitWhatsNew),
 		PromotionalText: strings.Repeat("宣", LimitPromotionalText),
 	}
@@ -65,5 +65,27 @@ func TestMetadataLengthChecks_ValidUnicode(t *testing.T) {
 	checks := metadataLengthChecks([]VersionLocalization{loc}, []AppInfoLocalization{appInfo})
 	if len(checks) != 0 {
 		t.Fatalf("expected no checks, got %d", len(checks))
+	}
+}
+
+func TestVersionLocalizationLengthIssues_KeywordsUseCharacterLimit(t *testing.T) {
+	keywords := strings.Repeat("語", 101)
+
+	issues := VersionLocalizationLengthIssues(VersionLocalization{
+		Locale:   "ja-JP",
+		Keywords: keywords,
+	})
+
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %+v", issues)
+	}
+	if issues[0].Field != "keywords" {
+		t.Fatalf("expected keywords issue, got %+v", issues[0])
+	}
+	if issues[0].Length != 101 {
+		t.Fatalf("expected keyword length 101, got %d", issues[0].Length)
+	}
+	if issues[0].Limit != LimitKeywords {
+		t.Fatalf("expected keyword limit %d, got %d", LimitKeywords, issues[0].Limit)
 	}
 }

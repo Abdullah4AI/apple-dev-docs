@@ -35,6 +35,11 @@ func TestPricingCurrentValidationErrors(t *testing.T) {
 			args:    []string{"pricing", "current", "--app", "app-1", "--territory", ",,,"},
 			wantErr: "Error: --territory must include at least one territory code",
 		},
+		{
+			name:    "invalid territory value",
+			args:    []string{"pricing", "current", "--app", "app-1", "--territory", "Atlantis"},
+			wantErr: "Error: territory \"Atlantis\" could not be mapped to an App Store Connect territory ID",
+		},
 	}
 
 	for _, test := range tests {
@@ -622,7 +627,7 @@ func TestPricingCurrentTerritoryFilterTableOutput(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"pricing", "current", "--app", "app-1", "--territory", "USA,GBR", "--output", "table"}); err != nil {
+		if err := root.Parse([]string{"pricing", "current", "--app", "app-1", "--territory", "US,United Kingdom", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

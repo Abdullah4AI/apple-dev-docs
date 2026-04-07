@@ -57,6 +57,28 @@ func TestResolveAppIDWithLookup_NumericPassthrough(t *testing.T) {
 	}
 }
 
+func TestIsNumericAppID(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "empty", value: "", want: false},
+		{name: "numeric", value: "123456789", want: true},
+		{name: "whitespace", value: " 123456789 ", want: false},
+		{name: "bundle id", value: "com.example.app", want: false},
+		{name: "mixed", value: "123abc", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := IsNumericAppID(test.value); got != test.want {
+				t.Fatalf("IsNumericAppID(%q) = %t, want %t", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func TestResolveAppIDWithLookup_NumericPassthroughSkipsClientLookup(t *testing.T) {
 	t.Setenv("ASC_APP_ID", "")
 

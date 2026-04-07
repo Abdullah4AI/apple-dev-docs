@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/auth"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/config"
 )
@@ -1360,6 +1361,104 @@ func splitCSVUpper(value string) []string {
 	return upper
 }
 
+type ASCTerritoryValuePair struct {
+	TerritoryID string
+	Value       string
+}
+
+func joinCSVParts(parts []string) string {
+	return strings.Join(parts, ", ")
+}
+
+func normalizeASCTerritoryCSVParts(parts []string) ([]string, error) {
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(parts))
+	for start := 0; start < len(parts); {
+		candidateParts := make([]string, 0, len(parts)-start)
+		matchedID := ""
+		nextIndex := -1
+
+		for end := start; end < len(parts); end++ {
+			candidateParts = append(candidateParts, parts[end])
+			candidate := joinCSVParts(candidateParts)
+			territoryID, err := ascterritory.Normalize(candidate)
+			if err == nil {
+				matchedID = territoryID
+				nextIndex = end + 1
+			}
+		}
+
+		if nextIndex == -1 {
+			_, err := ascterritory.Normalize(parts[start])
+			return nil, err
+		}
+
+		normalized = append(normalized, matchedID)
+		start = nextIndex
+	}
+
+	return normalized, nil
+}
+
+func normalizeASCTerritoryCSV(value string) ([]string, error) {
+	values := splitCSV(value)
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return normalizeASCTerritoryCSVParts(values)
+}
+
+func parseASCTerritoryValueCSV(value string) ([]ASCTerritoryValuePair, error) {
+	parts := splitCSV(value)
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	pairs := make([]ASCTerritoryValuePair, 0, len(parts))
+	for start := 0; start < len(parts); {
+		territoryParts := make([]string, 0, len(parts)-start)
+		matched := false
+
+		for end := start; end < len(parts); end++ {
+			before, after, found := strings.Cut(parts[end], ":")
+			if !found {
+				territoryParts = append(territoryParts, parts[end])
+				continue
+			}
+
+			territoryParts = append(territoryParts, strings.TrimSpace(before))
+			territoryID, err := ascterritory.Normalize(joinCSVParts(territoryParts))
+			if err != nil {
+				return nil, err
+			}
+
+			valuePart := strings.TrimSpace(after)
+			if territoryID == "" || valuePart == "" {
+				return nil, fmt.Errorf("--prices must use TERRITORY:PRICE_POINT_ID entries")
+			}
+
+			pairs = append(pairs, ASCTerritoryValuePair{
+				TerritoryID: territoryID,
+				Value:       valuePart,
+			})
+			start = end + 1
+			matched = true
+			break
+		}
+
+		if matched {
+			continue
+		}
+
+		return nil, fmt.Errorf("--prices must use TERRITORY:PRICE_POINT_ID entries")
+	}
+
+	return pairs, nil
+}
+
 func validateNextURL(next string) error {
 	next = strings.TrimSpace(next)
 	if next == "" {
@@ -1493,6 +1592,14 @@ func SplitUniqueCSV(value string) []string {
 
 func SplitCSVUpper(value string) []string {
 	return splitCSVUpper(value)
+}
+
+func NormalizeASCTerritoryCSV(value string) ([]string, error) {
+	return normalizeASCTerritoryCSV(value)
+}
+
+func ParseASCTerritoryValueCSV(value string) ([]ASCTerritoryValuePair, error) {
+	return parseASCTerritoryValueCSV(value)
 }
 
 func ValidateNextURL(next string) error {

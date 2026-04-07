@@ -200,6 +200,25 @@ func init() {
 			ih, ir := assetUploadResultItemRows(v.Results)
 			render(ih, ir)
 		}
+		if len(v.Failures) > 0 {
+			fh, fr := assetUploadFailureItemRows(v.Failures)
+			render(fh, fr)
+		}
+		return nil
+	})
+	registerDirect(func(v *AppScreenshotFanoutUploadResult, render func([]string, [][]string)) error {
+		h, r := appScreenshotFanoutUploadResultMainRows(v)
+		render(h, r)
+		if len(v.Localizations) > 0 {
+			lh, lr := appScreenshotFanoutUploadLocalizationRows(v)
+			render(lh, lr)
+			ih, ir := appScreenshotFanoutUploadResultItemRows(v)
+			render(ih, ir)
+			fh, fr := appScreenshotFanoutUploadFailureRows(v)
+			if len(fr) > 0 {
+				render(fh, fr)
+			}
+		}
 		return nil
 	})
 	registerDirect(func(v *AppPreviewUploadResult, render func([]string, [][]string)) error {
@@ -271,6 +290,10 @@ func init() {
 		if v.Export != nil {
 			eh, er := publishExportStageRows(v.Export)
 			render(eh, er)
+		}
+		if len(v.Plan) > 0 {
+			ph, pr := publishPlanRows(v.Plan)
+			render(ph, pr)
 		}
 		return nil
 	})

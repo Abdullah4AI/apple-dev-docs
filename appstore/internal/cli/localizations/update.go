@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -21,7 +22,7 @@ func LocalizationsUpdateCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID, for app-info localizations)")
 	appInfoID := fs.String("app-info", "", "App Info ID (optional override)")
 	locType := fs.String("type", shared.LocalizationTypeVersion, "Localization type: version (default) or app-info")
-	locale := fs.String("locale", "", "Locale to update (required, e.g., en-US)")
+	locale := fs.String("locale", "", "Locale to update (required; reuse exact ASC locale like en-US, ar-SA, zh-Hans)")
 
 	// App-info fields
 	name := fs.String("name", "", "App name (app-info)")
@@ -46,11 +47,26 @@ func LocalizationsUpdateCommand() *ffcli.Command {
 		ShortHelp:  "Update localization fields directly.",
 		LongHelp: `Update localization fields directly without file preparation.
 
+Pass the exact locale value already stored in App Store Connect. Common accepted
+forms include en-US, de-DE, ja, ar-SA, zh-Hans, and zh-Hant.
+
+Common failures:
+  "ar" is usually stored as "ar-SA"
+  "de" is usually stored as "de-DE"
+  "zh-Hans-CN" and "zh-Hant-TW" are usually stored as "zh-Hans" and "zh-Hant"
+
+If a version locale is rejected or not found, run:
+  asc localizations supported-locales --version "VERSION_ID"
+  asc localizations list --version "VERSION_ID"
+
+For app-info localizations, inspect configured locales with:
+  asc localizations list --app "APP_ID" --type app-info
+
 For app-info localizations (name, subtitle, privacy URLs):
-  asc localizations update --app "APP_ID" --type app-info --locale "en-US" --subtitle "My App"
+  asc localizations update --app "APP_ID" --type app-info --locale "ar-SA" --subtitle "Arabic subtitle"
 
 For version localizations (description, keywords, whatsNew):
-  asc localizations update --version "VERSION_ID" --locale "en-US" --description "Updated description"
+  asc localizations update --version "VERSION_ID" --locale "zh-Hans" --description "Simplified Chinese description"
 
 At least one field flag must be provided.`,
 		FlagSet:   fs,
@@ -65,6 +81,10 @@ At least one field flag must be provided.`,
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
 				return flag.ErrHelp
+			}
+			localeValue, err = shared.CanonicalizeAppStoreLocalizationLocale(localeValue)
+			if err != nil {
+				return shared.UsageError(err.Error())
 			}
 
 			switch normalizedType {
@@ -157,7 +177,12 @@ func updateAppInfoLocalization(ctx context.Context, p updateAppInfoParams) error
 
 	resp, err := client.UpdateAppInfoLocalization(requestCtx, localizationID, attrs)
 	if err != nil {
-		return fmt.Errorf("localizations update: %w", err)
+		return fmt.Errorf(
+			"localizations update: update app-info localization %q (fields: %s): %w",
+			p.locale,
+			formatAttemptedFields(appInfoAttemptedFields(p)),
+			err,
+		)
 	}
 
 	return shared.PrintOutput(resp, *p.output.Output, *p.output.Pretty)
@@ -183,6 +208,9 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 	if vid == "" {
 		fmt.Fprintln(os.Stderr, "Error: --version is required for version localizations")
 		return flag.ErrHelp
+	}
+	if err := shared.ValidateVersionLocalizationAttributes(asc.AppStoreVersionLocalizationAttributes{Keywords: p.keywords}); err != nil {
+		return shared.UsageError(err.Error())
 	}
 
 	client, err := shared.GetASCClient()
@@ -221,7 +249,12 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 
 	resp, err := client.UpdateAppStoreVersionLocalization(requestCtx, localizationID, attrs)
 	if err != nil {
-		return fmt.Errorf("localizations update: %w", err)
+		return fmt.Errorf(
+			"localizations update: update version localization %q (fields: %s): %w",
+			p.locale,
+			formatAttemptedFields(versionAttemptedFields(p)),
+			err,
+		)
 	}
 
 	return shared.PrintOutput(resp, *p.output.Output, *p.output.Pretty)
@@ -229,4 +262,56 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 
 func hasAnyVersionField(p updateVersionParams) bool {
 	return p.description != "" || p.keywords != "" || p.whatsNew != "" || p.promotionalText != "" || p.supportURL != "" || p.marketingURL != ""
+}
+
+func appInfoAttemptedFields(p updateAppInfoParams) []string {
+	fields := make([]string, 0, 5)
+	if p.name != "" {
+		fields = append(fields, "name")
+	}
+	if p.subtitle != "" {
+		fields = append(fields, "subtitle")
+	}
+	if p.privacyPolicyURL != "" {
+		fields = append(fields, "privacyPolicyUrl")
+	}
+	if p.privacyChoicesURL != "" {
+		fields = append(fields, "privacyChoicesUrl")
+	}
+	if p.privacyPolicyText != "" {
+		fields = append(fields, "privacyPolicyText")
+	}
+	return fields
+}
+
+func versionAttemptedFields(p updateVersionParams) []string {
+	fields := make([]string, 0, 6)
+	if p.description != "" {
+		fields = append(fields, "description")
+	}
+	if p.keywords != "" {
+		fields = append(fields, "keywords")
+	}
+	if p.marketingURL != "" {
+		fields = append(fields, "marketingUrl")
+	}
+	if p.promotionalText != "" {
+		fields = append(fields, "promotionalText")
+	}
+	if p.supportURL != "" {
+		fields = append(fields, "supportUrl")
+	}
+	if p.whatsNew != "" {
+		fields = append(fields, "whatsNew")
+	}
+	return fields
+}
+
+func formatAttemptedFields(fields []string) string {
+	if len(fields) == 0 {
+		return "none"
+	}
+	values := append([]string(nil), fields...)
+	sort.Strings(values)
+	return strings.Join(values, ", ")
 }

@@ -17,11 +17,9 @@ import (
 	"unicode"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
-	"golang.org/x/text/language"
-	"golang.org/x/text/language/display"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
-	sandboxcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/sandbox"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -71,17 +69,6 @@ type subscriptionPricePointLookupCache struct {
 	mu          sync.Mutex
 	byTerritory map[string]map[string][]string
 }
-
-type territoryNameMapResult struct {
-	id        string
-	ambiguous bool
-}
-
-var (
-	subscriptionPriceImportTerritoryNamesOnce sync.Once
-	subscriptionPriceImportTerritoryNames     map[string]territoryNameMapResult
-	subscriptionPriceImportTerritoryIDs       map[string]struct{}
-)
 
 var subscriptionPricesImportKnownColumns = map[string]string{
 	"territory":              "territory",
@@ -565,177 +552,7 @@ func fetchSubscriptionPricePointsByTerritory(
 }
 
 func resolveSubscriptionPriceImportTerritoryID(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", fmt.Errorf("territory is required")
-	}
-
-	upper := strings.ToUpper(trimmed)
-	if isThreeLetterCode(upper) {
-		if isKnownSubscriptionPriceImportTerritoryID(upper) {
-			return upper, nil
-		}
-		return "", fmt.Errorf("territory %q could not be mapped to an App Store Connect territory ID", trimmed)
-	}
-
-	// Accept alpha-2 inputs when users pass "US"/"GB" from spreadsheets.
-	if len(upper) == 2 {
-		if region, err := language.ParseRegion(upper); err == nil {
-			if iso3 := strings.ToUpper(strings.TrimSpace(region.ISO3())); isKnownSubscriptionPriceImportTerritoryID(iso3) {
-				return iso3, nil
-			}
-		}
-	}
-
-	key := normalizeSubscriptionPriceImportTerritoryName(trimmed)
-	entry, ok := subscriptionPriceImportTerritoryNameMap()[key]
-	if !ok {
-		return "", fmt.Errorf("territory %q could not be mapped to an App Store Connect territory ID", trimmed)
-	}
-	if entry.ambiguous || entry.id == "" {
-		return "", fmt.Errorf("territory %q is ambiguous; use a 3-letter territory ID like USA", trimmed)
-	}
-	return entry.id, nil
-}
-
-func subscriptionPriceImportTerritoryNameMap() map[string]territoryNameMapResult {
-	subscriptionPriceImportTerritoryNamesOnce.Do(func() {
-		m := make(map[string]territoryNameMapResult)
-		ids := make(map[string]struct{})
-		regionNamer := display.English.Regions()
-
-		for a := 'A'; a <= 'Z'; a++ {
-			for b := 'A'; b <= 'Z'; b++ {
-				for c := 'A'; c <= 'Z'; c++ {
-					code := string([]rune{a, b, c})
-					region, err := language.ParseRegion(code)
-					if err != nil {
-						continue
-					}
-					iso3 := strings.ToUpper(strings.TrimSpace(region.ISO3()))
-					if iso3 != code {
-						continue
-					}
-					if !isSupportedSubscriptionPriceImportTerritoryCode(iso3) {
-						continue
-					}
-					ids[iso3] = struct{}{}
-					name := strings.TrimSpace(regionNamer.Name(region))
-					if name == "" || strings.EqualFold(name, code) || strings.EqualFold(name, "Unknown Region") {
-						continue
-					}
-					key := normalizeSubscriptionPriceImportTerritoryName(name)
-					if key == "" {
-						continue
-					}
-					existing, exists := m[key]
-					switch {
-					case !exists:
-						m[key] = territoryNameMapResult{id: iso3}
-					case existing.id != iso3:
-						m[key] = territoryNameMapResult{ambiguous: true}
-					}
-				}
-			}
-		}
-
-		for alias, id := range subscriptionPriceImportTerritoryAliases() {
-			key := normalizeSubscriptionPriceImportTerritoryName(alias)
-			if key == "" {
-				continue
-			}
-			normalizedID := strings.ToUpper(strings.TrimSpace(id))
-			if normalizedID == "" {
-				continue
-			}
-			if !isSupportedSubscriptionPriceImportTerritoryCode(normalizedID) {
-				continue
-			}
-			m[key] = territoryNameMapResult{id: normalizedID}
-			ids[normalizedID] = struct{}{}
-		}
-
-		subscriptionPriceImportTerritoryNames = m
-		subscriptionPriceImportTerritoryIDs = ids
-	})
-
-	return subscriptionPriceImportTerritoryNames
-}
-
-func isKnownSubscriptionPriceImportTerritoryID(value string) bool {
-	subscriptionPriceImportTerritoryNameMap()
-	_, ok := subscriptionPriceImportTerritoryIDs[value]
-	return ok
-}
-
-func isSupportedSubscriptionPriceImportTerritoryCode(value string) bool {
-	_, err := sandboxcmd.NormalizeSandboxTerritoryCode(value)
-	return err == nil
-}
-
-func subscriptionPriceImportTerritoryAliases() map[string]string {
-	return map[string]string{
-		"uae":                                   "ARE",
-		"uk":                                    "GBR",
-		"united states of america":              "USA",
-		"republic of korea":                     "KOR",
-		"korea republic of":                     "KOR",
-		"korea south":                           "KOR",
-		"democratic people's republic of korea": "PRK",
-		"korea north":                           "PRK",
-		"taiwan province of china":              "TWN",
-		"russian federation":                    "RUS",
-		"bolivia plurinational state of":        "BOL",
-		"venezuela bolivarian republic of":      "VEN",
-		"iran islamic republic of":              "IRN",
-		"moldova republic of":                   "MDA",
-		"tanzania united republic of":           "TZA",
-		"lao people's democratic republic":      "LAO",
-		"viet nam":                              "VNM",
-		"syrian arab republic":                  "SYR",
-		"palestine state of":                    "PSE",
-		"brunei darussalam":                     "BRN",
-		"czechia":                               "CZE",
-		"eswatini":                              "SWZ",
-		"cape verde":                            "CPV",
-		"curacao":                               "CUW",
-		"kosovo":                                "XKS",
-		"hong kong sar china":                   "HKG",
-		"macao sar china":                       "MAC",
-		"myanmar":                               "MMR",
-		"turkiye":                               "TUR",
-		"cote d ivoire":                         "CIV",
-		"cote divoire":                          "CIV",
-		"congo democratic republic of the":      "COD",
-		"democratic republic of the congo":      "COD",
-		"congo republic of the":                 "COG",
-		"republic of the congo":                 "COG",
-		"micronesia federated states of":        "FSM",
-		"macedonia the former yugoslav republic of": "MKD",
-		"north macedonia": "MKD",
-	}
-}
-
-func normalizeSubscriptionPriceImportTerritoryName(value string) string {
-	trimmed := strings.TrimSpace(strings.ToLower(value))
-	if trimmed == "" {
-		return ""
-	}
-
-	var builder strings.Builder
-	lastSpace := false
-	for _, r := range trimmed {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			builder.WriteRune(r)
-			lastSpace = false
-			continue
-		}
-		if !lastSpace {
-			builder.WriteRune(' ')
-			lastSpace = true
-		}
-	}
-	return strings.Join(strings.Fields(builder.String()), " ")
+	return ascterritory.Normalize(raw)
 }
 
 func normalizeSubscriptionPriceImportPrice(value string) (string, error) {
@@ -799,18 +616,6 @@ func normalizeSubscriptionPricesImportHeader(raw string) string {
 func isSubscriptionPricesImportRecordEmpty(record []string) bool {
 	for _, item := range record {
 		if strings.TrimSpace(item) != "" {
-			return false
-		}
-	}
-	return true
-}
-
-func isThreeLetterCode(value string) bool {
-	if len(value) != 3 {
-		return false
-	}
-	for _, r := range value {
-		if r < 'A' || r > 'Z' {
 			return false
 		}
 	}

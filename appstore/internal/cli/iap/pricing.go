@@ -156,7 +156,7 @@ func DeprecatedIAPAvailabilityAliasCommand() *ffcli.Command {
 			shared.DeprecatedAliasLeafCommand(
 				IAPAvailabilitySetCommand(),
 				"set",
-				iapPricingCanonicalRoot+" availability set --iap-id \"IAP_ID\" --territories \"USA,CAN\"",
+				iapPricingCanonicalRoot+" availability set --iap-id \"IAP_ID\" --territories \"US,Canada\"",
 				iapPricingCanonicalRoot+" availability set",
 				"Warning: `asc iap availability set` is deprecated. Use `asc iap pricing availability set`.",
 			),
