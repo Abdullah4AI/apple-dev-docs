@@ -3,17 +3,21 @@ package integrations
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// validPAT is a test token matching the Supabase PAT format: sbp_ + 40 hex chars.
-const validPAT = "sbp_0123456789abcdef0123456789abcdef01234567"
+var (
+	// Build token-shaped fixtures at runtime so secret scanning does not treat
+	// test constants as real leaked Supabase PATs.
+	validPAT      = fakeSupabasePAT("sbp_", "0123456789abcdef")
+	validPAT2     = fakeSupabasePAT("sbp_", "abcdef0123456789")
+	validOAuthPAT = fakeSupabasePAT("sbp_oauth_", "0123456789abcdef")
+)
 
-// validPAT2 is a second distinct valid token for priority/overwrite tests.
-const validPAT2 = "sbp_abcdef0123456789abcdef0123456789abcdef01"
-
-// validOAuthPAT is a valid OAuth-style token: sbp_oauth_ + 40 hex chars.
-const validOAuthPAT = "sbp_oauth_0123456789abcdef0123456789abcdef01234567"
+func fakeSupabasePAT(prefix, seed string) string {
+	return prefix + strings.Repeat(seed, 3)[:40]
+}
 
 // --- Token validation tests ---
 
@@ -25,9 +29,9 @@ func TestIsValidPAT(t *testing.T) {
 		{validPAT, true},
 		{validOAuthPAT, true},
 		{validPAT2, true},
-		{"sbp_0123456789abcdef0123456789abcdef0123456", false},  // 39 chars (too short)
-		{"sbp_0123456789abcdef0123456789abcdef012345678", false}, // 41 chars (too long)
-		{"sbp_UPPERCASE0123456789abcdef01234567890123", false},   // uppercase hex
+		{validPAT[:len(validPAT)-1], false},                        // 39 chars (too short)
+		{validPAT + "8", false},                                    // 41 chars (too long)
+		{"sbp_" + strings.ToUpper(strings.Repeat("ab", 20)), false}, // uppercase hex
 		{"", false},
 		{"random-string", false},
 		{"\x1b\x1b", false},      // escape chars (the bug that caused garbage saves)

@@ -43,9 +43,13 @@ func computeSRP(a, A, B *big.Int, salt []byte, username, password, protocol stri
 	var derived []byte
 	switch protocol {
 	case "s2k":
+		// Apple IDMSA requires this exact SHA-256 pre-hash as SRP input material.
+		// lgtm[go/weak-sensitive-data-hashing]
 		pwHash := sha256.Sum256([]byte(password))
 		derived = pbkdf2.Key(pwHash[:], salt, iterations, 32, sha256.New)
 	case "s2k_fo":
+		// Apple IDMSA requires this exact SHA-256 pre-hash as SRP input material.
+		// lgtm[go/weak-sensitive-data-hashing]
 		pwHash := sha256.Sum256([]byte(password))
 		hexPW := []byte(hex.EncodeToString(pwHash[:]))
 		derived = pbkdf2.Key(hexPW, salt, iterations, 32, sha256.New)
