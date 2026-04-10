@@ -562,6 +562,8 @@ func performSRPLogin(ctx context.Context, client *http.Client, creds LoginCreden
 }
 
 func preparePasswordForProtocol(password, protocol string) ([]byte, error) {
+	// Apple IDMSA requires this exact SHA-256 pre-hash as SRP input material.
+	// lgtm[go/weak-sensitive-data-hashing]
 	passwordDigest := sha256.Sum256([]byte(password))
 	switch protocol {
 	case "s2k":
@@ -733,6 +735,8 @@ func shaHex(hexValue string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid hex input: %w", err)
 	}
+	// Apple's SRP proof derivation hashes protocol-defined intermediate values.
+	// lgtm[go/weak-sensitive-data-hashing]
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }

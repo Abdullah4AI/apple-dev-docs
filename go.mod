@@ -9,7 +9,7 @@ require (
 	github.com/creack/pty v1.1.17
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/modelcontextprotocol/go-sdk v1.4.1
+	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/peterbourgon/ff/v3 v3.4.0
 	github.com/rivo/uniseg v0.4.4
