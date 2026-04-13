@@ -3,6 +3,7 @@ package cmdtest
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,16 +13,36 @@ import (
 func buildASCBlackBoxBinary(t *testing.T) string {
 	t.Helper()
 
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	repoRoot := findModuleRoot(t)
 	binaryPath := filepath.Join(t.TempDir(), "asc")
 
-	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	build := exec.Command("go", "build", "-o", binaryPath, "./cmd/appledev")
 	build.Dir = repoRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build asc binary: %v\n%s", err, string(output))
 	}
 
 	return binaryPath
+}
+
+func findModuleRoot(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not find module root from %s", dir)
+		}
+		dir = parent
+	}
 }
 
 func TestValidateRemovedRemediationFlagsReturnUsageExitCode(t *testing.T) {

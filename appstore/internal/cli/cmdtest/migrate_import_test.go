@@ -3,6 +3,7 @@ package cmdtest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -580,6 +582,188 @@ func TestMigrateImportRejectsInvalidScreenshot(t *testing.T) {
 	}
 	if !strings.Contains(runErr.Error(), badPath) {
 		t.Fatalf("expected error to mention %q, got %v", badPath, runErr)
+	}
+}
+
+func TestMigrateImportDryRunSkipScreenshotsFlag(t *testing.T) {
+	root := t.TempDir()
+	metadataDir := filepath.Join(root, "metadata", "en-US")
+	if err := os.MkdirAll(metadataDir, 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+	writeFile(t, filepath.Join(metadataDir, "description.txt"), "English description")
+
+	screenshotsDir := filepath.Join(root, "screenshots", "en-US")
+	if err := os.MkdirAll(screenshotsDir, 0o755); err != nil {
+		t.Fatalf("mkdir screenshots: %v", err)
+	}
+	writePNGForMigrate(t, filepath.Join(screenshotsDir, "iphone_65_screen.png"), 1242, 2688)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	rootCmd := RootCommand("1.2.3")
+	rootCmd.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := rootCmd.Parse([]string{
+			"migrate", "import",
+			"--app", "APP_ID",
+			"--version-id", "VERSION_ID",
+			"--dry-run",
+			"--skip-screenshots",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := rootCmd.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var result migrate.MigrateImportResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.ScreenshotPlan) != 0 {
+		t.Fatalf("expected no screenshot plan, got %+v", result.ScreenshotPlan)
+	}
+	if len(result.Skipped) == 0 {
+		t.Fatalf("expected screenshots dir to be reported as skipped")
+	}
+}
+
+func TestMigrateImportSkipScreenshotsRejectsInvalidBooleanExitCode(t *testing.T) {
+	binaryPath := buildASCBlackBoxBinary(t)
+	cmd := exec.Command(binaryPath, "migrate", "import", "--app", "APP_ID", "--version-id", "VERSION_ID", "--skip-screenshots=maybe")
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected process exit error, got %v", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.ExitCode())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid boolean value") {
+		t.Fatalf("expected invalid boolean error, got %q", stderr.String())
+	}
+}
+
+func TestMigrateImportDryRunSkipScreenshotsAllowsMissingFastlaneScreenshotsDir(t *testing.T) {
+	root := t.TempDir()
+	fastlaneDir := filepath.Join(root, "fastlane")
+	metadataDir := filepath.Join(fastlaneDir, "metadata", "en-US")
+	if err := os.MkdirAll(metadataDir, 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+	writeFile(t, filepath.Join(metadataDir, "description.txt"), "English description")
+
+	rootCmd := RootCommand("1.2.3")
+	rootCmd.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := rootCmd.Parse([]string{
+			"migrate", "import",
+			"--app", "APP_ID",
+			"--version-id", "VERSION_ID",
+			"--fastlane-dir", fastlaneDir,
+			"--dry-run",
+			"--skip-screenshots",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := rootCmd.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var result migrate.MigrateImportResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.MetadataFiles) != 1 {
+		t.Fatalf("expected metadata plan to survive missing screenshots dir, got %+v", result.MetadataFiles)
+	}
+	if len(result.ScreenshotPlan) != 0 {
+		t.Fatalf("expected no screenshot plan, got %+v", result.ScreenshotPlan)
+	}
+}
+
+func TestMigrateImportDryRunDeliverfileSkipScreenshotsAllowsMissingFastlaneScreenshotsDir(t *testing.T) {
+	root := t.TempDir()
+	fastlaneDir := filepath.Join(root, "fastlane")
+	metadataDir := filepath.Join(fastlaneDir, "metadata", "en-US")
+	if err := os.MkdirAll(metadataDir, 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+	writeFile(t, filepath.Join(metadataDir, "description.txt"), "English description")
+	writeFile(t, filepath.Join(fastlaneDir, "Deliverfile"), "skip_screenshots true\n")
+
+	rootCmd := RootCommand("1.2.3")
+	rootCmd.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := rootCmd.Parse([]string{
+			"migrate", "import",
+			"--app", "APP_ID",
+			"--version-id", "VERSION_ID",
+			"--fastlane-dir", fastlaneDir,
+			"--dry-run",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := rootCmd.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var result migrate.MigrateImportResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.MetadataFiles) != 1 {
+		t.Fatalf("expected metadata plan to survive missing screenshots dir, got %+v", result.MetadataFiles)
+	}
+	if len(result.ScreenshotPlan) != 0 {
+		t.Fatalf("expected no screenshot plan, got %+v", result.ScreenshotPlan)
+	}
+	foundDeliverfileSkip := false
+	for _, skipped := range result.Skipped {
+		if skipped.Reason == "skip_screenshots in Deliverfile" {
+			foundDeliverfileSkip = true
+			break
+		}
+	}
+	if !foundDeliverfileSkip {
+		t.Fatalf("expected skipped list to include Deliverfile skip_screenshots reason, got %+v", result.Skipped)
 	}
 }
 

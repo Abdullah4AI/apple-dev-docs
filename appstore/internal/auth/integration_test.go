@@ -420,7 +420,7 @@ func findASCBinary(t *testing.T) string {
 
 	// Binary not found - try to build it
 	t.Log("asc binary not found, attempting to build...")
-	cmd := exec.Command("go", "build", "-o", "asc", ".")
+	cmd := exec.Command("go", "build", "-o", "asc", "./cmd/appledev")
 	cmd.Dir = projectRoot
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build asc binary: %v\nOutput: %s", err, output)

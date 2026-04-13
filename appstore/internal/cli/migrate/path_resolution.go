@@ -16,10 +16,11 @@ const (
 )
 
 type importInputOptions struct {
-	WorkDir        string
-	FastlaneDir    string
-	MetadataDir    string
-	ScreenshotsDir string
+	WorkDir         string
+	FastlaneDir     string
+	MetadataDir     string
+	ScreenshotsDir  string
+	SkipScreenshots bool
 }
 
 type importInputs struct {
@@ -67,15 +68,18 @@ func resolveImportInputs(opts importInputOptions) (importInputs, []SkippedItem, 
 
 	metadataDir, metadataSource := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.MetadataDir, config.MetadataPath, "metadata")
 	screenshotsDir, screenshotsSource := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.ScreenshotsDir, config.ScreenshotsPath, "screenshots")
+	skipScreenshots := opts.SkipScreenshots || config.SkipScreenshots
 
 	skipped := []SkippedItem{}
 	metadataDir, skipped, err = validateResolvedDir(metadataDir, metadataSource, "metadata", skipped)
 	if err != nil {
 		return importInputs{}, nil, err
 	}
-	screenshotsDir, skipped, err = validateResolvedDir(screenshotsDir, screenshotsSource, "screenshots", skipped)
-	if err != nil {
-		return importInputs{}, nil, err
+	if !skipScreenshots {
+		screenshotsDir, skipped, err = validateResolvedDir(screenshotsDir, screenshotsSource, "screenshots", skipped)
+		if err != nil {
+			return importInputs{}, nil, err
+		}
 	}
 
 	inputs.MetadataDir = metadataDir

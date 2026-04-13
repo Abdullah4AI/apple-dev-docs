@@ -168,6 +168,76 @@ func TestDiscoverScreenshotPlan_NormalizesLocale(t *testing.T) {
 	}
 }
 
+func TestDiscoverScreenshotPlan_SkipsHiddenAndNonImageFiles(t *testing.T) {
+	root := t.TempDir()
+	localeDir := filepath.Join(root, "en-US")
+	if err := os.MkdirAll(localeDir, 0o755); err != nil {
+		t.Fatalf("mkdir locale dir: %v", err)
+	}
+	writePNG(t, filepath.Join(localeDir, "iPhone 17 Pro Max-1-main-screen.png"), 1320, 2868)
+	if err := os.WriteFile(filepath.Join(localeDir, ".DS_Store"), []byte("not an image"), 0o644); err != nil {
+		t.Fatalf("write hidden file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localeDir, "notes.txt"), []byte("not an image"), 0o644); err != nil {
+		t.Fatalf("write notes file: %v", err)
+	}
+
+	plans, skipped, err := discoverScreenshotPlan(root)
+	if err != nil {
+		t.Fatalf("discoverScreenshotPlan() error: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	if len(plans[0].Files) != 1 {
+		t.Fatalf("expected 1 image file, got %d", len(plans[0].Files))
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("expected 2 skipped files, got %+v", skipped)
+	}
+}
+
+func TestDiscoverScreenshotPlan_IgnoresEmptyLocaleDirectories(t *testing.T) {
+	root := t.TempDir()
+	emptyLocaleDir := filepath.Join(root, "ja")
+	if err := os.MkdirAll(emptyLocaleDir, 0o755); err != nil {
+		t.Fatalf("mkdir empty locale dir: %v", err)
+	}
+	localeDir := filepath.Join(root, "en-US")
+	if err := os.MkdirAll(localeDir, 0o755); err != nil {
+		t.Fatalf("mkdir locale dir: %v", err)
+	}
+	writePNG(t, filepath.Join(localeDir, "iphone_65_screen.png"), 1242, 2688)
+
+	plans, skipped, err := discoverScreenshotPlan(root)
+	if err != nil {
+		t.Fatalf("discoverScreenshotPlan() error: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("expected 1 skipped locale, got %+v", skipped)
+	}
+	if skipped[0].Path != emptyLocaleDir {
+		t.Fatalf("expected skipped path %q, got %q", emptyLocaleDir, skipped[0].Path)
+	}
+}
+
+func TestInferScreenshotDisplayType_FastlaneIPadPro13Filename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "iPad Pro 13-inch (M5)-1-main-screen.png")
+	writePNG(t, path, 2064, 2752)
+
+	displayType, err := inferScreenshotDisplayType(path)
+	if err != nil {
+		t.Fatalf("inferScreenshotDisplayType() error: %v", err)
+	}
+	if displayType != "APP_IPAD_PRO_129" {
+		t.Fatalf("expected APP_IPAD_PRO_129, got %q", displayType)
+	}
+}
+
 func writePNG(t *testing.T, path string, width, height int) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))

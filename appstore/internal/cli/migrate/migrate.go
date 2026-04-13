@@ -54,6 +54,7 @@ func MigrateImportCommand() *ffcli.Command {
 	versionID := fs.String("version-id", "", "App Store version ID (required unless Deliverfile app_version + platform)")
 	fastlaneDir := fs.String("fastlane-dir", "", "Path to fastlane directory (optional)")
 	dryRun := fs.Bool("dry-run", false, "Preview changes without uploading")
+	skipScreenshots := fs.Bool("skip-screenshots", false, "Skip screenshot discovery and upload")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -93,7 +94,8 @@ or conventional metadata/ and screenshots/ directories:
 
 Examples:
   asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane
-  asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane --dry-run`,
+  asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane --dry-run
+  asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane --skip-screenshots`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -103,8 +105,9 @@ Examples:
 			}
 
 			inputs, skipped, err := resolveImportInputs(importInputOptions{
-				WorkDir:     workDir,
-				FastlaneDir: strings.TrimSpace(*fastlaneDir),
+				WorkDir:         workDir,
+				FastlaneDir:     strings.TrimSpace(*fastlaneDir),
+				SkipScreenshots: *skipScreenshots,
 			})
 			if err != nil {
 				return fmt.Errorf("migrate import: %w", err)
@@ -123,6 +126,13 @@ Examples:
 				skipped = append(skipped, SkippedItem{
 					Path:   screenshotsDir,
 					Reason: "skip_screenshots in Deliverfile",
+				})
+				screenshotsDir = ""
+			}
+			if *skipScreenshots && screenshotsDir != "" {
+				skipped = append(skipped, SkippedItem{
+					Path:   screenshotsDir,
+					Reason: "skipped by --skip-screenshots",
 				})
 				screenshotsDir = ""
 			}

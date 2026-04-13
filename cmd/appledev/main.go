@@ -33,8 +33,8 @@ func main() {
 			os.Exit(1)
 		}
 		return
-	case "appstore":
-		// Direct appstore mode
+	case "appstore", "asc":
+		// Direct appstore mode, including legacy asc invocation.
 		os.Exit(appstorecmd.Run(os.Args[1:], versionString()))
 		return
 	}

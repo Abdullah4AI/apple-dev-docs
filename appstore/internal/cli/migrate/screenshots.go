@@ -49,10 +49,11 @@ func discoverScreenshotPlan(screenshotsDir string) ([]ScreenshotPlan, []SkippedI
 			return nil, nil, fmt.Errorf("invalid locale directory %q: %w", localeName, err)
 		}
 		localeDir := filepath.Join(screenshotsDir, entry.Name())
-		files, err := collectScreenshotFiles(localeDir)
+		files, localeSkipped, err := collectScreenshotFiles(localeDir)
 		if err != nil {
 			return nil, nil, err
 		}
+		skipped = append(skipped, localeSkipped...)
 		for _, filePath := range files {
 			dimensions, err := asc.ReadImageDimensions(filePath)
 			if err != nil {
@@ -87,8 +88,9 @@ func discoverScreenshotPlan(screenshotsDir string) ([]ScreenshotPlan, []SkippedI
 	return result, skipped, nil
 }
 
-func collectScreenshotFiles(localeDir string) ([]string, error) {
+func collectScreenshotFiles(localeDir string) ([]string, []SkippedItem, error) {
 	var files []string
+	var skipped []SkippedItem
 	err := filepath.WalkDir(localeDir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -106,17 +108,28 @@ func collectScreenshotFiles(localeDir string) ([]string, error) {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		if shouldSkipScreenshotFile(path) {
+			skipped = append(skipped, SkippedItem{
+				Path:   path,
+				Reason: "unsupported screenshot file",
+			})
+			return nil
+		}
 		files = append(files, path)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no screenshots found in %q", localeDir)
+		skipped = append(skipped, SkippedItem{
+			Path:   localeDir,
+			Reason: "no supported screenshots found",
+		})
+		return nil, skipped, nil
 	}
 	sort.Strings(files)
-	return files, nil
+	return files, skipped, nil
 }
 
 func inferScreenshotDisplayType(path string) (string, error) {
@@ -157,42 +170,45 @@ func readImageDimensions(path string) (int, int, error) {
 func inferDisplayTypeFromFilename(path string) string {
 	name := strings.ToLower(filepath.Base(path))
 	replacements := map[string]string{
-		"iphone 6.9":      "APP_IPHONE_69",
-		"iphone6.9":       "APP_IPHONE_69",
-		"iphone 6.7":      "APP_IPHONE_67",
-		"iphone6.7":       "APP_IPHONE_67",
-		"iphone 6.5":      "APP_IPHONE_65",
-		"iphone6.5":       "APP_IPHONE_65",
-		"iphone 6.1":      "APP_IPHONE_61",
-		"iphone6.1":       "APP_IPHONE_61",
-		"iphone 5.8":      "APP_IPHONE_58",
-		"iphone5.8":       "APP_IPHONE_58",
-		"iphone 5.5":      "APP_IPHONE_55",
-		"iphone5.5":       "APP_IPHONE_55",
-		"iphone 4.7":      "APP_IPHONE_47",
-		"iphone4.7":       "APP_IPHONE_47",
-		"iphone 4.0":      "APP_IPHONE_40",
-		"iphone4.0":       "APP_IPHONE_40",
-		"iphone 3.5":      "APP_IPHONE_35",
-		"iphone3.5":       "APP_IPHONE_35",
-		"ipad 12.9":       "APP_IPAD_PRO_129",
-		"ipad12.9":        "APP_IPAD_PRO_129",
-		"ipad 11":         "APP_IPAD_PRO_3GEN_11",
-		"ipad11":          "APP_IPAD_PRO_3GEN_11",
-		"ipad 10.5":       "APP_IPAD_105",
-		"ipad10.5":        "APP_IPAD_105",
-		"ipad 9.7":        "APP_IPAD_97",
-		"ipad9.7":         "APP_IPAD_97",
-		"apple tv":        "APP_APPLE_TV",
-		"appletv":         "APP_APPLE_TV",
-		"vision pro":      "APP_APPLE_VISION_PRO",
-		"desktop":         "APP_DESKTOP",
-		"mac":             "APP_DESKTOP",
-		"watch ultra":     "APP_WATCH_ULTRA",
-		"watch series 10": "APP_WATCH_SERIES_10",
-		"watch series 7":  "APP_WATCH_SERIES_7",
-		"watch series 4":  "APP_WATCH_SERIES_4",
-		"watch series 3":  "APP_WATCH_SERIES_3",
+		"ipad pro 13":      "APP_IPAD_PRO_129",
+		"ipad pro 13-inch": "APP_IPAD_PRO_129",
+		"ipad pro 13 inch": "APP_IPAD_PRO_129",
+		"iphone 6.9":       "APP_IPHONE_69",
+		"iphone6.9":        "APP_IPHONE_69",
+		"iphone 6.7":       "APP_IPHONE_67",
+		"iphone6.7":        "APP_IPHONE_67",
+		"iphone 6.5":       "APP_IPHONE_65",
+		"iphone6.5":        "APP_IPHONE_65",
+		"iphone 6.1":       "APP_IPHONE_61",
+		"iphone6.1":        "APP_IPHONE_61",
+		"iphone 5.8":       "APP_IPHONE_58",
+		"iphone5.8":        "APP_IPHONE_58",
+		"iphone 5.5":       "APP_IPHONE_55",
+		"iphone5.5":        "APP_IPHONE_55",
+		"iphone 4.7":       "APP_IPHONE_47",
+		"iphone4.7":        "APP_IPHONE_47",
+		"iphone 4.0":       "APP_IPHONE_40",
+		"iphone4.0":        "APP_IPHONE_40",
+		"iphone 3.5":       "APP_IPHONE_35",
+		"iphone3.5":        "APP_IPHONE_35",
+		"ipad 12.9":        "APP_IPAD_PRO_129",
+		"ipad12.9":         "APP_IPAD_PRO_129",
+		"ipad 11":          "APP_IPAD_PRO_3GEN_11",
+		"ipad11":           "APP_IPAD_PRO_3GEN_11",
+		"ipad 10.5":        "APP_IPAD_105",
+		"ipad10.5":         "APP_IPAD_105",
+		"ipad 9.7":         "APP_IPAD_97",
+		"ipad9.7":          "APP_IPAD_97",
+		"apple tv":         "APP_APPLE_TV",
+		"appletv":          "APP_APPLE_TV",
+		"vision pro":       "APP_APPLE_VISION_PRO",
+		"desktop":          "APP_DESKTOP",
+		"mac":              "APP_DESKTOP",
+		"watch ultra":      "APP_WATCH_ULTRA",
+		"watch series 10":  "APP_WATCH_SERIES_10",
+		"watch series 7":   "APP_WATCH_SERIES_7",
+		"watch series 4":   "APP_WATCH_SERIES_4",
+		"watch series 3":   "APP_WATCH_SERIES_3",
 	}
 	for key, value := range replacements {
 		if strings.Contains(name, key) {
@@ -240,6 +256,8 @@ func inferDisplayTypeFromDimensions(width, height int) string {
 		return "APP_IPHONE_35"
 	case maxDim == 2732 && minDim == 2048:
 		return "APP_IPAD_PRO_129"
+	case maxDim == 2752 && minDim == 2064:
+		return "APP_IPAD_PRO_129"
 	case maxDim == 2420 && minDim == 1668:
 		return "APP_IPAD_PRO_3GEN_11"
 	case maxDim == 2388 && minDim == 1668:
@@ -256,5 +274,19 @@ func inferDisplayTypeFromDimensions(width, height int) string {
 		return "APP_APPLE_TV"
 	default:
 		return ""
+	}
+}
+
+func shouldSkipScreenshotFile(path string) bool {
+	name := filepath.Base(path)
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg":
+		return false
+	default:
+		return true
 	}
 }
