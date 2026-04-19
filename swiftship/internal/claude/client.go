@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -317,6 +318,14 @@ func (c *Client) GenerateStreaming(ctx context.Context, userMessage string, opts
 	var resultErr error
 	var stderrBuf bytes.Buffer
 	var stderrErr error
+	var resultReceived atomic.Bool
+
+	go func() {
+		<-ctx.Done()
+		if !resultReceived.Load() {
+			killCommandProcess(cmd)
+		}
+	}()
 
 	var stderrWG sync.WaitGroup
 	stderrWG.Add(1)
@@ -362,6 +371,7 @@ func (c *Client) GenerateStreaming(ctx context.Context, userMessage string, opts
 		}
 
 		if ev.Type == "result" {
+			resultReceived.Store(true)
 			result := ev.Result
 			if result == "" {
 				result = assistantText.String()
@@ -394,14 +404,11 @@ func (c *Client) GenerateStreaming(ctx context.Context, userMessage string, opts
 		return nil
 	})
 	if errors.Is(streamErr, errClaudeResultReceived) {
-		if err := waitForProcessExitOrKill(cmd, claudeResultExitGrace); err != nil && ctx.Err() == nil {
+		if err := waitForProcessExitOrKill(cmd, claudeResultExitGrace); err != nil {
 			if stderrMsg := strings.TrimSpace(stderrBuf.String()); stderrMsg != "" {
 				return nil, fmt.Errorf("claude command failed after result: %w\nstderr: %s", err, stderrMsg)
 			}
 			return nil, fmt.Errorf("claude command failed after result: %w", err)
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
 		}
 		if resultErr != nil {
 			return nil, resultErr
@@ -418,6 +425,15 @@ func (c *Client) GenerateStreaming(ctx context.Context, userMessage string, opts
 		_ = cmd.Wait()
 		stderrWG.Wait()
 		if ctx.Err() != nil {
+			if lastResponse != nil {
+				if lastResponse.SessionID == "" {
+					lastResponse.SessionID = sessionID
+				}
+				return lastResponse, nil
+			}
+			if result := assistantText.String(); result != "" || sessionID != "" {
+				return &Response{Result: result, SessionID: sessionID}, nil
+			}
 			return nil, ctx.Err()
 		}
 		if stderrErr != nil {
@@ -433,6 +449,15 @@ func (c *Client) GenerateStreaming(ctx context.Context, userMessage string, opts
 	if err := cmd.Wait(); err != nil {
 		stderrWG.Wait()
 		if ctx.Err() != nil {
+			if lastResponse != nil {
+				if lastResponse.SessionID == "" {
+					lastResponse.SessionID = sessionID
+				}
+				return lastResponse, nil
+			}
+			if result := assistantText.String(); result != "" || sessionID != "" {
+				return &Response{Result: result, SessionID: sessionID}, nil
+			}
 			return nil, ctx.Err()
 		}
 		if stderrErr != nil {
@@ -466,13 +491,22 @@ func waitForProcessExitOrKill(cmd *exec.Cmd, grace time.Duration) error {
 		waitCh <- cmd.Wait()
 	}()
 
+	afterKillGrace := grace
+	if afterKillGrace <= 0 {
+		afterKillGrace = 100 * time.Millisecond
+	}
+
 	select {
 	case err := <-waitCh:
 		return err
 	case <-time.After(grace):
 		killCommandProcess(cmd)
-		<-waitCh
-		return nil
+		select {
+		case <-waitCh:
+			return nil
+		case <-time.After(afterKillGrace):
+			return nil
+		}
 	}
 }
 

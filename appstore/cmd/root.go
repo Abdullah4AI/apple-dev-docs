@@ -24,7 +24,7 @@ func RootCommand(version string) *ffcli.Command {
 	root := &ffcli.Command{
 		Name:        "asc",
 		ShortUsage:  "asc <subcommand> [flags]",
-		ShortHelp:   "Unofficial. asc is a fast, lightweight cli for App Store Connect. Built by AI agents, for AI agents.",
+		ShortHelp:   "asc is a fast, lightweight CLI for App Store Connect from Rork.",
 		LongHelp:    "",
 		FlagSet:     flag.NewFlagSet("asc", flag.ExitOnError),
 		UsageFunc:   RootUsageFunc,

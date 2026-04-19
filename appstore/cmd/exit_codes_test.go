@@ -205,7 +205,12 @@ func TestGetCommandName(t *testing.T) {
 func TestJUnitReportNameWithRootFlags(t *testing.T) {
 	// Build the binary
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	cmd.Dir = ".." // Go up from cmd/ to project root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to build binary: %v\n%s", err, out)
+	}
 
 	reportFile := filepath.Join(tmpDir, "junit.xml")
 	// Run with root flags before subcommand
@@ -242,7 +247,12 @@ func TestJUnitReportNameWithRootFlags(t *testing.T) {
 func TestJUnitReportEndToEnd(t *testing.T) {
 	// Build the binary
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	cmd.Dir = ".." // Go up from cmd/ to project root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to build binary: %v\n%s", err, out)
+	}
 
 	tests := []struct {
 		name       string
@@ -324,7 +334,13 @@ func TestJUnitReportEndToEnd(t *testing.T) {
 
 func TestBuildsListMissingAppExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "builds", "list", "--version", "1.2.3")
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
@@ -348,7 +364,13 @@ func TestBuildsListMissingAppExitCode(t *testing.T) {
 
 func TestScreenshotsUploadResumeMissingValueExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "screenshots", "upload", "--resume")
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
@@ -373,7 +395,13 @@ func TestScreenshotsUploadResumeMissingValueExitCode(t *testing.T) {
 
 func TestBuildsTestNotesUpdateConflictingFlagsExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "builds", "test-notes", "update",
 		"--id", "loc-1", "--build", "build-1", "--whats-new", "test")
@@ -405,7 +433,13 @@ func TestBuildsTestNotesUpdateConflictingFlagsExitCode(t *testing.T) {
 
 func TestBuildsLatestExcludeExpiredInvalidBooleanExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".." // Go up from cmd/ to project root
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "builds", "latest", "--app", "APP_ID", "--exclude-expired=maybe")
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
@@ -433,7 +467,13 @@ func TestBuildsLatestExcludeExpiredInvalidBooleanExitCode(t *testing.T) {
 
 func TestPublishAppStoreDryRunInvalidBooleanExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(
 		binaryPath,
@@ -468,7 +508,13 @@ func TestPublishAppStoreDryRunInvalidBooleanExitCode(t *testing.T) {
 
 func TestWebAuthLoginLegacyTwoFactorFlagExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(
 		binaryPath,
@@ -503,7 +549,13 @@ func TestWebAuthLoginLegacyTwoFactorFlagExitCode(t *testing.T) {
 
 func TestAuthTokenConfirmInvalidBooleanExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".." // Go up from cmd/ to project root
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "auth", "token", "--confirm=maybe")
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
@@ -531,7 +583,13 @@ func TestAuthTokenConfirmInvalidBooleanExitCode(t *testing.T) {
 
 func TestWebAuthLoginPromptInterruptDoesNotFallBackToUsageError(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	runCmd := exec.Command(binaryPath, "web", "auth", "login", "--apple-id", "user@example.com")
 	runCmd.Env = append(
@@ -574,11 +632,11 @@ func TestWebAuthLoginPromptInterruptDoesNotFallBackToUsageError(t *testing.T) {
 		t.Fatalf("process did not exit promptly after interrupt\noutput:\n%s", output.String())
 	}
 
-	_ = ptmx.Close()
-
 	select {
 	case <-readDone:
 	case <-time.After(2 * time.Second):
+		// Let the child close the PTY so the reader can drain the final
+		// interrupt-specific stderr before we tear the PTY down ourselves.
 		t.Fatalf("PTY reader did not exit after process completion\noutput:\n%s", output.String())
 	}
 
@@ -605,7 +663,13 @@ func TestWebAuthLoginPromptInterruptDoesNotFallBackToUsageError(t *testing.T) {
 
 func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := buildLegacyASCTestBinary(t, tmpDir)
+	binaryPath := filepath.Join(tmpDir, "asc-test")
+
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
 
 	configPath := filepath.Join(tmpDir, "config.json")
 	if err := os.WriteFile(configPath, []byte(`{"skills_checked_at":"2000-01-01T00:00:00Z"}`), 0o600); err != nil {
@@ -737,39 +801,6 @@ func startPTYCapture(ptmx *os.File, prompt string) (*ptyOutput, <-chan struct{},
 	}()
 
 	return output, promptSeen, readDone
-}
-
-func buildLegacyASCTestBinary(t *testing.T, outDir string) string {
-	t.Helper()
-
-	binaryPath := filepath.Join(outDir, "asc")
-	buildCmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/appledev")
-	buildCmd.Dir = findModuleRoot(t)
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build binary: %v\n%s", err, out)
-	}
-
-	return binaryPath
-}
-
-func findModuleRoot(t *testing.T) string {
-	t.Helper()
-
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get cwd: %v", err)
-	}
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatalf("could not find project root from %s", dir)
-		}
-		dir = parent
-	}
 }
 
 func isolatedCLITestEnv(configPath string) []string {

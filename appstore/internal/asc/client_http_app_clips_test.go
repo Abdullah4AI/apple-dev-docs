@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -596,15 +597,91 @@ func TestCreateBetaAppClipInvocation(t *testing.T) {
 		if payload.Data.Relationships.BuildBundle.Data.ID != "bundle-1" {
 			t.Fatalf("expected buildBundle id bundle-1, got %s", payload.Data.Relationships.BuildBundle.Data.ID)
 		}
+		if payload.Data.Relationships.BetaAppClipInvocationLocalizations == nil {
+			t.Fatal("expected localization relationships to be present")
+		}
+		if len(payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data) != 1 {
+			t.Fatalf("expected one localization relationship, got %d", len(payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data))
+		}
+		if payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data[0].ID != "loc-1" {
+			t.Fatalf("expected localization id loc-1, got %s", payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data[0].ID)
+		}
 		if payload.Data.Attributes.URL != "https://example.com/clip" {
 			t.Fatalf("expected url https://example.com/clip, got %s", payload.Data.Attributes.URL)
+		}
+		if len(payload.Included) != 0 {
+			t.Fatalf("expected no included localizations, got %d", len(payload.Included))
 		}
 		assertAuthorized(t, req)
 	}, response)
 
 	attrs := BetaAppClipInvocationCreateAttributes{URL: "https://example.com/clip"}
-	if _, err := client.CreateBetaAppClipInvocation(context.Background(), "bundle-1", attrs, nil); err != nil {
+	if _, err := client.CreateBetaAppClipInvocation(context.Background(), "bundle-1", attrs, []string{"loc-1"}, nil); err != nil {
 		t.Fatalf("CreateBetaAppClipInvocation() error: %v", err)
+	}
+}
+
+func TestCreateBetaAppClipInvocationWithInlineLocalization(t *testing.T) {
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"betaAppClipInvocations","id":"inv-1","attributes":{"url":"https://example.com/clip"}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/betaAppClipInvocations" {
+			t.Fatalf("expected path /v1/betaAppClipInvocations, got %s", req.URL.Path)
+		}
+		var payload BetaAppClipInvocationCreateRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Data.Relationships.BetaAppClipInvocationLocalizations == nil {
+			t.Fatal("expected localization relationships to be present")
+		}
+		if len(payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data) != 1 {
+			t.Fatalf("expected one localization relationship, got %d", len(payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data))
+		}
+		relationship := payload.Data.Relationships.BetaAppClipInvocationLocalizations.Data[0]
+		if relationship.ID != "${localization-1}" {
+			t.Fatalf("expected inline localization id ${localization-1}, got %s", relationship.ID)
+		}
+		if len(payload.Included) != 1 {
+			t.Fatalf("expected one included localization, got %d", len(payload.Included))
+		}
+		included := payload.Included[0]
+		if included.ID != relationship.ID {
+			t.Fatalf("expected included id %s, got %s", relationship.ID, included.ID)
+		}
+		if included.Attributes.Locale != "en-US" {
+			t.Fatalf("expected locale en-US, got %s", included.Attributes.Locale)
+		}
+		if included.Attributes.Title != "Try it" {
+			t.Fatalf("expected title Try it, got %s", included.Attributes.Title)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	attrs := BetaAppClipInvocationCreateAttributes{URL: "https://example.com/clip"}
+	inline := []BetaAppClipInvocationLocalizationCreateAttributes{{
+		Locale: "en-US",
+		Title:  "Try it",
+	}}
+	if _, err := client.CreateBetaAppClipInvocation(context.Background(), "bundle-1", attrs, nil, inline); err != nil {
+		t.Fatalf("CreateBetaAppClipInvocation() error: %v", err)
+	}
+}
+
+func TestCreateBetaAppClipInvocationRequiresLocalization(t *testing.T) {
+	client := newTestClient(t, func(req *http.Request) {
+		t.Fatalf("did not expect request, got %s %s", req.Method, req.URL.Path)
+	}, jsonResponse(http.StatusCreated, `{"data":{"type":"betaAppClipInvocations","id":"inv-1"}}`))
+
+	attrs := BetaAppClipInvocationCreateAttributes{URL: "https://example.com/clip"}
+	_, err := client.CreateBetaAppClipInvocation(context.Background(), "bundle-1", attrs, nil, nil)
+	if err == nil {
+		t.Fatal("expected localization validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one localization is required") {
+		t.Fatalf("expected localization validation error, got %v", err)
 	}
 }
 

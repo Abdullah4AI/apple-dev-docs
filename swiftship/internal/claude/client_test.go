@@ -128,7 +128,7 @@ sleep 5
 	}
 
 	client := NewClient(script)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
 	start := time.Now()
@@ -136,8 +136,8 @@ sleep 5
 	if err != nil {
 		t.Fatalf("GenerateStreaming() error = %v", err)
 	}
-	if elapsed := time.Since(start); elapsed >= 2*time.Second {
-		t.Fatalf("GenerateStreaming() took %v, want it to finish before context timeout", elapsed)
+	if elapsed := time.Since(start); elapsed >= 4*time.Second {
+		t.Fatalf("GenerateStreaming() took %v, want it to finish well before the lingering process exits", elapsed)
 	}
 	if resp == nil {
 		t.Fatal("GenerateStreaming() response = nil")

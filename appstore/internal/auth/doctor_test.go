@@ -17,9 +17,6 @@ func TestDoctorConfigPermissionsWarning(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("{}"), 0o644); err != nil {
 		t.Fatalf("write config error: %v", err)
 	}
-	if err := os.Chmod(configPath, 0o644); err != nil {
-		t.Fatalf("chmod config error: %v", err)
-	}
 	t.Setenv("ASC_CONFIG_PATH", configPath)
 
 	report := Doctor(DoctorOptions{})

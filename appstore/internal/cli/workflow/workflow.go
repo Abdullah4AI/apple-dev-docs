@@ -119,7 +119,7 @@ Try it:
   asc workflow run release --resume beta-20260312T120000Z-deadbeef
 
 More docs:
-  https://github.com/Abdullah4AI/apple-developer-toolkit/appstore/blob/main/docs/WORKFLOWS.md
+  https://github.com/rorkai/App-Store-Connect-CLI/blob/main/docs/WORKFLOWS.md
 
 Examples:
   asc workflow list

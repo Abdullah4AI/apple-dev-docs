@@ -13,6 +13,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+var appClipsClientFactory = shared.GetASCClient
+
 // AppClipInvocationsCommand returns the invocations command group.
 func AppClipInvocationsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("invocations", flag.ExitOnError)
@@ -77,7 +79,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := appClipsClientFactory()
 			if err != nil {
 				return fmt.Errorf("app-clips invocations list: %w", err)
 			}
@@ -151,7 +153,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := appClipsClientFactory()
 			if err != nil {
 				return fmt.Errorf("app-clips invocations get: %w", err)
 			}
@@ -175,17 +177,22 @@ func AppClipInvocationsCreateCommand() *ffcli.Command {
 
 	buildBundleID := fs.String("build-bundle-id", "", "Build bundle ID")
 	url := fs.String("url", "", "Invocation URL")
-	localizationIDs := fs.String("localization-id", "", "Localization ID(s), comma-separated")
+	localizationIDs := fs.String("localization-id", "", "Existing localization ID(s), comma-separated")
+	locale := fs.String("locale", "", "Inline localization locale (use with --title)")
+	title := fs.String("title", "", "Inline localization title (use with --locale)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "create",
-		ShortUsage: "asc app-clips invocations create --build-bundle-id \"BUILD_BUNDLE_ID\" --url \"https://example.com/clip\" [flags]",
+		ShortUsage: "asc app-clips invocations create --build-bundle-id \"BUILD_BUNDLE_ID\" --url \"https://example.com/clip\" (--localization-id \"LOC_ID\" | --locale \"en-US\" --title \"Try it\") [flags]",
 		ShortHelp:  "Create a beta App Clip invocation.",
 		LongHelp: `Create a beta App Clip invocation.
 
+Provide either pre-existing localization IDs with ` + "`--localization-id`" + ` or an inline localization with ` + "`--locale`" + ` and ` + "`--title`" + `.
+
 Examples:
-  asc app-clips invocations create --build-bundle-id "BUILD_BUNDLE_ID" --url "https://example.com/clip"`,
+  asc app-clips invocations create --build-bundle-id "BUILD_BUNDLE_ID" --url "https://example.com/clip" --locale "en-US" --title "Try it"
+  asc app-clips invocations create --build-bundle-id "BUILD_BUNDLE_ID" --url "https://example.com/clip" --localization-id "LOC_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -201,7 +208,31 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			client, err := shared.GetASCClient()
+			localizationValues := shared.SplitCSV(*localizationIDs)
+			localeValue := strings.TrimSpace(*locale)
+			titleValue := strings.TrimSpace(*title)
+			if titleValue != "" && localeValue == "" {
+				fmt.Fprintln(os.Stderr, "Error: --locale is required when --title is set")
+				return flag.ErrHelp
+			}
+			if localeValue != "" && titleValue == "" {
+				fmt.Fprintln(os.Stderr, "Error: --title is required when --locale is set")
+				return flag.ErrHelp
+			}
+
+			inlineLocalizations := make([]asc.BetaAppClipInvocationLocalizationCreateAttributes, 0, 1)
+			if localeValue != "" && titleValue != "" {
+				inlineLocalizations = append(inlineLocalizations, asc.BetaAppClipInvocationLocalizationCreateAttributes{
+					Locale: localeValue,
+					Title:  titleValue,
+				})
+			}
+			if len(localizationValues) == 0 && len(inlineLocalizations) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: provide --localization-id or both --locale and --title")
+				return flag.ErrHelp
+			}
+
+			client, err := appClipsClientFactory()
 			if err != nil {
 				return fmt.Errorf("app-clips invocations create: %w", err)
 			}
@@ -210,7 +241,7 @@ Examples:
 			defer cancel()
 
 			attrs := asc.BetaAppClipInvocationCreateAttributes{URL: urlValue}
-			resp, err := client.CreateBetaAppClipInvocation(requestCtx, buildBundleValue, attrs, shared.SplitCSV(*localizationIDs))
+			resp, err := client.CreateBetaAppClipInvocation(requestCtx, buildBundleValue, attrs, localizationValues, inlineLocalizations)
 			if err != nil {
 				return fmt.Errorf("app-clips invocations create: failed to create: %w", err)
 			}
@@ -257,7 +288,7 @@ Examples:
 			urlValue := strings.TrimSpace(*url)
 			attrs := &asc.BetaAppClipInvocationUpdateAttributes{URL: &urlValue}
 
-			client, err := shared.GetASCClient()
+			client, err := appClipsClientFactory()
 			if err != nil {
 				return fmt.Errorf("app-clips invocations update: %w", err)
 			}
@@ -304,7 +335,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := appClipsClientFactory()
 			if err != nil {
 				return fmt.Errorf("app-clips invocations delete: %w", err)
 			}
