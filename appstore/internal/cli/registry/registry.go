@@ -61,6 +61,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/sandbox"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/schema"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/screenshots"
+	searchcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/search"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/signing"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/snitch"
@@ -101,7 +102,8 @@ func Subcommands(version string) []*ffcli.Command {
 		"asc pricing availability set":   {},
 	}
 
-	subs := []*ffcli.Command{
+	var subs []*ffcli.Command
+	subs = []*ffcli.Command{
 		auth.AuthCommand(),
 		auth.AuthDoctorCommand(),
 		web.WebCommand(),
@@ -174,6 +176,7 @@ func Subcommands(version string) []*ffcli.Command {
 		gamecenter.GameCenterCommand(),
 		capabilities.Command(),
 		schema.SchemaCommand(),
+		searchcmd.SearchCommand(func() []*ffcli.Command { return subs }),
 		snitch.SnitchCommand(version),
 		VersionCommand(version),
 	}

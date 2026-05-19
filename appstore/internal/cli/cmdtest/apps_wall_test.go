@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func findSubcommand(root *ffcli.Command, path ...string) *ffcli.Command {
@@ -37,11 +39,13 @@ func TestAppsWallFlagDefaults(t *testing.T) {
 	cmd := findSubcommand(root, "apps", "wall")
 	if cmd == nil {
 		t.Fatal("expected apps wall command")
+		return
 	}
 
 	outputFlag := cmd.FlagSet.Lookup("output")
 	if outputFlag == nil {
 		t.Fatal("expected --output flag")
+		return
 	}
 	if got := outputFlag.DefValue; got != "table" {
 		t.Fatalf("expected --output default table, got %q", got)
@@ -50,6 +54,7 @@ func TestAppsWallFlagDefaults(t *testing.T) {
 	sortFlag := cmd.FlagSet.Lookup("sort")
 	if sortFlag == nil {
 		t.Fatal("expected --sort flag")
+		return
 	}
 	if got := sortFlag.DefValue; got != "name" {
 		t.Fatalf("expected --sort default name, got %q", got)
@@ -61,11 +66,13 @@ func TestAppsWallSubmitCommandExists(t *testing.T) {
 	cmd := findSubcommand(root, "apps", "wall", "submit")
 	if cmd == nil {
 		t.Fatal("expected apps wall submit command")
+		return
 	}
 
 	outputFlag := cmd.FlagSet.Lookup("output")
 	if outputFlag == nil {
 		t.Fatal("expected --output flag")
+		return
 	}
 	if got := outputFlag.DefValue; got != "json" {
 		t.Fatalf("expected --output default json, got %q", got)
@@ -160,6 +167,50 @@ func TestAppsWallSubmitRejectsMultipleParentWallFlags(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "--limit, --output") {
 		t.Fatalf("expected sorted offending flags in stderr, got %q", stderr)
+	}
+}
+
+func TestAppsWallSubmitInvalidCountryReturnsUsageExitCode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "country before app",
+			args: []string{
+				"apps", "wall", "submit",
+				"--country", "zz",
+				"--app", "1234567890",
+				"--dry-run",
+			},
+		},
+		{
+			name: "country after dry run",
+			args: []string{
+				"apps", "wall", "submit",
+				"--app", "1234567890",
+				"--dry-run",
+				"--country", "zz",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := captureOutput(t, func() {
+				code := rootcmd.Run(test.args, "1.2.3")
+				if code != rootcmd.ExitUsage {
+					t.Fatalf("expected exit code %d, got %d", rootcmd.ExitUsage, code)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "--country") {
+				t.Fatalf("expected --country guidance in stderr, got %q", stderr)
+			}
+		})
 	}
 }
 

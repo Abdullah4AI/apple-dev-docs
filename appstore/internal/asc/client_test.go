@@ -19,6 +19,9 @@ func TestBuildReviewQuery(t *testing.T) {
 		WithTerritory("us"),
 		WithLimit(25),
 		WithReviewSort("-createdDate"),
+		WithPublishedResponseExists(false),
+		WithReviewIncludeResponse(),
+		WithReviewResponseFields([]string{"responseBody", "state"}),
 	})
 
 	values, err := url.ParseQuery(query)
@@ -40,6 +43,18 @@ func TestBuildReviewQuery(t *testing.T) {
 
 	if got := values.Get("sort"); got != "-createdDate" {
 		t.Fatalf("expected sort=-createdDate, got %q", got)
+	}
+
+	if got := values.Get("exists[publishedResponse]"); got != "false" {
+		t.Fatalf("expected exists[publishedResponse]=false, got %q", got)
+	}
+
+	if got := values.Get("include"); got != "response" {
+		t.Fatalf("expected include=response, got %q", got)
+	}
+
+	if got := values.Get("fields[customerReviewResponses]"); got != "responseBody,state" {
+		t.Fatalf("expected fields[customerReviewResponses]=responseBody,state, got %q", got)
 	}
 }
 

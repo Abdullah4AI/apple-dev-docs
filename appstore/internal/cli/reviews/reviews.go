@@ -25,6 +25,10 @@ func ReviewsCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	responseState := fs.String("response-state", "any", "Filter by response state: any, unresponded/unreplied, responded/replied")
+	onlyUnresponded := fs.Bool("only-unresponded", false, "Only list reviews without a published response")
+	includeResponse := fs.Bool("include-response", false, "Include customer review response relationships")
+	responseFields := fs.String("response-fields", "", "Comma-separated customer review response fields: responseBody,lastModifiedDate,state,review")
 
 	return &ffcli.Command{
 		Name:       "reviews",
@@ -41,6 +45,8 @@ Examples:
   asc reviews --app "123456789"
   asc reviews --app "123456789" --stars 1 --territory US
   asc reviews --app "123456789" --sort -createdDate --limit 5
+  asc reviews --app "123456789" --response-state unreplied --include-response
+  asc reviews --app "123456789" --only-unresponded
   asc reviews --next "<links.next>"
   asc reviews --app "123456789" --paginate
   asc reviews get --id "REVIEW_ID"
@@ -48,6 +54,7 @@ Examples:
   asc reviews ratings --app "123456789" --all
   asc reviews summarizations --app "123456789" --platform IOS --territory US
   asc reviews respond --review-id "REVIEW_ID" --response "Thanks!"
+  asc reviews respond-batch --app "123456789" --file replies.json --dry-run
   asc reviews response get --id "RESPONSE_ID"
   asc reviews response delete --id "RESPONSE_ID" --confirm
   asc reviews response for-review --review-id "REVIEW_ID"`,
@@ -59,6 +66,7 @@ Examples:
 			ReviewsRatingsCommand(),
 			ReviewsSummarizationsCommand(),
 			ReviewsRespondCommand(),
+			ReviewsRespondBatchCommand(),
 			ReviewsResponseCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -70,7 +78,7 @@ Examples:
 			}
 
 			// Execute the list functionality directly
-			return executeReviewsList(ctx, resolvedAppID, *output.Output, *output.Pretty, *stars, *territory, *sort, *limit, *next, *paginate)
+			return executeReviewsList(ctx, resolvedAppID, *output.Output, *output.Pretty, *stars, *territory, *sort, *limit, *next, *paginate, *responseState, *onlyUnresponded, *includeResponse, *responseFields)
 		},
 	}
 }
@@ -87,6 +95,10 @@ func ReviewsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	responseState := fs.String("response-state", "any", "Filter by response state: any, unresponded/unreplied, responded/replied")
+	onlyUnresponded := fs.Bool("only-unresponded", false, "Only list reviews without a published response")
+	includeResponse := fs.Bool("include-response", false, "Include customer review response relationships")
+	responseFields := fs.String("response-fields", "", "Comma-separated customer review response fields: responseBody,lastModifiedDate,state,review")
 
 	return &ffcli.Command{
 		Name:       "list",
@@ -98,6 +110,8 @@ Examples:
   asc reviews list --app "123456789"
   asc reviews list --app "123456789" --stars 5
   asc reviews list --app "123456789" --territory US --sort -createdDate
+  asc reviews list --app "123456789" --response-state unreplied --include-response
+  asc reviews list --app "123456789" --only-unresponded
   asc reviews list --next "<links.next>"
   asc reviews list --app "123456789" --paginate`,
 		FlagSet:   fs,
@@ -109,12 +123,12 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			return executeReviewsList(ctx, resolvedAppID, *output.Output, *output.Pretty, *stars, *territory, *sort, *limit, *next, *paginate)
+			return executeReviewsList(ctx, resolvedAppID, *output.Output, *output.Pretty, *stars, *territory, *sort, *limit, *next, *paginate, *responseState, *onlyUnresponded, *includeResponse, *responseFields)
 		},
 	}
 }
 
-func executeReviewsList(ctx context.Context, appID, output string, pretty bool, stars int, territory, sort string, limit int, next string, paginate bool) error {
+func executeReviewsList(ctx context.Context, appID, output string, pretty bool, stars int, territory, sort string, limit int, next string, paginate bool, responseState string, onlyUnresponded bool, includeResponse bool, responseFields string) error {
 	if limit != 0 && (limit < 1 || limit > 200) {
 		return fmt.Errorf("reviews: --limit must be between 1 and 200")
 	}
@@ -126,6 +140,20 @@ func executeReviewsList(ctx context.Context, appID, output string, pretty bool, 
 	}
 	if err := shared.ValidateSort(sort, "rating", "-rating", "createdDate", "-createdDate"); err != nil {
 		return fmt.Errorf("reviews: %w", err)
+	}
+	normalizedResponseState, err := normalizeReviewResponseState(responseState)
+	if err != nil {
+		return shared.UsageError(err.Error())
+	}
+	if onlyUnresponded {
+		if normalizedResponseState == reviewResponseStateResponded {
+			return shared.UsageError("--only-unresponded cannot be combined with --response-state responded")
+		}
+		normalizedResponseState = reviewResponseStateUnresponded
+	}
+	normalizedResponseFields, err := normalizeReviewResponseFields(responseFields)
+	if err != nil {
+		return shared.UsageError(err.Error())
 	}
 
 	client, err := shared.GetASCClient()
@@ -144,6 +172,15 @@ func executeReviewsList(ctx context.Context, appID, output string, pretty bool, 
 	}
 	if strings.TrimSpace(sort) != "" {
 		opts = append(opts, asc.WithReviewSort(sort))
+	}
+	if exists, ok := publishedResponseExistsFilter(normalizedResponseState); ok {
+		opts = append(opts, asc.WithPublishedResponseExists(exists))
+	}
+	if includeResponse {
+		opts = append(opts, asc.WithReviewIncludeResponse())
+	}
+	if len(normalizedResponseFields) > 0 {
+		opts = append(opts, asc.WithReviewIncludeResponse(), asc.WithReviewResponseFields(normalizedResponseFields))
 	}
 
 	if paginate {

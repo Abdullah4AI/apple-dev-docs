@@ -39,9 +39,12 @@ type crashQuery struct {
 
 type reviewQuery struct {
 	listQuery
-	rating    int
-	territory string
-	sort      string
+	rating                  int
+	territory               string
+	sort                    string
+	publishedResponseExists *bool
+	includeResponse         bool
+	responseFields          []string
 }
 
 type appsQuery struct {
@@ -626,6 +629,13 @@ func buildReviewQuery(opts []ReviewOption) string {
 	if query.sort != "" {
 		values.Set("sort", query.sort)
 	}
+	if query.publishedResponseExists != nil {
+		values.Set("exists[publishedResponse]", strconv.FormatBool(*query.publishedResponseExists))
+	}
+	if query.includeResponse {
+		values.Set("include", "response")
+	}
+	addCSV(values, "fields[customerReviewResponses]", query.responseFields)
 	addLimit(values, query.limit)
 
 	return values.Encode()
