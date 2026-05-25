@@ -25,11 +25,13 @@ func SubscriptionsOfferCodesCommand() *ffcli.Command {
 		LongHelp: `Manage subscription offer codes.
 
 Examples:
-  asc subscriptions offer-codes list --subscription-id "SUB_ID"
-  asc subscriptions offer-codes create --subscription-id "SUB_ID" --name "SPRING" --offer-eligibility STACK_WITH_INTRO_OFFERS --customer-eligibilities NEW --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
-  asc subscriptions offer-codes create --subscription-id "SUB_ID" --name "SPRING" --offer-eligibility STACK_WITH_INTRO_OFFERS --customer-eligibilities NEW --offer-duration ONE_MONTH --offer-mode PAY_AS_YOU_GO --number-of-periods 1 --prices "US:PRICE_POINT_ID"
-  asc subscriptions offer-codes generate --offer-code-id "OFFER_CODE_ID" --quantity 10 --expiration-date "2026-02-01"
-  asc subscriptions offer-codes values --batch-id "ONE_TIME_USE_CODE_ID" --output "./offer-codes.txt"`,
+  asc subscriptions offers offer-codes list --subscription-id "SUB_ID"
+  asc subscriptions offers offer-codes list --subscription-id "SUB_ID" --output table
+  asc subscriptions offers offer-codes create --subscription-id "SUB_ID" --name "SPRING" --offer-eligibility STACK_WITH_INTRO_OFFERS --customer-eligibilities NEW --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
+  asc subscriptions offers offer-codes create --subscription-id "SUB_ID" --name "SPRING" --offer-eligibility STACK_WITH_INTRO_OFFERS --customer-eligibilities NEW --offer-duration ONE_MONTH --offer-mode PAY_AS_YOU_GO --number-of-periods 1 --prices "US:PRICE_POINT_ID"
+  asc subscriptions offers offer-codes generate --offer-code-id "OFFER_CODE_ID" --quantity 10 --expiration-date "2026-02-01"
+  asc subscriptions offers offer-codes one-time-codes list --offer-code-id "OFFER_CODE_ID"
+  asc subscriptions offers offer-codes values --batch-id "ONE_TIME_USE_CODE_ID" --output "./offer-codes.csv" --format csv`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -67,8 +69,9 @@ func SubscriptionsOfferCodesListCommand() *ffcli.Command {
 		LongHelp: `List offer codes for a subscription.
 
 Examples:
-  asc subscriptions offer-codes list --subscription-id "SUB_ID"
-  asc subscriptions offer-codes list --subscription-id "SUB_ID" --paginate`,
+  asc subscriptions offers offer-codes list --subscription-id "SUB_ID"
+  asc subscriptions offers offer-codes list --subscription-id "SUB_ID" --output table
+  asc subscriptions offers offer-codes list --subscription-id "SUB_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -119,7 +122,7 @@ Examples:
 					return fmt.Errorf("subscriptions offer-codes list: %w", err)
 				}
 
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+				return printSubscriptionOfferCodesListOutput(resp, *output.Output, *output.Pretty)
 			}
 
 			resp, err := client.GetSubscriptionOfferCodes(requestCtx, id, opts...)
@@ -127,9 +130,45 @@ Examples:
 				return fmt.Errorf("subscriptions offer-codes list: failed to fetch: %w", err)
 			}
 
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return printSubscriptionOfferCodesListOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func printSubscriptionOfferCodesListOutput(data any, format string, pretty bool) error {
+	resp, ok := data.(*asc.SubscriptionOfferCodesResponse)
+	if !ok {
+		return shared.PrintOutput(data, format, pretty)
+	}
+	return shared.PrintOutputWithRenderers(
+		resp,
+		format,
+		pretty,
+		func() error {
+			if err := asc.PrintTable(resp); err != nil {
+				return err
+			}
+			printSubscriptionOfferCodesFollowUps(resp)
+			return nil
+		},
+		func() error {
+			return asc.PrintMarkdown(resp)
+		},
+	)
+}
+
+func printSubscriptionOfferCodesFollowUps(resp *asc.SubscriptionOfferCodesResponse) {
+	if resp == nil || len(resp.Data) == 0 {
+		return
+	}
+	id := strings.TrimSpace(resp.Data[0].ID)
+	if id == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout, "Follow-up commands:")
+	fmt.Fprintf(os.Stdout, "  asc subscriptions offers offer-codes one-time-codes list --offer-code-id %q\n", id)
+	fmt.Fprintln(os.Stdout, `  asc subscriptions offers offer-codes values --batch-id "ONE_TIME_USE_CODE_ID" --output "./offer-codes.csv" --format csv`)
 }
 
 // SubscriptionsOfferCodesGetCommand returns the offer codes get subcommand.
