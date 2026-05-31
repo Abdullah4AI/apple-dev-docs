@@ -40,6 +40,8 @@ func TestExecuteExperimentTreatmentLocalizationScreenshotUpload_UploadCreatesSet
 				t.Fatalf("expected PPO treatment-localization relationship in body, got %s", string(body))
 			}
 			return customPageJSONResponse(http.StatusCreated, `{"data":{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
@@ -135,6 +137,8 @@ func TestExecuteExperimentTreatmentLocalizationScreenshotUpload_CanonicalizesAli
 			}
 			createdSetDisplayType = payload.Data.Attributes.ScreenshotDisplayType
 			return customPageJSONResponse(http.StatusCreated, `{"data":{"type":"appScreenshotSets","id":"set-69","attributes":{"screenshotDisplayType":"APP_IPHONE_67"}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-69/appScreenshots":
+			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-69/relationships/appScreenshots":
 			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
@@ -190,6 +194,8 @@ func TestExecuteExperimentTreatmentLocalizationScreenshotUpload_UploadPreservesE
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionExperimentTreatmentLocalizations/tloc-1/appScreenshotSets":
 			return customPageJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}]}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return customPageJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"old-1"},{"type":"appScreenshots","id":"old-2"}]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return customPageJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"old-1"},{"type":"appScreenshots","id":"old-2"}]}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
@@ -373,6 +379,8 @@ func TestExecuteExperimentTreatmentLocalizationScreenshotUpload_UsesRequestTimeo
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionExperimentTreatmentLocalizations/tloc-1/appScreenshotSets":
 			metadataRemaining = time.Until(deadline)
 			return customPageJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}]}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return customPageJSONResponse(http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":

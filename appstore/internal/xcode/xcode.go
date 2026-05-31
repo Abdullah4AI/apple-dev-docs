@@ -993,6 +993,22 @@ func runCommandWithTail(ctx context.Context, name string, args []string, logWrit
 	cmd.Stderr = writer
 	if err := cmd.Run(); err != nil {
 		detail := strings.TrimSpace(outputTail.String())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if detail != "" {
+				if outputTail.Truncated() {
+					return fmt.Errorf(
+						"%s %s timed out or was canceled (showing last %d bytes): %s: %w",
+						commandLabel,
+						action,
+						xcodebuildErrorTailLimit,
+						detail,
+						ctxErr,
+					)
+				}
+				return fmt.Errorf("%s %s timed out or was canceled: %s: %w", commandLabel, action, detail, ctxErr)
+			}
+			return fmt.Errorf("%s %s timed out or was canceled: %w", commandLabel, action, ctxErr)
+		}
 		if detail != "" {
 			if outputTail.Truncated() {
 				return fmt.Errorf(

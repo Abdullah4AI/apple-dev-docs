@@ -31,6 +31,7 @@ import (
 const (
 	communityWallUpstreamOwner        = "rorkai"
 	communityWallUpstreamRepo         = "App-Store-Connect-CLI"
+	communityWallTransferredFromOwner = "rudrankriyam"
 	communityWallUpstreamBranch       = "main"
 	communityWallGitHubMaxBodyBytes   = 8192
 	defaultCommunityWallSubmitOutput  = "json"
@@ -994,7 +995,20 @@ func (repo *communityWallGitHubRepo) isForkOf(upstreamFullName string) bool {
 	if repo == nil || !repo.Fork || repo.Parent == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(repo.Parent.FullName), strings.TrimSpace(upstreamFullName))
+	parent := strings.TrimSpace(repo.Parent.FullName)
+	for _, allowed := range communityWallAcceptedForkParents(upstreamFullName) {
+		if strings.EqualFold(parent, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func communityWallAcceptedForkParents(upstreamFullName string) []string {
+	return []string{
+		strings.TrimSpace(upstreamFullName),
+		communityWallTransferredFromOwner + "/" + communityWallUpstreamRepo,
+	}
 }
 
 func (repo *communityWallGitHubRepo) displayName(owner, name string) string {

@@ -112,6 +112,8 @@ func TestProductPagesExperimentTreatmentLocalizationScreenshotSetsUploadSuccessJ
 				t.Fatalf("expected PPO relationship in body, got %s", string(body))
 			}
 			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return jsonHTTPResponse(http.StatusOK, `{"data":[]}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return jsonHTTPResponse(http.StatusOK, `{"data":[]}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":

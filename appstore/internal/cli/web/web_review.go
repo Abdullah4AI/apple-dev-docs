@@ -698,6 +698,7 @@ Subcommands:
   list  List review submissions for an app
   show  Show one submission with threads/messages/rejections and auto-download screenshots
   subscriptions  Inspect and mutate next-version subscription review selection
+  iaps  Attach non-renewing IAPs to the next app version review
 
 ` + webWarningText,
 		FlagSet:   fs,
@@ -706,6 +707,7 @@ Subcommands:
 			WebReviewListCommand(),
 			WebReviewShowCommand(),
 			WebReviewSubscriptionsCommand(),
+			WebReviewIAPsCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp

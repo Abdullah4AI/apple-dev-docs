@@ -65,12 +65,11 @@ Before tagging a release, verify:
 
 ```bash
 # 1. Update release-facing docs
-#    - refresh resources/changelog.mdx for the new version
 #    - update any website pages affected by the release
+#    - release notes are auto-generated from merged PRs on tag push
 
 # 2. Verify documentation
 make check-docs
-make check-release-docs VERSION=0.1.0
 
 # 3. All tests pass
 ASC_BYPASS_KEYCHAIN=1 make test

@@ -79,7 +79,7 @@ Create `.asc/workflow.json`:
         },
         {
           "name": "export",
-          "run": "asc xcode export --archive-path ${steps.archive.ARCHIVE_PATH} --export-options \"$EXPORT_OPTIONS\" --ipa-path \".asc/artifacts/App-$VERSION-${steps.archive.BUILD_NUMBER}.ipa\" --overwrite --xcodebuild-flag=-allowProvisioningUpdates --output json",
+          "run": "asc xcode export --archive-path ${steps.archive.ARCHIVE_PATH} --export-options \"$EXPORT_OPTIONS\" --ipa-path \".asc/artifacts/App-$VERSION-${steps.archive.BUILD_NUMBER}.ipa\" --overwrite --timeout 10m --xcodebuild-flag=-allowProvisioningUpdates --output json",
           "outputs": {
             "IPA_PATH": "$.ipa_path",
             "VERSION": "$.version",

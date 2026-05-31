@@ -21,6 +21,8 @@ var focusedScreenshotDisplayTypes = []string{
 	"APP_IPAD_PRO_3GEN_129",
 }
 
+const appScreenshotSetMaxScreenshots = 10
+
 var focusedScreenshotDisplayTypesByPlatform = map[string][]string{
 	"IOS":       focusedScreenshotDisplayTypes,
 	"MAC_OS":    {"APP_DESKTOP"},
@@ -76,6 +78,7 @@ type screenshotUploadConfig[T any] struct {
 	SkipExisting   bool
 	Replace        bool
 	DryRun         bool
+	MaxScreenshots int
 	RequestContext func(context.Context) (context.Context, context.CancelFunc)
 	UploadContext  func(context.Context) (context.Context, context.CancelFunc)
 	Access         ScreenshotSetAccess
@@ -93,6 +96,7 @@ type screenshotUploadCommandOptions struct {
 	SkipExisting          bool
 	Replace               bool
 	DryRun                bool
+	MaxScreenshots        int
 }
 
 type screenshotUploadDependencies struct {
@@ -117,6 +121,7 @@ type screenshotUploadFanoutConfig struct {
 	SkipExisting          bool
 	Replace               bool
 	DryRun                bool
+	MaxScreenshots        int
 
 	RequestContext   func(context.Context) (context.Context, context.CancelFunc)
 	UploadScreenshot func(context.Context, *asc.Client, string, string, []string, bool, bool, bool) (asc.AppScreenshotUploadResult, error)
@@ -407,6 +412,7 @@ func AssetsScreenshotsUploadCommand() *ffcli.Command {
 	skipExisting := fs.Bool("skip-existing", false, "Skip files whose MD5 checksum already exists in the target screenshot set")
 	replace := fs.Bool("replace", false, "Delete all existing screenshots from the target set before uploading")
 	dryRun := fs.Bool("dry-run", false, "Show what would be uploaded, skipped, or deleted without making changes")
+	maxScreenshots := fs.Int("max-screenshots", 0, "Upload only the first N sorted screenshots per set; must be 10 or less")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -432,6 +438,7 @@ Examples:
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65"
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --skip-existing
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --replace
+  asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --max-screenshots 10
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --skip-existing --dry-run
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPAD_PRO_3GEN_129"
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots/en-US.png" --device-type "IPHONE_65"
@@ -452,8 +459,8 @@ Examples:
 					strings.TrimSpace(*deviceType) != "" {
 					return shared.UsageError("--resume cannot be combined with --version-localization, --app, --version, --version-id, --platform, --path, or --device-type")
 				}
-				if *skipExisting || *replace || *dryRun {
-					return shared.UsageError("--resume cannot be combined with --skip-existing, --replace, or --dry-run")
+				if *skipExisting || *replace || *dryRun || *maxScreenshots != 0 {
+					return shared.UsageError("--resume cannot be combined with --skip-existing, --replace, --dry-run, or --max-screenshots")
 				}
 
 				client, err := shared.GetASCClient()
@@ -481,6 +488,7 @@ Examples:
 				SkipExisting:          *skipExisting,
 				Replace:               *replace,
 				DryRun:                *dryRun,
+				MaxScreenshots:        *maxScreenshots,
 			}, screenshotUploadDependencies{
 				GetClient:        shared.GetASCClient,
 				RequestContext:   shared.ContextWithTimeout,
@@ -573,6 +581,12 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 		fmt.Fprintln(os.Stderr, "Error: --skip-existing and --replace are mutually exclusive")
 		return nil, flag.ErrHelp
 	}
+	if opts.MaxScreenshots < 0 {
+		return nil, shared.UsageError("--max-screenshots must be zero or greater")
+	}
+	if opts.MaxScreenshots > appScreenshotSetMaxScreenshots {
+		return nil, shared.UsageError(fmt.Sprintf("--max-screenshots cannot exceed %d; App Store screenshot sets allow at most %d images", appScreenshotSetMaxScreenshots, appScreenshotSetMaxScreenshots))
+	}
 
 	displayType, err := normalizeScreenshotDisplayType(deviceValue)
 	if err != nil {
@@ -581,7 +595,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	apiDisplayType := asc.CanonicalScreenshotDisplayTypeForAPI(displayType)
 
 	if locID != "" {
-		files, err := collectAssetFiles(pathValue)
+		files, err := collectScreenshotUploadFiles(pathValue, opts.MaxScreenshots)
 		if err != nil {
 			return nil, err
 		}
@@ -600,6 +614,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 			SkipExisting:   opts.SkipExisting,
 			Replace:        opts.Replace,
 			DryRun:         opts.DryRun,
+			MaxScreenshots: opts.MaxScreenshots,
 			RequestContext: deps.RequestContext,
 			UploadContext:  contextWithAssetUploadTimeout,
 			Access:         appStoreVersionScreenshotSetAccess,
@@ -612,7 +627,11 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 		return nil, shared.UsageError(err.Error())
 	}
 
-	localeAssets, err := collectLocaleAssetFiles(pathValue, apiDisplayType)
+	localeAssets, err := collectLocaleAssetFilesWithLimit(pathValue, apiDisplayType, opts.MaxScreenshots)
+	if err != nil {
+		return nil, err
+	}
+	localeAssets, err = limitScreenshotFanoutUploadFiles(localeAssets, opts.MaxScreenshots)
 	if err != nil {
 		return nil, err
 	}
@@ -647,6 +666,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 		SkipExisting:          opts.SkipExisting,
 		Replace:               opts.Replace,
 		DryRun:                opts.DryRun,
+		MaxScreenshots:        opts.MaxScreenshots,
 		RequestContext:        deps.RequestContext,
 		UploadScreenshot:      deps.UploadScreenshot,
 		ExecuteUpload:         deps.ExecuteUpload,
@@ -655,6 +675,110 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 		return &result, err
 	}
 	return &result, nil
+}
+
+func collectScreenshotUploadFiles(path string, maxScreenshots int) ([]string, error) {
+	files, err := collectAssetPaths(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no files found in %q", path)
+	}
+
+	files, err = limitScreenshotUploadFiles(files, maxScreenshots, path)
+	if err != nil {
+		return nil, err
+	}
+	for _, filePath := range files {
+		if err := asc.ValidateImageFile(filePath); err != nil {
+			return nil, err
+		}
+	}
+	return files, nil
+}
+
+func limitScreenshotUploadFiles(files []string, maxScreenshots int, source string) ([]string, error) {
+	if maxScreenshots > 0 {
+		if len(files) > maxScreenshots {
+			return append([]string(nil), files[:maxScreenshots]...), nil
+		}
+		return files, nil
+	}
+
+	if len(files) > appScreenshotSetMaxScreenshots {
+		return nil, fmt.Errorf(
+			"%q contains %d screenshots for one screenshot set; App Store screenshot sets allow at most %d images. Remove extra files or pass --max-screenshots %d to upload the first %d sorted files",
+			source,
+			len(files),
+			appScreenshotSetMaxScreenshots,
+			appScreenshotSetMaxScreenshots,
+			appScreenshotSetMaxScreenshots,
+		)
+	}
+	return files, nil
+}
+
+func limitScreenshotFanoutUploadFiles(localeAssets []screenshotLocaleAssetFiles, maxScreenshots int) ([]screenshotLocaleAssetFiles, error) {
+	limited := make([]screenshotLocaleAssetFiles, 0, len(localeAssets))
+	for _, item := range localeAssets {
+		files, err := limitScreenshotUploadFiles(item.Files, maxScreenshots, item.Locale)
+		if err != nil {
+			return nil, err
+		}
+		item.Files = files
+		limited = append(limited, item)
+	}
+	return limited, nil
+}
+
+func limitScreenshotUploadFilesForExistingSet(files []string, maxScreenshots int, existingScreenshots []asc.Resource[asc.AppScreenshotAttributes], replace bool, setID string) ([]string, error) {
+	if replace {
+		if maxScreenshots <= 0 {
+			return files, nil
+		}
+		if len(files) > maxScreenshots {
+			return append([]string(nil), files[:maxScreenshots]...), nil
+		}
+		return files, nil
+	}
+
+	setLabel := strings.TrimSpace(setID)
+	if setLabel == "" {
+		setLabel = "target set"
+	}
+	if maxScreenshots <= 0 {
+		total := len(existingScreenshots) + len(files)
+		if total > appScreenshotSetMaxScreenshots {
+			return nil, fmt.Errorf(
+				"%s already has %d screenshot(s); uploading %d more would exceed App Store screenshot set limit %d. Pass --replace to replace existing screenshots or --max-screenshots %d to upload only the remaining slot(s)",
+				setLabel,
+				len(existingScreenshots),
+				len(files),
+				appScreenshotSetMaxScreenshots,
+				max(0, appScreenshotSetMaxScreenshots-len(existingScreenshots)),
+			)
+		}
+		return files, nil
+	}
+
+	remaining := maxScreenshots - len(existingScreenshots)
+	if remaining <= 0 {
+		if len(files) == 0 {
+			return files, nil
+		}
+		return nil, fmt.Errorf(
+			"%s already has %d screenshot(s); --max-screenshots %d leaves no upload slots. Pass --replace to replace existing screenshots or choose a higher limit up to %d",
+			setLabel,
+			len(existingScreenshots),
+			maxScreenshots,
+			appScreenshotSetMaxScreenshots,
+		)
+	}
+	if len(files) > remaining {
+		return append([]string(nil), files[:remaining]...), nil
+	}
+	return files, nil
 }
 
 func uploadScreenshotsFanout(ctx context.Context, cfg screenshotUploadFanoutConfig) (asc.AppScreenshotFanoutUploadResult, error) {
@@ -731,6 +855,7 @@ func uploadScreenshotsFanout(ctx context.Context, cfg screenshotUploadFanoutConf
 			SkipExisting:   cfg.SkipExisting,
 			Replace:        cfg.Replace,
 			DryRun:         cfg.DryRun,
+			MaxScreenshots: cfg.MaxScreenshots,
 			RequestContext: cfg.RequestContext,
 			UploadContext:  contextWithAssetUploadTimeout,
 			Access:         appStoreVersionScreenshotSetAccess,
@@ -748,6 +873,10 @@ func uploadScreenshotsFanout(ctx context.Context, cfg screenshotUploadFanoutConf
 }
 
 func collectLocaleAssetFiles(rootPath, displayType string) ([]screenshotLocaleAssetFiles, error) {
+	return collectLocaleAssetFilesWithLimit(rootPath, displayType, 0)
+}
+
+func collectLocaleAssetFilesWithLimit(rootPath, displayType string, maxScreenshots int) ([]screenshotLocaleAssetFiles, error) {
 	info, err := os.Lstat(rootPath)
 	if err != nil {
 		return nil, err
@@ -803,7 +932,7 @@ func collectLocaleAssetFiles(rootPath, displayType string) ([]screenshotLocaleAs
 				continue
 			}
 		}
-		files, err := collectLocaleAssetFilesRecursive(entryPath, displayType)
+		files, err := collectLocaleAssetFilesRecursiveWithLimit(entryPath, displayType, maxScreenshots)
 		if err != nil {
 			return nil, fmt.Errorf("locale %s: %w", locale, err)
 		}
@@ -866,21 +995,32 @@ func walkMatchingScreenshotFiles(rootPath, displayType string, opts screenshotMa
 			}
 			return err
 		}
-		matches, err := screenshotMatchesDisplayType(path, displayType)
+		isMatch, err := screenshotMatchesDisplayType(path, displayType)
 		if err != nil {
 			if opts.ignoreInvalidFiles {
 				return nil
 			}
 			return err
 		}
-		if !matches || opts.onMatch == nil {
+		if !isMatch || opts.onMatch == nil {
 			return nil
 		}
-		return opts.onMatch(path)
+		if err := opts.onMatch(path); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
 func collectLocaleAssetFilesRecursive(rootPath, displayType string) ([]string, error) {
+	return collectLocaleAssetFilesRecursiveWithLimit(rootPath, displayType, 0)
+}
+
+func collectLocaleAssetFilesRecursiveWithLimit(rootPath, displayType string, maxScreenshots int) ([]string, error) {
+	if maxScreenshots > 0 {
+		return collectLimitedLocaleAssetFilesRecursive(rootPath, displayType, maxScreenshots)
+	}
+
 	files := make([]string, 0)
 	err := walkMatchingScreenshotFiles(rootPath, displayType, screenshotMatchWalkOptions{
 		onMatch: func(path string) error {
@@ -893,6 +1033,69 @@ func collectLocaleAssetFilesRecursive(rootPath, displayType string) ([]string, e
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no screenshot files matching %s found in %q", displayType, rootPath)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func collectLimitedLocaleAssetFilesRecursive(rootPath, displayType string, maxScreenshots int) ([]string, error) {
+	candidates, err := collectSupportedScreenshotCandidateFiles(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]string, 0, min(maxScreenshots, len(candidates)))
+	for _, path := range candidates {
+		if len(files) >= maxScreenshots {
+			break
+		}
+		if err := asc.ValidateImageFile(path); err != nil {
+			return nil, err
+		}
+		matches, err := screenshotMatchesDisplayType(path, displayType)
+		if err != nil {
+			return nil, err
+		}
+		if matches {
+			files = append(files, path)
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no screenshot files matching %s found in %q", displayType, rootPath)
+	}
+	return files, nil
+}
+
+func collectSupportedScreenshotCandidateFiles(rootPath string) ([]string, error) {
+	files := make([]string, 0)
+	err := filepath.WalkDir(rootPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path != rootPath && shouldIgnoreFanoutEntryName(entry.Name()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to read symlink %q", path)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || !isSupportedScreenshotUploadFile(path) {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(files)
 	return files, nil
@@ -1501,7 +1704,7 @@ func uploadScreenshotsWithConfig[T any](ctx context.Context, cfg screenshotUploa
 	}
 
 	existingScreenshots := make([]asc.Resource[asc.AppScreenshotAttributes], 0)
-	if (cfg.SkipExisting || cfg.Replace) && set.ID != "" {
+	if (cfg.SkipExisting || cfg.Replace || (!cfg.Replace && len(cfg.Files) > 0)) && set.ID != "" {
 		fetchCtx, fetchCancel := cfg.RequestContext(ctx)
 		existingResp, err := cfg.Client.GetAppScreenshots(fetchCtx, set.ID)
 		fetchCancel()
@@ -1519,6 +1722,10 @@ func uploadScreenshotsWithConfig[T any](ctx context.Context, cfg screenshotUploa
 		if filterErr != nil {
 			return zero, filterErr
 		}
+	}
+	files, err = limitScreenshotUploadFilesForExistingSet(files, cfg.MaxScreenshots, existingScreenshots, cfg.Replace, set.ID)
+	if err != nil {
+		return zero, err
 	}
 
 	if cfg.DryRun {

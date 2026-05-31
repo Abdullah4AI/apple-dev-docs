@@ -144,7 +144,7 @@ func prepareAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 	}
 
 	existingScreenshots := make([]asc.Resource[asc.AppScreenshotAttributes], 0)
-	if (cfg.SkipExisting || cfg.Replace) && set.ID != "" {
+	if (cfg.SkipExisting || cfg.Replace || (!cfg.Replace && len(cfg.Files) > 0)) && set.ID != "" {
 		fetchCtx, fetchCancel := cfg.RequestContext(ctx)
 		existingResp, err := cfg.Client.GetAppScreenshots(fetchCtx, set.ID)
 		fetchCancel()
@@ -162,6 +162,10 @@ func prepareAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 		if filterErr != nil {
 			return screenshotUploadPreparedState{}, filterErr
 		}
+	}
+	files, err = limitScreenshotUploadFilesForExistingSet(files, cfg.MaxScreenshots, existingScreenshots, cfg.Replace, set.ID)
+	if err != nil {
+		return screenshotUploadPreparedState{}, err
 	}
 
 	orderedIDs := make([]string, 0)
@@ -193,6 +197,9 @@ func prepareAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 }
 
 func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[asc.AppScreenshotUploadResult], artifactPath string) (asc.AppScreenshotUploadResult, error) {
+	if cfg.UploadContext == nil {
+		cfg.UploadContext = contextWithAssetUploadTimeout
+	}
 	prepared, err := prepareAppScreenshotUpload(ctx, cfg)
 	if err != nil {
 		return asc.AppScreenshotUploadResult{}, err

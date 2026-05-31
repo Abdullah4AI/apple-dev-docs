@@ -3,6 +3,7 @@ package assets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -510,6 +511,30 @@ func TestCollectLocaleAssetFilesRecursiveSkipsNonImageFiles(t *testing.T) {
 	}
 	if filepath.Base(files[0]) != "01-home.png" {
 		t.Fatalf("expected 01-home.png, got %q", files[0])
+	}
+}
+
+func TestCollectLocaleAssetFilesRecursiveWithLimitSortsBeforeValidation(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	for i := 1; i <= 10; i++ {
+		writeAssetsTestPNGWithSize(t, rootDir, fmt.Sprintf("%02d-home.png", i), 1242, 2688)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "11-corrupt.png"), []byte("not an image"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	files, err := collectLocaleAssetFilesRecursiveWithLimit(rootDir, asc.CanonicalScreenshotDisplayTypeForAPI("APP_IPHONE_65"), 10)
+	if err != nil {
+		t.Fatalf("collectLocaleAssetFilesRecursiveWithLimit() error: %v", err)
+	}
+	if len(files) != 10 {
+		t.Fatalf("expected 10 matching screenshot files, got %d", len(files))
+	}
+	if filepath.Base(files[0]) != "01-home.png" || filepath.Base(files[9]) != "10-home.png" {
+		t.Fatalf("expected first 10 sorted screenshots, got %#v", files)
 	}
 }
 

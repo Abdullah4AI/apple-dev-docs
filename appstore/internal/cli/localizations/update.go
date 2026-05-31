@@ -178,8 +178,9 @@ func updateAppInfoLocalization(ctx context.Context, p updateAppInfoParams) error
 	resp, err := client.UpdateAppInfoLocalization(requestCtx, localizationID, attrs)
 	if err != nil {
 		return fmt.Errorf(
-			"localizations update: update app-info localization %q (fields: %s): %w",
+			"localizations update: update app-info localization %q via PATCH /v1/appInfoLocalizations/%s (fields: %s): %w",
 			p.locale,
+			localizationID,
 			formatAttemptedFields(appInfoAttemptedFields(p)),
 			err,
 		)
@@ -250,8 +251,9 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 	resp, err := client.UpdateAppStoreVersionLocalization(requestCtx, localizationID, attrs)
 	if err != nil {
 		return fmt.Errorf(
-			"localizations update: update version localization %q (fields: %s): %w",
+			"localizations update: update version localization %q via PATCH /v1/appStoreVersionLocalizations/%s (fields: %s): %w",
 			p.locale,
+			localizationID,
 			formatAttemptedFields(versionAttemptedFields(p)),
 			err,
 		)

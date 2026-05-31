@@ -252,6 +252,8 @@ func TestScreenshotsApplyUploadsApprovedArtifacts(t *testing.T) {
 			return statusJSONResponse(`{"data":[{"type":"appStoreVersionLocalizations","id":"LOC_123","attributes":{"locale":"en-US"}}]}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
 			return statusJSONResponse(`{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return statusJSONResponse(`{"data":[],"links":{}}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":

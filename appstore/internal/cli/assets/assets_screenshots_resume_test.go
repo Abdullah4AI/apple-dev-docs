@@ -174,6 +174,8 @@ func TestExecuteAppScreenshotUploadOrderSyncFailureSurfacesOrderingError(t *test
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
 			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return assetsJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":

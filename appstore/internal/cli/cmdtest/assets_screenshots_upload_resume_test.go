@@ -52,6 +52,10 @@ func TestRunScreenshotsUploadResumeRejectsExecutionModeFlags(t *testing.T) {
 			name: "dry-run",
 			args: []string{"--dry-run"},
 		},
+		{
+			name: "max-screenshots",
+			args: []string{"--max-screenshots", "5"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -67,7 +71,7 @@ func TestRunScreenshotsUploadResumeRejectsExecutionModeFlags(t *testing.T) {
 				}
 			})
 
-			if !strings.Contains(stderr, "--resume cannot be combined with --skip-existing, --replace, or --dry-run") {
+			if !strings.Contains(stderr, "--resume cannot be combined with --skip-existing, --replace, --dry-run, or --max-screenshots") {
 				t.Fatalf("expected resume execution-mode conflict message, got %q", stderr)
 			}
 		})
@@ -114,6 +118,11 @@ func TestRunScreenshotsUploadWritesFailureArtifactAndResumeCompletes(t *testing.
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
 			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			if phase == "resume" {
+				return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"new-1"}],"links":{}}`)
+			}
+			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			if phase == "resume" {
 				return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"new-1"}],"links":{}}`)
@@ -323,7 +332,11 @@ func TestRunScreenshotsUploadFanoutPrintsPartialResultsOnLocaleFailure(t *testin
 			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-fr","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-en/relationships/appScreenshots":
 			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-en/appScreenshots":
+			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-fr/relationships/appScreenshots":
+			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-fr/appScreenshots":
 			return screenshotsUploadJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
 			createCount++

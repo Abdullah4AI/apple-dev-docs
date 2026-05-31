@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 )
 
@@ -38,4 +39,44 @@ func IsDuplicateAppNameError(err error) bool {
 		}
 	}
 	return false
+}
+
+// IsAlreadyExistsConflict reports whether an internal API error is a 409 caused
+// by an exact already-exists response. It intentionally avoids treating broader
+// "already attached/submitted" wording as idempotent success.
+func IsAlreadyExistsConflict(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil || apiErr.Status != http.StatusConflict {
+		return false
+	}
+
+	var payload struct {
+		Errors []struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+			Title  string `json:"title"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(apiErr.rawResponseBody(), &payload) != nil {
+		body := strings.ToLower(string(apiErr.rawResponseBody()))
+		return strings.Contains(body, "already exists") && !conflictTextMentionsDifferentTarget(body)
+	}
+
+	if len(payload.Errors) == 0 {
+		return false
+	}
+	for _, e := range payload.Errors {
+		code := strings.ToUpper(strings.TrimSpace(e.Code))
+		detail := strings.ToLower(strings.TrimSpace(e.Detail))
+		title := strings.ToLower(strings.TrimSpace(e.Title))
+		text := detail + " " + title
+		if !strings.Contains(code, "ALREADY_EXISTS") || conflictTextMentionsDifferentTarget(text) {
+			return false
+		}
+	}
+	return true
+}
+
+func conflictTextMentionsDifferentTarget(text string) bool {
+	return strings.Contains(text, "another") || strings.Contains(text, "different")
 }

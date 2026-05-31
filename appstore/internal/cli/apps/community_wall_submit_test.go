@@ -522,6 +522,80 @@ func TestSubmitCommunityWallEntryRejectsDuplicateAppID(t *testing.T) {
 	}
 }
 
+func TestSubmitCommunityWallEntryAcceptsTransferredForkParent(t *testing.T) {
+	sourceJSON := `[
+  {
+    "app": "Alpha",
+    "link": "https://example.com/alpha",
+    "creator": "alpha-dev",
+    "platform": ["iOS"]
+  }
+]`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/tester/App-Store-Connect-CLI":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"full_name":"tester/App-Store-Connect-CLI","fork":true,"parent":{"full_name":"rudrankriyam/App-Store-Connect-CLI"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/rorkai/App-Store-Connect-CLI/git/ref/heads/main":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": map[string]any{
+					"sha": "base-sha-123",
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/rorkai/App-Store-Connect-CLI/contents/docs/wall-of-apps.json":
+			if got := r.URL.Query().Get("ref"); got != "base-sha-123" {
+				t.Fatalf("expected ref=base-sha-123, got %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sha":      "blob123",
+				"encoding": "base64",
+				"content":  base64.StdEncoding.EncodeToString([]byte(sourceJSON)),
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	previousAPIBase := communityWallGitHubAPIBase
+	previousHTTPClient := communityWallGitHubClient
+	previousLookupDetails := communityWallLookupAppDetails
+	communityWallGitHubAPIBase = server.URL
+	communityWallGitHubClient = func() *http.Client { return server.Client() }
+	communityWallLookupAppDetails = func(ctx context.Context, ids []string, country string) (map[string]communityWallAppDetails, error) {
+		return map[string]communityWallAppDetails{
+			"1234567890": {
+				Name: "Beta",
+				Link: "https://apps.apple.com/us/app/beta/id1234567890",
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		communityWallGitHubAPIBase = previousAPIBase
+		communityWallGitHubClient = previousHTTPClient
+		communityWallLookupAppDetails = previousLookupDetails
+	})
+
+	result, err := submitCommunityWallEntry(context.Background(), communityWallSubmitRequest{
+		Input: communityWallSubmitInput{
+			AppID: "1234567890",
+		},
+		GitHubToken: "token",
+		GitHubLogin: "tester",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("submit dry-run with transferred parent: %v", err)
+	}
+	if result.WillCreateFork {
+		t.Fatalf("expected existing transferred fork to be reused")
+	}
+	if result.UpstreamRepo != "rorkai/App-Store-Connect-CLI" {
+		t.Fatalf("UpstreamRepo = %q, want rorkai/App-Store-Connect-CLI", result.UpstreamRepo)
+	}
+}
+
 func TestSubmitCommunityWallEntryRejectsMalformedExistingSource(t *testing.T) {
 	sourceJSON := `[
   {

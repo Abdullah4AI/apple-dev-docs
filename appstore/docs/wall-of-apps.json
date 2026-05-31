@@ -957,6 +957,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/89/bd/10/89bd10b6-2a9a-4292-2eaf-16948b018a7a/AppIcon-0-0-1x_U007emarketing-0-11-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "PodSized: AI Podcast Summaries",
+    "link": "https://apps.apple.com/us/app/podsized-ai-podcast-summaries/id6737673525?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ec/c6/43/ecc6438f-9c3e-2b6e-34d7-c27e82104512/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Pop - Find by Color",
     "link": "https://apps.apple.com/us/app/pop-find-by-color/id6758629086?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ee/8a/b3/ee8ab36e-f44e-a3d8-baf5-bf9036af5532/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -1055,6 +1060,11 @@
     "app": "Receipts Manager: Receipteka",
     "link": "https://apps.apple.com/us/app/receipts-manager-receipteka/id6474066806?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/3c/f7/5a/3cf75a8b-78f9-010e-906d-011849ab7ee2/AppIcon-0-0-1x_U007epad-0-1-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "RecipeBee: Recipes & Meal Plan",
+    "link": "https://apps.apple.com/us/app/recipebee-recipes-meal-plan/id6757370845?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/86/0e/52/860e52e1-9c23-7868-1f43-b43739700fae/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "RegexMate",
@@ -1396,6 +1406,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/6a/1e/8f/6a1e8f8e-1f53-fcde-f26b-f814416eeb69/glass-0-0-85-220-0-6-0-2x-sRGB.png/512x512bb.png"
   },
   {
+    "app": "UrbanAir: Unlock all escooters",
+    "link": "https://apps.apple.com/us/app/urbanair-unlock-all-escooters/id1491025864?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple122/v4/7f/75/08/7f750858-b379-719d-f98c-06e4fbc9a984/AppIcon-0-0-1x_U007emarketing-0-0-0-10-0-0-sRGB-0-0-0-GLES2_U002c0-512MB-85-220-0-0.png/512x512bb.jpg"
+  },
+  {
     "app": "Vakta: Prayer Times & Quran",
     "link": "https://apps.apple.com/us/app/vakta-prayer-times-quran/id6759549958?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/c0/a4/8e/c0a48e40-32c3-8e31-6779-9b75593d9e38/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -1439,6 +1454,11 @@
     "app": "Wat Kham",
     "link": "https://apps.apple.com/us/app/wat-kham/id6760705576?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/86/4a/45/864a4587-87e9-4a25-e53e-2e9e025800e0/AppIcon-1x_U007emarketing-0-8-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "Watchletic - Run tracker",
+    "link": "https://apps.apple.com/us/app/watchletic-run-tracker/id1606429298?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e0/4b/bd/e04bbd15-6b77-184e-381f-3d5e5654d97b/app-0-0-1x_U007epad-0-0-0-1-0-0-sRGB-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Weather mini - Trip Forecasts",

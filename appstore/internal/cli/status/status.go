@@ -51,6 +51,7 @@ type statusSummary struct {
 	Health     string   `json:"health"`
 	NextAction string   `json:"nextAction"`
 	Blockers   []string `json:"blockers"`
+	Platform   string   `json:"platform,omitempty"`
 }
 
 type buildsSection struct {
@@ -133,6 +134,7 @@ func StatusCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (required, or ASC_APP_ID env)")
+	platform := fs.String("platform", "", "Filter release status by platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	include := fs.String("include", "", "Comma-separated sections: app,builds,testflight,appstore,submission,review,phased-release,links")
 	watch := fs.Bool("watch", false, "Poll and emit snapshots when status changes")
 	pollInterval := fs.Duration("poll-interval", 30*time.Second, "Polling interval for --watch")
@@ -152,6 +154,7 @@ Examples:
   asc status --app "123456789"
   asc status --app "com.example.app"
   asc status --app "My App"
+  asc status --app "123456789" --platform MAC_OS
   asc status --app "123456789" --include builds,testflight,submission
   asc status --app "123456789" --watch --poll-interval 15s
   asc status --app "123456789" --output table`,
@@ -182,6 +185,13 @@ Examples:
 			if *maxPolls > 0 && !*watch {
 				return shared.UsageError("--max-polls requires --watch")
 			}
+			normalizedPlatform := ""
+			if strings.TrimSpace(*platform) != "" {
+				normalizedPlatform, err = shared.NormalizeAppStoreVersionPlatform(*platform)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -196,13 +206,13 @@ Examples:
 			}
 
 			if *watch {
-				return watchDashboard(ctx, client, resolvedAppID, includes, *output.Output, *output.Pretty, *pollInterval, *maxPolls)
+				return watchDashboard(ctx, client, resolvedAppID, normalizedPlatform, includes, *output.Output, *output.Pretty, *pollInterval, *maxPolls)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := collectDashboard(requestCtx, client, resolvedAppID, includes, false)
+			resp, err := collectDashboard(requestCtx, client, resolvedAppID, normalizedPlatform, includes, false)
 			if err != nil {
 				return fmt.Errorf("status: %w", err)
 			}
@@ -218,12 +228,12 @@ Examples:
 	}
 }
 
-func watchDashboard(ctx context.Context, client *asc.Client, appID string, includes includeSet, output string, pretty bool, pollInterval time.Duration, maxPolls int) error {
+func watchDashboard(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, output string, pretty bool, pollInterval time.Duration, maxPolls int) error {
 	seen := ""
 
 	for poll := 1; maxPolls == 0 || poll <= maxPolls; poll++ {
 		requestCtx, cancel := shared.ContextWithTimeout(ctx)
-		resp, err := collectDashboard(requestCtx, client, appID, includes, true)
+		resp, err := collectDashboard(requestCtx, client, appID, platform, includes, true)
 		cancel()
 		if err != nil {
 			if watchContextDone(ctx) {
@@ -393,7 +403,7 @@ func parseInclude(value string) (includeSet, error) {
 	return includes, nil
 }
 
-func collectDashboard(ctx context.Context, client *asc.Client, appID string, includes includeSet, watchMode bool) (*dashboardResponse, error) {
+func collectDashboard(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, watchMode bool) (*dashboardResponse, error) {
 	resp := &dashboardResponse{}
 	if includes.app {
 		appResp, err := client.GetApp(ctx, appID)
@@ -421,7 +431,7 @@ func collectDashboard(ctx context.Context, client *asc.Client, appID string, inc
 		tasks = append(tasks, sectionTask{
 			name: "builds/testflight",
 			run: func() error {
-				return fillBuildsAndTestFlight(ctx, client, appID, includes, resp)
+				return fillBuildsAndTestFlight(ctx, client, appID, platform, includes, resp)
 			},
 		})
 	}
@@ -429,7 +439,7 @@ func collectDashboard(ctx context.Context, client *asc.Client, appID string, inc
 		tasks = append(tasks, sectionTask{
 			name: "appstore/phased-release",
 			run: func() error {
-				return fillAppStoreAndPhasedRelease(ctx, client, appID, includes, resp)
+				return fillAppStoreAndPhasedRelease(ctx, client, appID, platform, includes, resp)
 			},
 		})
 	}
@@ -437,7 +447,7 @@ func collectDashboard(ctx context.Context, client *asc.Client, appID string, inc
 		tasks = append(tasks, sectionTask{
 			name: "submission/review",
 			run: func() error {
-				return fillSubmissionAndReview(ctx, client, appID, includes, resp, watchMode)
+				return fillSubmissionAndReview(ctx, client, appID, platform, includes, resp, watchMode)
 			},
 		})
 	}
@@ -446,6 +456,7 @@ func collectDashboard(ctx context.Context, client *asc.Client, appID string, inc
 		return nil, err
 	}
 	resp.Summary = buildStatusSummary(resp)
+	resp.Summary.Platform = platform
 
 	return resp, nil
 }
@@ -486,8 +497,12 @@ func runTasks(tasks []sectionTask, limit int) error {
 	return nil
 }
 
-func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID string, includes includeSet, resp *dashboardResponse) error {
-	buildsResp, err := client.GetBuilds(ctx, appID, asc.WithBuildsSort("-uploadedDate"), asc.WithBuildsLimit(50))
+func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, resp *dashboardResponse) error {
+	buildOpts := []asc.BuildsOption{asc.WithBuildsSort("-uploadedDate"), asc.WithBuildsLimit(50)}
+	if platform != "" {
+		buildOpts = append(buildOpts, asc.WithBuildsPreReleaseVersionPlatforms([]string{platform}))
+	}
+	buildsResp, err := client.GetBuilds(ctx, appID, buildOpts...)
 	if err != nil {
 		return err
 	}
@@ -622,8 +637,12 @@ func optionalRelationshipResourceID(relationships json.RawMessage, key string) (
 	return id, true
 }
 
-func fillAppStoreAndPhasedRelease(ctx context.Context, client *asc.Client, appID string, includes includeSet, resp *dashboardResponse) error {
-	versions, err := shared.FetchAllAppStoreVersions(ctx, client, appID, asc.WithAppStoreVersionsLimit(200))
+func fillAppStoreAndPhasedRelease(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, resp *dashboardResponse) error {
+	versionOpts := []asc.AppStoreVersionsOption{asc.WithAppStoreVersionsLimit(200)}
+	if platform != "" {
+		versionOpts = append(versionOpts, asc.WithAppStoreVersionsPlatforms([]string{platform}))
+	}
+	versions, err := shared.FetchAllAppStoreVersions(ctx, client, appID, versionOpts...)
 	if err != nil {
 		return err
 	}
@@ -666,8 +685,8 @@ func fillAppStoreAndPhasedRelease(ctx context.Context, client *asc.Client, appID
 	return nil
 }
 
-func fillSubmissionAndReview(ctx context.Context, client *asc.Client, appID string, includes includeSet, resp *dashboardResponse, watchMode bool) error {
-	submissions, err := fetchStatusReviewSubmissions(ctx, client, appID, watchMode)
+func fillSubmissionAndReview(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, resp *dashboardResponse, watchMode bool) error {
+	submissions, err := fetchStatusReviewSubmissions(ctx, client, appID, platform, watchMode)
 	if err != nil {
 		return err
 	}
@@ -706,13 +725,17 @@ func fillSubmissionAndReview(ctx context.Context, client *asc.Client, appID stri
 	return nil
 }
 
-func fetchStatusReviewSubmissions(ctx context.Context, client *asc.Client, appID string, watchMode bool) ([]asc.ReviewSubmissionResource, error) {
+func fetchStatusReviewSubmissions(ctx context.Context, client *asc.Client, appID string, platform string, watchMode bool) ([]asc.ReviewSubmissionResource, error) {
+	opts := []asc.ReviewSubmissionsOption{asc.WithReviewSubmissionsLimit(200)}
+	if platform != "" {
+		opts = append(opts, asc.WithReviewSubmissionsPlatforms([]string{platform}))
+	}
 	if !watchMode {
-		return shared.FetchAllReviewSubmissions(ctx, client, appID, asc.WithReviewSubmissionsLimit(200))
+		return shared.FetchAllReviewSubmissions(ctx, client, appID, opts...)
 	}
 
 	// Watch mode uses a bounded recent snapshot instead of walking submission history on every poll.
-	resp, err := client.GetReviewSubmissions(ctx, appID, asc.WithReviewSubmissionsLimit(200))
+	resp, err := client.GetReviewSubmissions(ctx, appID, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -968,11 +991,15 @@ func renderDashboard(resp *dashboardResponse, markdown bool) {
 		summary = buildStatusSummary(resp)
 	}
 
-	shared.RenderSection("Summary", []string{"field", "value"}, [][]string{
+	summaryRows := [][]string{
 		{"health", fmt.Sprintf("%s %s", healthSymbol(summary.Health), shared.OrNA(summary.Health))},
 		{"nextAction", shared.OrNA(summary.NextAction)},
 		{"blockerCount", fmt.Sprintf("%d", len(summary.Blockers))},
-	}, markdown)
+	}
+	if summary.Platform != "" {
+		summaryRows = append(summaryRows, []string{"platform", summary.Platform})
+	}
+	shared.RenderSection("Summary", []string{"field", "value"}, summaryRows, markdown)
 
 	if len(summary.Blockers) > 0 {
 		attentionRows := make([][]string, 0, len(summary.Blockers))

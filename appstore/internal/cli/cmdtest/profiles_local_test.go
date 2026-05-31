@@ -67,6 +67,137 @@ func TestProfilesLocalInstall_ForceActionIsInstalledWhenNoExisting(t *testing.T)
 	}
 }
 
+func TestProfilesInspect_JSONIncludesEntitlements(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "profile.mobileprovision")
+	sourceBytes := buildMobileprovisionWithEntitlements(
+		t,
+		"00000000-0000-0000-0000-0000000000AD",
+		"Inspect Profile",
+		time.Now().Add(24*time.Hour),
+		map[string]any{
+			"com.apple.developer.family-controls":                       true,
+			"com.apple.developer.family-controls.app-and-website-usage": true,
+		},
+	)
+	if err := os.WriteFile(sourcePath, sourceBytes, 0o600); err != nil {
+		t.Fatalf("WriteFile(sourcePath) error: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"profiles", "inspect",
+			"--path", sourcePath,
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var result struct {
+		UUID                  string         `json:"uuid"`
+		Name                  string         `json:"name"`
+		TeamID                string         `json:"teamId"`
+		BundleID              string         `json:"bundleId"`
+		ApplicationIdentifier string         `json:"applicationIdentifier"`
+		Entitlements          map[string]any `json:"entitlements"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode JSON: %v (stdout=%q)", err, stdout)
+	}
+	if result.UUID != "00000000-0000-0000-0000-0000000000AD" {
+		t.Fatalf("uuid=%q", result.UUID)
+	}
+	if result.Name != "Inspect Profile" {
+		t.Fatalf("name=%q", result.Name)
+	}
+	if result.TeamID != "TEAM12345" {
+		t.Fatalf("teamId=%q", result.TeamID)
+	}
+	if result.BundleID != "com.example.app" {
+		t.Fatalf("bundleId=%q", result.BundleID)
+	}
+	if result.ApplicationIdentifier != "TEAM12345.com.example.app" {
+		t.Fatalf("applicationIdentifier=%q", result.ApplicationIdentifier)
+	}
+	if got, ok := result.Entitlements["com.apple.developer.family-controls"].(bool); !ok || !got {
+		t.Fatalf("expected family-controls entitlement true, got %#v", result.Entitlements["com.apple.developer.family-controls"])
+	}
+}
+
+func TestProfilesInspect_EntitlementsFlagRendersEntitlementRows(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "profile.mobileprovision")
+	sourceBytes := buildMobileprovisionWithEntitlements(
+		t,
+		"00000000-0000-0000-0000-0000000000AE",
+		"Entitlements Profile",
+		time.Now().Add(24*time.Hour),
+		map[string]any{
+			"com.apple.developer.family-controls": true,
+		},
+	)
+	if err := os.WriteFile(sourcePath, sourceBytes, 0o600); err != nil {
+		t.Fatalf("WriteFile(sourcePath) error: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"profiles", "inspect",
+			"--path", sourcePath,
+			"--entitlements",
+			"--output", "table",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "com.apple.developer.family-controls") {
+		t.Fatalf("expected entitlement key in output, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "true") {
+		t.Fatalf("expected entitlement value in output, got %q", stdout)
+	}
+}
+
+func TestProfilesInspect_MissingPath(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"profiles", "inspect"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "--path is required") {
+		t.Fatalf("expected --path error, got %q", stderr)
+	}
+}
+
 func TestProfilesLocalInstall_ForceActionIsReplacedWhenExisting(t *testing.T) {
 	installDir := t.TempDir()
 	uuid := "00000000-0000-0000-0000-0000000000AC"
@@ -402,19 +533,29 @@ func TestProfilesLocalInstall_ByID_DownloadsAndInstalls(t *testing.T) {
 func buildMobileprovision(t *testing.T, uuid, name string, expires time.Time) []byte {
 	t.Helper()
 
+	return buildMobileprovisionWithEntitlements(t, uuid, name, expires, nil)
+}
+
+func buildMobileprovisionWithEntitlements(t *testing.T, uuid, name string, expires time.Time, extraEntitlements map[string]any) []byte {
+	t.Helper()
+
 	const teamID = "TEAM12345"
 	const bundleID = "com.example.app"
 	now := time.Now().UTC()
+	entitlements := map[string]any{
+		"application-identifier":              teamID + "." + bundleID,
+		"com.apple.developer.team-identifier": teamID,
+	}
+	for key, value := range extraEntitlements {
+		entitlements[key] = value
+	}
 	payload := map[string]any{
 		"UUID":           uuid,
 		"Name":           name,
 		"TeamIdentifier": []string{teamID},
 		"CreationDate":   now.Add(-1 * time.Hour),
 		"ExpirationDate": expires.UTC(),
-		"Entitlements": map[string]any{
-			"application-identifier":              teamID + "." + bundleID,
-			"com.apple.developer.team-identifier": teamID,
-		},
+		"Entitlements":   entitlements,
 	}
 
 	plistBytes, err := plist.Marshal(payload, plist.XMLFormat)

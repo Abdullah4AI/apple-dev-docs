@@ -247,6 +247,116 @@ func TestXcodeExportAllowsPollIntervalWithoutWait(t *testing.T) {
 	}
 }
 
+func TestXcodeExportRejectsNegativeTimeout(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--export-options", "ExportOptions.plist",
+		"--ipa-path", "Demo.ipa",
+		"--timeout", "-1s",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	var runErr error
+	_, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatal("expected flag.ErrHelp for negative timeout")
+	}
+	if !strings.Contains(stderr, "Error: --timeout must be zero or greater") {
+		t.Fatalf("expected timeout usage error, got %q", stderr)
+	}
+}
+
+func TestXcodeExportPassesTimeoutContextToLocalExport(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	runExport = func(ctx context.Context, opts localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected export context deadline")
+		}
+		if time.Until(deadline) <= 0 {
+			t.Fatalf("expected future deadline, got %s", deadline)
+		}
+		return &localxcode.ExportResult{
+			ArchivePath: opts.ArchivePath,
+			IPAPath:     opts.IPAPath,
+			BundleID:    "com.example.demo",
+			Version:     "1.2.3",
+			BuildNumber: "42",
+		}, nil
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--export-options", "ExportOptions.plist",
+		"--ipa-path", "Demo.ipa",
+		"--timeout", "10s",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr != nil {
+		t.Fatalf("Exec() error: %v", runErr)
+	}
+	if strings.TrimSpace(stdout) == "" {
+		t.Fatal("expected JSON output")
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("expected no stderr output, got %q", stderr)
+	}
+}
+
+func TestXcodeExportReportsTimeout(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	runExport = func(ctx context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--export-options", "ExportOptions.plist",
+		"--ipa-path", "Demo.ipa",
+		"--timeout", "1ms",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	var runErr error
+	_, _ = captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(runErr.Error(), "timed out after 1ms while running xcodebuild -exportArchive") {
+		t.Fatalf("expected timeout guidance, got %v", runErr)
+	}
+}
+
 func TestXcodeExportWaitPollsForUploadedBuild(t *testing.T) {
 	restore := overrideXcodeCommandTestHooks(t)
 	defer restore()

@@ -2,6 +2,10 @@ package profiles
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -11,12 +15,19 @@ import (
 )
 
 type mobileProvision struct {
-	UUID           string         `plist:"UUID"`
-	Name           string         `plist:"Name"`
-	TeamIdentifier []string       `plist:"TeamIdentifier"`
-	CreationDate   time.Time      `plist:"CreationDate"`
-	ExpirationDate time.Time      `plist:"ExpirationDate"`
-	Entitlements   map[string]any `plist:"Entitlements"`
+	UUID                  string         `plist:"UUID"`
+	Name                  string         `plist:"Name"`
+	AppIDName             string         `plist:"AppIDName"`
+	TeamName              string         `plist:"TeamName"`
+	TeamIdentifier        []string       `plist:"TeamIdentifier"`
+	Platform              []string       `plist:"Platform"`
+	ProvisionedDevices    []string       `plist:"ProvisionedDevices"`
+	ProvisionsAllDevices  bool           `plist:"ProvisionsAllDevices"`
+	CreationDate          time.Time      `plist:"CreationDate"`
+	ExpirationDate        time.Time      `plist:"ExpirationDate"`
+	TimeToLive            int            `plist:"TimeToLive"`
+	Entitlements          map[string]any `plist:"Entitlements"`
+	DeveloperCertificates [][]byte       `plist:"DeveloperCertificates"`
 }
 
 func parseMobileProvision(data []byte) (*mobileProvision, error) {
@@ -95,4 +106,23 @@ func coerceAnyToString(value any) string {
 	default:
 		return ""
 	}
+}
+
+func inspectDeveloperCertificate(data []byte) profileCertificate {
+	sumSHA1 := sha1.Sum(data)
+	sumSHA256 := sha256.Sum256(data)
+
+	cert := profileCertificate{
+		SHA1:   strings.ToUpper(hex.EncodeToString(sumSHA1[:])),
+		SHA256: strings.ToUpper(hex.EncodeToString(sumSHA256[:])),
+	}
+	parsed, err := x509.ParseCertificate(data)
+	if err != nil {
+		return cert
+	}
+	cert.CommonName = strings.TrimSpace(parsed.Subject.CommonName)
+	cert.SerialNumber = strings.TrimSpace(parsed.SerialNumber.String())
+	cert.NotBefore = parsed.NotBefore
+	cert.NotAfter = parsed.NotAfter
+	return cert
 }

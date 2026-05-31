@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,6 +221,207 @@ func TestAssetsScreenshotsUploadCommandRejectsSkipExistingWithReplace(t *testing
 	}
 	if !strings.Contains(stderr, "--skip-existing and --replace are mutually exclusive") {
 		t.Fatalf("expected mutually exclusive error in stderr, got %q", stderr)
+	}
+}
+
+func TestAssetsScreenshotsUploadCommandRejectsMaxScreenshotsWithResume(t *testing.T) {
+	cmd := AssetsScreenshotsUploadCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--resume", ".asc/reports/screenshots-upload/failures.json",
+		"--max-screenshots", "10",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), cmd.FlagSet.Args())
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "--resume cannot be combined with --skip-existing, --replace, --dry-run, or --max-screenshots") {
+		t.Fatalf("expected max-screenshots resume error in stderr, got %q", stderr)
+	}
+}
+
+func TestExecuteScreenshotUploadCommandRejectsMoreThanTenScreenshotsBeforeAuth(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 11; i++ {
+		writeAssetsTestPNGWithSize(t, dir, fmt.Sprintf("%02d-home.png", i), 1242, 2688)
+	}
+
+	clientCalled := false
+	_, err := executeScreenshotUploadCommand(context.Background(), screenshotUploadCommandOptions{
+		VersionLocalizationID: "LOC_ID",
+		Path:                  dir,
+		DeviceType:            "IPHONE_65",
+	}, screenshotUploadDependencies{
+		GetClient: func() (*asc.Client, error) {
+			clientCalled = true
+			return &asc.Client{}, nil
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected screenshot-count error")
+	}
+	if !strings.Contains(err.Error(), "allow at most 10 images") {
+		t.Fatalf("expected max screenshot guidance, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "--max-screenshots 10") {
+		t.Fatalf("expected --max-screenshots guidance, got %v", err)
+	}
+	if clientCalled {
+		t.Fatal("expected local screenshot-count validation before auth/client creation")
+	}
+}
+
+func TestExecuteScreenshotUploadCommandRejectsMaxScreenshotsAboveAppleLimit(t *testing.T) {
+	clientCalled := false
+	var err error
+	_, stderr := captureOutput(t, func() {
+		_, err = executeScreenshotUploadCommand(context.Background(), screenshotUploadCommandOptions{
+			VersionLocalizationID: "LOC_ID",
+			Path:                  "unused",
+			DeviceType:            "IPHONE_65",
+			MaxScreenshots:        11,
+		}, screenshotUploadDependencies{
+			GetClient: func() (*asc.Client, error) {
+				clientCalled = true
+				return &asc.Client{}, nil
+			},
+		})
+	})
+
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", err)
+	}
+	if !strings.Contains(stderr, "--max-screenshots cannot exceed 10") {
+		t.Fatalf("expected max-screenshots limit error, got %q", stderr)
+	}
+	if clientCalled {
+		t.Fatal("expected max-screenshots validation before auth/client creation")
+	}
+}
+
+func TestExecuteScreenshotUploadCommandMaxScreenshotsCapsSortedFiles(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 11; i++ {
+		writeAssetsTestPNGWithSize(t, dir, fmt.Sprintf("%02d-home.png", i), 1242, 2688)
+	}
+
+	var gotFiles []string
+	result, err := executeScreenshotUploadCommand(context.Background(), screenshotUploadCommandOptions{
+		VersionLocalizationID: "LOC_ID",
+		Path:                  dir,
+		DeviceType:            "IPHONE_65",
+		MaxScreenshots:        10,
+	}, screenshotUploadDependencies{
+		GetClient: func() (*asc.Client, error) {
+			return &asc.Client{}, nil
+		},
+		ExecuteUpload: func(_ context.Context, cfg screenshotUploadConfig[asc.AppScreenshotUploadResult], _ string) (asc.AppScreenshotUploadResult, error) {
+			gotFiles = append([]string(nil), cfg.Files...)
+			return asc.AppScreenshotUploadResult{
+				VersionLocalizationID: cfg.LocalizationID,
+				DisplayType:           cfg.DisplayType,
+				Total:                 len(cfg.Files),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeScreenshotUploadCommand() error: %v", err)
+	}
+	uploadResult, ok := result.(*asc.AppScreenshotUploadResult)
+	if !ok {
+		t.Fatalf("expected *asc.AppScreenshotUploadResult, got %T", result)
+	}
+	if uploadResult.Total != 10 {
+		t.Fatalf("expected capped result total 10, got %d", uploadResult.Total)
+	}
+	if len(gotFiles) != 10 {
+		t.Fatalf("expected 10 files passed to upload, got %d", len(gotFiles))
+	}
+	if !strings.HasSuffix(gotFiles[0], "01-home.png") || !strings.HasSuffix(gotFiles[9], "10-home.png") {
+		t.Fatalf("expected first 10 sorted screenshots, got %#v", gotFiles)
+	}
+}
+
+func TestExecuteScreenshotUploadCommandMaxScreenshotsCapsBeforeDimensionValidation(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 10; i++ {
+		writeAssetsTestPNGWithSize(t, dir, fmt.Sprintf("%02d-home.png", i), 1242, 2688)
+	}
+	writeAssetsTestPNGWithSize(t, dir, "11-wrong-size.png", 100, 100)
+
+	var gotFiles []string
+	_, err := executeScreenshotUploadCommand(context.Background(), screenshotUploadCommandOptions{
+		VersionLocalizationID: "LOC_ID",
+		Path:                  dir,
+		DeviceType:            "IPHONE_65",
+		MaxScreenshots:        10,
+	}, screenshotUploadDependencies{
+		GetClient: func() (*asc.Client, error) {
+			return &asc.Client{}, nil
+		},
+		ExecuteUpload: func(_ context.Context, cfg screenshotUploadConfig[asc.AppScreenshotUploadResult], _ string) (asc.AppScreenshotUploadResult, error) {
+			gotFiles = append([]string(nil), cfg.Files...)
+			return asc.AppScreenshotUploadResult{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeScreenshotUploadCommand() error: %v", err)
+	}
+	if len(gotFiles) != 10 {
+		t.Fatalf("expected 10 capped files, got %d", len(gotFiles))
+	}
+	for _, file := range gotFiles {
+		if strings.HasSuffix(file, "11-wrong-size.png") {
+			t.Fatalf("expected capped files to exclude wrong-size screenshot, got %#v", gotFiles)
+		}
+	}
+}
+
+func TestExecuteScreenshotUploadCommandMaxScreenshotsCapsBeforeImageValidation(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 10; i++ {
+		writeAssetsTestPNGWithSize(t, dir, fmt.Sprintf("%02d-home.png", i), 1242, 2688)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "11-corrupt.png"), []byte("not an image"), 0o644); err != nil {
+		t.Fatalf("write corrupt screenshot: %v", err)
+	}
+
+	var gotFiles []string
+	_, err := executeScreenshotUploadCommand(context.Background(), screenshotUploadCommandOptions{
+		VersionLocalizationID: "LOC_ID",
+		Path:                  dir,
+		DeviceType:            "IPHONE_65",
+		MaxScreenshots:        10,
+	}, screenshotUploadDependencies{
+		GetClient: func() (*asc.Client, error) {
+			return &asc.Client{}, nil
+		},
+		ExecuteUpload: func(_ context.Context, cfg screenshotUploadConfig[asc.AppScreenshotUploadResult], _ string) (asc.AppScreenshotUploadResult, error) {
+			gotFiles = append([]string(nil), cfg.Files...)
+			return asc.AppScreenshotUploadResult{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeScreenshotUploadCommand() error: %v", err)
+	}
+	if len(gotFiles) != 10 {
+		t.Fatalf("expected 10 capped files, got %d", len(gotFiles))
+	}
+	for _, file := range gotFiles {
+		if strings.HasSuffix(file, "11-corrupt.png") {
+			t.Fatalf("expected capped files to exclude corrupt screenshot, got %#v", gotFiles)
+		}
 	}
 }
 

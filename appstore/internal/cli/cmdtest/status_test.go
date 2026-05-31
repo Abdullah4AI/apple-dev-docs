@@ -241,6 +241,159 @@ func TestStatusDefaultJSONIncludesAllSections(t *testing.T) {
 	}
 }
 
+func TestStatusPlatformFiltersPlatformScopedSections(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/apps":
+			return statusJSONResponse(`{
+				"data": [{"type":"apps","id":"app-1","attributes":{"name":"My App","bundleId":"app-1"}}]
+			}`), nil
+		case "/v1/builds":
+			query := req.URL.Query()
+			if query.Get("filter[app]") != "app-1" {
+				t.Fatalf("expected filter[app]=app-1, got %q", query.Get("filter[app]"))
+			}
+			if query.Get("filter[preReleaseVersion.platform]") != "MAC_OS" {
+				t.Fatalf("expected build platform filter MAC_OS, got %q", query.Get("filter[preReleaseVersion.platform]"))
+			}
+			return statusJSONResponse(`{
+				"data":[{"type":"builds","id":"build-mac","attributes":{"version":"45","uploadedDate":"2026-02-20T00:00:00Z","processingState":"VALID"}}],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/builds/build-mac/preReleaseVersion":
+			return statusJSONResponse(`{
+				"data":{"type":"preReleaseVersions","id":"prv-mac","attributes":{"version":"1.2.3","platform":"MAC_OS"}}
+			}`), nil
+		case "/v1/apps/app-1/appStoreVersions":
+			query := req.URL.Query()
+			if query.Get("filter[platform]") != "MAC_OS" {
+				t.Fatalf("expected app store versions platform filter MAC_OS, got %q", query.Get("filter[platform]"))
+			}
+			return statusJSONResponse(`{
+				"data":[
+					{
+						"type":"appStoreVersions",
+						"id":"ver-mac",
+						"attributes":{
+							"platform":"MAC_OS",
+							"versionString":"1.2.3",
+							"appVersionState":"READY_FOR_SALE",
+							"createdDate":"2026-02-20T02:00:00Z"
+						}
+					}
+				],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/apps/app-1/reviewSubmissions":
+			query := req.URL.Query()
+			if query.Get("filter[platform]") != "MAC_OS" {
+				t.Fatalf("expected review submissions platform filter MAC_OS, got %q", query.Get("filter[platform]"))
+			}
+			return statusJSONResponse(`{
+				"data":[
+					{
+						"type":"reviewSubmissions",
+						"id":"review-sub-mac",
+						"attributes":{"state":"COMPLETE","platform":"MAC_OS","submittedDate":"2026-02-20T03:00:00Z"}
+					}
+				],
+				"links":{"next":""}
+			}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "canonical order",
+			args: []string{"status", "--app", "app-1", "--platform", "mac_os", "--include", "builds,appstore,review"},
+		},
+		{
+			name: "platform before app",
+			args: []string{"status", "--platform", "mac_os", "--app", "app-1", "--include", "builds,appstore,review"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(tt.args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				if err := root.Run(context.Background()); err != nil {
+					t.Fatalf("run error: %v", err)
+				}
+			})
+
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+				t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+			}
+
+			summary := payload["summary"].(map[string]any)
+			if summary["platform"] != "MAC_OS" {
+				t.Fatalf("expected summary.platform MAC_OS, got %v", summary["platform"])
+			}
+
+			builds := payload["builds"].(map[string]any)
+			latestBuild := builds["latest"].(map[string]any)
+			if latestBuild["platform"] != "MAC_OS" {
+				t.Fatalf("expected builds.latest.platform MAC_OS, got %v", latestBuild["platform"])
+			}
+
+			appStore := payload["appstore"].(map[string]any)
+			if appStore["platform"] != "MAC_OS" || appStore["versionId"] != "ver-mac" {
+				t.Fatalf("expected macOS appstore version, got %v", appStore)
+			}
+
+			review := payload["review"].(map[string]any)
+			if review["platform"] != "MAC_OS" || review["latestSubmissionId"] != "review-sub-mac" {
+				t.Fatalf("expected macOS review submission, got %v", review)
+			}
+		})
+	}
+}
+
+func TestStatusRejectsUnknownPlatform(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "app-1", "--platform", "IPAD_OS"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp usage error, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "--platform must be one of: IOS, MAC_OS, TV_OS, VISION_OS") {
+		t.Fatalf("expected platform validation error in stderr, got %q", stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+}
+
 func TestStatusAppStorePaginatesBeforeChoosingLatestVersion(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

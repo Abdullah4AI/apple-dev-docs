@@ -119,8 +119,14 @@ func TestXcodeExportHelpMentionsDirectUploadMode(t *testing.T) {
 	if !strings.Contains(exportCmd.LongHelp, "without writing a local") {
 		t.Fatalf("expected long help to explain no local IPA is written, got %q", exportCmd.LongHelp)
 	}
+	if !strings.Contains(exportCmd.LongHelp, "--timeout 10m") {
+		t.Fatalf("expected long help to show local export timeout usage, got %q", exportCmd.LongHelp)
+	}
 	if got := exportCmd.FlagSet.Lookup("ipa-path").Usage; !strings.Contains(got, "when one is produced") {
 		t.Fatalf("expected ipa-path usage to mention produced IPA behavior, got %q", got)
+	}
+	if exportCmd.FlagSet.Lookup("timeout") == nil {
+		t.Fatal("expected xcode export to expose --timeout")
 	}
 }
 

@@ -2,6 +2,7 @@ package xcode
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -172,6 +173,7 @@ func XcodeExportCommand() *ffcli.Command {
 	overwrite := fs.Bool("overwrite", false, "Replace an existing IPA at --ipa-path")
 	wait := fs.Bool("wait", false, "Wait for App Store Connect build discovery and processing when export uploads directly")
 	pollInterval := fs.Duration("poll-interval", shared.PublishDefaultPollInterval, "Polling interval for --wait when waiting for uploaded builds")
+	timeout := fs.Duration("timeout", 0, "Maximum duration for xcodebuild -exportArchive (0 disables local export timeout)")
 	var xcodebuildFlags shared.MultiStringFlag
 	fs.Var(&xcodebuildFlags, "xcodebuild-flag", "Pass a raw argument through to xcodebuild (repeatable)")
 	output := shared.BindOutputFlags(fs)
@@ -191,6 +193,7 @@ finishes processing.
 
 Examples:
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options ExportOptions.plist --ipa-path .asc/artifacts/App.ipa
+  asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options ExportOptions.plist --ipa-path .asc/artifacts/App.ipa --timeout 10m
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options UploadExportOptions.plist --ipa-path .asc/artifacts/App.ipa --wait
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options ExportOptions.plist --ipa-path .asc/artifacts/App.ipa --xcodebuild-flag=-allowProvisioningUpdates --output json`,
 		FlagSet:   fs,
@@ -215,13 +218,25 @@ Examples:
 			if *wait && *pollInterval <= 0 {
 				return shared.UsageError("--poll-interval must be greater than 0")
 			}
+			if *timeout < 0 {
+				return shared.UsageError("--timeout must be zero or greater")
+			}
 			exportOptionsPath := strings.TrimSpace(*exportOptions)
 			if *wait && !isDirectUploadExportOptionsFn(exportOptionsPath) {
 				return shared.UsageError("--wait requires ExportOptions.plist with destination=upload")
 			}
 
+			exportCtx := ctx
+			var exportCancel context.CancelFunc
+			if *timeout > 0 {
+				exportCtx, exportCancel = context.WithTimeout(ctx, *timeout)
+			}
+			if exportCancel != nil {
+				defer exportCancel()
+			}
+
 			exportStartedAt := time.Now()
-			result, err := runExport(ctx, localxcode.ExportOptions{
+			result, err := runExport(exportCtx, localxcode.ExportOptions{
 				ArchivePath:    strings.TrimSpace(*archivePath),
 				ExportOptions:  exportOptionsPath,
 				IPAPath:        strings.TrimSpace(*ipaPath),
@@ -230,6 +245,9 @@ Examples:
 				LogWriter:      os.Stderr,
 			})
 			if err != nil {
+				if *timeout > 0 && errors.Is(err, context.DeadlineExceeded) {
+					return fmt.Errorf("xcode export: timed out after %s while running xcodebuild -exportArchive: %w", timeout.String(), err)
+				}
 				return fmt.Errorf("xcode export: %w", err)
 			}
 			exportCompletedAt := time.Now()
