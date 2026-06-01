@@ -2,6 +2,7 @@ package devices
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,8 @@ import (
 )
 
 const defaultLocalUDIDCommandTimeout = 10 * time.Second
+
+var errExistingDeviceFound = errors.New("existing device found")
 
 var (
 	localUDIDGOOS           = runtime.GOOS
@@ -324,6 +327,14 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
+			existingDevice, err := findExistingDeviceByNormalizedUDID(requestCtx, client, udidValue, platformValue)
+			if err != nil {
+				return fmt.Errorf("devices register: failed to check existing devices: %w", err)
+			}
+			if existingDevice != nil {
+				return shared.PrintOutput(existingDevice, *output.Output, *output.Pretty)
+			}
+
 			attrs := asc.DeviceCreateAttributes{
 				Name:     nameValue,
 				UDID:     udidValue,
@@ -338,6 +349,51 @@ Examples:
 			return shared.PrintOutput(device, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func findExistingDeviceByNormalizedUDID(ctx context.Context, client *asc.Client, udidValue, platformValue string) (*asc.DeviceResponse, error) {
+	targetUDID := normalizeDeviceUDIDForComparison(udidValue)
+	if targetUDID == "" {
+		return nil, nil
+	}
+
+	firstPage, err := client.GetDevices(
+		ctx,
+		asc.WithDevicesPlatforms([]string{platformValue}),
+		asc.WithDevicesFields([]string{"name", "udid", "platform", "status"}),
+		asc.WithDevicesLimit(200),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var found *asc.DeviceResponse
+	err = asc.PaginateEach(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return client.GetDevices(ctx, asc.WithDevicesNextURL(nextURL))
+	}, func(page asc.PaginatedResponse) error {
+		devices, ok := page.(*asc.DevicesResponse)
+		if !ok || devices == nil {
+			return nil
+		}
+		for _, device := range devices.Data {
+			if normalizeDeviceUDIDForComparison(device.Attributes.UDID) == targetUDID {
+				found = &asc.DeviceResponse{Data: device}
+				return errExistingDeviceFound
+			}
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errExistingDeviceFound) {
+		return nil, err
+	}
+	return found, nil
+}
+
+func normalizeDeviceUDIDForComparison(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "-", "")
+	value = strings.ReplaceAll(value, ":", "")
+	return strings.ToUpper(value)
 }
 
 // DevicesUpdateCommand returns the devices update subcommand.

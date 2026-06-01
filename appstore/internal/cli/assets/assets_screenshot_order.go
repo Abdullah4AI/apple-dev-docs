@@ -27,14 +27,14 @@ func UploadScreenshotsToSet(ctx context.Context, client *asc.Client, setID strin
 		orderedIDs = append(orderedIDs, existingIDs...)
 	}
 
-	progress, err := uploadScreenshotsWithOrderState(ctx, client, setID, orderedIDs, files, false)
+	progress, err := uploadScreenshotsWithOrderState(ctx, client, setID, orderedIDs, files, false, true)
 	if err != nil {
 		return nil, err
 	}
 	return progress.Results, nil
 }
 
-func uploadScreenshotsWithOrderState(ctx context.Context, client *asc.Client, setID string, orderedIDs, files []string, syncIfNoNew bool) (screenshotUploadProgress, error) {
+func uploadScreenshotsWithOrderState(ctx context.Context, client *asc.Client, setID string, orderedIDs, files []string, syncIfNoNew, syncAfterUpload bool) (screenshotUploadProgress, error) {
 	progress := screenshotUploadProgress{
 		Results:    make([]asc.AssetUploadResultItem, 0, len(files)),
 		OrderedIDs: append([]string(nil), orderedIDs...),
@@ -55,6 +55,9 @@ func uploadScreenshotsWithOrderState(ctx context.Context, client *asc.Client, se
 		return progress, nil
 	}
 	if len(progress.Results) == 0 && !syncIfNoNew {
+		return progress, nil
+	}
+	if !syncAfterUpload {
 		return progress, nil
 	}
 	if err := SetOrderedAppScreenshots(ctx, client, setID, progress.OrderedIDs); err != nil {

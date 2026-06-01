@@ -27,7 +27,7 @@ var rootUsageGroups = []rootCommandGroup{
 	},
 	{
 		title:    "ANALYTICS & FINANCE COMMANDS",
-		commands: []string{"analytics", "insights", "finance", "performance"},
+		commands: []string{"analytics", "ads", "insights", "finance", "performance"},
 	},
 	{
 		title: "APP MANAGEMENT COMMANDS",

@@ -1697,10 +1697,75 @@ func WithAppStoreVersionsVersionStrings(versions []string) AppStoreVersionsOptio
 	}
 }
 
-// WithAppStoreVersionsStates filters versions by app store state.
+// WithAppStoreVersionsStates filters versions by state. Deprecated app store
+// states are sent as filter[appStoreState]; modern version-only states use
+// filter[appVersionState].
 func WithAppStoreVersionsStates(states []string) AppStoreVersionsOption {
 	return func(q *appStoreVersionsQuery) {
-		q.states = normalizeUpperList(states)
+		normalized := normalizeUpperList(states)
+		if shouldUseAppVersionStateFilter(normalized) {
+			q.appVersionStates = append(q.appVersionStates, normalized...)
+			return
+		}
+		for _, state := range normalized {
+			if isAppVersionStateOnly(state) {
+				q.appVersionStates = append(q.appVersionStates, state)
+				continue
+			}
+			q.states = append(q.states, state)
+		}
+	}
+}
+
+// WithAppStoreVersionsVersionStates filters versions by app version state.
+func WithAppStoreVersionsVersionStates(states []string) AppStoreVersionsOption {
+	return func(q *appStoreVersionsQuery) {
+		q.appVersionStates = normalizeUpperList(states)
+	}
+}
+
+func isAppVersionStateOnly(state string) bool {
+	switch state {
+	case "PROCESSING_FOR_DISTRIBUTION", "READY_FOR_DISTRIBUTION":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldUseAppVersionStateFilter(states []string) bool {
+	hasVersionOnlyState := false
+	for _, state := range states {
+		if !isAppVersionStateFilterState(state) {
+			return false
+		}
+		if isAppVersionStateOnly(state) {
+			hasVersionOnlyState = true
+		}
+	}
+	return hasVersionOnlyState
+}
+
+func isAppVersionStateFilterState(state string) bool {
+	switch state {
+	case "ACCEPTED",
+		"DEVELOPER_REJECTED",
+		"IN_REVIEW",
+		"INVALID_BINARY",
+		"METADATA_REJECTED",
+		"PENDING_APPLE_RELEASE",
+		"PENDING_DEVELOPER_RELEASE",
+		"PREPARE_FOR_SUBMISSION",
+		"PROCESSING_FOR_DISTRIBUTION",
+		"READY_FOR_DISTRIBUTION",
+		"READY_FOR_REVIEW",
+		"REJECTED",
+		"REPLACED_WITH_NEW_VERSION",
+		"WAITING_FOR_EXPORT_COMPLIANCE",
+		"WAITING_FOR_REVIEW":
+		return true
+	default:
+		return false
 	}
 }
 

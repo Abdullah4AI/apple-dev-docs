@@ -40,6 +40,11 @@ func TestBetaGroupsCreateInternalSetsAttributeOnCreate(t *testing.T) {
 			if !strings.Contains(string(payload), `"isInternalGroup":true`) {
 				t.Fatalf("expected isInternalGroup=true in body, got %s", string(payload))
 			}
+			for _, field := range []string{"publicLinkEnabled", "publicLinkLimitEnabled", "publicLinkLimit"} {
+				if strings.Contains(string(payload), field) {
+					t.Fatalf("did not expect internal group create payload to include %s, got %s", field, string(payload))
+				}
+			}
 			if !strings.Contains(string(payload), `"type":"apps"`) || !strings.Contains(string(payload), `"id":"app-1"`) {
 				t.Fatalf("expected app relationship in body, got %s", string(payload))
 			}

@@ -117,6 +117,30 @@ func TestRun_RemovedTopLevelCommandsReturnUnknown(t *testing.T) {
 	}
 }
 
+func TestRun_WebBundleIDSyncAppClipInvalidSettingsJSONReturnsUsage(t *testing.T) {
+	resetReportFlags(t)
+
+	_, stderr := captureCommandOutput(t, func() {
+		code := Run([]string{
+			"web", "bundle-ids", "capabilities", "sync-app-clip",
+			"--bundle-id", "clip-1",
+			"--parent-bundle-id", "parent-1",
+			"--capability", "PUSH_NOTIFICATIONS",
+			"--settings-json", "null",
+		}, "1.0.0")
+		if code != ExitUsage {
+			t.Fatalf("Run() exit code = %d, want %d", code, ExitUsage)
+		}
+	})
+
+	if !strings.Contains(stderr, "--settings-json must be a JSON array") {
+		t.Fatalf("expected settings-json usage error, got %q", stderr)
+	}
+	if strings.Contains(stderr, "--apple-id is required") {
+		t.Fatalf("expected settings-json validation before auth resolution, got %q", stderr)
+	}
+}
+
 func TestRun_NoArgsShowsHelpReturnsSuccess(t *testing.T) {
 	resetReportFlags(t)
 

@@ -104,6 +104,8 @@ Examples:
 				if err := validateResolveBuildOptions(selectors.resolveOptions()); err != nil {
 					return fmt.Errorf("builds test-notes list: %w", err)
 				}
+			} else if err := selectors.validateNextPageSelectorFlags(); err != nil {
+				return fmt.Errorf("builds test-notes list: %w", err)
 			}
 
 			client, err := shared.GetASCClient()

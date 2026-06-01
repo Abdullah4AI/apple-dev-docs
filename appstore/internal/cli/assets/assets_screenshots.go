@@ -1035,6 +1035,9 @@ func collectLocaleAssetFilesRecursiveWithLimit(rootPath, displayType string, max
 		return nil, fmt.Errorf("no screenshot files matching %s found in %q", displayType, rootPath)
 	}
 	sort.Strings(files)
+	if err := validateUniqueScreenshotUploadFileNames(files); err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 
@@ -1063,7 +1066,28 @@ func collectLimitedLocaleAssetFilesRecursive(rootPath, displayType string, maxSc
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no screenshot files matching %s found in %q", displayType, rootPath)
 	}
+	if err := validateUniqueScreenshotUploadFileNames(files); err != nil {
+		return nil, err
+	}
 	return files, nil
+}
+
+func validateUniqueScreenshotUploadFileNames(files []string) error {
+	seen := make(map[string]string, len(files))
+	for _, filePath := range files {
+		fileName := filepath.Base(filePath)
+		key := strings.ToLower(fileName)
+		if previous, ok := seen[key]; ok {
+			return fmt.Errorf(
+				"duplicate screenshot file name %q (%q, %q); App Store screenshot ordering uses uploaded file names, so rename one file before uploading",
+				fileName,
+				previous,
+				filePath,
+			)
+		}
+		seen[key] = filePath
+	}
+	return nil
 }
 
 func collectSupportedScreenshotCandidateFiles(rootPath string) ([]string, error) {
@@ -1127,6 +1151,9 @@ func canonicalizeUniqueScreenshotFanoutLocaleAssets(localeAssets []screenshotLoc
 		}
 		if err := registerUniqueCanonicalFanoutLocale(canonicalLocale, item.Locale, "fan-out upload", "inputs", seen); err != nil {
 			return nil, err
+		}
+		if err := validateUniqueScreenshotUploadFileNames(item.Files); err != nil {
+			return nil, fmt.Errorf("locale %s: %w", canonicalLocale, err)
 		}
 		result = append(result, screenshotLocaleAssetFiles{
 			Locale: canonicalLocale,
@@ -1364,16 +1391,13 @@ Examples:
 						return fmt.Errorf("screenshots download: failed to fetch screenshots for set %s: %w", set.ID, err)
 					}
 
-					shots := make([]asc.Resource[asc.AppScreenshotAttributes], 0, len(shotsResp.Data))
-					shots = append(shots, shotsResp.Data...)
-					sort.Slice(shots, func(i, j int) bool {
-						fi := strings.ToLower(strings.TrimSpace(shots[i].Attributes.FileName))
-						fj := strings.ToLower(strings.TrimSpace(shots[j].Attributes.FileName))
-						if fi == fj {
-							return shots[i].ID < shots[j].ID
-						}
-						return fi < fj
-					})
+					requestCtx, cancel = shared.ContextWithTimeout(ctx)
+					orderedIDs, err := GetOrderedAppScreenshotIDs(requestCtx, client, set.ID)
+					cancel()
+					if err != nil {
+						return fmt.Errorf("screenshots download: failed to fetch screenshot order for set %s: %w", set.ID, err)
+					}
+					shots := orderScreenshotsForDownload(shotsResp.Data, orderedIDs)
 
 					for idx, shot := range shots {
 						base := sanitizeBaseFileName(shot.Attributes.FileName)
@@ -1471,6 +1495,43 @@ Examples:
 			return nil
 		},
 	}
+}
+
+func orderScreenshotsForDownload(shots []asc.Resource[asc.AppScreenshotAttributes], orderedIDs []string) []asc.Resource[asc.AppScreenshotAttributes] {
+	ordered := append([]asc.Resource[asc.AppScreenshotAttributes](nil), shots...)
+	orderByID := make(map[string]int, len(orderedIDs))
+	for idx, id := range orderedIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := orderByID[id]; exists {
+			continue
+		}
+		orderByID[id] = idx
+	}
+
+	sort.SliceStable(ordered, func(i, j int) bool {
+		iOrder, iOK := orderByID[strings.TrimSpace(ordered[i].ID)]
+		jOrder, jOK := orderByID[strings.TrimSpace(ordered[j].ID)]
+		switch {
+		case iOK && jOK:
+			return iOrder < jOrder
+		case iOK:
+			return true
+		case jOK:
+			return false
+		}
+
+		fi := strings.ToLower(strings.TrimSpace(ordered[i].Attributes.FileName))
+		fj := strings.ToLower(strings.TrimSpace(ordered[j].Attributes.FileName))
+		if fi == fj {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return fi < fj
+	})
+
+	return ordered
 }
 
 func renderScreenshotDownloadResult(result *screenshotDownloadResult, markdown bool) error {
@@ -1767,6 +1828,12 @@ func uploadScreenshotsWithConfig[T any](ctx context.Context, cfg screenshotUploa
 		}
 		results = append(results, uploadedResults...)
 	}
+	if cfg.SkipExisting && len(skippedResults) > 0 {
+		if _, err := syncSkippedScreenshotOrder(uploadCtx, cfg.Client, set.ID, cfg.Files, skippedResults, results); err != nil {
+			results = append(skippedResults, results...)
+			return cfg.BuildResult(cfg.LocalizationID, set, false, results), err
+		}
+	}
 	results = append(skippedResults, results...)
 
 	return cfg.BuildResult(cfg.LocalizationID, set, false, results), nil
@@ -1782,13 +1849,15 @@ func deleteExistingScreenshots(ctx context.Context, client *asc.Client, screensh
 }
 
 func filterExistingScreenshotFiles(files []string, screenshots []asc.Resource[asc.AppScreenshotAttributes]) ([]string, []asc.AssetUploadResultItem, error) {
-	existingChecksums := make(map[string]struct{}, len(screenshots))
+	existingByChecksum := make(map[string]asc.Resource[asc.AppScreenshotAttributes], len(screenshots))
 	for _, screenshot := range screenshots {
 		checksum := strings.TrimSpace(screenshot.Attributes.SourceFileChecksum)
 		if checksum == "" {
 			continue
 		}
-		existingChecksums[checksum] = struct{}{}
+		if _, exists := existingByChecksum[checksum]; !exists {
+			existingByChecksum[checksum] = screenshot
+		}
 	}
 
 	filtered := make([]string, 0, len(files))
@@ -1798,10 +1867,11 @@ func filterExistingScreenshotFiles(files []string, screenshots []asc.Resource[as
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, exists := existingChecksums[checksum]; exists {
+		if existing, exists := existingByChecksum[checksum]; exists {
 			skipped = append(skipped, asc.AssetUploadResultItem{
 				FileName: filepath.Base(filePath),
 				FilePath: filePath,
+				AssetID:  existing.ID,
 				State:    "skipped",
 				Skipped:  true,
 			})
@@ -1811,6 +1881,81 @@ func filterExistingScreenshotFiles(files []string, screenshots []asc.Resource[as
 	}
 
 	return filtered, skipped, nil
+}
+
+func syncSkippedScreenshotOrder(ctx context.Context, client *asc.Client, setID string, files []string, skippedResults, uploadedResults []asc.AssetUploadResultItem) ([]string, error) {
+	currentOrder, err := GetOrderedAppScreenshotIDs(ctx, client, setID)
+	if err != nil {
+		return nil, err
+	}
+
+	orderedIDs := orderScreenshotIDsForLocalFiles(currentOrder, files, skippedResults, uploadedResults)
+	if sameScreenshotIDOrder(currentOrder, orderedIDs) {
+		return orderedIDs, nil
+	}
+	return orderedIDs, SetOrderedAppScreenshots(ctx, client, setID, orderedIDs)
+}
+
+func orderScreenshotIDsForLocalFiles(currentOrder []string, files []string, skippedResults, uploadedResults []asc.AssetUploadResultItem) []string {
+	skippedByPath := make(map[string]string, len(skippedResults))
+	for _, item := range skippedResults {
+		if strings.TrimSpace(item.AssetID) == "" {
+			continue
+		}
+		skippedByPath[item.FilePath] = item.AssetID
+	}
+	uploadedByPath := make(map[string]string, len(uploadedResults))
+	for _, item := range uploadedResults {
+		if strings.TrimSpace(item.AssetID) == "" {
+			continue
+		}
+		uploadedByPath[item.FilePath] = item.AssetID
+	}
+
+	orderedIDs := make([]string, 0, len(currentOrder)+len(uploadedResults))
+	seen := make(map[string]struct{}, len(currentOrder)+len(uploadedResults))
+	for _, filePath := range files {
+		id := skippedByPath[filePath]
+		if id == "" {
+			id = uploadedByPath[filePath]
+		}
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		orderedIDs = append(orderedIDs, id)
+	}
+	for _, id := range currentOrder {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		orderedIDs = append(orderedIDs, id)
+	}
+
+	return orderedIDs
+}
+
+func sameScreenshotIDOrder(a, b []string) bool {
+	a = normalizeScreenshotIDs(a)
+	b = normalizeScreenshotIDs(b)
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func computeFileChecksum(filePath string) (string, error) {

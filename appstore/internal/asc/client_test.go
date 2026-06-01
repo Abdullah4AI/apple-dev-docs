@@ -782,6 +782,7 @@ func TestBuildAppStoreVersionsQuery(t *testing.T) {
 		WithAppStoreVersionsPlatforms([]string{"ios", "MAC_OS"}),
 		WithAppStoreVersionsVersionStrings([]string{"1.0.0", "1.1.0"}),
 		WithAppStoreVersionsStates([]string{"ready_for_review"}),
+		WithAppStoreVersionsVersionStates([]string{"ready_for_distribution"}),
 		WithAppStoreVersionsInclude([]string{"appStoreReviewDetail"}),
 	}
 	for _, opt := range opts {
@@ -801,11 +802,46 @@ func TestBuildAppStoreVersionsQuery(t *testing.T) {
 	if got := values.Get("filter[appStoreState]"); got != "READY_FOR_REVIEW" {
 		t.Fatalf("expected filter[appStoreState]=READY_FOR_REVIEW, got %q", got)
 	}
+	if got := values.Get("filter[appVersionState]"); got != "READY_FOR_DISTRIBUTION" {
+		t.Fatalf("expected filter[appVersionState]=READY_FOR_DISTRIBUTION, got %q", got)
+	}
 	if got := values.Get("include"); got != "appStoreReviewDetail" {
 		t.Fatalf("expected include=appStoreReviewDetail, got %q", got)
 	}
 	if got := values.Get("limit"); got != "20" {
 		t.Fatalf("expected limit=20, got %q", got)
+	}
+}
+
+func TestBuildAppStoreVersionsQueryMixedReadyStatesUseAppVersionStateFilter(t *testing.T) {
+	query := &appStoreVersionsQuery{}
+	WithAppStoreVersionsStates([]string{"READY_FOR_REVIEW", "READY_FOR_DISTRIBUTION"})(query)
+
+	values, err := url.ParseQuery(buildAppStoreVersionsQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if got := values.Get("filter[appVersionState]"); got != "READY_FOR_REVIEW,READY_FOR_DISTRIBUTION" {
+		t.Fatalf("expected filter[appVersionState]=READY_FOR_REVIEW,READY_FOR_DISTRIBUTION, got %q", got)
+	}
+	if got := values.Get("filter[appStoreState]"); got != "" {
+		t.Fatalf("expected no filter[appStoreState], got %q", got)
+	}
+}
+
+func TestBuildAppStoreVersionsQueryMixedExclusiveStatesKeepSeparateFilters(t *testing.T) {
+	query := &appStoreVersionsQuery{}
+	WithAppStoreVersionsStates([]string{"READY_FOR_SALE", "READY_FOR_DISTRIBUTION"})(query)
+
+	values, err := url.ParseQuery(buildAppStoreVersionsQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if got := values.Get("filter[appStoreState]"); got != "READY_FOR_SALE" {
+		t.Fatalf("expected filter[appStoreState]=READY_FOR_SALE, got %q", got)
+	}
+	if got := values.Get("filter[appVersionState]"); got != "READY_FOR_DISTRIBUTION" {
+		t.Fatalf("expected filter[appVersionState]=READY_FOR_DISTRIBUTION, got %q", got)
 	}
 }
 

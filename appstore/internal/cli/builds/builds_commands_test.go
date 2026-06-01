@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
@@ -50,6 +51,25 @@ func TestBuildsListCommand_ProcessingStateFlagDescription(t *testing.T) {
 	}
 	if !strings.Contains(processingStateFlag.Usage, "VALID") || !strings.Contains(processingStateFlag.Usage, "all") {
 		t.Fatalf("expected --processing-state usage to mention supported values, got %q", processingStateFlag.Usage)
+	}
+}
+
+func TestBuildsListCommand_ExcludeExpiredFlagsExist(t *testing.T) {
+	cmd := BuildsListCommand()
+
+	excludeExpiredFlag := cmd.FlagSet.Lookup("exclude-expired")
+	if excludeExpiredFlag == nil {
+		t.Fatal("expected --exclude-expired flag to be defined")
+	}
+	if !strings.Contains(excludeExpiredFlag.Usage, "expired") {
+		t.Fatalf("expected --exclude-expired usage to mention expired builds, got %q", excludeExpiredFlag.Usage)
+	}
+
+	if cmd.FlagSet.Lookup("not-expired") == nil {
+		t.Fatal("expected --not-expired alias to be defined")
+	}
+	if !strings.Contains(cmd.LongHelp, "--exclude-expired") {
+		t.Fatalf("expected long help to include --exclude-expired example, got %q", cmd.LongHelp)
 	}
 }
 
@@ -148,6 +168,29 @@ func TestBuildsUpdateCommand_Shape(t *testing.T) {
 	encFlag := cmd.FlagSet.Lookup("uses-non-exempt-encryption")
 	if encFlag == nil {
 		t.Fatal("expected --uses-non-exempt-encryption flag to be defined")
+	}
+}
+
+func TestBuildSelectorCommandsExposeExcludeExpiredFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func() *ffcli.Command
+	}{
+		{name: "add-groups", cmd: BuildsAddGroupsCommand},
+		{name: "dsyms", cmd: BuildsDsymsCommand},
+		{name: "update", cmd: BuildsUpdateCommand},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			flags := test.cmd().FlagSet
+			if flags.Lookup("exclude-expired") == nil {
+				t.Fatal("expected --exclude-expired flag to be defined")
+			}
+			if flags.Lookup("not-expired") == nil {
+				t.Fatal("expected --not-expired flag to be defined")
+			}
+		})
 	}
 }
 

@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -189,11 +191,63 @@ func runBuildsFetchFromNext(
 	}
 }
 
+func runBuildsRejectExpiredFilterFromNext(
+	t *testing.T,
+	argsPrefix []string,
+	nextURL string,
+) {
+	t.Helper()
+
+	tests := []struct {
+		name string
+		flag string
+	}{
+		{name: "exclude-expired", flag: "--exclude-expired"},
+		{name: "not-expired", flag: "--not-expired"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := append(append([]string{}, argsPrefix...), "--next", nextURL, test.flag)
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			var runErr error
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+			}
+			wantErr := "--exclude-expired and --not-expired require --latest"
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "Error: "+wantErr) {
+				t.Fatalf("expected stderr to contain %q, got %q", "Error: "+wantErr, stderr)
+			}
+		})
+	}
+}
+
 func TestBuildsIconsListRejectsInvalidNextURL(t *testing.T) {
 	runBuildsInvalidNextURLCases(
 		t,
 		[]string{"builds", "icons", "list"},
 		"builds icons list: --next",
+	)
+}
+
+func TestBuildsIconsListRejectsExpiredFilterFromNextWithoutLatest(t *testing.T) {
+	runBuildsRejectExpiredFilterFromNext(
+		t,
+		[]string{"builds", "icons", "list"},
+		"https://api.appstoreconnect.apple.com/v1/builds/build-1/icons?cursor=AQ",
 	)
 }
 
@@ -243,6 +297,14 @@ func TestBuildsIndividualTestersListRejectsInvalidNextURL(t *testing.T) {
 	)
 }
 
+func TestBuildsIndividualTestersListRejectsExpiredFilterFromNextWithoutLatest(t *testing.T) {
+	runBuildsRejectExpiredFilterFromNext(
+		t,
+		[]string{"builds", "individual-testers", "list"},
+		"https://api.appstoreconnect.apple.com/v1/builds/build-1/individualTesters?cursor=AQ",
+	)
+}
+
 func TestBuildsIndividualTestersListPaginateFromNext(t *testing.T) {
 	const firstURL = "https://api.appstoreconnect.apple.com/v1/builds/build-1/individualTesters?cursor=AQ&limit=200"
 	const secondURL = "https://api.appstoreconnect.apple.com/v1/builds/build-1/individualTesters?cursor=BQ&limit=200"
@@ -286,6 +348,14 @@ func TestBuildsMetricsBetaUsagesRejectsInvalidNextURL(t *testing.T) {
 		t,
 		[]string{"builds", "metrics", "beta-usages"},
 		"builds metrics beta-usages: --next",
+	)
+}
+
+func TestBuildsMetricsBetaUsagesRejectsExpiredFilterFromNextWithoutLatest(t *testing.T) {
+	runBuildsRejectExpiredFilterFromNext(
+		t,
+		[]string{"builds", "metrics", "beta-usages"},
+		"https://api.appstoreconnect.apple.com/v1/builds/build-1/metrics/betaBuildUsages?cursor=AQ",
 	)
 }
 

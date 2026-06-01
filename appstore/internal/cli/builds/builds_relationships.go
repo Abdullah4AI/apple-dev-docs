@@ -108,6 +108,8 @@ Examples:
 				if err := selectors.validate(); err != nil {
 					return err
 				}
+			} else if err := selectors.validateNextPageSelectorFlags(); err != nil {
+				return fmt.Errorf("builds links view: %w", err)
 			}
 
 			if kind == relationshipSingle && (nextValue != "" || *paginate || *limit != 0) {

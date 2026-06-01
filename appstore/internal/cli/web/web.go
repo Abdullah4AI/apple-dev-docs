@@ -47,6 +47,7 @@ Examples:
 			WebAuthCommand(),
 			WebSandboxCommand(),
 			WebAppsCommand(),
+			WebBundleIDsCommand(),
 			WebPrivacyCommand(),
 			WebReviewCommand(),
 			WebSubscriptionsCommand(),

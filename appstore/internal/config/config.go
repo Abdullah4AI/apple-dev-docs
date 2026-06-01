@@ -117,12 +117,40 @@ type Credential struct {
 	PrivateKeyPath string `json:"private_key_path"`
 }
 
+// AdsCredential stores a named Apple Ads API credential in config.json.
+type AdsCredential struct {
+	Name           string `json:"name"`
+	ClientID       string `json:"client_id"`
+	TeamID         string `json:"team_id"`
+	KeyID          string `json:"key_id"`
+	PrivateKeyPath string `json:"private_key_path"`
+	OrgID          string `json:"org_id,omitempty"`
+}
+
 // KeychainMetadata stores non-secret metadata for keychain-backed credentials.
 type KeychainMetadata struct {
 	Name       string `json:"name"`
 	KeyID      string `json:"key_id"`
 	IssuerID   string `json:"issuer_id"`
 	ModifiedAt string `json:"modified_at,omitempty"`
+}
+
+// AdsKeychainMetadata stores non-secret metadata for keychain-backed Apple Ads credentials.
+type AdsKeychainMetadata struct {
+	Name       string `json:"name"`
+	ClientID   string `json:"client_id"`
+	TeamID     string `json:"team_id"`
+	KeyID      string `json:"key_id"`
+	OrgID      string `json:"org_id,omitempty"`
+	ModifiedAt string `json:"modified_at,omitempty"`
+}
+
+// AdsConfig stores Apple Ads-specific auth configuration.
+type AdsConfig struct {
+	DefaultKeyName   string                `json:"default_key_name,omitempty"`
+	Keys             []AdsCredential       `json:"keys,omitempty"`
+	KeychainMetadata []AdsKeychainMetadata `json:"keychain_metadata,omitempty"`
+	OrgID            string                `json:"org_id,omitempty"`
 }
 
 // Config holds the application configuration
@@ -149,6 +177,8 @@ type Config struct {
 	MaxDelay             string        `json:"max_delay"`
 	RetryLog             string        `json:"retry_log"`
 	Debug                string        `json:"debug"`
+
+	Ads AdsConfig `json:"ads,omitempty"`
 }
 
 // ErrNotFound is returned when the config file doesn't exist

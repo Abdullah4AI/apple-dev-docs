@@ -39,7 +39,7 @@ func TestSubcommandsIncludesCoreEntries(t *testing.T) {
 		names[name] = struct{}{}
 	}
 
-	required := []string{"auth", "doctor", "account", "insights", "builds", "reviews", "version", "completion"}
+	required := []string{"auth", "doctor", "account", "ads", "insights", "builds", "reviews", "version", "completion"}
 	for _, name := range required {
 		if _, ok := names[name]; !ok {
 			t.Fatalf("expected root subcommands to include %q", name)

@@ -9,6 +9,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/accessibility"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/account"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/actors"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/ads"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/agerating"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/agreements"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/alternativedistribution"
@@ -118,6 +119,7 @@ func Subcommands(version string) []*ffcli.Command {
 		reviews.ReviewsCommand(),
 		reviews.ReviewCommand(),
 		analytics.AnalyticsCommand(),
+		ads.AdsCommand(),
 		performance.PerformanceCommand(),
 		finance.FinanceCommand(),
 		apps.AppsCommand(),

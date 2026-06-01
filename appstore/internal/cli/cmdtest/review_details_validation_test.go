@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	cmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestReviewDetailsCreateRejectsDemoAccountRequiredWithoutCredentials(t *testing.T) {
@@ -111,6 +113,46 @@ func TestReviewDetailsCreateAllowsDemoAccountRequiredWithBothCredentials(t *test
 	}
 }
 
+func TestReviewDetailsCreateRejectsOverlongDemoAccountPassword(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"review", "details-create",
+			"--version-id", "version-1",
+			"--demo-account-password", strings.Repeat("p", 101),
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--demo-account-password must be 100 characters or fewer") {
+		t.Fatalf("expected local demo account password length error, got %q", stderr)
+	}
+}
+
 func TestReviewDetailsUpdateRejectsDemoAccountRequiredWhenExistingCredentialsAreIncomplete(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -154,6 +196,142 @@ func TestReviewDetailsUpdateRejectsDemoAccountRequiredWhenExistingCredentialsAre
 	}
 	if !strings.Contains(stderr, "--demo-account-required=true requires both --demo-account-name and --demo-account-password") {
 		t.Fatalf("expected local demo credential validation error, got %q", stderr)
+	}
+}
+
+func TestReviewDetailsUpdateRejectsOverlongDemoAccountPassword(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"review", "details-update",
+			"--id", "detail-1",
+			"--demo-account-password", strings.Repeat("p", 101),
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--demo-account-password must be 100 characters or fewer") {
+		t.Fatalf("expected local demo account password length error, got %q", stderr)
+	}
+}
+
+func TestReviewDetailsUpdateAcceptsMaxLengthDemoAccountPassword(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreReviewDetails/detail-1" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body error: %v", err)
+		}
+		body := string(payload)
+		if !strings.Contains(body, `"demoAccountPassword":"`+strings.Repeat("p", 100)+`"`) {
+			t.Fatalf("expected max-length demo account password in body, got %s", body)
+		}
+		return jsonResponse(http.StatusOK, `{"data":{"type":"appStoreReviewDetails","id":"detail-1","attributes":{"demoAccountPassword":"`+strings.Repeat("p", 100)+`"}}}`)
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"review", "details-update",
+			"--id", "detail-1",
+			"--demo-account-password", strings.Repeat("p", 100),
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, `"id":"detail-1"`) {
+		t.Fatalf("expected detail id in output, got %q", stdout)
+	}
+}
+
+func TestRunReviewDetailsRejectsOverlongDemoAccountPasswordWithUsageExit(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_KEY_ID", "")
+	t.Setenv("ASC_ISSUER_ID", "")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "details-create",
+			args: []string{
+				"review", "details-create",
+				"--version-id", "version-1",
+				"--demo-account-password", strings.Repeat("p", 101),
+			},
+		},
+		{
+			name: "details-update",
+			args: []string{
+				"review", "details-update",
+				"--id", "detail-1",
+				"--demo-account-password", strings.Repeat("p", 101),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := captureOutput(t, func() {
+				code := cmd.Run(test.args, "1.2.3")
+				if code != cmd.ExitUsage {
+					t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "--demo-account-password must be 100 characters or fewer") {
+				t.Fatalf("expected local demo account password length error, got %q", stderr)
+			}
+		})
 	}
 }
 

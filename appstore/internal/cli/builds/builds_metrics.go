@@ -75,6 +75,8 @@ Examples:
 				if err := selectors.validate(); err != nil {
 					return err
 				}
+			} else if err := selectors.validateNextPageSelectorFlags(); err != nil {
+				return fmt.Errorf("builds metrics beta-usages: %w", err)
 			}
 
 			client, err := shared.GetASCClient()

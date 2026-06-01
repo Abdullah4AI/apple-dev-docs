@@ -54,6 +54,8 @@ func BuildsDsymsCommand() *ffcli.Command {
 	buildNumber := fs.String("build-number", "", "Build number (CFBundleVersion)")
 	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	latest := fs.Bool("latest", false, "Download dSYMs for the latest build")
+	excludeExpired := fs.Bool("exclude-expired", false, "Exclude expired builds when selecting --latest")
+	notExpired := fs.Bool("not-expired", false, "Alias for --exclude-expired")
 	outputDir := fs.String("output-dir", ".", "Output directory for dSYM files")
 	output := shared.BindOutputFlags(fs)
 
@@ -89,12 +91,13 @@ Examples:
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			appInput := strings.TrimSpace(*appID)
 			resolveOpts := ResolveBuildOptions{
-				BuildID:     trimmedBuildID,
-				AppID:       appInput,
-				Version:     strings.TrimSpace(*version),
-				BuildNumber: strings.TrimSpace(*buildNumber),
-				Platform:    strings.TrimSpace(*platform),
-				Latest:      *latest,
+				BuildID:        trimmedBuildID,
+				AppID:          appInput,
+				Version:        strings.TrimSpace(*version),
+				BuildNumber:    strings.TrimSpace(*buildNumber),
+				Platform:       strings.TrimSpace(*platform),
+				Latest:         *latest,
+				ExcludeExpired: *excludeExpired || *notExpired,
 			}
 			if err := validateResolveBuildOptions(resolveOpts); err != nil {
 				return fmt.Errorf("builds dsyms: %w", err)

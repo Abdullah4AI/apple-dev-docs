@@ -114,6 +114,18 @@ type AuthSession struct {
 	twoFactorCodeRequested bool
 }
 
+// ProviderSelection identifies the App Store Connect provider/team a web
+// session should use. ProviderID is Apple's numeric provider id; PublicProviderID
+// is the public team/provider id users usually recognize.
+type ProviderSelection struct {
+	ProviderID       int64
+	PublicProviderID string
+}
+
+func (s ProviderSelection) empty() bool {
+	return s.ProviderID == 0 && strings.TrimSpace(s.PublicProviderID) == ""
+}
+
 // LoginCredentials holds Apple ID credentials.
 type LoginCredentials struct {
 	Username string
@@ -243,13 +255,16 @@ type signinInitResponse struct {
 	Challenge  json.RawMessage `json:"c"`
 }
 
+type sessionProviderInfo struct {
+	ProviderID       int64  `json:"providerId"`
+	PublicProviderID string `json:"publicProviderId"`
+	Name             string `json:"name"`
+}
+
 type sessionInfo struct {
-	Provider struct {
-		ProviderID       int64  `json:"providerId"`
-		PublicProviderID string `json:"publicProviderId"`
-		Name             string `json:"name"`
-	} `json:"provider"`
-	User struct {
+	Provider           sessionProviderInfo   `json:"provider"`
+	AvailableProviders []sessionProviderInfo `json:"availableProviders"`
+	User               struct {
 		EmailAddress string `json:"emailAddress"`
 	} `json:"user"`
 }
@@ -427,6 +442,16 @@ func LoginWithClient(ctx context.Context, client *http.Client, creds LoginCreden
 	return loginWithHTTPClient(ctx, client, creds)
 }
 
+func applySessionInfo(session *AuthSession, info *sessionInfo) {
+	if session == nil || info == nil {
+		return
+	}
+	session.ProviderID = info.Provider.ProviderID
+	session.PublicProviderID = strings.TrimSpace(info.Provider.PublicProviderID)
+	session.TeamID = fmt.Sprintf("%d", info.Provider.ProviderID)
+	session.UserEmail = strings.TrimSpace(info.User.EmailAddress)
+}
+
 func loginWithHTTPClient(ctx context.Context, client *http.Client, creds LoginCredentials) (*AuthSession, error) {
 	if strings.TrimSpace(creds.Username) == "" {
 		return nil, fmt.Errorf("apple id is required")
@@ -460,14 +485,12 @@ func loginWithHTTPClient(ctx context.Context, client *http.Client, creds LoginCr
 		return nil, fmt.Errorf("failed to get session info: %w", err)
 	}
 
-	return &AuthSession{
-		Client:           client,
-		ProviderID:       info.Provider.ProviderID,
-		PublicProviderID: strings.TrimSpace(info.Provider.PublicProviderID),
-		TeamID:           fmt.Sprintf("%d", info.Provider.ProviderID),
-		UserEmail:        strings.TrimSpace(info.User.EmailAddress),
-		ServiceKey:       serviceKey,
-	}, nil
+	session := &AuthSession{
+		Client:     client,
+		ServiceKey: serviceKey,
+	}
+	applySessionInfo(session, info)
+	return session, nil
 }
 
 func getAuthServiceKey(ctx context.Context, client *http.Client) (string, error) {
@@ -973,6 +996,158 @@ func getSessionInfo(ctx context.Context, client *http.Client) (*sessionInfo, err
 	return &result, nil
 }
 
+func providerSelectionDescription(selection ProviderSelection) string {
+	parts := make([]string, 0, 2)
+	if selection.ProviderID != 0 {
+		parts = append(parts, fmt.Sprintf("provider-id=%d", selection.ProviderID))
+	}
+	if publicID := strings.TrimSpace(selection.PublicProviderID); publicID != "" {
+		parts = append(parts, fmt.Sprintf("public-provider-id=%s", publicID))
+	}
+	return strings.Join(parts, " ")
+}
+
+func providerSummary(provider sessionProviderInfo) string {
+	name := strings.TrimSpace(provider.Name)
+	publicID := strings.TrimSpace(provider.PublicProviderID)
+	parts := []string{fmt.Sprintf("%d", provider.ProviderID)}
+	if publicID != "" {
+		parts = append(parts, publicID)
+	}
+	if name != "" {
+		parts = append(parts, name)
+	}
+	return strings.Join(parts, " / ")
+}
+
+func availableProviderSummaries(info *sessionInfo) string {
+	if info == nil {
+		return ""
+	}
+	providers := info.AvailableProviders
+	if len(providers) == 0 && info.Provider.ProviderID != 0 {
+		providers = []sessionProviderInfo{info.Provider}
+	}
+	summaries := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		summaries = append(summaries, providerSummary(provider))
+	}
+	return strings.Join(summaries, ", ")
+}
+
+func resolveProviderSelection(info *sessionInfo, selection ProviderSelection) (sessionProviderInfo, error) {
+	if info == nil {
+		return sessionProviderInfo{}, fmt.Errorf("session info is required")
+	}
+	publicID := strings.TrimSpace(selection.PublicProviderID)
+	providers := info.AvailableProviders
+	if len(providers) == 0 && info.Provider.ProviderID != 0 {
+		providers = []sessionProviderInfo{info.Provider}
+	}
+
+	var matched *sessionProviderInfo
+	for i := range providers {
+		provider := providers[i]
+		idMatches := selection.ProviderID != 0 && provider.ProviderID == selection.ProviderID
+		publicMatches := publicID != "" && strings.EqualFold(strings.TrimSpace(provider.PublicProviderID), publicID)
+		if selection.ProviderID != 0 && publicID != "" {
+			switch {
+			case idMatches && publicMatches:
+				matched = &provider
+			case idMatches:
+				return sessionProviderInfo{}, fmt.Errorf("provider selection mismatch: provider-id %d is %q, not %q", selection.ProviderID, strings.TrimSpace(provider.PublicProviderID), publicID)
+			case publicMatches:
+				return sessionProviderInfo{}, fmt.Errorf("provider selection mismatch: public-provider-id %q is provider-id %d, not %d", publicID, provider.ProviderID, selection.ProviderID)
+			}
+			continue
+		}
+		switch {
+		case idMatches && publicID != "" && !publicMatches:
+			return sessionProviderInfo{}, fmt.Errorf("provider selection mismatch: provider-id %d is %q, not %q", selection.ProviderID, strings.TrimSpace(provider.PublicProviderID), publicID)
+		case idMatches || publicMatches:
+			matched = &provider
+		}
+	}
+	if matched == nil {
+		available := availableProviderSummaries(info)
+		if available == "" {
+			return sessionProviderInfo{}, fmt.Errorf("provider selection %s did not match any available providers", providerSelectionDescription(selection))
+		}
+		return sessionProviderInfo{}, fmt.Errorf("provider selection %s did not match any available providers (available: %s)", providerSelectionDescription(selection), available)
+	}
+	return *matched, nil
+}
+
+// SelectProvider switches an authenticated web session to a specific App Store
+// Connect provider/team using Apple's private olympus session endpoint.
+func SelectProvider(ctx context.Context, session *AuthSession, selection ProviderSelection) error {
+	if selection.empty() {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if session == nil || session.Client == nil {
+		return fmt.Errorf("web session is required")
+	}
+
+	info, err := getSessionInfo(ctx, session.Client)
+	if err != nil {
+		return fmt.Errorf("failed to get session info: %w", err)
+	}
+	selected, err := resolveProviderSelection(info, selection)
+	if err != nil {
+		return err
+	}
+	if info.Provider.ProviderID == selected.ProviderID {
+		applySessionInfo(session, info)
+		return nil
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"provider": map[string]int64{
+			"providerId": selected.ProviderID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build provider selection payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, olympusSessionURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Requested-With", "olympus-ui")
+	setModifiedCookieHeader(session.Client, req)
+
+	resp, err := session.Client.Do(req)
+	if err != nil {
+		logWebAuthHTTP("select_provider", req, nil, nil, err)
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logWebAuthHTTP("select_provider", req, resp, nil, err)
+		return fmt.Errorf("failed to read provider selection response: %w", err)
+	}
+	logWebAuthHTTP("select_provider", req, resp, body, nil)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("failed to select provider %s with status %d", providerSummary(selected), resp.StatusCode)
+	}
+
+	refreshed, err := getSessionInfo(ctx, session.Client)
+	if err != nil {
+		return fmt.Errorf("failed to refresh session info after provider selection: %w", err)
+	}
+	if refreshed.Provider.ProviderID != selected.ProviderID {
+		return fmt.Errorf("provider selection did not take effect: selected %d but session reports %d", selected.ProviderID, refreshed.Provider.ProviderID)
+	}
+	applySessionInfo(session, refreshed)
+	return nil
+}
+
 func isSessionInfoAuthExpired(err error) bool {
 	var statusErr *sessionInfoStatusError
 	if !errors.As(err, &statusErr) {
@@ -1200,10 +1375,7 @@ func finalizeTwoFactor(ctx context.Context, session *AuthSession) error {
 	if err != nil {
 		return err
 	}
-	session.ProviderID = info.Provider.ProviderID
-	session.PublicProviderID = strings.TrimSpace(info.Provider.PublicProviderID)
-	session.TeamID = fmt.Sprintf("%d", info.Provider.ProviderID)
-	session.UserEmail = strings.TrimSpace(info.User.EmailAddress)
+	applySessionInfo(session, info)
 	return nil
 }
 

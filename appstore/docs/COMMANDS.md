@@ -49,6 +49,7 @@ asc <subcommand> [flags]
 ### Analytics and Finance
 
 - `analytics` - Request and download analytics and sales reports.
+- `ads` - Manage Apple Ads Campaign Management API resources.
 - `insights` - Generate weekly and daily insights from App Store data sources.
 - `finance` - Download payments and financial reports.
 - `performance` - Access performance metrics and diagnostic logs.
@@ -156,6 +157,10 @@ asc <subcommand> [flags]
 ```bash
 # List apps
 asc apps list --output table
+
+# Pause and resume Apple Ads campaigns
+asc ads campaigns pause --campaign CAMPAIGN_ID --org ORG_ID --confirm
+asc ads campaigns resume --campaign CAMPAIGN_ID --org ORG_ID --confirm
 
 # Manage App Store compatibility opt-ins through a web session
 asc web apps compatibility view --app "123456789"

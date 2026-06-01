@@ -6,17 +6,20 @@ import (
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 type buildSelectorFlags struct {
-	buildID       *string
-	legacyBuildID *trackedStringFlag
-	legacyID      *trackedStringFlag
-	appID         *string
-	latest        *bool
-	version       *string
-	buildNumber   *string
-	platform      *string
+	buildID        *string
+	legacyBuildID  *trackedStringFlag
+	legacyID       *trackedStringFlag
+	appID          *string
+	latest         *bool
+	version        *string
+	buildNumber    *string
+	platform       *string
+	excludeExpired *bool
+	notExpired     *bool
 }
 
 type buildSelectorFlagOptions struct {
@@ -56,13 +59,15 @@ func bindBuildSelectorFlags(fs *flag.FlagSet, opts buildSelectorFlagOptions) bui
 	}
 
 	selectors := buildSelectorFlags{
-		buildID:       fs.String("build-id", "", buildIDUsage),
-		legacyBuildID: bindHiddenStringFlag(fs, "build"),
-		appID:         fs.String("app", "", appUsage),
-		latest:        fs.Bool("latest", false, latestUsage),
-		version:       fs.String("version", "", versionUsage),
-		buildNumber:   fs.String("build-number", "", buildNumberUsage),
-		platform:      fs.String("platform", "", platformUsage),
+		buildID:        fs.String("build-id", "", buildIDUsage),
+		legacyBuildID:  bindHiddenStringFlag(fs, "build"),
+		appID:          fs.String("app", "", appUsage),
+		latest:         fs.Bool("latest", false, latestUsage),
+		version:        fs.String("version", "", versionUsage),
+		buildNumber:    fs.String("build-number", "", buildNumberUsage),
+		platform:       fs.String("platform", "", platformUsage),
+		excludeExpired: fs.Bool("exclude-expired", false, "Exclude expired builds when selecting --latest"),
+		notExpired:     fs.Bool("not-expired", false, "Alias for --exclude-expired"),
 	}
 	if opts.includeLegacyID {
 		selectors.legacyID = bindHiddenStringFlag(fs, "id")
@@ -91,11 +96,21 @@ func (s buildSelectorFlags) resolveOptions() ResolveBuildOptions {
 		BuildNumber: strings.TrimSpace(s.value(s.buildNumber)),
 		Platform:    strings.TrimSpace(s.value(s.platform)),
 		Latest:      s.latest != nil && *s.latest,
+		ExcludeExpired: (s.excludeExpired != nil && *s.excludeExpired) ||
+			(s.notExpired != nil && *s.notExpired),
 	}
 }
 
 func (s buildSelectorFlags) validate() error {
 	return validateResolveBuildOptions(s.resolveOptions())
+}
+
+func (s buildSelectorFlags) validateNextPageSelectorFlags() error {
+	opts := s.resolveOptions()
+	if opts.ExcludeExpired && !opts.Latest {
+		return shared.UsageError("--exclude-expired and --not-expired require --latest")
+	}
+	return nil
 }
 
 func (s buildSelectorFlags) resolveBuild(ctx context.Context, client *asc.Client) (*asc.BuildResponse, error) {

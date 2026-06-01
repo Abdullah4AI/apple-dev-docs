@@ -1047,13 +1047,9 @@ func resumeFromPersistedSession(ctx context.Context, sess persistedSession) (*Au
 		}
 		return nil, false, nil
 	}
-	return &AuthSession{
-		Client:           client,
-		ProviderID:       info.Provider.ProviderID,
-		PublicProviderID: strings.TrimSpace(info.Provider.PublicProviderID),
-		TeamID:           fmt.Sprintf("%d", info.Provider.ProviderID),
-		UserEmail:        strings.TrimSpace(info.User.EmailAddress),
-	}, true, nil
+	session := &AuthSession{Client: client}
+	applySessionInfo(session, info)
+	return session, true, nil
 }
 
 func loadSessionFromPersistedSession(sess persistedSession) (*AuthSession, bool, error) {

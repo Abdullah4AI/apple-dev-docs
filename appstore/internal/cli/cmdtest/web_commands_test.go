@@ -51,6 +51,13 @@ func TestWebAppsMedicalDeviceSetSubcommandIsRegistered(t *testing.T) {
 	}
 }
 
+func TestWebBundleIDCapabilitiesSyncAppClipSubcommandIsRegistered(t *testing.T) {
+	root := RootCommand("1.2.3")
+	if sub := findSubcommand(root, "web", "bundle-ids", "capabilities", "sync-app-clip"); sub == nil {
+		t.Fatalf("expected web bundle-ids capabilities sync-app-clip to be registered")
+	}
+}
+
 func TestWebSandboxCreateSubcommandIsRegistered(t *testing.T) {
 	root := RootCommand("1.2.3")
 	if sub := findSubcommand(root, "web", "sandbox", "create"); sub == nil {

@@ -80,6 +80,8 @@ Examples:
 				if err := selectors.validate(); err != nil {
 					return err
 				}
+			} else if err := selectors.validateNextPageSelectorFlags(); err != nil {
+				return fmt.Errorf("builds individual-testers list: %w", err)
 			}
 
 			client, err := shared.GetASCClient()

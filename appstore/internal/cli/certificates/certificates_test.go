@@ -137,6 +137,80 @@ func TestCertificatesCreateCommand_GenerateCSRCreatesFilesAndPostsCSR(t *testing
 	}
 }
 
+func TestCertificatesCreateCommand_GenerateCSRPreservesUnicodeSubject(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "unicode.key")
+	csrOut := filepath.Join(dir, "unicode.csr")
+
+	var got asc.CertificateCreateRequest
+	client := newCertificatesTestClient(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"certificates","id":"cert-1","attributes":{"name":"Cert","certificateType":"IOS_DISTRIBUTION"}}}`), nil
+	}))
+
+	originalGetClient := getCertificatesASCClient
+	getCertificatesASCClient = func() (*asc.Client, error) { return client, nil }
+	t.Cleanup(func() { getCertificatesASCClient = originalGetClient })
+
+	const (
+		commonName         = "Jos\u00e9 \u0141ukasz"
+		organization       = "M\u00fcnchen Labs"
+		organizationalUnit = "Cr\u00e9dentials"
+	)
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "IOS_DISTRIBUTION",
+		"--generate-csr",
+		"--key-out", keyOut,
+		"--csr-out", csrOut,
+		"--common-name", commonName,
+		"--organization", organization,
+		"--organizational-unit", organizationalUnit,
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); err != nil {
+		t.Fatalf("exec error: %v", err)
+	}
+
+	csrDER, err := base64.StdEncoding.DecodeString(got.Data.Attributes.CSRContent)
+	if err != nil {
+		t.Fatalf("decode posted CSR content: %v", err)
+	}
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("parse posted CSR: %v", err)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		t.Fatalf("posted CSR signature invalid: %v", err)
+	}
+	if csr.Subject.CommonName != commonName {
+		t.Fatalf("expected generated CSR CN %q, got %q", commonName, csr.Subject.CommonName)
+	}
+	if got := firstString(csr.Subject.Organization); got != organization {
+		t.Fatalf("expected generated CSR organization %q, got %q", organization, got)
+	}
+	if got := firstString(csr.Subject.OrganizationalUnit); got != organizationalUnit {
+		t.Fatalf("expected generated CSR organizational unit %q, got %q", organizationalUnit, got)
+	}
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
 func TestCertificatesCreateCommand_GenerateCSRWriteFailures(t *testing.T) {
 	tests := []struct {
 		name string

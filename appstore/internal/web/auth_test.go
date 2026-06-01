@@ -421,12 +421,16 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 						PhoneNumber struct {
 							ID int `json:"id"`
 						} `json:"phoneNumber"`
+						Mode string `json:"mode"`
 					}
 					if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 						t.Fatalf("decode phone delivery payload: %v", err)
 					}
 					if payload.PhoneNumber.ID != 7 {
 						t.Fatalf("expected delivery phone id 7, got %d", payload.PhoneNumber.ID)
+					}
+					if payload.Mode != "voice" {
+						t.Fatalf("expected delivery mode voice, got %q", payload.Mode)
 					}
 					return &http.Response{
 						StatusCode: http.StatusNoContent,
@@ -452,8 +456,8 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 					if payload.SecurityCode.Code != "123456" {
 						t.Fatalf("expected 2fa code 123456, got %q", payload.SecurityCode.Code)
 					}
-					if payload.Mode != "sms" {
-						t.Fatalf("expected sms mode, got %q", payload.Mode)
+					if payload.Mode != "voice" {
+						t.Fatalf("expected voice mode, got %q", payload.Mode)
 					}
 					return &http.Response{
 						StatusCode: http.StatusOK,
@@ -486,7 +490,7 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 		SCNT:                 "scnt-token",
 		twoFactorMethod:      twoFactorMethodPhone,
 		twoFactorPhoneID:     7,
-		twoFactorPhoneMode:   "sms",
+		twoFactorPhoneMode:   "voice",
 		twoFactorDestination: "+1 (•••) •••-••66",
 	}
 
@@ -712,6 +716,161 @@ func TestSubmitTwoFactorCodeRequestsPhoneDeliveryBeforeVerification(t *testing.T
 
 	if err := SubmitTwoFactorCode(context.Background(), session, "123456"); err != nil {
 		t.Fatalf("SubmitTwoFactorCode returned error: %v", err)
+	}
+}
+
+func TestSelectProviderByPublicProviderID(t *testing.T) {
+	requests := 0
+	session := &AuthSession{
+		Client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests++
+				switch requests {
+				case 1:
+					if req.Method != http.MethodGet || req.URL.String() != olympusSessionURL {
+						t.Fatalf("unexpected initial request %s %s", req.Method, req.URL.String())
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body: io.NopCloser(strings.NewReader(`{
+							"provider": {"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"},
+							"availableProviders": [
+								{"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"},
+								{"providerId": 222, "publicProviderId": "TEAM222", "name": "New Team"}
+							],
+							"user": {"emailAddress": "user@example.com"}
+						}`)),
+					}, nil
+				case 2:
+					if req.Method != http.MethodPost || req.URL.String() != olympusSessionURL {
+						t.Fatalf("unexpected provider selection request %s %s", req.Method, req.URL.String())
+					}
+					if got := req.Header.Get("X-Requested-With"); got != "olympus-ui" {
+						t.Fatalf("expected X-Requested-With olympus-ui, got %q", got)
+					}
+					var payload struct {
+						Provider struct {
+							ProviderID int64 `json:"providerId"`
+						} `json:"provider"`
+					}
+					if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+						t.Fatalf("decode provider selection payload: %v", err)
+					}
+					if payload.Provider.ProviderID != 222 {
+						t.Fatalf("expected providerId 222, got %d", payload.Provider.ProviderID)
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(`{}`)),
+					}, nil
+				case 3:
+					if req.Method != http.MethodGet || req.URL.String() != olympusSessionURL {
+						t.Fatalf("unexpected refresh request %s %s", req.Method, req.URL.String())
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body: io.NopCloser(strings.NewReader(`{
+							"provider": {"providerId": 222, "publicProviderId": "TEAM222", "name": "New Team"},
+							"user": {"emailAddress": "user@example.com"}
+						}`)),
+					}, nil
+				default:
+					t.Fatalf("unexpected extra request %d: %s %s", requests, req.Method, req.URL.String())
+					return nil, nil
+				}
+			}),
+		},
+	}
+
+	err := SelectProvider(context.Background(), session, ProviderSelection{PublicProviderID: "team222"})
+	if err != nil {
+		t.Fatalf("SelectProvider returned error: %v", err)
+	}
+	if session.ProviderID != 222 {
+		t.Fatalf("expected provider id 222, got %d", session.ProviderID)
+	}
+	if session.PublicProviderID != "TEAM222" {
+		t.Fatalf("expected public provider id TEAM222, got %q", session.PublicProviderID)
+	}
+	if session.TeamID != "222" {
+		t.Fatalf("expected team id 222, got %q", session.TeamID)
+	}
+	if session.UserEmail != "user@example.com" {
+		t.Fatalf("expected user email user@example.com, got %q", session.UserEmail)
+	}
+	if requests != 3 {
+		t.Fatalf("expected 3 requests, got %d", requests)
+	}
+}
+
+func TestSelectProviderRejectsUnknownPublicProviderID(t *testing.T) {
+	session := &AuthSession{
+		Client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method != http.MethodGet || req.URL.String() != olympusSessionURL {
+					t.Fatalf("unexpected request %s %s", req.Method, req.URL.String())
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(`{
+						"provider": {"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"},
+						"availableProviders": [
+							{"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"}
+						],
+						"user": {"emailAddress": "user@example.com"}
+					}`)),
+				}, nil
+			}),
+		},
+	}
+
+	err := SelectProvider(context.Background(), session, ProviderSelection{PublicProviderID: "TEAM404"})
+	if err == nil {
+		t.Fatal("expected unknown provider error")
+	}
+	if !strings.Contains(err.Error(), "TEAM404") || !strings.Contains(err.Error(), "TEAM111") {
+		t.Fatalf("expected error to include requested and available providers, got %v", err)
+	}
+}
+
+func TestSelectProviderRejectsMismatchedProviderIDs(t *testing.T) {
+	requests := 0
+	session := &AuthSession{
+		Client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests++
+				if req.Method != http.MethodGet || req.URL.String() != olympusSessionURL {
+					t.Fatalf("unexpected request %s %s", req.Method, req.URL.String())
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(`{
+						"provider": {"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"},
+						"availableProviders": [
+							{"providerId": 111, "publicProviderId": "TEAM111", "name": "Old Team"},
+							{"providerId": 222, "publicProviderId": "TEAM222", "name": "New Team"}
+						],
+						"user": {"emailAddress": "user@example.com"}
+					}`)),
+				}, nil
+			}),
+		},
+	}
+
+	err := SelectProvider(context.Background(), session, ProviderSelection{ProviderID: 999, PublicProviderID: "TEAM222"})
+	if err == nil {
+		t.Fatal("expected provider mismatch error")
+	}
+	if !strings.Contains(err.Error(), "TEAM222") || !strings.Contains(err.Error(), "999") || !strings.Contains(err.Error(), "222") {
+		t.Fatalf("expected error to include mismatched provider ids, got %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected mismatch to stop before provider selection POST, got %d requests", requests)
 	}
 }
 

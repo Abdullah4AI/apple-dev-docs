@@ -25,9 +25,12 @@ func SetResolveWebSession(fn any) func() {
 		panic(fmt.Sprintf("unsupported resolve session hook type %T", fn))
 	}
 	prev := resolveSessionFn
+	prevNoPersist := resolveSessionWithoutPersistFn
 	resolveSessionFn = fn
+	resolveSessionWithoutPersistFn = fn
 	return func() {
 		resolveSessionFn = prev
+		resolveSessionWithoutPersistFn = prevNoPersist
 	}
 }
 
@@ -44,5 +47,13 @@ func SetLookupWebAuthKey(fn func(context.Context, *webcore.Client, string) (*web
 	lookupWebAuthKeyFn = fn
 	return func() {
 		lookupWebAuthKeyFn = prev
+	}
+}
+
+func SetSyncAppClipBundleIDCapability(fn func(context.Context, *webcore.Client, webcore.AppClipBundleIDCapabilitySyncRequest) (*webcore.AppClipBundleIDCapabilitySyncResult, error)) func() {
+	prev := syncAppClipBundleIDCapabilityFn
+	syncAppClipBundleIDCapabilityFn = fn
+	return func() {
+		syncAppClipBundleIDCapabilityFn = prev
 	}
 }

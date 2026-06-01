@@ -2,9 +2,12 @@ package assets
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -236,6 +239,228 @@ func TestUploadScreenshotsDryRunWithSkipExistingReportsSkipped(t *testing.T) {
 	}
 	if !result.Results[0].Skipped {
 		t.Fatal("expected Skipped=true")
+	}
+}
+
+func TestUploadScreenshotsSkipExistingSyncsLocalFileOrder(t *testing.T) {
+	dir := t.TempDir()
+	fileA := writeAssetsTestPNG(t, dir, "01-home.png")
+	fileB := writeAssetsTestPNG(t, dir, "02-settings.png")
+	const (
+		checksumA = "checksum-a"
+		checksumB = "checksum-b"
+	)
+	origChecksumFunc := screenshotFileChecksumFunc
+	screenshotFileChecksumFunc = func(path string) (string, error) {
+		switch path {
+		case fileA:
+			return checksumA, nil
+		case fileB:
+			return checksumB, nil
+		default:
+			return computeFileChecksum(path)
+		}
+	}
+	t.Cleanup(func() {
+		screenshotFileChecksumFunc = origChecksumFunc
+	})
+
+	relationshipPatchCalled := false
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = assetsUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"existing-b","attributes":{"fileName":"02-settings.png","fileSize":100,"sourceFileChecksum":"%s"}},{"type":"appScreenshots","id":"existing-a","attributes":{"fileName":"01-home.png","fileSize":100,"sourceFileChecksum":"%s"}}],"links":{}}`, checksumB, checksumA))
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"existing-b"},{"type":"appScreenshots","id":"existing-a"}],"links":{}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read relationship patch body: %v", err)
+			}
+			var payload asc.RelationshipRequest
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode relationship patch body: %v", err)
+			}
+			gotIDs := make([]string, 0, len(payload.Data))
+			for _, item := range payload.Data {
+				gotIDs = append(gotIDs, item.ID)
+			}
+			wantIDs := []string{"existing-a", "existing-b"}
+			if !reflect.DeepEqual(gotIDs, wantIDs) {
+				t.Fatalf("relationship order = %v, want %v", gotIDs, wantIDs)
+			}
+			relationshipPatchCalled = true
+			return assetsJSONResponse(http.StatusNoContent, "")
+		default:
+			t.Fatalf("unexpected request in --skip-existing reorder: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = origTransport
+	})
+
+	client := newAssetsUploadTestClient(t)
+	result, err := uploadScreenshots(context.Background(), client, "LOC_123", "APP_IPHONE_65", []string{fileA, fileB}, true, false, false)
+	if err != nil {
+		t.Fatalf("uploadScreenshots() error: %v", err)
+	}
+
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 skipped results, got %d", len(result.Results))
+	}
+	if result.Results[0].AssetID != "existing-a" || result.Results[1].AssetID != "existing-b" {
+		t.Fatalf("expected skipped results to keep existing IDs in local order, got %#v", result.Results)
+	}
+	if !relationshipPatchCalled {
+		t.Fatal("expected --skip-existing to sync screenshot relationship order")
+	}
+}
+
+func TestUploadScreenshotsSkipExistingSyncFailurePreservesResults(t *testing.T) {
+	dir := t.TempDir()
+	fileA := writeAssetsTestPNG(t, dir, "01-home.png")
+	fileB := writeAssetsTestPNG(t, dir, "02-settings.png")
+	const (
+		checksumA = "checksum-a"
+		checksumB = "checksum-b"
+	)
+	origChecksumFunc := screenshotFileChecksumFunc
+	screenshotFileChecksumFunc = func(path string) (string, error) {
+		switch path {
+		case fileA:
+			return checksumA, nil
+		case fileB:
+			return checksumB, nil
+		default:
+			return computeFileChecksum(path)
+		}
+	}
+	t.Cleanup(func() {
+		screenshotFileChecksumFunc = origChecksumFunc
+	})
+
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = assetsUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"existing-b","attributes":{"fileName":"02-settings.png","fileSize":100,"sourceFileChecksum":"%s"}},{"type":"appScreenshots","id":"existing-a","attributes":{"fileName":"01-home.png","fileSize":100,"sourceFileChecksum":"%s"}}],"links":{}}`, checksumB, checksumA))
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"existing-b"},{"type":"appScreenshots","id":"existing-a"}],"links":{}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return assetsJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"INTERNAL_ERROR","detail":"reorder failed"}]}`)
+		default:
+			t.Fatalf("unexpected request in --skip-existing reorder failure: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = origTransport
+	})
+
+	client := newAssetsUploadTestClient(t)
+	result, err := uploadScreenshots(context.Background(), client, "LOC_123", "APP_IPHONE_65", []string{fileA, fileB}, true, false, false)
+	if err == nil {
+		t.Fatal("expected uploadScreenshots() error")
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected skipped results to be preserved, got %#v", result.Results)
+	}
+	if result.Results[0].AssetID != "existing-a" || result.Results[1].AssetID != "existing-b" {
+		t.Fatalf("expected skipped results in local order, got %#v", result.Results)
+	}
+}
+
+func TestExecuteAppScreenshotUploadSkipExistingSyncsLocalFileOrder(t *testing.T) {
+	dir := t.TempDir()
+	fileA := writeAssetsTestPNG(t, dir, "01-home.png")
+	fileB := writeAssetsTestPNG(t, dir, "02-settings.png")
+	const (
+		checksumA = "checksum-a"
+		checksumB = "checksum-b"
+	)
+	origChecksumFunc := screenshotFileChecksumFunc
+	screenshotFileChecksumFunc = func(path string) (string, error) {
+		switch path {
+		case fileA:
+			return checksumA, nil
+		case fileB:
+			return checksumB, nil
+		default:
+			return computeFileChecksum(path)
+		}
+	}
+	t.Cleanup(func() {
+		screenshotFileChecksumFunc = origChecksumFunc
+	})
+
+	relationshipPatchCalled := false
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = assetsUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"existing-b","attributes":{"fileName":"02-settings.png","fileSize":100,"sourceFileChecksum":"%s"}},{"type":"appScreenshots","id":"existing-a","attributes":{"fileName":"01-home.png","fileSize":100,"sourceFileChecksum":"%s"}}],"links":{}}`, checksumB, checksumA))
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshots","id":"existing-b"},{"type":"appScreenshots","id":"existing-a"}],"links":{}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read relationship patch body: %v", err)
+			}
+			var payload asc.RelationshipRequest
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode relationship patch body: %v", err)
+			}
+			gotIDs := make([]string, 0, len(payload.Data))
+			for _, item := range payload.Data {
+				gotIDs = append(gotIDs, item.ID)
+			}
+			wantIDs := []string{"existing-a", "existing-b"}
+			if !reflect.DeepEqual(gotIDs, wantIDs) {
+				t.Fatalf("relationship order = %v, want %v", gotIDs, wantIDs)
+			}
+			relationshipPatchCalled = true
+			return assetsJSONResponse(http.StatusNoContent, "")
+		default:
+			t.Fatalf("unexpected request in execute --skip-existing reorder: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = origTransport
+	})
+
+	client := newAssetsUploadTestClient(t)
+	result, err := executeAppScreenshotUpload(context.Background(), screenshotUploadConfig[asc.AppScreenshotUploadResult]{
+		Client:         client,
+		LocalizationID: "LOC_123",
+		DisplayType:    "APP_IPHONE_65",
+		Files:          []string{fileA, fileB},
+		SkipExisting:   true,
+		Access:         appStoreVersionScreenshotSetAccess,
+		BuildResult: func(localizationID string, set asc.Resource[asc.AppScreenshotSetAttributes], dryRun bool, results []asc.AssetUploadResultItem) asc.AppScreenshotUploadResult {
+			return buildAppScreenshotUploadResult(localizationID, set, dryRun, results)
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("executeAppScreenshotUpload() error: %v", err)
+	}
+
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 skipped results, got %d", len(result.Results))
+	}
+	if result.Results[0].AssetID != "existing-a" || result.Results[1].AssetID != "existing-b" {
+		t.Fatalf("expected skipped results to keep existing IDs in local order, got %#v", result.Results)
+	}
+	if !relationshipPatchCalled {
+		t.Fatal("expected execute --skip-existing to sync screenshot relationship order")
 	}
 }
 

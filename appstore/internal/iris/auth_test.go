@@ -357,12 +357,16 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 						PhoneNumber struct {
 							ID int `json:"id"`
 						} `json:"phoneNumber"`
+						Mode string `json:"mode"`
 					}
 					if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 						t.Fatalf("decode phone delivery payload: %v", err)
 					}
 					if payload.PhoneNumber.ID != 7 {
 						t.Fatalf("expected delivery phone id 7, got %d", payload.PhoneNumber.ID)
+					}
+					if payload.Mode != "voice" {
+						t.Fatalf("expected delivery mode voice, got %q", payload.Mode)
 					}
 					return &http.Response{
 						StatusCode: http.StatusNoContent,
@@ -388,8 +392,8 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 					if payload.SecurityCode.Code != "123456" {
 						t.Fatalf("expected 2fa code 123456, got %q", payload.SecurityCode.Code)
 					}
-					if payload.Mode != "sms" {
-						t.Fatalf("expected sms mode, got %q", payload.Mode)
+					if payload.Mode != "voice" {
+						t.Fatalf("expected voice mode, got %q", payload.Mode)
 					}
 					return &http.Response{
 						StatusCode: http.StatusOK,
@@ -422,7 +426,7 @@ func TestSubmitTwoFactorCodeUsesPreparedPhoneFlow(t *testing.T) {
 		SCNT:                 "scnt-token",
 		twoFactorMethod:      twoFactorMethodPhone,
 		twoFactorPhoneID:     7,
-		twoFactorPhoneMode:   "sms",
+		twoFactorPhoneMode:   "voice",
 		twoFactorDestination: "+1 (•••) •••-••66",
 	}
 

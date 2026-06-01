@@ -86,4 +86,86 @@ func TestReadJSONFilePayload(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+
+	t.Run("object helper rejects array", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "array.json")
+		if err := os.WriteFile(path, []byte(`[1,2,3]`), 0o600); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+
+		_, err := ReadJSONFilePayload(path)
+		if err == nil {
+			t.Fatal("expected object payload error")
+		}
+		if !strings.Contains(err.Error(), "payload must be a JSON object") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestReadJSONFilePayloadKind(t *testing.T) {
+	t.Run("array payload", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "array.json")
+		if err := os.WriteFile(path, []byte(`[{"name":"demo"}]`), 0o600); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+
+		payload, err := ReadJSONFilePayloadKind(path, JSONPayloadArray)
+		if err != nil {
+			t.Fatalf("ReadJSONFilePayloadKind unexpected error: %v", err)
+		}
+		if string(payload) != `[{"name":"demo"}]` {
+			t.Fatalf("unexpected payload: %q", string(payload))
+		}
+	})
+
+	t.Run("array mode rejects object", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "object.json")
+		if err := os.WriteFile(path, []byte(`{"name":"demo"}`), 0o600); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+
+		_, err := ReadJSONFilePayloadKind(path, JSONPayloadArray)
+		if err == nil {
+			t.Fatal("expected array payload error")
+		}
+		if !strings.Contains(err.Error(), "payload must be a JSON array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("any payload accepts scalar", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "scalar.json")
+		if err := os.WriteFile(path, []byte(`true`), 0o600); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+
+		payload, err := ReadJSONFilePayloadKind(path, JSONPayloadAny)
+		if err != nil {
+			t.Fatalf("ReadJSONFilePayloadKind unexpected error: %v", err)
+		}
+		if string(payload) != `true` {
+			t.Fatalf("unexpected payload: %q", string(payload))
+		}
+	})
+
+	t.Run("unsupported kind", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "payload.json")
+		if err := os.WriteFile(path, []byte(`{"name":"demo"}`), 0o600); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+
+		_, err := ReadJSONFilePayloadKind(path, JSONPayloadKind("document"))
+		if err == nil {
+			t.Fatal("expected unsupported kind error")
+		}
+		if !strings.Contains(err.Error(), "unsupported JSON payload kind: document") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
