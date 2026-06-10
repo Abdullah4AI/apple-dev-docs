@@ -25,12 +25,13 @@ func TestReportsPresetCommandHelpShowsOperatorGuidance(t *testing.T) {
 		"Choose the report resource with --level.",
 		"Apple Ads accepts UTC and ORTZ",
 		"--last-days for an inclusive UTC rolling date range",
-		"Ad-level reports require --sort",
+		"Report presets default to --sort -impressions",
 		"HOURLY granularity is available for",
 		"campaign, ad-group, and keyword report levels",
 		"Search-term report levels cannot",
 		"request row totals",
-		"asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort impressions:desc",
+		"asc ads reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions",
+		"asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions",
 	} {
 		if !strings.Contains(cmd.LongHelp, want) {
 			t.Fatalf("LongHelp missing %q\n%s", want, cmd.LongHelp)
@@ -130,8 +131,8 @@ func TestBuildReportPresetPayloadRejectsExplicitUTCForSearchTerms(t *testing.T) 
 	}
 }
 
-func TestBuildReportPresetPayloadRequiresSortForAds(t *testing.T) {
-	_, err := buildReportPresetPayload(reportPresetTestFlags(
+func TestBuildReportPresetPayloadDefaultsSort(t *testing.T) {
+	payload, err := buildReportPresetPayload(reportPresetTestFlags(
 		"ads",
 		"12345",
 		"2026-05-01",
@@ -139,8 +140,11 @@ func TestBuildReportPresetPayloadRequiresSortForAds(t *testing.T) {
 		0,
 		"UTC",
 	), time.Date(2026, 6, 1, 1, 0, 0, 0, time.UTC))
-	if err == nil || !strings.Contains(err.Error(), "--sort is required for --level ads") {
-		t.Fatalf("error = %v, want ad-level sort validation", err)
+	if err != nil {
+		t.Fatalf("buildReportPresetPayload() error: %v", err)
+	}
+	if len(payload.Selector.OrderBy) != 1 || payload.Selector.OrderBy[0].Field != "impressions" || payload.Selector.OrderBy[0].SortOrder != "DESCENDING" {
+		t.Fatalf("orderBy = %+v, want default impressions descending", payload.Selector.OrderBy)
 	}
 }
 
@@ -250,7 +254,7 @@ func TestBuildReportPresetPayloadRejectsHourlyWhereUnsupported(t *testing.T) {
 	}{
 		{level: "search-terms", timeZone: "UTC"},
 		{level: "ad-group-search-terms", timeZone: "UTC"},
-		{level: "ads", timeZone: "UTC", sort: "impressions:desc"},
+		{level: "ads", timeZone: "UTC", sort: "-impressions"},
 	} {
 		t.Run(tt.level, func(t *testing.T) {
 			flags := reportPresetTestFlags(
@@ -344,16 +348,47 @@ func reportPresetTestFlags(level, campaign, from, to string, lastDays int, timeZ
 }
 
 func TestParseReportPresetSort(t *testing.T) {
-	sortSpec, err := parseReportPresetSort("impressions:asc")
+	sortSpec, err := parseReportPresetSort("impressions")
 	if err != nil {
 		t.Fatalf("parseReportPresetSort() error: %v", err)
 	}
-	if sortSpec.Field != "impressions" || sortSpec.SortOrder != "ASCENDING" {
-		t.Fatalf("sort = %+v, want impressions ASCENDING", sortSpec)
+	if sortSpec.Field != "impressions" || sortSpec.SortOrder != "DESCENDING" {
+		t.Fatalf("sort = %+v, want impressions DESCENDING", sortSpec)
+	}
+
+	sortSpec, err = parseReportPresetSort("-impressions")
+	if err != nil {
+		t.Fatalf("parseReportPresetSort() error: %v", err)
+	}
+	if sortSpec.Field != "impressions" || sortSpec.SortOrder != "DESCENDING" {
+		t.Fatalf("sort = %+v, want impressions DESCENDING", sortSpec)
+	}
+
+	sortSpec, err = parseReportPresetSort("-spend")
+	if err != nil {
+		t.Fatalf("parseReportPresetSort() error: %v", err)
+	}
+	if sortSpec.Field != "localSpend" || sortSpec.SortOrder != "DESCENDING" {
+		t.Fatalf("sort = %+v, want localSpend DESCENDING", sortSpec)
+	}
+
+	sortSpec, err = parseReportPresetSort("impressions:desc")
+	if err != nil {
+		t.Fatalf("parseReportPresetSort() error: %v", err)
+	}
+	if sortSpec.Field != "impressions" || sortSpec.SortOrder != "DESCENDING" {
+		t.Fatalf("sort = %+v, want compatibility descending sort", sortSpec)
 	}
 
 	_, err = parseReportPresetSort("impressions:sideways")
 	if err == nil || !strings.Contains(err.Error(), "--sort direction must be asc or desc") {
 		t.Fatalf("error = %v, want sort direction validation", err)
+	}
+}
+
+func TestNormalizeReportPresetFields(t *testing.T) {
+	fields := normalizeReportPresetFields("campaignName,spend,localSpend,taps")
+	if strings.Join(fields, ",") != "campaignName,localSpend,localSpend,taps" {
+		t.Fatalf("fields = %v, want spend alias normalized to localSpend", fields)
 	}
 }

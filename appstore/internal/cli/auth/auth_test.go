@@ -658,6 +658,216 @@ func TestAuthLogoutCommand(t *testing.T) {
 	})
 }
 
+func TestAuthExportToConfigCommand(t *testing.T) {
+	t.Run("requires confirm", func(t *testing.T) {
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "--confirm is required") {
+			t.Fatalf("expected confirm error in stderr, got %q", stderr)
+		}
+	})
+
+	t.Run("invalid output format", func(t *testing.T) {
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{"--confirm", "--output", "yaml"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "unsupported format: yaml") {
+			t.Fatalf("expected unsupported format error, got %q", stderr)
+		}
+	})
+
+	t.Run("blank private key dir", func(t *testing.T) {
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{"--confirm", "--private-key-dir", "   "}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "--private-key-dir cannot be blank") {
+			t.Fatalf("expected blank private-key-dir error, got %q", stderr)
+		}
+	})
+
+	t.Run("blank config path", func(t *testing.T) {
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{"--confirm", "--config", "   "}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "--config cannot be blank") {
+			t.Fatalf("expected blank config error, got %q", stderr)
+		}
+	})
+
+	t.Run("local and config are mutually exclusive", func(t *testing.T) {
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{"--confirm", "--local", "--config", filepath.Join(t.TempDir(), "config.json")}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+		})
+		if !strings.Contains(stderr, "--local and --config are mutually exclusive") {
+			t.Fatalf("expected local/config error, got %q", stderr)
+		}
+	})
+
+	t.Run("local resolves repo config path", func(t *testing.T) {
+		withTempRepo(t, func(repo string) {
+			var captured authsvc.MigrateKeychainToConfigOptions
+			restore := SetMigrateKeychainToConfig(func(opts authsvc.MigrateKeychainToConfigOptions) (authsvc.MigrateKeychainToConfigResult, error) {
+				captured = opts
+				return authsvc.MigrateKeychainToConfigResult{
+					ConfigPath: opts.ConfigPath,
+					Migrated: []authsvc.MigratedCredential{
+						{Name: "demo", KeyID: "KEY123", PrivateKeyPath: "/tmp/AuthKey.p8"},
+					},
+				}, nil
+			})
+			t.Cleanup(restore)
+
+			cmd := AuthExportToConfigCommand()
+			if err := cmd.FlagSet.Parse([]string{"--confirm", "--local"}); err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			if err := cmd.Exec(context.Background(), []string{}); err != nil {
+				t.Fatalf("Exec() error: %v", err)
+			}
+			expectedRepo := repo
+			if resolvedRepo, err := filepath.EvalSymlinks(repo); err == nil {
+				expectedRepo = resolvedRepo
+			}
+			expected := filepath.Join(expectedRepo, ".asc", "config.json")
+			if captured.ConfigPath != expected {
+				t.Fatalf("captured ConfigPath = %q, want %q", captured.ConfigPath, expected)
+			}
+		})
+	})
+
+	t.Run("default resolves active config path", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "active-config.json")
+		t.Setenv("ASC_CONFIG_PATH", configPath)
+		var captured authsvc.MigrateKeychainToConfigOptions
+		restore := SetMigrateKeychainToConfig(func(opts authsvc.MigrateKeychainToConfigOptions) (authsvc.MigrateKeychainToConfigResult, error) {
+			captured = opts
+			return authsvc.MigrateKeychainToConfigResult{
+				ConfigPath: opts.ConfigPath,
+				Migrated: []authsvc.MigratedCredential{
+					{Name: "demo", KeyID: "KEY123", PrivateKeyPath: "/tmp/AuthKey.p8"},
+				},
+			}, nil
+		})
+		t.Cleanup(restore)
+
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{"--confirm"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		if err := cmd.Exec(context.Background(), []string{}); err != nil {
+			t.Fatalf("Exec() error: %v", err)
+		}
+		if captured.ConfigPath != configPath {
+			t.Fatalf("captured ConfigPath = %q, want active config path %q", captured.ConfigPath, configPath)
+		}
+	})
+
+	t.Run("json success", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.json")
+		privateKeyDir := filepath.Join(t.TempDir(), "keys")
+		var captured authsvc.MigrateKeychainToConfigOptions
+		restore := SetMigrateKeychainToConfig(func(opts authsvc.MigrateKeychainToConfigOptions) (authsvc.MigrateKeychainToConfigResult, error) {
+			captured = opts
+			return authsvc.MigrateKeychainToConfigResult{
+				ConfigPath:          opts.ConfigPath,
+				PrivateKeyDir:       opts.PrivateKeyDir,
+				RemovedFromKeychain: opts.RemoveKeychain,
+				Migrated: []authsvc.MigratedCredential{
+					{
+						Name:           "demo",
+						KeyID:          "KEY123",
+						PrivateKeyPath: filepath.Join(privateKeyDir, "AuthKey_demo.p8"),
+					},
+				},
+			}, nil
+		})
+		t.Cleanup(restore)
+
+		cmd := AuthExportToConfigCommand()
+		if err := cmd.FlagSet.Parse([]string{
+			"--confirm",
+			"--output", "json",
+			"--config", configPath,
+			"--private-key-dir", privateKeyDir,
+			"--remove-keychain",
+		}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		stdout, stderr := captureAuthOutput(t, func() {
+			if err := cmd.Exec(context.Background(), []string{}); err != nil {
+				t.Fatalf("Exec() error: %v", err)
+			}
+		})
+		if stderr != "" {
+			t.Fatalf("expected empty stderr, got %q", stderr)
+		}
+		if captured.ConfigPath != configPath {
+			t.Fatalf("captured ConfigPath = %q, want %q", captured.ConfigPath, configPath)
+		}
+		if captured.PrivateKeyDir != privateKeyDir {
+			t.Fatalf("captured PrivateKeyDir = %q, want %q", captured.PrivateKeyDir, privateKeyDir)
+		}
+		if !captured.RemoveKeychain {
+			t.Fatal("expected RemoveKeychain option to be true")
+		}
+
+		var payload struct {
+			ConfigPath          string `json:"configPath"`
+			PrivateKeyDir       string `json:"privateKeyDir"`
+			RemovedFromKeychain bool   `json:"removedFromKeychain"`
+			Migrated            []struct {
+				Name  string `json:"name"`
+				KeyID string `json:"keyId"`
+			} `json:"migrated"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+			t.Fatalf("failed to unmarshal migration json: %v; stdout=%q", err, stdout)
+		}
+		if payload.ConfigPath != configPath || payload.PrivateKeyDir != privateKeyDir || !payload.RemovedFromKeychain {
+			t.Fatalf("unexpected migration payload: %+v", payload)
+		}
+		if len(payload.Migrated) != 1 || payload.Migrated[0].Name != "demo" || payload.Migrated[0].KeyID != "KEY123" {
+			t.Fatalf("unexpected migrated credentials payload: %+v", payload.Migrated)
+		}
+	})
+}
+
 func TestAuthStatusCommand(t *testing.T) {
 	t.Run("no credentials", func(t *testing.T) {
 		cfgPath := filepath.Join(t.TempDir(), "config.json")

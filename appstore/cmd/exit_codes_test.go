@@ -447,11 +447,6 @@ func TestBuildsExpiredFlagsInvalidBooleanExitCode(t *testing.T) {
 		flag string
 	}{
 		{
-			name: "latest exclude-expired",
-			args: []string{"builds", "latest", "--app", "APP_ID", "--exclude-expired=maybe"},
-			flag: "exclude-expired",
-		},
-		{
 			name: "list exclude-expired",
 			args: []string{"builds", "list", "--app", "APP_ID", "--exclude-expired=maybe"},
 			flag: "exclude-expired",

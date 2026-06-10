@@ -675,11 +675,11 @@ func TestBuildsFindAliasIsRemoved(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "Error: `asc builds find` was removed. Use `asc builds info` instead.") {
-		t.Fatalf("expected removed builds find path to point to builds info, got %q", stderr)
+	if !strings.Contains(stderr, "Manage builds in App Store Connect.") {
+		t.Fatalf("expected builds help after deprecated command removal, got %q", stderr)
 	}
 	if strings.Contains(stderr, "\n  find\t") || strings.Contains(stderr, "\n  find ") {
-		t.Fatalf("expected removed builds find alias to stay hidden, got %q", stderr)
+		t.Fatalf("expected builds find to stay omitted from help, got %q", stderr)
 	}
 }
 

@@ -188,7 +188,7 @@ func EndpointSpecs() []EndpointSpec {
 	for i := range specs {
 		specs[i].RequiresConfirm = specs[i].Method == "DELETE" || strings.Contains(specs[i].Path, "/delete/bulk")
 		specs[i].SupportsPaginate = hasLimitOffset(specs[i].QueryParams)
-		specs[i].DefaultListAlias = len(specs[i].CommandPath) == 2 && specs[i].CommandPath[1] == "list"
+		specs[i].DefaultListAlias = len(specs[i].CommandPath) == 2 && (specs[i].CommandPath[1] == "list" || specs[i].Name == "get-me-details")
 		if specs[i].Name == "get-user-acl" || specs[i].Name == "get-me-details" {
 			specs[i].RequiresOrg = false
 		}

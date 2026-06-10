@@ -1,17 +1,10 @@
 package submit
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
-	"github.com/peterbourgon/ff/v3/ffcli"
-
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
-	validatecli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
@@ -32,115 +25,6 @@ type preflightResult struct {
 	Checks    []checkResult `json:"checks"`
 	PassCount int           `json:"pass_count"`
 	FailCount int           `json:"fail_count"`
-}
-
-func defaultSubmitPreflightOutputFormat() string {
-	if shared.DefaultOutputFormat() == "json" {
-		return "json"
-	}
-	return "text"
-}
-
-const submitPreflightDeprecationWarning = "Warning: `asc submit preflight` is deprecated. Use `asc validate`."
-
-func RemovedSubmitPreflightCommand() *ffcli.Command {
-	cmd := SubmitPreflightCommand()
-	cmd.ShortHelp = "DEPRECATED: removed; use `asc validate`."
-	cmd.LongHelp = "Removed legacy command. Use `asc validate` instead."
-	cmd.UsageFunc = shared.DeprecatedUsageFunc
-	cmd.Exec = func(ctx context.Context, args []string) error {
-		fmt.Fprintln(os.Stderr, "Error: `asc submit preflight` was removed. Use `asc validate` instead.")
-		return flag.ErrHelp
-	}
-	return cmd
-}
-
-// SubmitPreflightCommand returns the "submit preflight" subcommand.
-func SubmitPreflightCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("submit preflight", flag.ExitOnError)
-
-	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	version := fs.String("version", "", "App Store version string")
-	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
-	output := shared.BindOutputFlagsWithAllowed(fs, "output", defaultSubmitPreflightOutputFormat(), "Output format: text, json", "text", "json")
-
-	return &ffcli.Command{
-		Name:       "preflight",
-		ShortUsage: "asc submit preflight [flags]",
-		ShortHelp:  "DEPRECATED: use `asc validate` for App Store submission readiness.",
-		LongHelp: `Deprecated compatibility command for ` + "`asc validate`" + `.
-
-Use ` + "`asc validate`" + ` for the canonical, more comprehensive App Store
-submission readiness report. This compatibility command keeps the older
-preflight-style text/json output for existing scripts while delegating to the
-same shared readiness engine.
-
-Examples:
-  asc validate --app "123456789" --version "1.0"
-  asc validate --app "123456789" --version "1.0" --platform TV_OS
-  asc submit preflight --app "123456789" --version "2.0" --output json`,
-		FlagSet:   fs,
-		UsageFunc: shared.DeprecatedUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if len(args) > 0 {
-				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
-			}
-
-			resolvedAppID := shared.ResolveAppID(*appID)
-			if resolvedAppID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return flag.ErrHelp
-			}
-			if strings.TrimSpace(*version) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --version is required")
-				return flag.ErrHelp
-			}
-
-			normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
-			normalizedOutput, err := shared.ValidateOutputFormatAllowed(*output.Output, *output.Pretty, "text", "json")
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
-
-			fmt.Fprintln(os.Stderr, submitPreflightDeprecationWarning)
-
-			result, err := runSubmitPreflightCompatibility(ctx, resolvedAppID, strings.TrimSpace(*version), normalizedPlatform)
-			if err != nil {
-				return fmt.Errorf("submit preflight: %w", err)
-			}
-
-			if normalizedOutput == "text" {
-				printPreflightText(os.Stdout, result)
-				if result.FailCount > 0 {
-					return fmt.Errorf("submit preflight: %d issue(s) found", result.FailCount)
-				}
-				return nil
-			}
-
-			if err := shared.PrintOutput(result, normalizedOutput, *output.Pretty); err != nil {
-				return err
-			}
-			if result.FailCount > 0 {
-				return fmt.Errorf("submit preflight: %d issue(s) found", result.FailCount)
-			}
-			return nil
-		},
-	}
-}
-
-func runSubmitPreflightCompatibility(ctx context.Context, appID, version, platform string) (*preflightResult, error) {
-	report, err := validatecli.BuildReadinessReport(ctx, validatecli.ReadinessOptions{
-		AppID:    appID,
-		Version:  version,
-		Platform: platform,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return preflightResultFromReport(appID, version, report), nil
 }
 
 func preflightResultFromReport(appID, version string, report validation.Report) *preflightResult {

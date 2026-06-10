@@ -3,6 +3,7 @@ package cmdtest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestSubscriptionsPricingMonthlyCommitmentHelp(t *testing.T) {
@@ -31,8 +34,8 @@ func TestSubscriptionsPricingMonthlyCommitmentHelp(t *testing.T) {
 		return
 	}
 	monthlyUsage := monthlyCmd.UsageFunc(monthlyCmd)
-	if !strings.Contains(monthlyUsage, "April 27, 2026") {
-		t.Fatalf("expected monthly-commitment help to mention Apple announcement date, got %q", monthlyUsage)
+	if !strings.Contains(monthlyUsage, "App Store Connect API 4.4") {
+		t.Fatalf("expected monthly-commitment help to mention App Store Connect API 4.4, got %q", monthlyUsage)
 	}
 }
 
@@ -159,25 +162,47 @@ func TestSubscriptionsPricingMonthlyCommitmentUsageExitCodes(t *testing.T) {
 }
 
 func TestSubscriptionsPricingMonthlyCommitmentDisableFiltersExcludedTerritories(t *testing.T) {
+	setupAuth(t)
+
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.URL.Path == "/v1/subscriptions/8000000001/planAvailabilities" && req.Method == http.MethodGet:
+			return jsonResponse(http.StatusOK, `{"data":[{"type":"subscriptionPlanAvailabilities","id":"plan-1","attributes":{"planType":"MONTHLY","availableInNewTerritories":true}}]}`)
+		case req.URL.Path == "/v1/subscriptionPlanAvailabilities/plan-1" && req.Method == http.MethodPatch:
+			var payload asc.SubscriptionPlanAvailabilityUpdateRequest
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if len(payload.Data.Relationships.AvailableTerritories.Data) != 0 {
+				t.Fatalf("expected empty territory list, got %#v", payload.Data.Relationships.AvailableTerritories.Data)
+			}
+			return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionPlanAvailabilities","id":"plan-1","attributes":{"planType":"MONTHLY","availableInNewTerritories":true}}}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 
+	var runErr error
 	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"subscriptions", "pricing", "monthly-commitment", "disable",
-			"--subscription-id", "sub-1",
+			"--subscription-id", "8000000001",
 			"--territories", "United States,Norway,Singapore",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
-		err := root.Run(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "not yet supported by Apple's public App Store Connect API") {
-			t.Fatalf("expected upstream API unsupported error, got %v", err)
-		}
+		runErr = root.Run(context.Background())
 	})
+	if runErr != nil {
+		t.Fatalf("run error: %v; stderr=%q stdout=%q", runErr, stderr, stdout)
+	}
 
-	if stdout != "" {
-		t.Fatalf("expected empty stdout, got %q", stdout)
+	if !strings.Contains(stdout, `"id":"plan-1"`) {
+		t.Fatalf("expected plan availability response, got %q", stdout)
 	}
 	if !strings.Contains(stderr, "Warning: monthly-commitment billing is unavailable in USA,SGP") {
 		t.Fatalf("expected excluded territory warning, got %q", stderr)

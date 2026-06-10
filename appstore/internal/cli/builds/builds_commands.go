@@ -374,9 +374,7 @@ Examples:
 			listCmd,
 			BuildsCountCommand(),
 			BuildsNextBuildNumberCommand(),
-			BuildsLatestCommand(),
 			BuildsWaitCommand(),
-			RemovedBuildsFindCommand(),
 			BuildsInfoCommand(),
 			BuildsExpireCommand(),
 			BuildsExpireAllCommand(),
@@ -770,20 +768,6 @@ Examples:
 			return shared.PrintOutput(build, format, *output.Pretty)
 		},
 	}
-}
-
-func RemovedBuildsFindCommand() *ffcli.Command {
-	cmd := BuildsInfoCommand()
-	cmd.Name = "find"
-	cmd.ShortUsage = "asc builds find [--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER] [flags]"
-	cmd.ShortHelp = "DEPRECATED: removed; use `asc builds info`."
-	cmd.LongHelp = "Removed legacy command. Use `asc builds info` instead."
-	cmd.UsageFunc = shared.DeprecatedUsageFunc
-	cmd.Exec = func(ctx context.Context, args []string) error {
-		fmt.Fprintln(os.Stderr, "Error: `asc builds find` was removed. Use `asc builds info` instead.")
-		return flag.ErrHelp
-	}
-	return cmd
 }
 
 // BuildsExpireCommand returns a build expiration subcommand.

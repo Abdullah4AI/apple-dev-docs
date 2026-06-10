@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -23,8 +22,6 @@ const (
 	subscriptionBillingModeMonthlyCommitment subscriptionBillingMode = "monthly-commitment"
 )
 
-var errMonthlyCommitmentPublicAPINotAvailable = errors.New("monthly subscriptions with a 12-month commitment are not yet supported by Apple's public App Store Connect API; Apple documents the App Store Connect web UI flow, but the public OpenAPI schema currently has no billing-mode field or resource for subscriptionAvailabilities or subscriptionPrices")
-
 var monthlyCommitmentExcludedTerritories = map[string]struct{}{
 	"USA": {},
 	"SGP": {},
@@ -37,13 +34,12 @@ func SubscriptionsPricingMonthlyCommitmentCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "monthly-commitment",
 		ShortUsage: "asc subscriptions pricing monthly-commitment <subcommand> [flags]",
-		ShortHelp:  "[experimental] Prepare Monthly with 12-Month Commitment subscription billing.",
-		LongHelp: `[experimental] Prepare Monthly with 12-Month Commitment subscription billing.
+		ShortHelp:  "Manage Monthly with 12-Month Commitment subscription availability.",
+		LongHelp: `Manage Monthly with 12-Month Commitment subscription availability.
 
-Apple announced Monthly Subscriptions with a 12-Month Commitment on April 27, 2026.
-The public App Store Connect API currently exposes standard subscription
-availability and prices only; these commands validate the supported inputs and
-return a clear upstream-API error until Apple publishes the billing-mode fields.
+App Store Connect API 4.4 exposes subscriptionPlanAvailabilities for configuring
+monthly subscriptions with a 12-month commitment. The subscription must use
+subscriptionPeriod ONE_YEAR. USA and Singapore are excluded by Apple.
 
 Examples:
   asc subscriptions pricing monthly-commitment enable --subscription-id "SUB_ID" --price "9.99" --price-territory "Norway" --territories "Norway,Germany,France"
@@ -62,7 +58,7 @@ Examples:
 	}
 }
 
-// SubscriptionsPricingMonthlyCommitmentEnableCommand validates enabling monthly commitment billing.
+// SubscriptionsPricingMonthlyCommitmentEnableCommand enables monthly commitment billing.
 func SubscriptionsPricingMonthlyCommitmentEnableCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pricing monthly-commitment enable", flag.ExitOnError)
 
@@ -71,13 +67,14 @@ func SubscriptionsPricingMonthlyCommitmentEnableCommand() *ffcli.Command {
 	price := fs.String("price", "", "Monthly customer price; total commitment is price x 12")
 	priceTerritory := fs.String("price-territory", "", "Territory used to compare the upfront annual price")
 	territories := fs.String("territories", "", "Territories to enable, comma-separated; USA and Singapore are excluded")
-	availableInNew := fs.Bool("available-in-new-territories", false, "Include new eligible territories automatically when Apple exposes a public API")
+	availableInNew := fs.Bool("available-in-new-territories", false, "Include new eligible territories automatically")
+	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "enable",
 		ShortUsage: "asc subscriptions pricing monthly-commitment enable [flags]",
-		ShortHelp:  "[experimental] Validate monthly-commitment enable inputs.",
-		LongHelp: `[experimental] Validate Monthly with 12-Month Commitment enable inputs.
+		ShortHelp:  "Enable monthly-commitment availability.",
+		LongHelp: `Enable Monthly with 12-Month Commitment availability.
 
 The subscription must use subscriptionPeriod ONE_YEAR. USA and Singapore are
 removed from --territories because Apple excludes those storefronts. The CLI
@@ -161,23 +158,48 @@ Examples:
 				return fmt.Errorf("subscriptions pricing monthly-commitment enable: %w", err)
 			}
 
-			return fmt.Errorf("subscriptions pricing monthly-commitment enable: %w", errMonthlyCommitmentPublicAPINotAvailable)
+			availableInNewValue := *availableInNew
+			attrs := asc.SubscriptionPlanAvailabilityAttributes{
+				AvailableInNewTerritories: &availableInNewValue,
+				PlanType:                  asc.SubscriptionPlanTypeMonthly,
+			}
+
+			existing, err := client.GetSubscriptionPlanAvailabilitiesForSubscription(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment enable: failed to fetch plan availabilities: %w", err)
+			}
+
+			if monthlyPlan, ok := findMonthlySubscriptionPlanAvailability(existing); ok {
+				resp, err := client.UpdateSubscriptionPlanAvailability(requestCtx, monthlyPlan.ID, territoryIDs, &attrs)
+				if err != nil {
+					return fmt.Errorf("subscriptions pricing monthly-commitment enable: failed to update plan availability: %w", err)
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
+			resp, err := client.CreateSubscriptionPlanAvailability(requestCtx, id, territoryIDs, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment enable: failed to create plan availability: %w", err)
+			}
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
 }
 
-// SubscriptionsPricingMonthlyCommitmentDisableCommand validates disabling monthly commitment billing.
+// SubscriptionsPricingMonthlyCommitmentDisableCommand disables monthly commitment billing.
 func SubscriptionsPricingMonthlyCommitmentDisableCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pricing monthly-commitment disable", flag.ExitOnError)
 
 	subscriptionID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
+	appID := addSubscriptionLookupAppFlag(fs)
 	territories := fs.String("territories", "", "Territories to disable, comma-separated; USA and Singapore are excluded")
+	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "disable",
 		ShortUsage: "asc subscriptions pricing monthly-commitment disable [flags]",
-		ShortHelp:  "[experimental] Validate monthly-commitment disable inputs.",
-		LongHelp: `[experimental] Validate Monthly with 12-Month Commitment disable inputs.
+		ShortHelp:  "Disable monthly-commitment availability.",
+		LongHelp: `Disable Monthly with 12-Month Commitment availability.
 
 Examples:
   asc subscriptions pricing monthly-commitment disable --subscription-id "SUB_ID" --territories "Norway"`,
@@ -187,7 +209,8 @@ Examples:
 			if len(args) > 0 {
 				return shared.UsageError("subscriptions pricing monthly-commitment disable does not accept positional arguments")
 			}
-			if strings.TrimSpace(*subscriptionID) == "" {
+			id := strings.TrimSpace(*subscriptionID)
+			if id == "" {
 				return shared.UsageError("--subscription-id is required")
 			}
 			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
@@ -202,22 +225,50 @@ Examples:
 			if len(territoryIDs) == 0 {
 				return shared.UsageError("no eligible monthly-commitment territories remain after excluding USA and Singapore")
 			}
-			return fmt.Errorf("subscriptions pricing monthly-commitment disable: %w", errMonthlyCommitmentPublicAPINotAvailable)
+
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment disable: %w", err)
+			}
+			id, err = resolveSubscriptionLookupIDWithTimeout(ctx, client, *appID, id)
+			if err != nil {
+				return err
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			existing, err := client.GetSubscriptionPlanAvailabilitiesForSubscription(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment disable: failed to fetch plan availabilities: %w", err)
+			}
+			monthlyPlan, ok := findMonthlySubscriptionPlanAvailability(existing)
+			if !ok {
+				return fmt.Errorf("subscriptions pricing monthly-commitment disable: no monthly-commitment plan availability found for subscription %q", id)
+			}
+
+			resp, err := client.UpdateSubscriptionPlanAvailability(requestCtx, monthlyPlan.ID, nil, nil)
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment disable: failed to update plan availability: %w", err)
+			}
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
 }
 
-// SubscriptionsPricingMonthlyCommitmentListCommand reports upstream support status.
+// SubscriptionsPricingMonthlyCommitmentListCommand lists monthly commitment billing.
 func SubscriptionsPricingMonthlyCommitmentListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pricing monthly-commitment list", flag.ExitOnError)
 
 	subscriptionID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
+	appID := addSubscriptionLookupAppFlag(fs)
+	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc subscriptions pricing monthly-commitment list --subscription-id \"SUB_ID\"",
-		ShortHelp:  "[experimental] List monthly-commitment billing configuration when Apple exposes a public API.",
-		LongHelp: `[experimental] List Monthly with 12-Month Commitment billing configuration.
+		ShortHelp:  "List monthly-commitment plan availability.",
+		LongHelp: `List Monthly with 12-Month Commitment plan availability.
 
 Examples:
   asc subscriptions pricing monthly-commitment list --subscription-id "SUB_ID"`,
@@ -227,12 +278,41 @@ Examples:
 			if len(args) > 0 {
 				return shared.UsageError("subscriptions pricing monthly-commitment list does not accept positional arguments")
 			}
-			if strings.TrimSpace(*subscriptionID) == "" {
+			id := strings.TrimSpace(*subscriptionID)
+			if id == "" {
 				return shared.UsageError("--subscription-id is required")
 			}
-			return fmt.Errorf("subscriptions pricing monthly-commitment list: %w", errMonthlyCommitmentPublicAPINotAvailable)
+			client, err := shared.GetASCClient()
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment list: %w", err)
+			}
+			id, err = resolveSubscriptionLookupIDWithTimeout(ctx, client, *appID, id)
+			if err != nil {
+				return err
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			resp, err := client.GetSubscriptionPlanAvailabilitiesForSubscription(requestCtx, id)
+			if err != nil {
+				return fmt.Errorf("subscriptions pricing monthly-commitment list: failed to fetch: %w", err)
+			}
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func findMonthlySubscriptionPlanAvailability(resp *asc.SubscriptionPlanAvailabilitiesResponse) (asc.Resource[asc.SubscriptionPlanAvailabilityAttributes], bool) {
+	if resp == nil {
+		return asc.Resource[asc.SubscriptionPlanAvailabilityAttributes]{}, false
+	}
+	for _, item := range resp.Data {
+		if item.Attributes.PlanType == asc.SubscriptionPlanTypeMonthly {
+			return item, true
+		}
+	}
+	return asc.Resource[asc.SubscriptionPlanAvailabilityAttributes]{}, false
 }
 
 func normalizeSubscriptionBillingMode(value string) (subscriptionBillingMode, error) {

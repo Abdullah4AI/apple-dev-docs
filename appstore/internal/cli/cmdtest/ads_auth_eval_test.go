@@ -83,6 +83,52 @@ func TestAdsAuthEvalWorkflow(t *testing.T) {
 	}
 }
 
+func TestAdsAuthStatusReportsConfigStorageForConfigCredentials(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	keyPath := filepath.Join(t.TempDir(), "apple-ads-private-key.pem")
+	writeECDSAPEM(t, keyPath)
+
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+
+	_, stderr, err := runAdsEvalCommand(
+		t,
+		"ads", "auth", "login",
+		"--bypass-keychain",
+		"--name", "Marketing",
+		"--client-id", "SEARCHADS.CLIENT",
+		"--team-id", "SEARCHADS.TEAM",
+		"--key-id", "KEY_ID",
+		"--private-key", keyPath,
+		"--org", "987654",
+	)
+	if err != nil {
+		t.Fatalf("login error: %v\nstderr: %s", err, stderr)
+	}
+
+	stdout, stderr, err := runAdsEvalCommand(t, "ads", "auth", "status", "--output", "json")
+	if err != nil {
+		t.Fatalf("status error: %v\nstderr: %s", err, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("status stderr = %q, want empty", stderr)
+	}
+	var status struct {
+		Storage     string `json:"storage"`
+		Credentials []struct {
+			Source string `json:"source"`
+		} `json:"credentials"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil {
+		t.Fatalf("status stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if status.Storage != "Config File" {
+		t.Fatalf("storage = %q, want Config File for config credentials", status.Storage)
+	}
+	if len(status.Credentials) != 1 || status.Credentials[0].Source != "config" {
+		t.Fatalf("credentials = %+v, want config credential", status.Credentials)
+	}
+}
+
 func TestAdsAuthStatusShowsActiveEnvironmentContext(t *testing.T) {
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "missing.json"))
 	t.Setenv("ASC_ADS_ACCESS_TOKEN", "ACCESS")

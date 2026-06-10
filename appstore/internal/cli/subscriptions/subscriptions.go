@@ -1056,8 +1056,13 @@ func SubscriptionsAvailabilityCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "availability",
 		ShortUsage: "asc subscriptions availability <subcommand> [flags]",
-		ShortHelp:  "Manage subscription availability.",
+		ShortHelp:  "Manage subscription availability (deprecated by Apple).",
 		LongHelp: `Manage subscription availability.
+
+Deprecated: the underlying Subscription availability resource is deprecated in
+App Store Connect API 4.4 in favor of Subscription plan availability. These
+commands keep working for now; for plan-based availability use
+` + "`asc subscriptions pricing monthly-commitment`" + ` (enable/disable/list).
 
 Examples:
   asc subscriptions availability view --availability-id "AVAILABILITY_ID"
@@ -1268,7 +1273,6 @@ Examples:
 				if len(territoryIDs) == 0 {
 					return shared.UsageError("no eligible monthly-commitment territories remain after excluding USA and Singapore")
 				}
-				return fmt.Errorf("subscriptions availability edit: %w", errMonthlyCommitmentPublicAPINotAvailable)
 			}
 
 			client, err := shared.GetASCClient()
@@ -1283,6 +1287,18 @@ Examples:
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
+
+			if normalizedBillingMode == subscriptionBillingModeMonthlyCommitment {
+				availableInNewValue := *availableInNew
+				resp, err := client.CreateSubscriptionPlanAvailability(requestCtx, id, territoryIDs, asc.SubscriptionPlanAvailabilityAttributes{
+					AvailableInNewTerritories: &availableInNewValue,
+					PlanType:                  asc.SubscriptionPlanTypeMonthly,
+				})
+				if err != nil {
+					return fmt.Errorf("subscriptions availability edit: failed to set monthly-commitment plan availability: %w", err)
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
 
 			attrs := asc.SubscriptionAvailabilityAttributes{
 				AvailableInNewTerritories: *availableInNew,

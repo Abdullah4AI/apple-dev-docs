@@ -17,11 +17,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
-	validatecli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
-
-var submitReadinessReportBuilder = validatecli.BuildReadinessReport
 
 func SubmitCommand() *ffcli.Command {
 	return &ffcli.Command{
@@ -38,222 +34,21 @@ Use:
 		Subcommands: []*ffcli.Command{
 			SubmitStatusCommand(),
 			SubmitCancelCommand(),
-			RemovedSubmitCreateCommand(),
-			RemovedSubmitPreflightCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				switch strings.TrimSpace(args[0]) {
+				case "create":
+					fmt.Fprintln(os.Stderr, "Error: `asc submit create` was removed. Use `asc review submit` for already-uploaded builds, or `asc publish appstore --submit` for the full shipping path.")
+					return flag.ErrHelp
+				case "preflight":
+					fmt.Fprintln(os.Stderr, "Error: `asc submit preflight` was removed. Use `asc validate` instead.")
+					return flag.ErrHelp
+				}
+			}
 			return flag.ErrHelp
 		},
 	}
-}
-
-func RemovedSubmitCreateCommand() *ffcli.Command {
-	cmd := SubmitCreateCommand()
-	cmd.ShortHelp = "DEPRECATED: removed; use `asc publish appstore --submit` or `asc review submit`."
-	cmd.LongHelp = "Removed legacy command. Use `asc publish appstore --submit` for the canonical high-level flow, or `asc review submit` when the build is already uploaded and the version is already prepared."
-	cmd.UsageFunc = shared.DeprecatedUsageFunc
-	cmd.Exec = func(ctx context.Context, args []string) error {
-		fmt.Fprintln(os.Stderr, "Error: `asc submit create` was removed. Use `asc publish appstore --submit` or `asc review submit` instead.")
-		return flag.ErrHelp
-	}
-	return cmd
-}
-
-func SubmitCreateCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("submit create", flag.ExitOnError)
-
-	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	version := fs.String("version", "", "App Store version string")
-	versionID := fs.String("version-id", "", "App Store version ID")
-	buildID := fs.String("build", "", "Build ID to attach")
-	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
-	confirm := fs.Bool("confirm", false, "Confirm submission (required)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "create",
-		ShortUsage: "asc submit create [flags]",
-		ShortHelp:  "DEPRECATED: use `asc review submit`.",
-		LongHelp: `Deprecated compatibility path for lower-level direct submission.
-
-For already-uploaded builds, use:
-  - ` + "`asc review submit --app \"APP_ID\" --version-id \"VERSION_ID\" --build \"BUILD_ID\" --confirm`" + `
-
-Use ` + "`asc publish appstore --submit`" + ` only when you are starting from
-an IPA upload or local build.
-
-Keep ` + "`asc submit create`" + ` only for older automation that already prepared
-the version and just needs the final review-submission step. For newly scripted
-direct submission on an already-prepared version, prefer the
-nondeprecated command above instead of extending this alias.`,
-		FlagSet:   fs,
-		UsageFunc: shared.DeprecatedUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			fmt.Fprintln(os.Stderr, "Warning: `asc submit create` is deprecated. Use `asc review submit` for already-uploaded builds, or `asc publish appstore --submit` when starting from an IPA.")
-			if !*confirm {
-				fmt.Fprintln(os.Stderr, "Error: --confirm is required to submit for review")
-				return flag.ErrHelp
-			}
-			if strings.TrimSpace(*buildID) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return flag.ErrHelp
-			}
-			if strings.TrimSpace(*version) == "" && strings.TrimSpace(*versionID) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --version or --version-id is required")
-				return flag.ErrHelp
-			}
-			if strings.TrimSpace(*version) != "" && strings.TrimSpace(*versionID) != "" {
-				return shared.UsageError("--version and --version-id are mutually exclusive")
-			}
-
-			resolvedAppID := shared.ResolveAppID(*appID)
-			if resolvedAppID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return flag.ErrHelp
-			}
-
-			normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("submit create: %w", err)
-			}
-
-			resolvedVersionID := strings.TrimSpace(*versionID)
-			effectivePlatform := normalizedPlatform
-			if resolvedVersionID == "" {
-				resolveCtx, resolveCancel := shared.ContextWithTimeout(ctx)
-				resolvedVersionID, err = shared.ResolveAppStoreVersionID(resolveCtx, client, resolvedAppID, strings.TrimSpace(*version), normalizedPlatform)
-				resolveCancel()
-				if err != nil {
-					return fmt.Errorf("submit create: %w", err)
-				}
-			} else {
-				versionCtx, versionCancel := shared.ContextWithTimeout(ctx)
-				versionResp, versionErr := client.GetAppStoreVersion(versionCtx, resolvedVersionID)
-				versionCancel()
-				if versionErr != nil {
-					return fmt.Errorf("submit create: failed to fetch version %q: %w", resolvedVersionID, versionErr)
-				}
-
-				effectivePlatform, err = shared.NormalizeAppStoreVersionPlatform(string(versionResp.Data.Attributes.Platform))
-				if err != nil {
-					return fmt.Errorf("submit create: version %q returned unsupported platform %q", resolvedVersionID, string(versionResp.Data.Attributes.Platform))
-				}
-			}
-
-			if err := runSubmitCreateLocalizationPreflight(ctx, client, resolvedAppID, resolvedVersionID, effectivePlatform, 0); err != nil {
-				return err
-			}
-
-			resolvedBuildID := strings.TrimSpace(*buildID)
-			if err := runSubmitCreateReadinessPreflight(ctx, client, resolvedAppID, resolvedVersionID, effectivePlatform, resolvedBuildID); err != nil {
-				return err
-			}
-
-			// Attach the build only after blocking preflight checks pass so a
-			// failed submit create does not mutate the version unnecessarily.
-			attachCtx, attachCancel := shared.ContextWithTimeout(ctx)
-			if err := client.AttachBuildToVersion(attachCtx, resolvedVersionID, resolvedBuildID); err != nil {
-				attachCancel()
-				return fmt.Errorf("submit create: failed to attach build: %w", err)
-			}
-			attachCancel()
-
-			runSubmitCreateSubscriptionPreflight(ctx, client, resolvedAppID, 0)
-
-			preparationCtx, preparationCancel := shared.ContextWithTimeout(ctx)
-			preparedSubmission := prepareReviewSubmissionForCreate(preparationCtx, client, resolvedAppID, effectivePlatform, resolvedVersionID, nil)
-			preparationCancel()
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer func() {
-				if cancel != nil {
-					cancel()
-				}
-			}()
-
-			var createdSubmissionID string
-			submissionIDToSubmit := strings.TrimSpace(preparedSubmission.reuseSubmissionID)
-
-			if submissionIDToSubmit == "" {
-				// Use the new reviewSubmissions API (the old appStoreVersionSubmissions is deprecated)
-				// Step 1: Create review submission for the app
-				reviewSubmission, err := client.CreateReviewSubmission(requestCtx, resolvedAppID, asc.Platform(effectivePlatform))
-				if err != nil {
-					return fmt.Errorf("submit create: failed to create review submission: %w", err)
-				}
-				createdSubmissionID = strings.TrimSpace(reviewSubmission.Data.ID)
-				submissionIDToSubmit = createdSubmissionID
-			}
-
-			if !preparedSubmission.reuseSubmissionHasVersion {
-				// Step 2: Add the app store version as a submission item.
-				// If the version is already in another submission, recover by
-				// submitting that existing submission instead. If the conflicting
-				// submission is one we just canceled as stale, retry the add until
-				// App Store Connect finishes detaching the version.
-				submissionIDToSubmit, err = addVersionToSubmissionOrRecover(
-					requestCtx,
-					client,
-					submissionIDToSubmit,
-					resolvedVersionID,
-					preparedSubmission.canceledSubmissionIDs,
-					func(message string) {
-						fmt.Fprintln(os.Stderr, message)
-					},
-				)
-				if err != nil {
-					if createdSubmissionID != "" {
-						cleanupEmptyReviewSubmission(requestCtx, client, createdSubmissionID, nil)
-					}
-					printSubmissionErrorHints(err, submissionErrorHintContext{
-						AppID:         resolvedAppID,
-						Platform:      effectivePlatform,
-						VersionID:     resolvedVersionID,
-						VersionString: strings.TrimSpace(*version),
-					})
-					return fmt.Errorf("submit create: failed to add version to submission: %w", err)
-				}
-			}
-			if createdSubmissionID != "" && submissionIDToSubmit != createdSubmissionID {
-				cleanupEmptyReviewSubmission(requestCtx, client, createdSubmissionID, nil)
-			}
-
-			// Step 3: Submit for review
-			submitResp, err := client.SubmitReviewSubmission(requestCtx, submissionIDToSubmit)
-			if err != nil {
-				printSubmissionErrorHints(err, submissionErrorHintContext{
-					AppID:         resolvedAppID,
-					Platform:      effectivePlatform,
-					VersionID:     resolvedVersionID,
-					VersionString: strings.TrimSpace(*version),
-				})
-				return fmt.Errorf("submit create: failed to submit for review: %w", err)
-			}
-
-			submittedDate := submitResp.Data.Attributes.SubmittedDate
-			var createdDatePtr *string
-			if submittedDate != "" {
-				createdDatePtr = &submittedDate
-			}
-			result := &asc.AppStoreVersionSubmissionCreateResult{
-				SubmissionID: submitResp.Data.ID,
-				VersionID:    resolvedVersionID,
-				BuildID:      resolvedBuildID,
-				CreatedDate:  createdDatePtr,
-			}
-
-			return shared.PrintOutput(result, *output.Output, *output.Pretty)
-		},
-	}
-}
-
-func runSubmitCreateLocalizationPreflight(ctx context.Context, client *asc.Client, appID, versionID, platform string, requestTimeout time.Duration) error {
-	return runSubmissionLocalizationPreflight(ctx, client, appID, versionID, platform, requestTimeout, "submit create", "asc review submit")
 }
 
 func runSubmissionLocalizationPreflight(
@@ -296,147 +91,6 @@ func runSubmissionLocalizationPreflight(
 	}
 	fmt.Fprintf(os.Stderr, "Fix these with `asc metadata push` or `asc apps info edit` before retrying `%s`.\n", normalizeSubmissionRetryCommand(retryCommand))
 	return submissionPreflightWrap(errorPrefix, errors.New("submit preflight failed"))
-}
-
-func runSubmitCreateReadinessPreflight(ctx context.Context, client *asc.Client, appID, versionID, platform, buildID string) error {
-	build, err := submitCreateReadinessBuild(ctx, client, buildID)
-	if err != nil {
-		return err
-	}
-
-	report, err := submitReadinessReportBuilder(ctx, validatecli.ReadinessOptions{
-		AppID:     appID,
-		VersionID: versionID,
-		Platform:  platform,
-		Build:     build,
-	})
-	if err != nil {
-		return fmt.Errorf("submit create: failed to run readiness preflight: %w", err)
-	}
-	printSubmitCreateReadinessWarnings(report.Checks)
-	if report.Summary.Blocking == 0 {
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "Submit preflight failed: %d blocking readiness issue(s) found:\n", report.Summary.Blocking)
-	for _, check := range report.Checks {
-		if check.Severity != validation.SeverityError {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "  - %s: %s\n", submitCreateReadinessCheckLabel(check), check.Message)
-	}
-	fmt.Fprintf(
-		os.Stderr,
-		"Run `asc validate --app %s --version-id %s --platform %s` for the full report before retrying submit create.\n",
-		appID,
-		versionID,
-		platform,
-	)
-	return fmt.Errorf("submit create: submit preflight failed")
-}
-
-func submitCreateReadinessBuild(ctx context.Context, client *asc.Client, buildID string) (*validation.Build, error) {
-	buildID = strings.TrimSpace(buildID)
-	if buildID == "" || client == nil {
-		return nil, nil
-	}
-
-	buildCtx, buildCancel := shared.ContextWithTimeout(ctx)
-	buildResp, err := client.GetBuild(buildCtx, buildID)
-	buildCancel()
-	if err != nil {
-		return nil, fmt.Errorf("submit create: failed to fetch build %q for preflight: %w", buildID, err)
-	}
-
-	attrs := buildResp.Data.Attributes
-	return &validation.Build{
-		ID:                      strings.TrimSpace(buildResp.Data.ID),
-		Version:                 attrs.Version,
-		ProcessingState:         attrs.ProcessingState,
-		Expired:                 attrs.Expired,
-		UsesNonExemptEncryption: attrs.UsesNonExemptEncryption,
-	}, nil
-}
-
-func printSubmitCreateReadinessWarnings(checks []validation.CheckResult) {
-	for _, check := range checks {
-		prefix, ok := submitCreateReadinessNoticePrefix(check)
-		if !ok {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "%s: %s: %s\n", prefix, submitCreateReadinessCheckLabel(check), check.Message)
-		if remediation := strings.TrimSpace(check.Remediation); remediation != "" {
-			fmt.Fprintf(os.Stderr, "Hint: %s\n", remediation)
-		}
-	}
-}
-
-func submitCreateReadinessNoticePrefix(check validation.CheckResult) (string, bool) {
-	switch check.Severity {
-	case validation.SeverityWarning:
-		switch check.ID {
-		case "pricing.schedule.unverified", "availability.unverified":
-			return "Warning", true
-		}
-	case validation.SeverityInfo:
-		if check.ID == "privacy.publish_state.unverified" {
-			return "Advisory", true
-		}
-	}
-
-	return "", false
-}
-
-func submitCreateReadinessCheckLabel(check validation.CheckResult) string {
-	label := "Readiness"
-
-	switch {
-	case strings.HasPrefix(check.ID, "review_details."):
-		label = "App Store review details"
-	case strings.HasPrefix(check.ID, "categories."):
-		label = "Primary category"
-	case strings.HasPrefix(check.ID, "build."):
-		label = "Attached build"
-	case strings.HasPrefix(check.ID, "pricing."):
-		label = "Pricing"
-	case strings.HasPrefix(check.ID, "availability."):
-		label = "Availability"
-	case strings.HasPrefix(check.ID, "privacy."):
-		label = "App Privacy"
-	case strings.HasPrefix(check.ID, "screenshots."):
-		label = "Screenshots"
-	case strings.HasPrefix(check.ID, "age_rating."):
-		label = "Age rating"
-	case strings.HasPrefix(check.ID, "legal."):
-		label = "Legal metadata"
-	case strings.HasPrefix(check.ID, "required_fields."):
-		label = "Required metadata"
-	default:
-		switch strings.TrimSpace(check.ResourceType) {
-		case "appStoreReviewDetail":
-			label = "App Store review details"
-		case "appInfo":
-			label = "App information"
-		case "build":
-			label = "Attached build"
-		case "appPrivacy":
-			label = "App Privacy"
-		case "appScreenshotSet", "appScreenshot":
-			label = "Screenshots"
-		}
-	}
-
-	var qualifiers []string
-	if locale := strings.TrimSpace(check.Locale); locale != "" {
-		qualifiers = append(qualifiers, locale)
-	}
-	if field := strings.TrimSpace(check.Field); field != "" {
-		qualifiers = append(qualifiers, field)
-	}
-	if len(qualifiers) == 0 {
-		return label
-	}
-	return fmt.Sprintf("%s (%s)", label, strings.Join(qualifiers, ", "))
 }
 
 // isAppUpdate returns true if the target platform has ever been released,
@@ -984,14 +638,6 @@ Examples:
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
-}
-
-// runSubmitCreateSubscriptionPreflight checks whether the app has subscriptions
-// that need attention before submission. This is advisory (warnings only) because
-// the submit flow cannot include subscriptions in the review submission — they
-// use a separate submission path.
-func runSubmitCreateSubscriptionPreflight(ctx context.Context, client *asc.Client, appID string, requestTimeout time.Duration) {
-	runSubmissionSubscriptionPreflight(ctx, client, appID, requestTimeout, "asc review submit")
 }
 
 func runSubmissionSubscriptionPreflight(ctx context.Context, client *asc.Client, appID string, requestTimeout time.Duration, retryCommand string) {

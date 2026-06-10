@@ -50,6 +50,20 @@ func SetListCredentialSummaries(fn func() ([]authsvc.Credential, error)) func() 
 	}
 }
 
+// SetMigrateKeychainToConfig replaces the keychain-to-config migration hook for tests.
+// It returns a restore function to reset the previous handler.
+func SetMigrateKeychainToConfig(fn func(authsvc.MigrateKeychainToConfigOptions) (authsvc.MigrateKeychainToConfigResult, error)) func() {
+	previous := migrateKeychainToConfig
+	if fn == nil {
+		migrateKeychainToConfig = authsvc.MigrateKeychainToConfig
+	} else {
+		migrateKeychainToConfig = fn
+	}
+	return func() {
+		migrateKeychainToConfig = previous
+	}
+}
+
 // NewPermissionWarning builds a permission warning error for tests.
 func NewPermissionWarning(err error) error {
 	if err == nil {

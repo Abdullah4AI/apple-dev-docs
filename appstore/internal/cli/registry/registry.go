@@ -20,7 +20,6 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/apps"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/auth"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/backgroundassets"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/betabuildlocalizations"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/buildbundles"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/buildlocalizations"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/builds"
@@ -159,7 +158,6 @@ func Subcommands(version string) []*ffcli.Command {
 		videopreviews.VideoPreviewsCommand(),
 		backgroundassets.BackgroundAssetsCommand(),
 		buildlocalizations.BuildLocalizationsCommand(),
-		betabuildlocalizations.BetaBuildLocalizationsCommand(),
 		sandbox.SandboxCommand(),
 		signing.SigningCommand(),
 		notarization.NotarizationCommand(),

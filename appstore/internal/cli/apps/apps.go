@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
-	cliweb "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/web"
 )
 
 func appsListFlags(fs *flag.FlagSet) (output shared.OutputFlags, bundleID *string, name *string, sku *string, sort *string, limit *int, next *string, paginate *bool) {
@@ -66,7 +64,6 @@ Examples:
 		UsageFunc: shared.VisibleUsageFunc,
 		Subcommands: []*ffcli.Command{
 			AppsListCommand(),
-			RemovedAppsCreateCommand(),
 			AppsWallCommand(),
 			AppsPublicCommand(),
 			AppsRegistryCommand(),
@@ -82,24 +79,17 @@ Examples:
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
-				fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", strings.TrimSpace(args[0]))
+				subcommand := strings.TrimSpace(args[0])
+				if subcommand == "create" {
+					fmt.Fprintln(os.Stderr, "Error: `asc apps create` was removed. Use `asc web apps create` instead.")
+					return flag.ErrHelp
+				}
+				fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
 				return flag.ErrHelp
 			}
 			return appsList(ctx, *output.Output, *output.Pretty, *bundleID, *name, *sku, *sort, *limit, *next, *paginate)
 		},
 	}
-}
-
-func RemovedAppsCreateCommand() *ffcli.Command {
-	cmd := AppsCreateCommand()
-	cmd.ShortHelp = "DEPRECATED: removed; use `asc web apps create`."
-	cmd.LongHelp = "Removed legacy command. Use `asc web apps create` instead."
-	cmd.UsageFunc = shared.DeprecatedUsageFunc
-	cmd.Exec = func(ctx context.Context, args []string) error {
-		fmt.Fprintln(os.Stderr, "Error: `asc apps create` was removed. Use `asc web apps create` instead.")
-		return flag.ErrHelp
-	}
-	return cmd
 }
 
 // AppsListCommand returns the apps list subcommand.
@@ -170,89 +160,6 @@ Examples:
 			}
 
 			return shared.PrintOutput(app, *output.Output, *output.Pretty)
-		},
-	}
-}
-
-var runAppsCreateShimFn = cliweb.RunAppsCreate
-
-const (
-	appsCreateDeprecationWarning = "Warning: `asc apps create` is deprecated and will be removed after one release cycle."
-	appsCreateMigrationGuidance  = "Use `asc web apps create` instead. Legacy ASC_IRIS_SESSION_CACHE entries are imported into the web session cache automatically during the transition."
-)
-
-// AppsCreateCommand returns the apps create subcommand.
-// TODO(next-release-cycle): remove this shim after the deprecation window closes.
-func AppsCreateCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("apps create", flag.ExitOnError)
-
-	name := fs.String("name", "", "App name")
-	bundleID := fs.String("bundle-id", "", "Bundle ID (e.g., com.example.app)")
-	sku := fs.String("sku", "", "Unique SKU for the app")
-	primaryLocale := fs.String("primary-locale", "", "Primary locale (e.g., en-US)")
-	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, UNIVERSAL")
-	version := fs.String("version", "1.0", "Initial version string")
-	companyName := fs.String("company-name", "", "Company name (optional)")
-	appleID := fs.String("apple-id", "", "Apple ID (email) for authentication")
-	password := fs.String("password", "", "Apple ID password (will prompt if not provided)")
-	twoFactorCode := fs.String("two-factor-code", "", "2FA verification code (if prompted)")
-	twoFactorCodeCommand := fs.String("two-factor-code-command", "", "Shell command that prints the 2FA code to stdout if verification is required")
-	autoRename := fs.Bool("auto-rename", true, "Auto-retry with a unique app name when the chosen name is already in use (default: true)")
-	output := shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       "create",
-		ShortUsage: "asc apps create [flags]",
-		ShortHelp:  "[deprecated] Create a new app via the unofficial web-session shim.",
-		LongHelp: `DEPRECATED: Use ` + "`asc web apps create`" + `.
-
-This compatibility shim forwards to the canonical unofficial web-session app
-creation flow and will be removed after one release cycle.
-
-App creation requires Apple web-session authentication (not API key).
-If 2FA is enabled on your account, you may need to complete authentication in a browser first.
-The canonical web flow also supports --two-factor-code-command or
-ASC_WEB_2FA_CODE_COMMAND when a fresh login requires verification.
-Legacy ` + "`ASC_IRIS_SESSION_CACHE*`" + ` entries are imported into the web
-session cache automatically during the deprecation window.
-
-If flags are not provided, an interactive prompt will guide you through the required fields.
-This deprecated shim preserves the old Apple-ID-only contract and assumes the
-bundle ID already exists. Use ` + "`asc web apps create`" + ` if you want the
-new official-auth bundle-ID preflight and auto-create behavior.
-
-Examples:
-  asc web apps create
-  asc web apps create --name "My App" --bundle-id "com.example.myapp" --sku "MYAPP123"
-  asc apps create --name "My App" --bundle-id "com.example.myapp" --sku "MYAPP123"
-  asc apps create --apple-id "user@example.com" --password "APP_SPECIFIC_PASSWORD"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			fmt.Fprintln(os.Stderr, appsCreateDeprecationWarning)
-			fmt.Fprintln(os.Stderr, appsCreateMigrationGuidance)
-			err := runAppsCreateShimFn(ctx, cliweb.AppsCreateRunOptions{
-				Name:                         *name,
-				BundleID:                     *bundleID,
-				SKU:                          *sku,
-				PrimaryLocale:                *primaryLocale,
-				Platform:                     *platform,
-				Version:                      *version,
-				CompanyName:                  *companyName,
-				AppleID:                      *appleID,
-				Password:                     *password,
-				TwoFactorCode:                *twoFactorCode,
-				TwoFactorCodeCommand:         *twoFactorCodeCommand,
-				AutoRename:                   *autoRename,
-				Output:                       *output.Output,
-				Pretty:                       *output.Pretty,
-				PromptForAppleIDWithPassword: true,
-				DisableBundleIDPreflight:     true,
-			})
-			if err == nil || errors.Is(err, flag.ErrHelp) {
-				return err
-			}
-			return fmt.Errorf("apps create: %w", err)
 		},
 	}
 }

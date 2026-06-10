@@ -45,6 +45,16 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/6f/d5/6b/6fd56b58-41da-7aa7-4737-04bee755418d/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Alune: Planner & Assistant",
+    "link": "https://apps.apple.com/us/app/alune-planner-assistant/id6761420047?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/00/14/93/0014939d-ce61-2386-0bf3-b79c4dd678c4/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "App Time Limit: Screen Leech",
+    "link": "https://apps.apple.com/us/app/app-time-limit-screen-leech/id6743212513?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f5/a4/6e/f5a46e54-20c9-8a3f-69d0-df232214a7fc/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "Appboard: Find Apps · Rankings",
     "link": "https://apps.apple.com/us/app/appboard-find-apps-rankings/id1667492380?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/b8/86/4e/b8864eea-7c79-4b57-dc58-4a208fc28863/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -135,6 +145,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/80/f5/84/80f584d0-6956-72b2-1294-8a5157c450b9/AppIcon-0-0-1x_U007emarketing-0-7-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "CabinLink",
+    "link": "https://apps.apple.com/us/app/cabinlink/id6761247556?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f8/91/a8/f891a8c5-d49e-a5bf-83f4-cbe86e0eac04/CabinLink-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "Cal AI - Calorie Tracker",
     "link": "https://apps.apple.com/us/app/cal-ai-calorie-tracker/id6480417616?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/5e/5d/e9/5e5de9bc-18ef-3c07-79f0-e0a9e3009629/AppIcon-0-1x_U007ephone-0-1-85-220-0.png/512x512bb.jpg"
@@ -158,6 +173,11 @@
     "app": "Checkify: #1 AI Bill Splitter",
     "link": "https://apps.apple.com/us/app/checkify-1-ai-bill-splitter/id6755905554?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/fe/da/29/feda29cd-84dc-ad22-66f4-a276004811fc/appicon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Cinefuse: AI Movie Maker",
+    "link": "https://apps.apple.com/us/app/cinefuse-ai-movie-maker/id6758482061?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/98/b8/9f/98b89fce-4ee9-3a15-45d5-4def0e3808e0/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Clean Links: URL Privacy",
@@ -207,6 +227,11 @@
     "app": "Contact Sheet: AI Photo Review",
     "link": "https://apps.apple.com/us/app/contact-sheet-ai-photo-review/id6760267143?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4d/84/49/4d84498d-802a-03b0-262f-bc80aa2c0f1a/AppIcon-0-0-1x_U007epad-0-1-0-85-220.jpeg/512x512bb.jpg"
+  },
+  {
+    "app": "Cruisea: Real-time Tracking",
+    "link": "https://apps.apple.com/us/app/cruisea-real-time-tracking/id6755068162?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ad/6c/03/ad6c0376-c349-cdee-bfac-c7882f57a4d7/AppIcon-0-1x_U007ephone-0-1-85-220-0.png/512x512bb.jpg"
   },
   {
     "app": "Crunch: Compress & Convert",
@@ -588,6 +613,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/6c/ce/46/6cce46eb-8613-c97d-8913-6888c3d4f1d2/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "journeybot: trip packing list",
+    "link": "https://apps.apple.com/us/app/journeybot-trip-packing-list/id6756543673?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/8a/c2/bc/8ac2bcd8-9ddc-da52-cf6a-14990c6e107f/AppIcon-0-1x_U007epad-0-1-0-sRGB-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "Jurni: Trip Planner",
     "link": "https://apps.apple.com/us/app/jurni-trip-planner/id6759559463?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/67/19/a1/6719a179-73ef-1266-5682-bf1c944f98b9/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -641,6 +671,11 @@
     "app": "Layered: AI Outfit Maker",
     "link": "https://apps.apple.com/us/app/layered-ai-outfit-maker/id6746713932?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/91/a9/6e/91a96e06-a3de-fcc3-0719-109159431685/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Leafty - Travel Planner",
+    "link": "https://apps.apple.com/us/app/leafty-travel-planner/id6502776303?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/93/8c/82/938c8234-a602-a54a-83ea-6f3d85017add/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Lexie: Language Tamagotchi",
@@ -831,6 +866,11 @@
     "app": "Noteit - AI Journal",
     "link": "https://apps.apple.com/app/id1659178001",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/59/57/b4/5957b419-040d-763a-3c16-cf799bdaaa76/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Numby Pro",
+    "link": "https://apps.apple.com/us/app/numby-pro/id6755249901?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/82/a7/2e/82a72e8a-3dbd-7536-f153-282682b3bdc2/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
   },
   {
     "app": "OffScreen: Screen Time Control",
@@ -1232,6 +1272,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/43/63/bd/4363bd1c-3f2d-017b-f15c-d06d89736a88/AppIcon_1-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Spritz",
+    "link": "https://apps.apple.com/us/app/spritz-cocktail-recipes/id6748970457?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ff/db/6a/ffdb6a73-be0d-ce05-743b-4a6a6f05101d/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Squeaker - Dog Training Sounds",
     "link": "https://apps.apple.com/us/app/squeaker-dog-training-sounds/id6751776211?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/87/d5/10/87d51098-4022-e6e4-1c8d-7d8a8a545538/Squeaker-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -1441,6 +1486,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/e4/3d/81/e43d810c-3bf3-ea24-9aa6-1ced116d0f1d/AppIcon3-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "VivyShot: Screen Studio",
+    "link": "https://apps.apple.com/us/app/vivyshot-screen-studio/id6760658121?mt=12&uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/cb/3a/3d/cb3a3d36-ba8b-6e36-a332-5a51209a2a86/AppIcon-85-220-0-5-0-0-2x-0-0.png/512x512bb.png"
+  },
+  {
     "app": "Voice Do",
     "link": "https://apps.apple.com/us/app/voice-do-task-manager/id6746357453",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/27/ed/a2/27eda257-5dd2-5150-7b0e-977f35636552/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg"
@@ -1454,6 +1504,11 @@
     "app": "VoiceBee: AI Voice Keyboard",
     "link": "https://apps.apple.com/us/app/voicebee-ai-voice-keyboard/id6760564766?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/dd/b5/26/ddb52642-a03e-5ff7-ad0c-d973c80726c6/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "VVTerm: Native SSH Client",
+    "link": "https://apps.apple.com/us/app/vvterm-native-ssh-client/id6757482822?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/df/80/ae/df80aeb3-38cc-afe1-e15c-e0b27e957f66/AppIcon-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
   },
   {
     "app": "Wat Kham",

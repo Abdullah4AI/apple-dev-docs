@@ -22,8 +22,6 @@ import (
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
-	validatecli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
 func TestSubmitCommandShape(t *testing.T) {
@@ -35,8 +33,8 @@ func TestSubmitCommandShape(t *testing.T) {
 	if cmd.Name != "submit" {
 		t.Fatalf("unexpected command name: %q", cmd.Name)
 	}
-	if len(cmd.Subcommands) != 4 {
-		t.Fatalf("expected 4 submit subcommands, got %d", len(cmd.Subcommands))
+	if len(cmd.Subcommands) != 2 {
+		t.Fatalf("expected 2 submit subcommands, got %d", len(cmd.Subcommands))
 	}
 	usage := cmd.UsageFunc(cmd)
 	for _, visible := range []string{"\n  status  ", "\n  cancel  "} {
@@ -46,212 +44,8 @@ func TestSubmitCommandShape(t *testing.T) {
 	}
 	for _, hidden := range []string{"\n  create  ", "\n  preflight  "} {
 		if strings.Contains(usage, hidden) {
-			t.Fatalf("expected submit help to hide removed subcommand %q, got %q", strings.TrimSpace(hidden), usage)
+			t.Fatalf("expected submit help to omit removed subcommand %q, got %q", strings.TrimSpace(hidden), usage)
 		}
-	}
-}
-
-func TestSubmitCreateCommand_MissingConfirm(t *testing.T) {
-	cmd := SubmitCreateCommand()
-	if err := cmd.FlagSet.Parse([]string{"--build", "BUILD_ID", "--version", "1.0.0", "--app", "123"}); err != nil {
-		t.Fatalf("failed to parse flags: %v", err)
-	}
-	if err := cmd.Exec(context.Background(), nil); !errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected flag.ErrHelp, got %v", err)
-	}
-}
-
-func TestSubmitCreateCommand_MutuallyExclusiveVersionFlags(t *testing.T) {
-	cmd := SubmitCreateCommand()
-	args := []string{
-		"--confirm",
-		"--build", "BUILD_ID",
-		"--app", "123",
-		"--version", "1.0.0",
-		"--version-id", "VERSION_ID",
-	}
-	if err := cmd.FlagSet.Parse(args); err != nil {
-		t.Fatalf("failed to parse flags: %v", err)
-	}
-	err := cmd.Exec(context.Background(), nil)
-	if !errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected flag.ErrHelp for mutually exclusive flags, got %v", err)
-	}
-}
-
-func TestRunSubmitCreateReadinessPreflight_PrintsNonBlockingPricingAndAvailabilityWarnings(t *testing.T) {
-	tests := []struct {
-		name   string
-		checks []validation.CheckResult
-	}{
-		{
-			name: "pricing unverified",
-			checks: []validation.CheckResult{{
-				ID:       "pricing.schedule.unverified",
-				Severity: validation.SeverityWarning,
-				Message:  "could not verify app price schedule",
-			}},
-		},
-		{
-			name: "availability unverified",
-			checks: []validation.CheckResult{{
-				ID:       "availability.unverified",
-				Severity: validation.SeverityWarning,
-				Message:  "could not verify app availability",
-			}},
-		},
-		{
-			name: "both warnings",
-			checks: []validation.CheckResult{
-				{
-					ID:       "pricing.schedule.unverified",
-					Severity: validation.SeverityWarning,
-					Message:  "could not verify app price schedule",
-				},
-				{
-					ID:       "availability.unverified",
-					Severity: validation.SeverityWarning,
-					Message:  "could not verify app availability",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			originalBuilder := submitReadinessReportBuilder
-			t.Cleanup(func() {
-				submitReadinessReportBuilder = originalBuilder
-			})
-
-			var gotOpts validatecli.ReadinessOptions
-			submitReadinessReportBuilder = func(ctx context.Context, opts validatecli.ReadinessOptions) (validation.Report, error) {
-				gotOpts = opts
-				return validation.Report{
-					Summary: validation.Summary{Warnings: len(tt.checks)},
-					Checks:  tt.checks,
-				}, nil
-			}
-
-			var err error
-			stderr := captureSubmitStderr(t, func() {
-				err = runSubmitCreateReadinessPreflight(context.Background(), nil, "app-123", "version-123", "IOS", "")
-			})
-			if err != nil {
-				t.Fatalf("expected warning-only readiness report to pass, got %v", err)
-			}
-			if gotOpts.AppID != "app-123" || gotOpts.VersionID != "version-123" || gotOpts.Platform != "IOS" {
-				t.Fatalf("unexpected readiness options: %+v", gotOpts)
-			}
-			for _, check := range tt.checks {
-				want := fmt.Sprintf("Warning: %s: %s", submitCreateReadinessCheckLabel(check), check.Message)
-				if !strings.Contains(stderr, want) {
-					t.Fatalf("expected warning %q, got %q", want, stderr)
-				}
-			}
-		})
-	}
-}
-
-func TestRunSubmitCreateReadinessPreflight_PrintsPrivacyPublishStateAdvisory(t *testing.T) {
-	originalBuilder := submitReadinessReportBuilder
-	t.Cleanup(func() {
-		submitReadinessReportBuilder = originalBuilder
-	})
-
-	submitReadinessReportBuilder = func(ctx context.Context, opts validatecli.ReadinessOptions) (validation.Report, error) {
-		return validation.Report{
-			Summary: validation.Summary{Infos: 1},
-			Checks: []validation.CheckResult{
-				{
-					ID:           "privacy.publish_state.unverified",
-					Severity:     validation.SeverityInfo,
-					ResourceType: "appPrivacy",
-					ResourceID:   "app-123",
-					Message:      "App Privacy publish state is not verifiable via the public App Store Connect API and may still block submission",
-					Remediation:  "Confirm App Privacy is published in App Store Connect before submitting: https://appstoreconnect.apple.com/apps/app-123/appPrivacy",
-				},
-			},
-		}, nil
-	}
-
-	var err error
-	stderr := captureSubmitStderr(t, func() {
-		err = runSubmitCreateReadinessPreflight(context.Background(), nil, "app-123", "version-123", "IOS", "")
-	})
-	if err != nil {
-		t.Fatalf("expected advisory-only readiness report to pass, got %v", err)
-	}
-	if !strings.Contains(stderr, "Advisory: App Privacy: App Privacy publish state is not verifiable via the public App Store Connect API and may still block submission") {
-		t.Fatalf("expected App Privacy advisory in stderr, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "Hint: Confirm App Privacy is published in App Store Connect before submitting: https://appstoreconnect.apple.com/apps/app-123/appPrivacy") {
-		t.Fatalf("expected App Privacy hint in stderr, got %q", stderr)
-	}
-	if strings.Contains(strings.ToLower(stderr), "asc web") {
-		t.Fatalf("did not expect private/web command references in stderr, got %q", stderr)
-	}
-}
-
-func TestRunSubmitCreateReadinessPreflight_DoesNotSkipOtherBlockingChecks(t *testing.T) {
-	originalBuilder := submitReadinessReportBuilder
-	t.Cleanup(func() {
-		submitReadinessReportBuilder = originalBuilder
-	})
-
-	submitReadinessReportBuilder = func(ctx context.Context, opts validatecli.ReadinessOptions) (validation.Report, error) {
-		return validation.Report{
-			Summary: validation.Summary{Errors: 1, Warnings: 1, Blocking: 1},
-			Checks: []validation.CheckResult{
-				{
-					ID:       "pricing.schedule.unverified",
-					Severity: validation.SeverityWarning,
-					Message:  "could not verify app price schedule",
-				},
-				{
-					ID:       "screenshots.required.any",
-					Severity: validation.SeverityError,
-					Message:  "at least one required screenshot set is missing",
-				},
-			},
-		}, nil
-	}
-
-	var err error
-	stderr := captureSubmitStderr(t, func() {
-		err = runSubmitCreateReadinessPreflight(context.Background(), nil, "app-123", "version-123", "IOS", "")
-	})
-	if err == nil {
-		t.Fatal("expected blocking readiness issues to fail submit preflight")
-	}
-	if !strings.Contains(err.Error(), "submit preflight failed") {
-		t.Fatalf("expected submit preflight failure, got %v", err)
-	}
-	if !strings.Contains(stderr, "Screenshots: at least one required screenshot set is missing") {
-		t.Fatalf("expected blocking screenshot issue in stderr, got %q", stderr)
-	}
-}
-
-func TestRunSubmitCreateReadinessPreflight_PropagatesUnexpectedFetchErrors(t *testing.T) {
-	originalBuilder := submitReadinessReportBuilder
-	t.Cleanup(func() {
-		submitReadinessReportBuilder = originalBuilder
-	})
-
-	submitReadinessReportBuilder = func(ctx context.Context, opts validatecli.ReadinessOptions) (validation.Report, error) {
-		return validation.Report{}, fmt.Errorf("failed to fetch app price schedule: %w", &asc.APIError{
-			Code:       "INTERNAL_ERROR",
-			Title:      "Server Error",
-			StatusCode: http.StatusInternalServerError,
-		})
-	}
-
-	err := runSubmitCreateReadinessPreflight(context.Background(), nil, "app-123", "version-123", "IOS", "")
-	if err == nil {
-		t.Fatal("expected unexpected readiness fetch error to propagate")
-	}
-	if !strings.Contains(err.Error(), "failed to run readiness preflight") {
-		t.Fatalf("expected wrapped readiness preflight error, got %v", err)
 	}
 }
 

@@ -99,28 +99,11 @@ func TestReleaseCommandShape(t *testing.T) {
 	if cmd.Name != "release" {
 		t.Fatalf("expected command name release, got %q", cmd.Name)
 	}
-	if len(cmd.Subcommands) != 2 {
-		t.Fatalf("expected 2 subcommands, got %d", len(cmd.Subcommands))
+	if len(cmd.Subcommands) != 1 {
+		t.Fatalf("expected 1 subcommand, got %d", len(cmd.Subcommands))
 	}
 	if cmd.Subcommands[0].Name != "stage" {
 		t.Fatalf("expected subcommand stage, got %q", cmd.Subcommands[0].Name)
-	}
-	if cmd.Subcommands[1].Name != "run" {
-		t.Fatalf("expected hidden removed subcommand run, got %q", cmd.Subcommands[1].Name)
-	}
-	if !strings.HasPrefix(cmd.Subcommands[1].ShortHelp, "DEPRECATED:") {
-		t.Fatalf("expected hidden removed subcommand to be deprecated, got %q", cmd.Subcommands[1].ShortHelp)
-	}
-}
-
-func TestReleaseRunCommand_MissingRequiredFlags(t *testing.T) {
-	cmd := ReleaseRunCommand()
-	if err := cmd.FlagSet.Parse([]string{"--dry-run"}); err != nil {
-		t.Fatalf("parse flags: %v", err)
-	}
-	err := cmd.Exec(context.Background(), nil)
-	if !errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected ErrHelp, got %v", err)
 	}
 }
 

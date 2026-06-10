@@ -191,7 +191,7 @@ func TestTestFlightReviewAppGetOutput(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"testflight", "review", "app", "get", "--id", "detail-1"}); err != nil {
+		if err := root.Parse([]string{"testflight", "review", "app", "view", "--id", "detail-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -235,7 +235,7 @@ func TestTestFlightReviewSubmissionsGetOutput(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"testflight", "review", "submissions", "get", "--id", "submission-1"}); err != nil {
+		if err := root.Parse([]string{"testflight", "review", "submissions", "view", "--id", "submission-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

@@ -121,7 +121,7 @@ func TestAdsReportsPresetBuildsCampaignRequest(t *testing.T) {
 		if body.Granularity != "HOURLY" || body.TimeZone != "UTC" || !body.ReturnRowTotals {
 			t.Fatalf("report options = %+v, want hourly UTC totals", body)
 		}
-		if strings.Join(body.Selector.Fields, ",") != "campaignName,impressions,taps,spend" {
+		if strings.Join(body.Selector.Fields, ",") != "campaignName,impressions,taps,localSpend" {
 			t.Fatalf("fields = %v", body.Selector.Fields)
 		}
 		if len(body.Selector.OrderBy) != 1 || body.Selector.OrderBy[0].Field != "impressions" || body.Selector.OrderBy[0].SortOrder != "DESCENDING" {
@@ -140,7 +140,7 @@ func TestAdsReportsPresetBuildsCampaignRequest(t *testing.T) {
 		"--last-days", "7",
 		"--fields", "campaignName,impressions,taps,spend",
 		"--granularity", "hourly",
-		"--sort", "impressions:desc",
+		"--sort", "-impressions",
 		"--limit", "25",
 		"--offset", "5",
 		"--return-row-totals",
@@ -247,7 +247,7 @@ func TestAdsReportsPresetBuildsAdLevelRequestWithSort(t *testing.T) {
 		"--campaign", "12345",
 		"--from", from,
 		"--to", to,
-		"--sort", "impressions:desc",
+		"--sort", "-impressions",
 		"--output", "json",
 	}
 	if err := root.Parse(args); err != nil {
@@ -332,7 +332,7 @@ func TestAdsReportsPresetValidatesUsageBeforeNetwork(t *testing.T) {
 		},
 		{
 			name:    "hourly unsupported for ads",
-			args:    []string{"ads", "reports", "preset", "--level", "ads", "--campaign", "12345", "--from", recentFrom, "--to", recentTo, "--granularity", "HOURLY", "--sort", "impressions:desc", "--output", "json"},
+			args:    []string{"ads", "reports", "preset", "--level", "ads", "--campaign", "12345", "--from", recentFrom, "--to", recentTo, "--granularity", "HOURLY", "--sort", "-impressions", "--output", "json"},
 			wantErr: "--granularity HOURLY is only supported",
 		},
 		{
@@ -369,11 +369,6 @@ func TestAdsReportsPresetValidatesUsageBeforeNetwork(t *testing.T) {
 			name:    "last days unsupported for ORTZ",
 			args:    []string{"ads", "reports", "preset", "--level", "campaigns", "--last-days", "1", "--time-zone", "ORTZ", "--output", "json"},
 			wantErr: "--last-days is not supported for ORTZ reports; use --from and --to",
-		},
-		{
-			name:    "ad level requires sort",
-			args:    []string{"ads", "reports", "preset", "--level", "ads", "--campaign", "12345", "--from", recentFrom, "--to", recentTo, "--output", "json"},
-			wantErr: "--sort is required for --level ads",
 		},
 	}
 

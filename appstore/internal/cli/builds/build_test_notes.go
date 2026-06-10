@@ -45,7 +45,6 @@ Examples:
 		Subcommands: []*ffcli.Command{
 			BuildsTestNotesListCommand(),
 			BuildsTestNotesViewCommand(),
-			RemovedBuildsTestNotesGetCommand(),
 			BuildsTestNotesCreateCommand(),
 			BuildsTestNotesUpdateCommand(),
 			BuildsTestNotesDeleteCommand(),
@@ -225,20 +224,6 @@ Examples:
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
-}
-
-func RemovedBuildsTestNotesGetCommand() *ffcli.Command {
-	cmd := BuildsTestNotesViewCommand()
-	cmd.Name = "get"
-	cmd.ShortUsage = "asc builds test-notes get [flags]"
-	cmd.ShortHelp = "DEPRECATED: removed; use `asc builds test-notes view`."
-	cmd.LongHelp = "Removed legacy command. Use `asc builds test-notes view` instead."
-	cmd.UsageFunc = shared.DeprecatedUsageFunc
-	cmd.Exec = func(ctx context.Context, args []string) error {
-		fmt.Fprintln(os.Stderr, "Error: `asc builds test-notes get` was removed. Use `asc builds test-notes view` instead.")
-		return flag.ErrHelp
-	}
-	return cmd
 }
 
 // BuildsTestNotesCreateCommand returns the create subcommand.

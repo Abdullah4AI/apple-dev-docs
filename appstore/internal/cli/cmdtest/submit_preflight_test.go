@@ -7,15 +7,11 @@ import (
 	"testing"
 )
 
-func TestSubmitPreflightCommandIsRemoved(t *testing.T) {
+func TestSubmitPreflightCommandIsNotRegistered(t *testing.T) {
 	root := RootCommand("1.2.3")
 	cmd := findSubcommand(root, "submit", "preflight")
-	if cmd == nil {
-		t.Fatal("expected removed submit preflight shim to remain for migration guidance")
-		return
-	}
-	if !strings.Contains(cmd.ShortHelp, "removed") {
-		t.Fatalf("expected removed submit preflight shim, got short help %q", cmd.ShortHelp)
+	if cmd != nil {
+		t.Fatalf("expected submit preflight command to be removed, got %q", cmd.ShortHelp)
 	}
 }
 

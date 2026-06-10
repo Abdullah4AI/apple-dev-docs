@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -25,6 +26,7 @@ var (
 	statusValidateCredential = validateStoredCredential
 	listStoredCredentials    = authsvc.ListCredentials
 	listCredentialSummaries  = authsvc.ListCredentialSummaries
+	migrateKeychainToConfig  = authsvc.MigrateKeychainToConfig
 )
 
 // Auth command factory
@@ -55,12 +57,14 @@ Use "asc auth status" to see which credentials/profile are currently active.
 Examples:
   asc auth status
   asc auth status --verbose
-  asc auth switch --name work`,
+  asc auth switch --name work
+  asc auth export-to-config --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			AuthInitCommand(),
 			AuthLoginCommand(),
+			AuthExportToConfigCommand(),
 			AuthSwitchCommand(),
 			AuthLogoutCommand(),
 			AuthDoctorCommand(),
@@ -526,6 +530,137 @@ so commands continue to work even if the original .p8 file is removed.`,
 			return nil
 		},
 	}
+}
+
+// AuthExportToConfigCommand copies keychain-backed credentials to config.json.
+func AuthExportToConfigCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("auth export-to-config", flag.ExitOnError)
+
+	confirm := fs.Bool("confirm", false, "Confirm writing keychain credentials to config.json")
+	local := fs.Bool("local", false, "Write credentials to ./.asc/config.json in the current repo")
+	configPath := fs.String("config", "", "Write credentials to this config.json path")
+	privateKeyDir := fs.String("private-key-dir", "", "Directory for exported .p8 files when original key files are missing")
+	removeKeychain := fs.Bool("remove-keychain", false, "Remove migrated credentials from keychain after config.json is written")
+	output := shared.BindOutputFlagsWithAllowed(fs, "output", "table", "Output format: table, json", "table", "json")
+
+	return &ffcli.Command{
+		Name:       "export-to-config",
+		ShortUsage: "asc auth export-to-config --confirm [flags]",
+		ShortHelp:  "Copy keychain credentials into config.json.",
+		LongHelp: `Copy keychain credentials into config.json.
+
+This helps move from system keychain storage to JSON config storage. Credentials
+are written to ~/.asc/config.json by default, or to ./.asc/config.json with
+--local. If a keychain entry has embedded private key material and the original
+.p8 file is missing, the key is exported as a secure .p8 file and config.json
+references that exported file.
+
+Use --remove-keychain to delete migrated keychain entries after config.json is
+written successfully. Otherwise keychain entries are left in place.
+
+Examples:
+  asc auth export-to-config --confirm
+  asc auth export-to-config --confirm --local
+  asc auth export-to-config --confirm --private-key-dir ~/.asc/keys
+  asc auth export-to-config --confirm --remove-keychain
+  asc auth export-to-config --confirm --output json`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
+			}
+			normalizedOutput, err := shared.ValidateOutputFormatAllowed(*output.Output, *output.Pretty, "table", "json")
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if !*confirm {
+				return shared.UsageError("--confirm is required")
+			}
+			if strings.TrimSpace(*privateKeyDir) == "" && *privateKeyDir != "" {
+				return shared.UsageError("--private-key-dir cannot be blank")
+			}
+			if strings.TrimSpace(*configPath) == "" && *configPath != "" {
+				return shared.UsageError("--config cannot be blank")
+			}
+			if *local && strings.TrimSpace(*configPath) != "" {
+				return shared.UsageError("--local and --config are mutually exclusive")
+			}
+
+			targetConfigPath := strings.TrimSpace(*configPath)
+			if targetConfigPath == "" {
+				if *local {
+					targetConfigPath, err = config.LocalPath()
+				} else {
+					targetConfigPath, err = config.Path()
+				}
+				if err != nil {
+					return fmt.Errorf("auth export-to-config: %w", err)
+				}
+			} else {
+				targetConfigPath, err = filepath.Abs(targetConfigPath)
+				if err != nil {
+					return fmt.Errorf("auth export-to-config: invalid --config: %w", err)
+				}
+			}
+
+			result, err := migrateKeychainToConfig(authsvc.MigrateKeychainToConfigOptions{
+				ConfigPath:     targetConfigPath,
+				PrivateKeyDir:  strings.TrimSpace(*privateKeyDir),
+				RemoveKeychain: *removeKeychain,
+			})
+			if err != nil {
+				return fmt.Errorf("auth export-to-config: %w", err)
+			}
+
+			if normalizedOutput == "json" {
+				return shared.PrintOutput(result, "json", *output.Pretty)
+			}
+			printMigrateToConfigResult(result)
+			return nil
+		},
+	}
+}
+
+func printMigrateToConfigResult(result authsvc.MigrateKeychainToConfigResult) {
+	fmt.Printf("Migrated %d credential(s) to %s\n", len(result.Migrated), result.ConfigPath)
+	if strings.TrimSpace(result.PrivateKeyDir) != "" {
+		fmt.Printf("Private key directory: %s\n", result.PrivateKeyDir)
+	}
+	if len(result.Migrated) > 0 {
+		fmt.Println()
+		asc.RenderTable(
+			[]string{"Name", "Key ID", "Private Key", "Exported"},
+			buildMigrateToConfigRows(result.Migrated),
+		)
+	}
+	if result.RemovedFromKeychain {
+		fmt.Println("\nRemoved migrated credentials from keychain.")
+	} else if len(result.Warnings) > 0 {
+		fmt.Println("\nKeychain cleanup incomplete; inspect warnings below.")
+	} else {
+		fmt.Println("\nKeychain entries were left unchanged. Set ASC_BYPASS_KEYCHAIN=1 to prefer config.json.")
+	}
+	for _, warning := range result.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func buildMigrateToConfigRows(credentials []authsvc.MigratedCredential) [][]string {
+	rows := make([][]string, 0, len(credentials))
+	for _, cred := range credentials {
+		exported := "no"
+		if cred.ExportedPrivateKey {
+			exported = "yes"
+		}
+		rows = append(rows, []string{
+			cred.Name,
+			cred.KeyID,
+			cred.PrivateKeyPath,
+			exported,
+		})
+	}
+	return rows
 }
 
 // AuthSwitch command factory

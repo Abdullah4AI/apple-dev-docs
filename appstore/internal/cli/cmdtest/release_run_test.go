@@ -28,7 +28,7 @@ func TestRelease_ShowsHelp(t *testing.T) {
 	}
 }
 
-func TestReleaseRunRemovedShowsCanonicalGuidance(t *testing.T) {
+func TestReleaseRunIsNotRegistered(t *testing.T) {
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 
@@ -48,10 +48,13 @@ func TestReleaseRunRemovedShowsCanonicalGuidance(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(stderr, "Error: `asc release run` was removed. Use `asc release stage` instead.") {
-		t.Fatalf("expected removed command guidance, got %q", stderr)
+	if !strings.Contains(stderr, "Run high-level App Store release workflows.") {
+		t.Fatalf("expected release help for unknown run subcommand, got %q", stderr)
 	}
 	if !strings.Contains(stderr, "asc release stage") {
 		t.Fatalf("expected replacement guidance to mention asc release stage, got %q", stderr)
+	}
+	if strings.Contains(stderr, "\n  run") {
+		t.Fatalf("expected release run to be omitted from help, got %q", stderr)
 	}
 }

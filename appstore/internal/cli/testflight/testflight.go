@@ -35,7 +35,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: testflightVisibleUsageFunc,
 		Subcommands: []*ffcli.Command{
-			RemovedTestFlightAppsCommand(),
 			TestFlightGroupsCommand(),
 			TestFlightTestersCommand(),
 			TestFlightFeedbackCommand(),

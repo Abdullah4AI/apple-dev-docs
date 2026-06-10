@@ -80,6 +80,7 @@ func TestAdsAgentReadOnlyEvalWorkflow(t *testing.T) {
 	}))
 
 	for _, args := range [][]string{
+		{"ads", "me", "--output", "json"},
 		{"ads", "me", "view", "--output", "json"},
 		{"ads", "acls", "--output", "json"},
 		{"ads", "campaigns", "--limit", "1", "--output", "json"},

@@ -783,6 +783,9 @@ GET /v1/subscriptionOfferCodes/{id}/prices
 GET /v1/subscriptionOfferCodes/{id}/relationships/customCodes
 GET /v1/subscriptionOfferCodes/{id}/relationships/oneTimeUseCodes
 GET /v1/subscriptionOfferCodes/{id}/relationships/prices
+GET /v1/subscriptionPlanAvailabilities/{id}
+GET /v1/subscriptionPlanAvailabilities/{id}/availableTerritories
+GET /v1/subscriptionPlanAvailabilities/{id}/relationships/availableTerritories
 GET /v1/subscriptionPricePoints/{id}
 GET /v1/subscriptionPricePoints/{id}/equalizations
 GET /v1/subscriptionPricePoints/{id}/relationships/equalizations
@@ -794,6 +797,7 @@ GET /v1/subscriptions/{id}/appStoreReviewScreenshot
 GET /v1/subscriptions/{id}/images
 GET /v1/subscriptions/{id}/introductoryOffers
 GET /v1/subscriptions/{id}/offerCodes
+GET /v1/subscriptions/{id}/planAvailabilities
 GET /v1/subscriptions/{id}/pricePoints
 GET /v1/subscriptions/{id}/prices
 GET /v1/subscriptions/{id}/promotedPurchase
@@ -802,6 +806,7 @@ GET /v1/subscriptions/{id}/relationships/appStoreReviewScreenshot
 GET /v1/subscriptions/{id}/relationships/images
 GET /v1/subscriptions/{id}/relationships/introductoryOffers
 GET /v1/subscriptions/{id}/relationships/offerCodes
+GET /v1/subscriptions/{id}/relationships/planAvailabilities
 GET /v1/subscriptions/{id}/relationships/pricePoints
 GET /v1/subscriptions/{id}/relationships/prices
 GET /v1/subscriptions/{id}/relationships/promotedPurchase
@@ -1016,6 +1021,8 @@ PATCH /v1/subscriptionLocalizations/{id}
 PATCH /v1/subscriptionOfferCodeCustomCodes/{id}
 PATCH /v1/subscriptionOfferCodeOneTimeUseCodes/{id}
 PATCH /v1/subscriptionOfferCodes/{id}
+PATCH /v1/subscriptionPlanAvailabilities/{id}
+PATCH /v1/subscriptionPlanAvailabilities/{id}/relationships/availableTerritories
 PATCH /v1/subscriptionPromotionalOffers/{id}
 PATCH /v1/subscriptions/{id}
 PATCH /v1/territoryAvailabilities/{id}
@@ -1179,6 +1186,7 @@ POST /v1/subscriptionLocalizations
 POST /v1/subscriptionOfferCodeCustomCodes
 POST /v1/subscriptionOfferCodeOneTimeUseCodes
 POST /v1/subscriptionOfferCodes
+POST /v1/subscriptionPlanAvailabilities
 POST /v1/subscriptionPrices
 POST /v1/subscriptionPromotionalOffers
 POST /v1/subscriptionSubmissions

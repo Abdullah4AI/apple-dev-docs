@@ -533,47 +533,6 @@ Examples:
   asc testflight review submissions list --build-id "BUILD_ID"
   asc testflight review submissions view --id "SUBMISSION_ID"`
 	setUsageFuncRecursively(cmd, testflightVisibleUsageFunc)
-
-	cmd.Subcommands = append(
-		cmd.Subcommands,
-		deprecatedAliasCommand(
-			TestFlightReviewGetCommand(),
-			"asc testflight review view [flags]",
-			"Compatibility alias: use `asc testflight review view`.",
-			"Compatibility alias: use `asc testflight review view --app APP_ID`.",
-		),
-		deprecatedAliasCommand(
-			TestFlightReviewUpdateCommand(),
-			"asc testflight review edit [flags]",
-			"Compatibility alias: use `asc testflight review edit`.",
-			"Compatibility alias: use `asc testflight review edit --id DETAIL_ID ...`.",
-		),
-	)
-
-	if appCmd := findSubcommand(cmd, "app"); appCmd != nil {
-		appCmd.Subcommands = append(
-			appCmd.Subcommands,
-			deprecatedAliasCommand(
-				TestFlightReviewAppGetCommand(),
-				"asc testflight review app view --id \"DETAIL_ID\"",
-				"Compatibility alias: use `asc testflight review app view`.",
-				"Compatibility alias: use `asc testflight review app view --id DETAIL_ID`.",
-			),
-		)
-	}
-
-	if submissionsCmd := findSubcommand(cmd, "submissions"); submissionsCmd != nil {
-		submissionsCmd.Subcommands = append(
-			submissionsCmd.Subcommands,
-			deprecatedAliasCommand(
-				TestFlightReviewSubmissionsGetCommand(),
-				"asc testflight review submissions view --id \"SUBMISSION_ID\"",
-				"Compatibility alias: use `asc testflight review submissions view`.",
-				"Compatibility alias: use `asc testflight review submissions view --id SUBMISSION_ID`.",
-			),
-		)
-	}
-
 	return cmd
 }
 

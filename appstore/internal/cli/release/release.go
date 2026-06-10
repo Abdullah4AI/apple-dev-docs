@@ -44,7 +44,6 @@ Examples:
 		UsageFunc: shared.VisibleUsageFunc,
 		Subcommands: []*ffcli.Command{
 			ReleaseStageCommand(),
-			RemovedReleaseRunCommand(),
 		},
 		Exec: func(context.Context, []string) error {
 			return flag.ErrHelp

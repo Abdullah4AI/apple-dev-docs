@@ -378,11 +378,6 @@ func TestParityRelatedCommandsValidationErrors(t *testing.T) {
 			wantErr: "--id is required",
 		},
 		{
-			name:    "beta-build-localizations build get removed",
-			args:    []string{"beta-build-localizations", "build", "get"},
-			wantErr: "No canonical replacement exists yet",
-		},
-		{
 			name:    "pre-release app view missing id",
 			args:    []string{"testflight", "pre-release", "app", "view"},
 			wantErr: "--id is required",

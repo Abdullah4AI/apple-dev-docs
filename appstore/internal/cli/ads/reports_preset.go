@@ -93,7 +93,7 @@ func ReportsPresetCommand() *ffcli.Command {
 		lastDays:        fs.Int("last-days", 0, "Use an inclusive UTC range ending today"),
 		granularity:     fs.String("granularity", "DAILY", "Report granularity: HOURLY, DAILY, WEEKLY, MONTHLY"),
 		fields:          fs.String("fields", "", "Comma-separated selector fields to request"),
-		sort:            fs.String("sort", "", "Sort field with optional direction, e.g. impressions:desc"),
+		sort:            fs.String("sort", "-impressions", "Sort field; omit direction or prefix with - for descending, use field:asc for ascending"),
 		limit:           fs.Int("limit", 1000, "Report row limit (1..1000)"),
 		offset:          fs.Int("offset", 0, "Report row offset (>=0)"),
 		timeZone:        fs.String("time-zone", "UTC", "Apple Ads reporting time zone: UTC or ORTZ"),
@@ -114,15 +114,15 @@ Apple Ads accepts UTC and ORTZ (organization time zone) for --time-zone. Use
 --last-days for an inclusive UTC rolling date range; use --from and --to when
 requesting ORTZ because Apple Ads resolves the organization time zone. Use the
 raw report commands with --file when you need custom conditions or advanced
-selector JSON. Ad-level reports require --sort because Apple Ads requires
-selector.orderBy for that endpoint. HOURLY granularity is available for
+selector JSON. Report presets default to --sort -impressions because Apple Ads
+requires selector.orderBy. HOURLY granularity is available for
 	campaign, ad-group, and keyword report levels. Search-term report levels cannot
 	request row totals.
 
 Examples:
-  asc ads reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,spend --sort impressions:desc --org "123456"
+  asc ads reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions --org "123456"
   asc ads reports preset --level keywords --campaign 12345 --last-days 7 --fields keyword,impressions,taps --org "123456"
-  asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort impressions:desc --org "123456"`,
+  asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions --org "123456"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -238,21 +238,22 @@ func buildReportPresetPayload(flags adsReportPresetFlags, now time.Time) (adsRep
 	if *flags.offset < 0 {
 		return adsReportPresetPayload{}, fmt.Errorf("--offset must be >= 0")
 	}
-	if level == "ads" && strings.TrimSpace(*flags.sort) == "" {
-		return adsReportPresetPayload{}, fmt.Errorf("--sort is required for --level ads")
-	}
 	if isSearchTermReportLevel(level) && *flags.returnRowTotals {
 		return adsReportPresetPayload{}, fmt.Errorf("--return-row-totals cannot be used with search-term report levels")
 	}
 
 	selector := adsReportPresetSelector{
-		Fields: shared.SplitCSV(*flags.fields),
+		Fields: normalizeReportPresetFields(*flags.fields),
 		Pagination: &adsReportPresetPagination{
 			Offset: *flags.offset,
 			Limit:  *flags.limit,
 		},
 	}
-	if sortValue := strings.TrimSpace(*flags.sort); sortValue != "" {
+	sortValue := strings.TrimSpace(*flags.sort)
+	if sortValue == "" {
+		sortValue = "-impressions"
+	}
+	if sortValue != "" {
 		sortSpec, err := parseReportPresetSort(sortValue)
 		if err != nil {
 			return adsReportPresetPayload{}, err
@@ -399,11 +400,17 @@ func parseReportPresetDate(flagName string, value string) (time.Time, error) {
 }
 
 func parseReportPresetSort(value string) (adsReportPresetSort, error) {
+	value = strings.TrimSpace(value)
 	field, direction, ok := strings.Cut(value, ":")
 	field = strings.TrimSpace(field)
+	prefixedDescending := strings.HasPrefix(field, "-")
+	if prefixedDescending {
+		field = strings.TrimSpace(strings.TrimPrefix(field, "-"))
+	}
 	if field == "" {
 		return adsReportPresetSort{}, fmt.Errorf("--sort field is required")
 	}
+	field = normalizeReportPresetField(field)
 	sortOrder := "DESCENDING"
 	if ok {
 		switch strings.ToLower(strings.TrimSpace(direction)) {
@@ -416,6 +423,21 @@ func parseReportPresetSort(value string) (adsReportPresetSort, error) {
 		}
 	}
 	return adsReportPresetSort{Field: field, SortOrder: sortOrder}, nil
+}
+
+func normalizeReportPresetFields(value string) []string {
+	fields := shared.SplitCSV(value)
+	for index, field := range fields {
+		fields[index] = normalizeReportPresetField(field)
+	}
+	return fields
+}
+
+func normalizeReportPresetField(field string) string {
+	if field == "spend" {
+		return "localSpend"
+	}
+	return field
 }
 
 func sortedReportPresetLevels() []string {

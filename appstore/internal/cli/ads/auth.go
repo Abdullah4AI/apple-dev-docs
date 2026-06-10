@@ -219,7 +219,7 @@ Examples:
 				rows = append(rows, row)
 			}
 			result := adsAuthStatusOutput{
-				Storage:          storageDescription(),
+				Storage:          storageDescription(rows),
 				Active:           active,
 				Credentials:      rows,
 				CredentialsError: credentialsError,
@@ -369,8 +369,24 @@ func isNoAdsCredentialError(err error) bool {
 	return err.Error() == "default credentials not found"
 }
 
-func storageDescription() string {
+func storageDescription(rows []adsAuthStatusRow) string {
 	if appleads.ShouldBypassKeychain() {
+		return "Config File"
+	}
+	hasConfig := false
+	hasKeychain := false
+	for _, row := range rows {
+		switch row.Source {
+		case "config":
+			hasConfig = true
+		case "keychain":
+			hasKeychain = true
+		}
+	}
+	switch {
+	case hasConfig && hasKeychain:
+		return "System Keychain + Config File"
+	case hasConfig:
 		return "Config File"
 	}
 	return "System Keychain"

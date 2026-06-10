@@ -99,6 +99,7 @@ func init() {
 	registerRowsErr(subscriptionPricesRows)
 	registerRows(subscriptionPriceRows)
 	registerRows(subscriptionAvailabilityRows)
+	registerRowsWithSingleResourceAdapter(subscriptionPlanAvailabilitiesRows)
 	registerRows(subscriptionGracePeriodRows)
 	registerRowsWithSingleResourceAdapter(territoriesRows)
 	registerRowsErr(territoryAgeRatingsRows)

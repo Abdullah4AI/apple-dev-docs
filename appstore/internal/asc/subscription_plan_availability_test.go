@@ -1,0 +1,80 @@
+package asc
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"testing"
+)
+
+func TestCreateSubscriptionPlanAvailability(t *testing.T) {
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionPlanAvailabilities","id":"plan-1","attributes":{"planType":"MONTHLY","availableInNewTerritories":true}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/subscriptionPlanAvailabilities" {
+			t.Fatalf("expected path /v1/subscriptionPlanAvailabilities, got %s", req.URL.Path)
+		}
+		var payload SubscriptionPlanAvailabilityCreateRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if payload.Data.Type != ResourceTypeSubscriptionPlanAvailabilities {
+			t.Fatalf("expected type subscriptionPlanAvailabilities, got %q", payload.Data.Type)
+		}
+		if payload.Data.Attributes.PlanType != SubscriptionPlanTypeMonthly {
+			t.Fatalf("expected MONTHLY plan type, got %q", payload.Data.Attributes.PlanType)
+		}
+		if payload.Data.Relationships == nil || payload.Data.Relationships.Subscription == nil || payload.Data.Relationships.AvailableTerritories == nil {
+			t.Fatalf("expected subscription and territory relationships")
+		}
+		if payload.Data.Relationships.Subscription.Data.ID != "sub-1" {
+			t.Fatalf("unexpected subscription relationship: %+v", payload.Data.Relationships.Subscription.Data)
+		}
+		got := payload.Data.Relationships.AvailableTerritories.Data
+		if len(got) != 2 || got[0].ID != "NOR" || got[1].ID != "DEU" {
+			t.Fatalf("expected NOR,DEU territories, got %#v", got)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	availableInNew := true
+	attrs := SubscriptionPlanAvailabilityAttributes{
+		AvailableInNewTerritories: &availableInNew,
+		PlanType:                  SubscriptionPlanTypeMonthly,
+	}
+	if _, err := client.CreateSubscriptionPlanAvailability(context.Background(), "sub-1", []string{"NOR", "DEU"}, attrs); err != nil {
+		t.Fatalf("CreateSubscriptionPlanAvailability() error: %v", err)
+	}
+}
+
+func TestUpdateSubscriptionPlanAvailability(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionPlanAvailabilities","id":"plan-1","attributes":{"planType":"MONTHLY","availableInNewTerritories":false}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/subscriptionPlanAvailabilities/plan-1" {
+			t.Fatalf("expected path /v1/subscriptionPlanAvailabilities/plan-1, got %s", req.URL.Path)
+		}
+		var payload SubscriptionPlanAvailabilityUpdateRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if payload.Data.ID != "plan-1" || payload.Data.Type != ResourceTypeSubscriptionPlanAvailabilities {
+			t.Fatalf("unexpected update data: %+v", payload.Data)
+		}
+		if payload.Data.Relationships == nil || payload.Data.Relationships.AvailableTerritories == nil {
+			t.Fatalf("expected availableTerritories relationship")
+		}
+		if len(payload.Data.Relationships.AvailableTerritories.Data) != 0 {
+			t.Fatalf("expected empty territory list, got %#v", payload.Data.Relationships.AvailableTerritories.Data)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.UpdateSubscriptionPlanAvailability(context.Background(), "plan-1", nil, nil); err != nil {
+		t.Fatalf("UpdateSubscriptionPlanAvailability() error: %v", err)
+	}
+}

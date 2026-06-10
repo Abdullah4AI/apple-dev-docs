@@ -78,6 +78,31 @@ type Credentials struct {
 	Keys       []Credential `json:"keys"`
 }
 
+// MigrateKeychainToConfigOptions controls keychain-to-config migration.
+type MigrateKeychainToConfigOptions struct {
+	ConfigPath     string
+	PrivateKeyDir  string
+	RemoveKeychain bool
+}
+
+// MigratedCredential reports one profile copied into config.json.
+type MigratedCredential struct {
+	Name               string `json:"name"`
+	KeyID              string `json:"keyId"`
+	PrivateKeyPath     string `json:"privateKeyPath"`
+	ExportedPrivateKey bool   `json:"exportedPrivateKey,omitempty"`
+	keychainName       string
+}
+
+// MigrateKeychainToConfigResult summarizes a keychain-to-config migration.
+type MigrateKeychainToConfigResult struct {
+	ConfigPath          string               `json:"configPath"`
+	PrivateKeyDir       string               `json:"privateKeyDir,omitempty"`
+	Migrated            []MigratedCredential `json:"migrated"`
+	RemovedFromKeychain bool                 `json:"removedFromKeychain"`
+	Warnings            []string             `json:"warnings,omitempty"`
+}
+
 type credentialPayload struct {
 	KeyID          string `json:"key_id"`
 	IssuerID       string `json:"issuer_id"`
@@ -330,6 +355,298 @@ func StoreCredentialsConfigAt(name, keyID, issuerID, keyPath, configPath string)
 		PrivateKeyPath: keyPath,
 	}
 	return storeInConfigAt(name, payload, configPath)
+}
+
+// MigrateKeychainToConfig copies keychain-backed credentials into config.json.
+//
+// If a keychain entry contains embedded PEM data and its original private key
+// path is missing, the PEM is exported to a secure .p8 file and config.json is
+// updated to reference that file.
+func MigrateKeychainToConfig(opts MigrateKeychainToConfigOptions) (MigrateKeychainToConfigResult, error) {
+	configPath, err := resolveMigrationConfigPath(opts.ConfigPath)
+	if err != nil {
+		return MigrateKeychainToConfigResult{}, err
+	}
+	privateKeyDir, err := resolveMigrationPrivateKeyDir(opts.PrivateKeyDir, configPath)
+	if err != nil {
+		return MigrateKeychainToConfigResult{}, err
+	}
+	result := MigrateKeychainToConfigResult{
+		ConfigPath:    configPath,
+		PrivateKeyDir: privateKeyDir,
+	}
+
+	credentials, err := listFromKeychain()
+	if err != nil {
+		if isKeyringUnavailable(err) {
+			return result, fmt.Errorf("keychain unavailable: %w", err)
+		}
+		return result, err
+	}
+	if len(credentials) == 0 {
+		return result, fmt.Errorf("no keychain credentials found")
+	}
+
+	cfg, err := config.LoadAt(configPath)
+	if err != nil && !errors.Is(err, config.ErrNotFound) {
+		return result, err
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	migratedConfigCreds := make([]config.Credential, 0, len(credentials))
+	seenConfigNames := make(map[string]string, len(credentials))
+	for _, cred := range credentials {
+		name := strings.TrimSpace(cred.Name)
+		if name == "" {
+			continue
+		}
+		if previousKeychainName, exists := seenConfigNames[name]; exists && previousKeychainName != cred.Name {
+			return result, fmt.Errorf(
+				"multiple keychain credentials normalize to config profile %q: %q and %q",
+				name,
+				previousKeychainName,
+				cred.Name,
+			)
+		}
+		seenConfigNames[name] = cred.Name
+		privateKeyPath, exported, err := migrationPrivateKeyPath(cred, privateKeyDir, name)
+		if err != nil {
+			return result, err
+		}
+		configCred := config.Credential{
+			Name:           name,
+			KeyID:          strings.TrimSpace(cred.KeyID),
+			IssuerID:       strings.TrimSpace(cred.IssuerID),
+			PrivateKeyPath: privateKeyPath,
+		}
+		upsertConfigCredential(cfg, configCred)
+		migratedConfigCreds = append(migratedConfigCreds, configCred)
+		result.Migrated = append(result.Migrated, MigratedCredential{
+			Name:               configCred.Name,
+			KeyID:              configCred.KeyID,
+			PrivateKeyPath:     configCred.PrivateKeyPath,
+			ExportedPrivateKey: exported,
+			keychainName:       cred.Name,
+		})
+	}
+	if len(result.Migrated) == 0 {
+		return result, fmt.Errorf("no named keychain credentials found")
+	}
+
+	applyMigratedDefault(cfg, credentials, migratedConfigCreds)
+	if err := config.SaveAt(configPath, cfg); err != nil {
+		return result, err
+	}
+
+	if opts.RemoveKeychain {
+		removedAll := true
+		for _, cred := range result.Migrated {
+			if err := removeMigratedKeychainCredential(cred.keychainName); err != nil {
+				removedAll = false
+				result.Warnings = append(result.Warnings, fmt.Sprintf("failed to remove keychain credential %q: %v", cred.Name, err))
+			}
+		}
+		result.RemovedFromKeychain = removedAll
+	}
+
+	return result, nil
+}
+
+func resolveMigrationConfigPath(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return config.Path()
+	}
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid config path: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func resolveMigrationPrivateKeyDir(raw, configPath string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = filepath.Join(filepath.Dir(configPath), "keys")
+	}
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid private key directory: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func migrationPrivateKeyPath(cred Credential, privateKeyDir string, configName string) (string, bool, error) {
+	currentPath := strings.TrimSpace(cred.PrivateKeyPath)
+	if currentPath != "" {
+		info, err := os.Stat(currentPath)
+		if err == nil {
+			if info.IsDir() {
+				return "", false, fmt.Errorf("profile %q private key path is a directory: %s", cred.Name, currentPath)
+			}
+			return currentPath, false, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", false, fmt.Errorf("profile %q private key file could not be read: %w", cred.Name, err)
+		}
+	}
+
+	privateKeyPEM := cred.PrivateKeyPEM
+	if strings.TrimSpace(privateKeyPEM) == "" {
+		return "", false, fmt.Errorf("profile %q private key file is missing and keychain entry does not contain embedded private key PEM", cred.Name)
+	}
+	if _, err := LoadPrivateKeyFromPEM([]byte(privateKeyPEM)); err != nil {
+		return "", false, fmt.Errorf("profile %q keychain private key PEM is invalid: %w", cred.Name, err)
+	}
+
+	exportPath := filepath.Join(privateKeyDir, migrationPrivateKeyFilename(configName, cred.KeyID))
+	if err := writePrivateKeyPEMFile(exportPath, privateKeyPEM); err != nil {
+		return "", false, fmt.Errorf("profile %q failed to export private key: %w", cred.Name, err)
+	}
+	return exportPath, true, nil
+}
+
+func migrationPrivateKeyFilename(name, keyID string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "default"
+	}
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	safe := strings.Trim(b.String(), "._-")
+	if safe == "" {
+		safe = "default"
+	}
+	keyID = strings.TrimSpace(keyID)
+	if keyID != "" {
+		return "AuthKey_" + safe + "_" + keyID + ".p8"
+	}
+	return "AuthKey_" + safe + ".p8"
+}
+
+func writePrivateKeyPEMFile(path, privateKeyPEM string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty private key path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to overwrite symlink: %s", path)
+		}
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.TrimSpace(string(existing)) != strings.TrimSpace(privateKeyPEM) {
+			return fmt.Errorf("refusing to overwrite existing private key file: %s", path)
+		}
+		if filePermissionsTooPermissive(info.Mode()) {
+			if err := os.Chmod(path, 0o600); err != nil {
+				return err
+			}
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.WriteString(privateKeyPEM)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
+}
+
+func upsertConfigCredential(cfg *config.Config, cred config.Credential) {
+	for i := range cfg.Keys {
+		if strings.TrimSpace(cfg.Keys[i].Name) == cred.Name {
+			cfg.Keys[i] = cred
+			return
+		}
+	}
+	cfg.Keys = append(cfg.Keys, cred)
+}
+
+func applyMigratedDefault(cfg *config.Config, sourceCreds []Credential, migratedCreds []config.Credential) {
+	destinationDefaultName := strings.TrimSpace(cfg.DefaultKeyName)
+	if destinationDefaultName != "" {
+		if alignDefaultCredentialFields(cfg, destinationDefaultName) {
+			return
+		}
+	}
+
+	defaultName := destinationDefaultName
+	for _, cred := range sourceCreds {
+		if cred.IsDefault {
+			defaultName = strings.TrimSpace(cred.Name)
+			break
+		}
+	}
+	if defaultName == "" && len(migratedCreds) == 1 {
+		defaultName = migratedCreds[0].Name
+	}
+	if defaultName == "" {
+		return
+	}
+	cfg.DefaultKeyName = defaultName
+	if alignDefaultCredentialFields(cfg, defaultName) {
+		return
+	}
+	for _, cred := range migratedCreds {
+		if cred.Name == defaultName {
+			cfg.KeyID = cred.KeyID
+			cfg.IssuerID = cred.IssuerID
+			cfg.PrivateKeyPath = cred.PrivateKeyPath
+			return
+		}
+	}
+}
+
+func alignDefaultCredentialFields(cfg *config.Config, defaultName string) bool {
+	cred, found, complete := findConfigCredential(cfg, defaultName)
+	if !found || !complete {
+		return false
+	}
+	cfg.DefaultKeyName = strings.TrimSpace(cred.Name)
+	cfg.KeyID = cred.KeyID
+	cfg.IssuerID = cred.IssuerID
+	cfg.PrivateKeyPath = cred.PrivateKeyPath
+	return true
+}
+
+func removeMigratedKeychainCredential(name string) error {
+	if err := removeFromKeychain(name); err != nil &&
+		!errors.Is(err, keyring.ErrKeyNotFound) {
+		return err
+	}
+	if err := removeFromLegacyKeychain(name); err != nil &&
+		!errors.Is(err, keyring.ErrKeyNotFound) &&
+		!isKeyringUnavailable(err) {
+		return err
+	}
+	return nil
 }
 
 // clearConfigCredentials clears credentials from the config file.
