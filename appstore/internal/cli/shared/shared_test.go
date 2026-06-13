@@ -940,6 +940,31 @@ func TestCheckMixedCredentialSourcesStrictAuthEnvErrors(t *testing.T) {
 	}
 }
 
+func TestCheckMixedCredentialSourcesIndividualStrictErrors(t *testing.T) {
+	previousStrict := strictAuth
+	strictAuth = true
+	t.Cleanup(func() {
+		strictAuth = previousStrict
+	})
+	t.Setenv(strictAuthEnvVar, "")
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := checkMixedCredentialSourcesForKeyType(credentialSource{
+			keyID:       "config",
+			keyMaterial: "env",
+		}, config.CredentialKeyTypeIndividual); err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
 func TestStrictAuthEnabled_EnvTruthyValues(t *testing.T) {
 	previousStrict := strictAuth
 	strictAuth = false
@@ -1137,6 +1162,93 @@ func TestResolveCredentials_BypassKeychainFallsBackToEnvWhenConfigMissing(t *tes
 	}
 	if creds.keyID != "ENVKEY" || creds.issuerID != "ENVISS" || creds.keyPath != envKeyPath {
 		t.Fatalf("expected env fallback, got %+v", creds)
+	}
+}
+
+func TestResolveCredentials_IndividualEnvIgnoresIssuerID(t *testing.T) {
+	resetPrivateKeyTemp(t)
+
+	tempDir := t.TempDir()
+	envKeyPath := filepath.Join(tempDir, "AuthKey-Env.p8")
+	writeECDSAPEM(t, envKeyPath)
+
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "missing.json"))
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_PROFILE", "")
+	t.Setenv("ASC_KEY_ID", "ENVKEY")
+	t.Setenv("ASC_ISSUER_ID", "STRAYISS")
+	t.Setenv("ASC_KEY_TYPE", config.CredentialKeyTypeIndividual)
+	t.Setenv("ASC_PRIVATE_KEY_PATH", envKeyPath)
+	t.Setenv("ASC_PRIVATE_KEY_B64", "")
+	t.Setenv("ASC_PRIVATE_KEY", "")
+
+	previousProfile := selectedProfile
+	selectedProfile = ""
+	t.Cleanup(func() {
+		selectedProfile = previousProfile
+	})
+
+	creds, err := resolveCredentials()
+	if err != nil {
+		t.Fatalf("resolveCredentials() error: %v", err)
+	}
+	if creds.keyID != "ENVKEY" || creds.keyType != config.CredentialKeyTypeIndividual || creds.keyPath != envKeyPath {
+		t.Fatalf("expected individual env credentials, got %+v", creds)
+	}
+	if creds.issuerID != "" {
+		t.Fatalf("expected individual credentials to ignore issuer ID, got %q", creds.issuerID)
+	}
+}
+
+func TestResolveCredentials_IndividualStoredCredentialIgnoresIssuerID(t *testing.T) {
+	resetPrivateKeyTemp(t)
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	keyPath := filepath.Join(tempDir, "AuthKey.p8")
+	writeECDSAPEM(t, keyPath)
+
+	cfg := &config.Config{
+		DefaultKeyName: "individual",
+		Keys: []config.Credential{
+			{
+				Name:           "individual",
+				KeyID:          "CFGKEY",
+				IssuerID:       "STRAYISS",
+				PrivateKeyPath: keyPath,
+				KeyType:        config.CredentialKeyTypeIndividual,
+			},
+		},
+	}
+	if err := config.SaveAt(configPath, cfg); err != nil {
+		t.Fatalf("SaveAt() error: %v", err)
+	}
+
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_PROFILE", "")
+	t.Setenv("ASC_KEY_ID", "")
+	t.Setenv("ASC_ISSUER_ID", "")
+	t.Setenv("ASC_KEY_TYPE", "")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+	t.Setenv("ASC_PRIVATE_KEY_B64", "")
+	t.Setenv("ASC_PRIVATE_KEY", "")
+
+	previousProfile := selectedProfile
+	selectedProfile = ""
+	t.Cleanup(func() {
+		selectedProfile = previousProfile
+	})
+
+	creds, err := resolveCredentials()
+	if err != nil {
+		t.Fatalf("resolveCredentials() error: %v", err)
+	}
+	if creds.keyID != "CFGKEY" || creds.keyType != config.CredentialKeyTypeIndividual || creds.keyPath != keyPath {
+		t.Fatalf("expected individual stored credentials, got %+v", creds)
+	}
+	if creds.issuerID != "" {
+		t.Fatalf("expected individual credentials to ignore issuer ID, got %q", creds.issuerID)
 	}
 }
 

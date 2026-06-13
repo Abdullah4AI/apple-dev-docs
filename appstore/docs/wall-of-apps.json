@@ -483,6 +483,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/52/0e/ed/520eed9c-d3f0-5d0e-3e68-5b6e698e5efc/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Game Box - Games for Watch",
+    "link": "https://apps.apple.com/us/app/game-box-games-for-watch/id6741334696?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/fb/f2/5e/fbf25e58-55d1-77de-a0ad-a1e8488ab7d7/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Gecko Med",
     "link": "https://apps.apple.com/us/app/gecko-med/id6737719743?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/63/4c/14/634c143e-7e6b-4afb-9748-0816af5d4544/apple-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -945,6 +950,11 @@
     "app": "PicSeek: AI Photo Manager",
     "link": "https://apps.apple.com/us/app/picseek-ai-photo-manager/id6755383937?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f3/90/bc/f390bc5a-185e-095a-7ea2-c4a105bd89f7/AppIcon-1x_U007emarketing-0-8-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "PicVore: Photo Cleaner",
+    "link": "https://apps.apple.com/us/app/picvore-photo-cleaner/id6759577942?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/58/a3/4b/58a34be8-0aed-098e-505b-a497386e5db8/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Pievra: Jules AI Coding Agent",

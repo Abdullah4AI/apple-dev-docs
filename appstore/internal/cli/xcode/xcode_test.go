@@ -15,12 +15,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	localxcode "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/xcode"
+	"howett.net/plist"
 )
 
 func TestXcodeExportWaitRequiresDirectUpload(t *testing.T) {
@@ -50,6 +52,675 @@ func TestXcodeExportWaitRequiresDirectUpload(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "Error: --wait requires ExportOptions.plist with destination=upload") {
 		t.Fatalf("expected direct upload usage error, got %q", stderr)
+	}
+}
+
+func TestXcodeInjectGeneratesPlistTextAndCopiesAsset(t *testing.T) {
+	dir := t.TempDir()
+	sourceAssetPath := filepath.Join(dir, "Assets", "AppIcon.appiconset", "Contents.json")
+	if err := os.MkdirAll(filepath.Dir(sourceAssetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	if err := os.WriteFile(sourceAssetPath, []byte(`{"images":[]}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() source asset error: %v", err)
+	}
+
+	manifestPath := filepath.Join(dir, ".asc", "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"values": {
+			"bundle_id": "com.example.demo",
+			"app_name": "Demo",
+			"version": "1.2.3",
+			"build_number": "42"
+		},
+		"outputs": [
+			{
+				"type": "plist",
+				"path": "../Generated/Info.generated.plist",
+				"values": {
+					"CFBundleIdentifier": "${bundle_id}",
+					"CFBundleDisplayName": "${app_name}",
+					"CFBundleShortVersionString": "${version}",
+					"CFBundleVersion": "${build_number}"
+				}
+			},
+			{
+				"type": "text",
+				"path": "../Generated/Deployment.xcconfig",
+				"contents": "PRODUCT_BUNDLE_IDENTIFIER = ${bundle_id}\nMARKETING_VERSION = ${version}\nCURRENT_PROJECT_VERSION = ${build_number}\n"
+			},
+			{
+				"type": "copy",
+				"source": "../Assets/AppIcon.appiconset/Contents.json",
+				"path": "../Generated/Assets.xcassets/AppIcon.appiconset/Contents.json"
+			}
+		]
+	}`)
+
+	result, err := runXcodeInject(xcodeInjectOptions{
+		ManifestPath: manifestPath,
+		SetValues:    []string{"version=1.2.4"},
+	})
+	if err != nil {
+		t.Fatalf("runXcodeInject() error: %v", err)
+	}
+	if result.DryRun {
+		t.Fatal("expected non-dry-run result")
+	}
+	if len(result.Outputs) != 3 {
+		t.Fatalf("expected 3 outputs, got %d", len(result.Outputs))
+	}
+
+	plistPath := filepath.Join(dir, "Generated", "Info.generated.plist")
+	plistData, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatalf("ReadFile() plist error: %v", err)
+	}
+	var info map[string]any
+	if _, err := plist.Unmarshal(plistData, &info); err != nil {
+		t.Fatalf("plist.Unmarshal() error: %v", err)
+	}
+	if info["CFBundleIdentifier"] != "com.example.demo" {
+		t.Fatalf("expected bundle identifier, got %+v", info)
+	}
+	if info["CFBundleShortVersionString"] != "1.2.4" {
+		t.Fatalf("expected overridden version, got %+v", info)
+	}
+
+	xcconfigPath := filepath.Join(dir, "Generated", "Deployment.xcconfig")
+	xcconfigData, err := os.ReadFile(xcconfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile() xcconfig error: %v", err)
+	}
+	if !strings.Contains(string(xcconfigData), "CURRENT_PROJECT_VERSION = 42") {
+		t.Fatalf("expected build number in xcconfig, got %q", string(xcconfigData))
+	}
+
+	copiedAssetPath := filepath.Join(dir, "Generated", "Assets.xcassets", "AppIcon.appiconset", "Contents.json")
+	copiedAssetData, err := os.ReadFile(copiedAssetPath)
+	if err != nil {
+		t.Fatalf("ReadFile() copied asset error: %v", err)
+	}
+	if string(copiedAssetData) != "{\"images\":[]}\n" {
+		t.Fatalf("expected copied asset contents, got %q", string(copiedAssetData))
+	}
+}
+
+func TestXcodeInjectDryRunDoesNotWriteFiles(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"values": {"bundle_id": "com.example.demo"},
+		"outputs": [
+			{
+				"type": "text",
+				"path": "Generated.xcconfig",
+				"contents": "PRODUCT_BUNDLE_IDENTIFIER = ${bundle_id}\n"
+			}
+		]
+	}`)
+
+	result, err := runXcodeInject(xcodeInjectOptions{
+		ManifestPath: manifestPath,
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatalf("runXcodeInject() error: %v", err)
+	}
+	if !result.DryRun {
+		t.Fatal("expected dry_run result")
+	}
+	if len(result.Outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(result.Outputs))
+	}
+	if got := result.Outputs[0].Action; got != "would_write" {
+		t.Fatalf("expected would_write action, got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Generated.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected dry-run output not to exist, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectDryRunRejectsExistingOutputWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	existingPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.WriteFile(existingPath, []byte("OLD = yes\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() existing output error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected dry-run existing output error")
+	}
+	if !strings.Contains(err.Error(), "already exists; use --overwrite") {
+		t.Fatalf("expected overwrite guidance, got %v", err)
+	}
+	data, err := os.ReadFile(existingPath)
+	if err != nil {
+		t.Fatalf("ReadFile() existing output error: %v", err)
+	}
+	if string(data) != "OLD = yes\n" {
+		t.Fatalf("expected existing output preserved, got %q", string(data))
+	}
+}
+
+func TestXcodeInjectDryRunOverwriteRejectsSymlinkDestination(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	targetPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.Symlink(filepath.Join(dir, "real.xcconfig"), targetPath); err != nil {
+		t.Fatalf("Symlink() error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected dry-run symlink destination error")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite symlink") {
+		t.Fatalf("expected symlink refusal, got %v", err)
+	}
+}
+
+func TestXcodeInjectDryRunOverwriteRejectsDirectoryDestination(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	targetPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.Mkdir(targetPath, 0o755); err != nil {
+		t.Fatalf("Mkdir() error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected dry-run directory destination error")
+	}
+	if !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("expected directory refusal, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsDuplicateDestinationsBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "Generated.xcconfig", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected duplicate destination error")
+	}
+	if !strings.Contains(err.Error(), "duplicate output path") {
+		t.Fatalf("expected duplicate destination guidance, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Generated.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected duplicate validation before writing, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsLaterRenderErrorBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "First.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "Second.xcconfig", "contents": "SECOND = ${missing}\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected missing placeholder error")
+	}
+	if !strings.Contains(err.Error(), `missing value for placeholder "missing"`) {
+		t.Fatalf("expected missing placeholder error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "First.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected first output not to be written, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsLaterCopySourceErrorBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "First.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "copy", "source": "Missing/Contents.json", "path": "Copied/Contents.json"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected missing copy source error")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "First.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected first output not to be written, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsCopySourceFromManifestOutput(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "copy", "source": "Generated.xcconfig", "path": "Copied.xcconfig"}
+		]
+	}`)
+	if err := os.WriteFile(filepath.Join(dir, "Generated.xcconfig"), []byte("STALE = yes\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() stale source error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected copy source/output conflict error")
+	}
+	if !strings.Contains(err.Error(), "copy source") {
+		t.Fatalf("expected copy source guidance, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Copied.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected copy output not to be written, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectDryRunOverwriteRejectsDuplicateDestinations(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "Generated.xcconfig", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected duplicate dry-run overwrite destination error")
+	}
+	if !strings.Contains(err.Error(), "duplicate output path") {
+		t.Fatalf("expected duplicate destination guidance, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsCaseOnlyDuplicateDestinations(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated/Info.plist", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "generated/info.plist", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected case-only duplicate destination error")
+	}
+	if !strings.Contains(err.Error(), "duplicate output path") {
+		t.Fatalf("expected duplicate destination guidance, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsCaseOnlyNestedDestinationConflicts(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "generated/Info.plist", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected case-only nested destination conflict error")
+	}
+	if !strings.Contains(err.Error(), "conflicts with nested output path") {
+		t.Fatalf("expected nested destination guidance, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsNestedDestinationConflictsBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "Generated/Info.plist", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected nested destination conflict error")
+	}
+	if !strings.Contains(err.Error(), "conflicts with nested output path") {
+		t.Fatalf("expected nested destination guidance, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Generated")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected nested validation before writing, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsFileParentBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "First.xcconfig", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "Parent/Child.xcconfig", "contents": "SECOND = yes\n"}
+		]
+	}`)
+	parentPath := filepath.Join(dir, "Parent")
+	if err := os.WriteFile(parentPath, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() parent error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected file parent validation error")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("expected parent directory validation error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "First.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected first output not to be written, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectDryRunRejectsFileParent(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Parent/Child.xcconfig", "contents": "SECOND = yes\n"}
+		]
+	}`)
+	parentPath := filepath.Join(dir, "Parent")
+	if err := os.WriteFile(parentPath, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() parent error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected dry-run file parent validation error")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("expected parent directory validation error, got %v", err)
+	}
+}
+
+func TestXcodeInjectAllowsDirectorySymlinkParent(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "SharedGenerated")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("Mkdir() real parent error: %v", err)
+	}
+	if err := os.Symlink(realDir, filepath.Join(dir, "Generated")); err != nil {
+		t.Fatalf("Symlink() parent error: %v", err)
+	}
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated/Info.plist", "contents": "FIRST = yes\n"}
+		]
+	}`)
+
+	result, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err != nil {
+		t.Fatalf("runXcodeInject() error: %v", err)
+	}
+	if len(result.Outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(result.Outputs))
+	}
+	data, err := os.ReadFile(filepath.Join(realDir, "Info.plist"))
+	if err != nil {
+		t.Fatalf("ReadFile() generated output error: %v", err)
+	}
+	if string(data) != "FIRST = yes\n" {
+		t.Fatalf("unexpected generated output: %q", string(data))
+	}
+}
+
+func TestXcodeInjectRejectsSymlinkedParentAliasDestinations(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "SharedGenerated")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("Mkdir() real parent error: %v", err)
+	}
+	if err := os.Symlink(realDir, filepath.Join(dir, "Generated")); err != nil {
+		t.Fatalf("Symlink() parent error: %v", err)
+	}
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated/Info.plist", "contents": "FIRST = yes\n"},
+			{"type": "text", "path": "SharedGenerated/Info.plist", "contents": "SECOND = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected symlinked parent alias conflict error")
+	}
+	if !strings.Contains(err.Error(), "duplicate output path") {
+		t.Fatalf("expected duplicate destination guidance, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsFileSymlinkParent(t *testing.T) {
+	dir := t.TempDir()
+	realFile := filepath.Join(dir, "SharedGenerated")
+	if err := os.WriteFile(realFile, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() real parent error: %v", err)
+	}
+	if err := os.Symlink(realFile, filepath.Join(dir, "Generated")); err != nil {
+		t.Fatalf("Symlink() parent error: %v", err)
+	}
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated/Info.plist", "contents": "FIRST = yes\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, DryRun: true})
+	if err == nil {
+		t.Fatal("expected file symlink parent validation error")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("expected parent directory validation error, got %v", err)
+	}
+}
+
+func TestXcodeInjectOverwriteRejectsSymlinkDestination(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	targetPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.Symlink(filepath.Join(dir, "real.xcconfig"), targetPath); err != nil {
+		t.Fatalf("Symlink() error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected symlink destination error")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite symlink") {
+		t.Fatalf("expected symlink refusal, got %v", err)
+	}
+}
+
+func TestXcodeInjectOverwriteRejectsDirectoryDestination(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	targetPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.Mkdir(targetPath, 0o755); err != nil {
+		t.Fatalf("Mkdir() error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath, Overwrite: true})
+	if err == nil {
+		t.Fatal("expected directory destination error")
+	}
+	if !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("expected directory refusal, got %v", err)
+	}
+}
+
+func TestXcodeInjectExpandsNestedPlaceholders(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"values": {
+			"version": "1.2.3",
+			"env": "${version}-beta"
+		},
+		"outputs": [
+			{
+				"type": "text",
+				"path": "Generated.xcconfig",
+				"contents": "APP_CHANNEL = ${env}\n"
+			}
+		]
+	}`)
+
+	if _, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath}); err != nil {
+		t.Fatalf("runXcodeInject() error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "Generated.xcconfig"))
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	if string(data) != "APP_CHANNEL = 1.2.3-beta\n" {
+		t.Fatalf("expected nested placeholder expansion, got %q", string(data))
+	}
+}
+
+func TestXcodeInjectRejectsUnclosedPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "APP_CHANNEL = ${env\n"}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected unclosed placeholder error")
+	}
+	if !strings.Contains(err.Error(), "unclosed placeholder") {
+		t.Fatalf("expected unclosed placeholder error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Generated.xcconfig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected output not to be written, stat error: %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsInvalidOutputType(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "yaml", "path": "Generated.yml", "values": {"name": "Demo"}}
+		]
+	}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected invalid output type error")
+	}
+	if !strings.Contains(err.Error(), "type must be one of plist, json, text, copy") {
+		t.Fatalf("expected output type validation error, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsMultipleJSONValues(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{"outputs": []} {"outputs": []}`)
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected multiple JSON values error")
+	}
+	if !strings.Contains(err.Error(), "multiple JSON values") {
+		t.Fatalf("expected multiple JSON values error, got %v", err)
+	}
+}
+
+func TestXcodeInjectRejectsExistingOutputWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	writeXcodeInjectTestManifest(t, manifestPath, `{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "NEW = yes\n"}
+		]
+	}`)
+	existingPath := filepath.Join(dir, "Generated.xcconfig")
+	if err := os.WriteFile(existingPath, []byte("OLD = yes\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() existing output error: %v", err)
+	}
+
+	_, err := runXcodeInject(xcodeInjectOptions{ManifestPath: manifestPath})
+	if err == nil {
+		t.Fatal("expected existing output error")
+	}
+	if !strings.Contains(err.Error(), "already exists; use --overwrite") {
+		t.Fatalf("expected overwrite guidance, got %v", err)
+	}
+	data, err := os.ReadFile(existingPath)
+	if err != nil {
+		t.Fatalf("ReadFile() existing output error: %v", err)
+	}
+	if string(data) != "OLD = yes\n" {
+		t.Fatalf("expected existing output preserved, got %q", string(data))
+	}
+}
+
+func TestXcodeInjectCommandRequiresManifest(t *testing.T) {
+	cmd := XcodeInjectCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	_, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "Error: --manifest is required") {
+		t.Fatalf("expected manifest requirement in stderr, got %q", stderr)
 	}
 }
 
@@ -966,6 +1637,16 @@ func TestFindRecentBuildUploadIDContinuesPagingForCreatedDateOnlyUploads(t *test
 	}
 	if requests != 3 {
 		t.Fatalf("expected 3 paginated build upload requests before finding createdDate-only upload, got %d", requests)
+	}
+}
+
+func writeXcodeInjectTestManifest(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() manifest dir error: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile() manifest error: %v", err)
 	}
 }
 

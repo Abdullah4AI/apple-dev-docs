@@ -169,6 +169,9 @@ asc web apps compatibility edit --app "123456789" --ios-app-on-mac=false --ios-a
 # Upload a build
 asc builds upload --app "123456789" --ipa "/path/to/MyApp.ipa"
 
+# Generate local Xcode metadata before archiving
+asc xcode inject --manifest .asc/deployment.json --set version=1.2.3 --set build_number=42 --dry-run --output json
+
 # Stage an App Store version before submission
 asc release stage --app "123456789" --version "1.2.3" --build "BUILD_ID" --copy-metadata-from "1.2.2" --dry-run
 

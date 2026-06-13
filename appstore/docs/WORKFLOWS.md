@@ -14,6 +14,8 @@ repeatable release pipelines once you know which top-level path you want.
 This pattern was validated against a real app using:
 
 - `asc builds next-build-number` to choose the next build number for a version
+- `asc xcode inject` to materialize deployment metadata into generated Xcode
+  plist/config files and asset paths before archiving
 - `asc xcode archive` to create a deterministic `.xcarchive`
 - `asc xcode export` to create a deterministic `.ipa`
 - `asc publish testflight --group ... --wait` to upload, wait for processing,
@@ -39,6 +41,46 @@ Create `.asc/export-options-app-store.plist`:
 </dict>
 </plist>
 ```
+
+Create `.asc/deployment.json`:
+
+```json
+{
+  "values": {
+    "bundle_id": "com.example.app",
+    "app_name": "Example",
+    "version": "",
+    "build_number": ""
+  },
+  "outputs": [
+    {
+      "type": "plist",
+      "path": "../Generated/Info.generated.plist",
+      "values": {
+        "CFBundleIdentifier": "${bundle_id}",
+        "CFBundleDisplayName": "${app_name}",
+        "CFBundleShortVersionString": "${version}",
+        "CFBundleVersion": "${build_number}"
+      }
+    },
+    {
+      "type": "text",
+      "path": "../Generated/Deployment.xcconfig",
+      "contents": "PRODUCT_BUNDLE_IDENTIFIER = ${bundle_id}\nMARKETING_VERSION = ${version}\nCURRENT_PROJECT_VERSION = ${build_number}\n"
+    },
+    {
+      "type": "copy",
+      "source": "../Assets/AppIcon.appiconset/Contents.json",
+      "path": "../Generated/Assets.xcassets/AppIcon.appiconset/Contents.json"
+    }
+  ]
+}
+```
+
+Point your Xcode project at generated files such as `Generated/Info.generated.plist`
+or include `Generated/Deployment.xcconfig` from the build configuration. Then run
+`asc xcode inject` before archive time to fill in the release-specific values
+that previously came from Fastlane scripts.
 
 Create `.asc/workflow.json`:
 
@@ -66,6 +108,13 @@ Create `.asc/workflow.json`:
           "run": "asc builds next-build-number --app \"$APP_ID\" --version \"$VERSION\" --platform IOS --initial-build-number 1 --output json",
           "outputs": {
             "BUILD_NUMBER": "$.nextBuildNumber"
+          }
+        },
+        {
+          "name": "inject_metadata",
+          "run": "asc xcode inject --manifest .asc/deployment.json --set version=\"$VERSION\" --set build_number=${steps.resolve_next_build.BUILD_NUMBER} --overwrite --output json",
+          "outputs": {
+            "GENERATED_FILES": "$.outputs"
           }
         },
         {

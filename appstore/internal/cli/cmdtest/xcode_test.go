@@ -1,12 +1,18 @@
 package cmdtest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestXcodeCommandExists(t *testing.T) {
@@ -127,6 +133,65 @@ func TestXcodeExportHelpMentionsDirectUploadMode(t *testing.T) {
 	}
 	if exportCmd.FlagSet.Lookup("timeout") == nil {
 		t.Fatal("expected xcode export to expose --timeout")
+	}
+}
+
+func TestXcodeInjectInvalidFlagValuesExitUsage(t *testing.T) {
+	bin := buildCLIBinary(t)
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "deployment.json")
+	if err := os.WriteFile(manifestPath, []byte(`{
+		"outputs": [
+			{"type": "text", "path": "Generated.xcconfig", "contents": "VERSION = ${version}\n"}
+		]
+	}`), 0o644); err != nil {
+		t.Fatalf("WriteFile() manifest error: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "malformed set",
+			args:       []string{"xcode", "inject", "--manifest", manifestPath, "--set", "version"},
+			wantStderr: "--set values must use key=value",
+		},
+		{
+			name:       "invalid dry-run boolean",
+			args:       []string{"xcode", "inject", "--manifest", manifestPath, "--dry-run=maybe"},
+			wantStderr: `invalid boolean value "maybe" for -dry-run`,
+		},
+		{
+			name:       "invalid overwrite boolean",
+			args:       []string{"xcode", "inject", "--manifest", manifestPath, "--overwrite=inject"},
+			wantStderr: `invalid boolean value "inject" for -overwrite`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command(bin, test.args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("expected exit error, got %v", err)
+			}
+			if code := exitErr.ExitCode(); code != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+			}
+			if stdout.String() != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), test.wantStderr) {
+				t.Fatalf("expected stderr to contain %q, got %q", test.wantStderr, stderr.String())
+			}
+		})
 	}
 }
 

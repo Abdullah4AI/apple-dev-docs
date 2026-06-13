@@ -60,6 +60,7 @@ Use these commands to produce deterministic .xcarchive and .ipa paths that can
 be passed directly into asc upload and publish commands.
 
 Examples:
+  asc xcode inject --manifest .asc/deployment.json --set version=1.3.0 --overwrite
   asc xcode archive --workspace App.xcworkspace --scheme App --archive-path .asc/artifacts/App.xcarchive --output json
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options ExportOptions.plist --ipa-path .asc/artifacts/App.ipa --output json
   asc xcode version view
@@ -68,6 +69,7 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
+			XcodeInjectCommand(),
 			XcodeArchiveCommand(),
 			XcodeExportCommand(),
 			XcodeValidateCommand(),
