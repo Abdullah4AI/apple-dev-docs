@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	swiftshipcmds "github.com/Abdullah4AI/apple-developer-toolkit/swiftship/commands"
 	appstorecmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+	swiftshipcmds "github.com/Abdullah4AI/apple-developer-toolkit/swiftship/commands"
 )
 
 var (
@@ -41,9 +41,9 @@ func main() {
 
 	// Unified mode: appledev
 	rootCmd := &cobra.Command{
-		Use:   "appledev",
-		Short: "Apple Developer Toolkit - unified CLI for iOS development",
-		Long:  "A unified command-line toolkit combining SwiftShip (app builder) and Apple Developer Toolkit.",
+		Use:     "appledev",
+		Short:   "Apple Developer Toolkit - unified CLI for iOS development",
+		Long:    "A unified command-line toolkit combining SwiftShip (app builder) and Apple Developer Toolkit.",
 		Version: version,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
@@ -83,6 +83,10 @@ func main() {
 		},
 	}
 	rootCmd.AddCommand(storeCmd)
+
+	// Add direct Codex Build iOS/macOS plugin workflow commands.
+	rootCmd.AddCommand(newIOSCommand())
+	rootCmd.AddCommand(newMacOSCommand())
 
 	// Add hooks command (passthrough to store's hooks subcommand)
 	hooksCmd := &cobra.Command{

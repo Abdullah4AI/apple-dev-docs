@@ -94,6 +94,31 @@ Skills work out of the box with any agent that supports the [Agent Skills](https
 </tr>
 </table>
 
+## Codex Build iOS/macOS Workflows in the CLI
+
+The `Build iOS Apps` and `Build macOS Apps` Codex plugin workflows are exposed directly through `appledev`:
+
+```bash
+appledev ios features
+appledev ios doctor
+appledev ios mcp-config
+appledev ios simulators
+appledev ios build --workspace App.xcworkspace --scheme App --device "iPhone 17 Pro"
+appledev ios screenshot --sim <UDID> --output /tmp/app.png
+appledev ios mirror --sim <UDID>
+appledev ios memgraph --sim <UDID> --process App
+
+appledev macos features
+appledev macos doctor
+appledev macos bootstrap --app-name MyApp --scheme MyApp --project MyApp.xcodeproj
+appledev macos bootstrap --app-name MyApp --product MyApp
+appledev macos run --mode verify
+appledev macos logs --process MyApp
+appledev macos codesign-inspect --path dist/MyApp.app
+```
+
+These commands bring the plugin features into the CLI: iOS Simulator build/run/debug/log/UI workflows, scoped `serve-sim` mirroring, ETTrace and memgraph workflow entrypoints, macOS project-local `script/build_and_run.sh`, SwiftPM GUI `.app` staging, signing/entitlement inspection, and log/telemetry loops.
+
 | Feature | Credentials | Works Without Setup |
 |---|---|---|
 | Documentation Search | None | Yes |

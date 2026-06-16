@@ -1,51 +1,6 @@
 ---
 name: apple-developer-toolkit
-description: "Apple platform skill for docs, WWDC lookup, App Store Connect work, and SwiftUI app generation. Use repo-local `node cli.js` for Apple docs and WWDC search, `appledev store` for App Store Connect workflows, and `appledev build` for app scaffolding or fix loops on macOS. USE WHEN: Apple APIs, WWDC sessions, TestFlight/App Store tasks, or building/fixing Apple-platform apps. DON'T USE WHEN: non-Apple platforms, generic backend work, or general web research. EDGE CASES: docs-only queries use `node cli.js` in this repo, not `appledev`; release workflows use `appledev store`; app scaffolding uses `appledev build`; rules-only requests can read `references/ios-rules/` or `references/swiftui-guides/` progressively without invoking binaries."
-metadata:
-  {
-    "openclaw":
-      {
-        "emoji": "🍎",
-        "requires":
-          {
-            "bins": ["node"],
-            "anyBins": ["appledev"],
-          },
-        "install":
-          [
-            {
-              "id": "appledev",
-              "kind": "brew",
-              "tap": "Abdullah4AI/tap",
-              "formula": "appledev",
-              "bins": ["appledev"],
-              "label": "Apple Developer Toolkit - unified binary (Homebrew)",
-            },
-          ],
-        "env":
-          {
-            "optional":
-              [
-                {
-                  "name": "APPSTORE_KEY_ID",
-                  "description": "App Store Connect API Key ID. Required only for App Store Connect features. Get from https://appstoreconnect.apple.com/access/integrations/api",
-                },
-                {
-                  "name": "APPSTORE_ISSUER_ID",
-                  "description": "App Store Connect API Issuer ID. Required only for App Store Connect features.",
-                },
-                {
-                  "name": "APPSTORE_PRIVATE_KEY_PATH",
-                  "description": "Path to App Store Connect API .p8 private key file. Required only for App Store Connect features. Alternative: use APPSTORE_PRIVATE_KEY or APPSTORE_PRIVATE_KEY_B64.",
-                },
-                {
-                  "name": "LLM_API_KEY",
-                  "description": "LLM API key for code generation. Required only for iOS App Builder. Supports multiple AI backends.",
-                },
-              ],
-          },
-      },
-  }
+description: "Apple platform skill for docs, WWDC lookup, App Store Connect work, SwiftUI app generation, and Codex Build iOS/macOS plugin workflows now exposed directly in the CLI. Use repo-local `node cli.js` for Apple docs/WWDC, `appledev store` for App Store Connect, `appledev build` for app scaffolding/fix loops, `appledev ios` for Simulator build-run-debug/UI/log/memgraph/ETTrace workflows, and `appledev macos` for shell-first macOS build/run/log/signing workflows. USE WHEN: Apple APIs, WWDC sessions, TestFlight/App Store tasks, or building/fixing Apple-platform apps. DON'T USE WHEN: non-Apple platforms or generic backend work."
 ---
 
 # Apple Developer Toolkit
@@ -55,14 +10,24 @@ This skill has two execution surfaces plus a local Apple docs corpus. Each part 
 ## Architecture
 
 Use the right entry point for the job:
-
 ```
 node cli.js search ...    # Apple docs + WWDC lookup from this repo
 appledev build ...        # SwiftShip app builder
 appledev store ...        # App Store Connect CLI
+appledev ios ...          # Build iOS Apps plugin workflows in the CLI
+appledev macos ...        # Build macOS Apps plugin workflows in the CLI
 ```
 
-Important: `appledev --help` currently exposes `build` and `store`, but not the docs search commands. Docs lookup is repo-local through `node cli.js`.
+Important: `appledev --help` exposes `build`, `store`, `ios`, and `macos`. Docs lookup is repo-local through `node cli.js`.
+
+## Codex Build iOS/macOS Plugin Features
+
+The OpenAI Codex `Build iOS Apps` and `Build macOS Apps` plugin features are implemented directly in the CLI:
+
+- `appledev ios features|doctor|mcp-config|simulators|build|screenshot|logs|mirror|memgraph|ettrace`
+- `appledev macos features|doctor|bootstrap|run|logs|codesign-inspect`
+
+Load `references/codex-build-ios-macos-workflows.md` for the detailed feature map and proof loops.
 
 ## Agent Setup
 
