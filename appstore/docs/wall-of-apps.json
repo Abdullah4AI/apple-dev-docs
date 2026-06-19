@@ -150,6 +150,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f8/91/a8/f891a8c5-d49e-a5bf-83f4-cbe86e0eac04/CabinLink-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
   },
   {
+    "app": "Cairn - Your Expense Tracker",
+    "link": "https://apps.apple.com/us/app/cairn-your-expense-tracker/id6762088614?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/3d/7e/ab/3d7eabc0-2f4d-52b4-b629-5b979d65de14/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Cal AI - Calorie Tracker",
     "link": "https://apps.apple.com/us/app/cal-ai-calorie-tracker/id6480417616?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/5e/5d/e9/5e5de9bc-18ef-3c07-79f0-e0a9e3009629/AppIcon-0-1x_U007ephone-0-1-85-220-0.png/512x512bb.jpg"
@@ -573,6 +578,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/7b/43/73/7b4373fc-26e2-030b-7162-2f0ab0a7681d/AppIcon-0-0-1x_U007ewatch-0-1-P3-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Hush for visionOS",
+    "link": "https://apps.apple.com/us/app/hush-for-visionos/id6770631510?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f2/00/bf/f200bf3b-4f19-5cf4-d08b-f65e39137346/AppIcon.lsr/512x512bb.jpg"
+  },
+  {
     "app": "iCardSort",
     "link": "https://apps.apple.com/us/app/icardsort/id384552728?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/91/5d/55/915d552c-3b3d-a636-622c-525e4d4ca4e2/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -741,6 +751,11 @@
     "app": "Master Indicator",
     "link": "https://apps.apple.com/us/app/master-indicator/id6758697856?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/25/2c/78/252c787f-d9e8-738e-51fb-61c64ee95c32/AppIcon-1x_U007emarketing-0-10-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "Matchday - Soccer Planner",
+    "link": "https://apps.apple.com/us/app/matchday-soccer-planner/id6776015801?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/d5/d8/af/d5d8af6c-325a-56f9-6c88-36b787e6bdc5/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "MD Clock - Flip Clock",
@@ -1102,6 +1117,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/99/f4/3b/99f43be3-8cd4-448c-26db-bbe190492794/AppIcon-0-0-1x_U007ephone-0-1-P3-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Quotify: Quotation Maker",
+    "link": "https://apps.apple.com/us/app/quotify-quotation-maker/id6764370347?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f4/37/a4/f437a409-1d7a-a3b1-259f-dce2835c47bc/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "RateTier",
     "link": "https://apps.apple.com/us/app/ratetier/id6759999815?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/eb/49/d8/eb49d8c5-20bb-c2f7-068f-d24a970abb2f/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
@@ -1386,6 +1406,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f4/f1/65/f4f165e3-9826-8ced-d9be-d33b8a8e154c/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Tessera - Car Black Box",
+    "link": "https://apps.apple.com/us/app/tessera-car-black-box/id6778605690?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/6a/8b/a1/6a8ba19d-72e9-bd02-a39a-188c9d936f9f/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "text to speech · speakeasy",
     "link": "https://apps.apple.com/app/id6758816495",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/0a/49/48/0a49486e-92b3-37b5-8bb8-c038aee9a0a4/speakeasy-icon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -1424,6 +1449,11 @@
     "app": "Tintz: Color Picker",
     "link": "https://apps.apple.com/us/app/tintz-color-picker/id6748126014?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/53/33/80/5333806a-5c46-8d24-6f30-fc455847922e/AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Tiny Decisions",
+    "link": "https://apps.apple.com/us/app/tiny-decisions/id1338769645?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/57/19/ea/5719eae3-87a1-f412-34a1-4223cc8315c7/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg"
   },
   {
     "app": "TMS - Bible Memory",
@@ -1499,6 +1529,11 @@
     "app": "Videoer",
     "link": "https://apps.apple.com/us/app/videoer/id6742680573?mt=12&uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f6/51/f5/f651f5b7-8052-5407-77ec-a4203bbf456c/AppIcon-0-0-85-220-0-5-0-2x.png/512x512bb.png"
+  },
+  {
+    "app": "Vigil: Situation Room",
+    "link": "https://apps.apple.com/us/app/vigil-situation-room/id6773060534?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/5e/39/70/5e397004-de16-52f5-051c-03a5bf09db23/AppIcon.lsr/512x512bb.jpg"
   },
   {
     "app": "Visa Day Tracker: Residency",

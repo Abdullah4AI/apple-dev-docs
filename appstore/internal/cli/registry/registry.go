@@ -68,6 +68,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/status"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/submit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/subscriptions"
+	telemetrycmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/telemetry"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/testflight"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/users"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
@@ -176,6 +177,7 @@ func Subcommands(version string) []*ffcli.Command {
 		gamecenter.GameCenterCommand(),
 		capabilities.Command(),
 		schema.SchemaCommand(),
+		telemetrycmd.TelemetryCommand(),
 		searchcmd.SearchCommand(func() []*ffcli.Command { return subs }),
 		snitch.SnitchCommand(version),
 		VersionCommand(version),
