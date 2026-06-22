@@ -186,6 +186,23 @@ type AdsConfig struct {
 	OrgID            string                `json:"org_id,omitempty"`
 }
 
+// StoreKitCredential stores a named In-App Purchase API credential.
+// Private key material stays in the keychain; config-backed credentials store
+// only a path to the key file.
+type StoreKitCredential struct {
+	Name           string `json:"name"`
+	KeyID          string `json:"key_id"`
+	IssuerID       string `json:"issuer_id"`
+	PrivateKeyPath string `json:"private_key_path"`
+	BundleID       string `json:"bundle_id"`
+}
+
+// StoreKitConfig stores StoreKit-specific authentication configuration.
+type StoreKitConfig struct {
+	DefaultKeyName string               `json:"default_key_name,omitempty"`
+	Keys           []StoreKitCredential `json:"keys,omitempty"`
+}
+
 // Config holds the application configuration
 type Config struct {
 	KeyID            string             `json:"key_id"`
@@ -212,7 +229,8 @@ type Config struct {
 	RetryLog             string        `json:"retry_log"`
 	Debug                string        `json:"debug"`
 
-	Ads AdsConfig `json:"ads,omitempty"`
+	Ads      AdsConfig      `json:"ads,omitempty"`
+	StoreKit StoreKitConfig `json:"storekit,omitempty"`
 }
 
 // ErrNotFound is returned when the config file doesn't exist

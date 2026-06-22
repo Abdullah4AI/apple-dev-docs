@@ -105,6 +105,7 @@ asc <subcommand> [flags]
 ### Monetization
 
 - `iap` - Manage in-app purchases in App Store Connect.
+- `storekit` - Manage StoreKit server APIs with In-App Purchase API keys.
 - `app-events` - Manage App Store in-app events.
 - `subscriptions` - Manage subscription groups and subscriptions.
 

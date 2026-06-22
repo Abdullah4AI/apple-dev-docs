@@ -66,6 +66,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/signing"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/snitch"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/status"
+	storekitcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/storekit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/submit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/subscriptions"
 	telemetrycmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/telemetry"
@@ -163,6 +164,7 @@ func Subcommands(version string) []*ffcli.Command {
 		signing.SigningCommand(),
 		notarization.NotarizationCommand(),
 		iap.IAPCommand(),
+		storekitcmd.Command(),
 		app_events.Command(),
 		subscriptions.SubscriptionsCommand(),
 		submit.SubmitCommand(),
