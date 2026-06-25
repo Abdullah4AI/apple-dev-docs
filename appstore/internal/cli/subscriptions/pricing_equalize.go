@@ -215,47 +215,50 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Subscription has no prices; setting initial price in %s first...\n", territory)
 
 				baseTarget := allTerritories[0]
-				initialCtx, initialCancel := shared.ContextWithTimeout(ctx)
-				_, err := client.SetSubscriptionInitialPrice(initialCtx, subID, baseTarget.PricePointID, baseTarget.Territory, priceAttrs)
-				initialCancel()
+				_, err := runReconciledMutation(
+					ctx,
+					func(readbackCtx context.Context) (bool, error) {
+						reconciled, _, readErr := reconcileEqualizeFailures(
+							readbackCtx,
+							client,
+							subID,
+							[]equalizeAttemptFailure{{Target: baseTarget}},
+							effectiveAt,
+						)
+						return reconciled == 1, readErr
+					},
+					func(mutationCtx context.Context) error {
+						_, mutationErr := client.SetSubscriptionInitialPrice(mutationCtx, subID, baseTarget.PricePointID, baseTarget.Territory, priceAttrs)
+						return mutationErr
+					},
+				)
 				if err != nil {
-					initialFailures := []equalizeAttemptFailure{{
+					failures = append(failures, equalizeAttemptFailure{
 						Target: baseTarget,
 						Err:    err,
-					}}
-					reconciled, remaining, verifyErr := reconcileEqualizeFailures(ctx, client, subID, initialFailures, effectiveAt)
-					if verifyErr != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not verify failed initial price update: %v\n", verifyErr)
+					})
+					result := &equalizeResult{
+						SubscriptionID:    subID,
+						BaseTerritory:     territory,
+						BasePrice:         price,
+						StartDate:         priceAttrs.StartDate,
+						AutoScheduled:     autoScheduled,
+						Preserved:         *preserved,
+						SubscriptionState: subscriptionState,
+						DryRun:            false,
+						Total:             len(allTerritories),
+						Succeeded:         succeeded,
+						Failed:            len(failures),
+						Failures:          renderEqualizeFailures(failures),
 					}
-					if len(remaining) == 0 {
-						succeeded += reconciled
-						remainingTerritories = allTerritories[1:]
-					} else {
-						failures = append(failures, remaining...)
-						result := &equalizeResult{
-							SubscriptionID:    subID,
-							BaseTerritory:     territory,
-							BasePrice:         price,
-							StartDate:         priceAttrs.StartDate,
-							AutoScheduled:     autoScheduled,
-							Preserved:         *preserved,
-							SubscriptionState: subscriptionState,
-							DryRun:            false,
-							Total:             len(allTerritories),
-							Succeeded:         succeeded,
-							Failed:            len(failures),
-							Failures:          renderEqualizeFailures(failures),
-						}
-						fmt.Fprintf(os.Stderr, "Done: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
-						if err := printEqualizeResult(result, *output.Output, *output.Pretty); err != nil {
-							return err
-						}
-						return shared.NewReportedError(fmt.Errorf("equalize: failed to set initial price in %s", baseTarget.Territory))
+					fmt.Fprintf(os.Stderr, "Done: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+					if err := printEqualizeResult(result, *output.Output, *output.Pretty); err != nil {
+						return err
 					}
-				} else {
-					succeeded++
-					remainingTerritories = allTerritories[1:]
+					return shared.NewReportedError(fmt.Errorf("equalize: failed to set initial price in %s", baseTarget.Territory))
 				}
+				succeeded++
+				remainingTerritories = allTerritories[1:]
 			}
 
 			passSucceeded, passFailures := applyEqualizedPrices(ctx, client, subID, remainingTerritories, numWorkers, priceAttrs, effectiveAt)
@@ -327,9 +330,22 @@ type equalizeResult struct {
 
 func applyEqualizedPrices(ctx context.Context, client *asc.Client, subID string, targets []equalization, workers int, attrs asc.SubscriptionPriceCreateAttributes, effectiveAt time.Time) (int, []equalizeAttemptFailure) {
 	succeeded, failures := runEqualizePricePass(ctx, client, subID, targets, workers, attrs)
-	retryable, finalFailures := partitionEqualizeFailures(failures)
+	retryable, finalFailures := partitionEqualizeFailures(ctx, failures)
 
 	for pass := 1; len(retryable) > 0 && pass <= maxEqualizeRecoveryPasses; pass++ {
+		reconciled, unresolved, verifyErr := reconcileEqualizeFailures(ctx, client, subID, retryable, effectiveAt)
+		if verifyErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not verify %d retryable territory update(s) before replay: %v\n", len(retryable), verifyErr)
+			finalFailures = append(finalFailures, retryable...)
+			retryable = nil
+			break
+		}
+		succeeded += reconciled
+		retryable = unresolved
+		if len(retryable) == 0 {
+			break
+		}
+
 		if delay := maxEqualizeRetryAfter(retryable); delay > 0 {
 			fmt.Fprintf(os.Stderr, "Waiting %s before retrying %d retryable territory update(s)...\n", delay.Round(time.Second), len(retryable))
 			if err := sleepWithContext(ctx, delay); err != nil {
@@ -341,7 +357,7 @@ func applyEqualizedPrices(ctx context.Context, client *asc.Client, subID string,
 		retrySucceeded, retryFailures := runEqualizePricePass(ctx, client, subID, equalizeTargetsFromFailures(retryable), equalizeRecoveryWorkers, attrs)
 		succeeded += retrySucceeded
 
-		retryable, failures = partitionEqualizeFailures(retryFailures)
+		retryable, failures = partitionEqualizeFailures(ctx, retryFailures)
 		finalFailures = append(finalFailures, failures...)
 	}
 
@@ -427,9 +443,9 @@ func runEqualizePricePass(ctx context.Context, client *asc.Client, subID string,
 	return succeeded, failures
 }
 
-func partitionEqualizeFailures(failures []equalizeAttemptFailure) (retryable []equalizeAttemptFailure, final []equalizeAttemptFailure) {
+func partitionEqualizeFailures(ctx context.Context, failures []equalizeAttemptFailure) (retryable []equalizeAttemptFailure, final []equalizeAttemptFailure) {
 	for _, failure := range failures {
-		if asc.IsRetryable(failure.Err) {
+		if shared.IsTransientMutationError(ctx, failure.Err) {
 			retryable = append(retryable, failure)
 			continue
 		}
@@ -523,10 +539,7 @@ func reconcileEqualizeFailures(ctx context.Context, client *asc.Client, subID st
 
 	fmt.Fprintf(os.Stderr, "Verifying %d territory update(s) against current prices...\n", len(failures))
 
-	verifyCtx, verifyCancel := shared.ContextWithTimeout(ctx)
-	defer verifyCancel()
-
-	resolved, err := fetchResolvedSubscriptionPrices(verifyCtx, client, subID, 200, "", effectiveAt, "")
+	resolved, err := fetchResolvedSubscriptionPrices(ctx, client, subID, 200, "", effectiveAt, "")
 	if err != nil {
 		return 0, failures, err
 	}

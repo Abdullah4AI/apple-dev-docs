@@ -117,7 +117,9 @@ func EnsureBuildAttached(ctx context.Context, client *asc.Client, versionID, bui
 		return result, fmt.Errorf("attach build: build ID is required")
 	}
 
-	buildResp, err := client.GetAppStoreVersionBuild(ctx, result.VersionID)
+	buildResp, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.BuildResponse, error) {
+		return client.GetAppStoreVersionBuild(requestCtx, result.VersionID)
+	})
 	if err != nil {
 		if !asc.IsNotFound(err) {
 			return result, fmt.Errorf("attach build: failed to fetch current build: %w", err)
@@ -136,7 +138,27 @@ func EnsureBuildAttached(ctx context.Context, client *asc.Client, versionID, bui
 		return result, nil
 	}
 
-	if err := client.AttachBuildToVersion(ctx, result.VersionID, result.BuildID); err != nil {
+	_, _, err = shared.RunReconciledMutation(
+		ctx,
+		func(requestCtx context.Context) (string, error) {
+			attachErr := client.AttachBuildToVersion(requestCtx, result.VersionID, result.BuildID)
+			return result.BuildID, attachErr
+		},
+		func(readbackCtx context.Context) (string, bool, error) {
+			current, readErr := shared.RetryReadWithFreshTimeout(readbackCtx, func(requestCtx context.Context) (*asc.BuildResponse, error) {
+				return client.GetAppStoreVersionBuild(requestCtx, result.VersionID)
+			})
+			if readErr != nil {
+				if asc.IsNotFound(readErr) {
+					return "", false, nil
+				}
+				return "", false, readErr
+			}
+			currentID := strings.TrimSpace(current.Data.ID)
+			return currentID, currentID == result.BuildID, nil
+		},
+	)
+	if err != nil {
 		return result, fmt.Errorf("attach build: %w", err)
 	}
 	result.Attached = true

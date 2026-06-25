@@ -34,6 +34,7 @@ Examples:
 			SubscriptionsLocalizationsCreateCommand(),
 			SubscriptionsLocalizationsUpdateCommand(),
 			SubscriptionsLocalizationsDeleteCommand(),
+			SubscriptionsLocalizationsSyncCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp

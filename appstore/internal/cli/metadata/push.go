@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -56,28 +57,48 @@ type PlanAPICall struct {
 
 // ApplyAction represents one executed mutation action.
 type ApplyAction struct {
-	Scope          string `json:"scope"`
-	Locale         string `json:"locale"`
-	Version        string `json:"version,omitempty"`
-	Action         string `json:"action"`
-	LocalizationID string `json:"localizationId,omitempty"`
+	Scope          string            `json:"scope"`
+	Locale         string            `json:"locale"`
+	Version        string            `json:"version,omitempty"`
+	Action         string            `json:"action"`
+	Status         string            `json:"status,omitempty"`
+	LocalizationID string            `json:"localizationId,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	DesiredFields  map[string]string `json:"desiredFields,omitempty"`
 }
 
 // PushPlanResult is the push dry-run output artifact.
 type PushPlanResult struct {
-	AppID     string        `json:"appId"`
-	AppInfoID string        `json:"appInfoId"`
-	Version   string        `json:"version"`
-	VersionID string        `json:"versionId"`
-	Dir       string        `json:"dir"`
-	DryRun    bool          `json:"dryRun"`
-	Applied   bool          `json:"applied,omitempty"`
-	Includes  []string      `json:"includes"`
-	Adds      []PlanItem    `json:"adds"`
-	Updates   []PlanItem    `json:"updates"`
-	Deletes   []PlanItem    `json:"deletes"`
-	APICalls  []PlanAPICall `json:"apiCalls,omitempty"`
-	Actions   []ApplyAction `json:"actions,omitempty"`
+	AppID                string        `json:"appId"`
+	AppInfoID            string        `json:"appInfoId"`
+	Version              string        `json:"version"`
+	VersionID            string        `json:"versionId"`
+	Dir                  string        `json:"dir"`
+	DryRun               bool          `json:"dryRun"`
+	Applied              bool          `json:"applied,omitempty"`
+	Includes             []string      `json:"includes"`
+	Adds                 []PlanItem    `json:"adds"`
+	Updates              []PlanItem    `json:"updates"`
+	Deletes              []PlanItem    `json:"deletes"`
+	APICalls             []PlanAPICall `json:"apiCalls,omitempty"`
+	Actions              []ApplyAction `json:"actions,omitempty"`
+	Total                int           `json:"total,omitempty"`
+	Succeeded            int           `json:"succeeded,omitempty"`
+	Failed               int           `json:"failed,omitempty"`
+	FailureArtifactPath  string        `json:"failureArtifactPath,omitempty"`
+	FailureArtifactError string        `json:"failureArtifactError,omitempty"`
+}
+
+type metadataPushFailureArtifact struct {
+	SchemaVersion int           `json:"schemaVersion"`
+	Command       string        `json:"command"`
+	AppID         string        `json:"appId"`
+	AppInfoID     string        `json:"appInfoId"`
+	Version       string        `json:"version"`
+	VersionID     string        `json:"versionId"`
+	Dir           string        `json:"dir"`
+	GeneratedAt   string        `json:"generatedAt"`
+	Failures      []ApplyAction `json:"failures"`
 }
 
 type scopeCallCounts struct {
@@ -170,7 +191,7 @@ Notes:
 				AllowDeletes: *allowDeletes,
 				Confirm:      *confirm,
 			})
-			if err != nil {
+			if err != nil && len(result.Actions) == 0 {
 				return err
 			}
 			if err := shared.PrintOutputWithRenderers(
@@ -182,7 +203,20 @@ Notes:
 			); err != nil {
 				return err
 			}
-			return shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings)
+			if warningErr := shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings); warningErr != nil {
+				return warningErr
+			}
+			if err != nil || result.FailureArtifactError != "" {
+				message := fmt.Sprintf("metadata %s: %d localization(s) failed", cfg.name, result.Failed)
+				if result.Failed == 0 && err != nil {
+					message = fmt.Sprintf("metadata %s: operation incomplete: %v", cfg.name, err)
+				}
+				if result.FailureArtifactError != "" {
+					message += "; write failure artifact: " + result.FailureArtifactError
+				}
+				return shared.NewReportedError(fmt.Errorf("%s", message))
+			}
+			return nil
 		},
 	}
 }
@@ -578,6 +612,23 @@ func cloneVersionLocalPatch(patch versionLocalPatch) versionLocalPatch {
 	}
 }
 
+func validateMetadataCreatePrerequisites(local map[string]appInfoLocalPatch, remote map[string]AppInfoLocalization) error {
+	locales := make([]string, 0, len(local))
+	for locale := range local {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+	for _, locale := range locales {
+		if _, exists := remote[locale]; exists {
+			continue
+		}
+		if strings.TrimSpace(local[locale].localization.Name) == "" {
+			return fmt.Errorf("app-info localization %q requires name when creating a new locale", locale)
+		}
+	}
+	return nil
+}
+
 func cloneStringMap(source map[string]string) map[string]string {
 	result := make(map[string]string, len(source))
 	for key, value := range source {
@@ -624,20 +675,21 @@ func applyMetadataPlan(
 	allowDeletes bool,
 ) ([]ApplyAction, error) {
 	actions := make([]ApplyAction, 0)
+	applyErrors := make([]error, 0)
 
 	appInfoActions, err := applyAppInfoChanges(ctx, client, appInfoID, localAppInfo, remoteAppInfoItems, allowDeletes)
-	if err != nil {
-		return nil, err
-	}
 	actions = append(actions, appInfoActions...)
+	if err != nil {
+		applyErrors = append(applyErrors, err)
+	}
 
 	versionActions, err := applyVersionChanges(ctx, client, versionID, version, localVersion, remoteVersionItems, allowDeletes)
-	if err != nil {
-		return nil, err
-	}
 	actions = append(actions, versionActions...)
+	if err != nil {
+		applyErrors = append(applyErrors, err)
+	}
 
-	return actions, nil
+	return actions, errors.Join(applyErrors...)
 }
 
 func applyAppInfoChanges(
@@ -667,25 +719,46 @@ func applyAppInfoChanges(
 	}
 
 	locales := sortedLocaleUnion(local, remoteByLocale)
-
 	actions := make([]ApplyAction, 0)
+	applyErrors := make([]error, 0)
+	contextErrorRecorded := false
 	for _, locale := range locales {
 		localPatch, localExists := local[locale]
 		remoteState, remoteExists := remoteByLocale[locale]
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if action, ok := canceledAppInfoAction(locale, localPatch, remoteState, localExists, remoteExists, allowDeletes, ctxErr); ok {
+				if !contextErrorRecorded {
+					applyErrors = append(applyErrors, ctxErr)
+					contextErrorRecorded = true
+				}
+				actions = append(actions, action)
+			}
+			continue
+		}
 
 		if !localExists && remoteExists {
+			if !hasTrackedRemoteFields(appInfoPlanFields, remoteState.fields) {
+				continue
+			}
 			if !allowDeletes {
-				return nil, fmt.Errorf("delete operations require --allow-deletes")
+				return actions, fmt.Errorf("delete operations require --allow-deletes")
 			}
-			if err := client.DeleteAppInfoLocalization(ctx, remoteState.id); err != nil {
-				return nil, fmt.Errorf("delete app-info localization %s: %w", locale, err)
+			id, action, err := runMetadataMutation(
+				ctx, "delete",
+				func(requestCtx context.Context) (string, error) {
+					return remoteState.id, client.DeleteAppInfoLocalization(requestCtx, remoteState.id)
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					_, exists, readErr := readBackAppInfoLocalization(readbackCtx, client, appInfoID, locale, nil)
+					return remoteState.id, !exists, readErr
+				},
+			)
+			if err != nil {
+				actions = append(actions, failedMetadataAction(appInfoDirName, locale, "", "delete", remoteState.id, nil, err))
+				applyErrors = append(applyErrors, fmt.Errorf("delete app-info localization %s: %w", locale, err))
+			} else {
+				actions = append(actions, successfulMetadataAction(appInfoDirName, locale, "", action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          appInfoDirName,
-				Locale:         locale,
-				Action:         "delete",
-				LocalizationID: remoteState.id,
-			})
 			continue
 		}
 		if !localExists {
@@ -701,43 +774,55 @@ func applyAppInfoChanges(
 		switch {
 		case !remoteExists:
 			if strings.TrimSpace(localPatch.localization.Name) == "" {
-				return nil, fmt.Errorf("cannot create app-info localization %q without name", locale)
+				err := fmt.Errorf("cannot create app-info localization %q without name", locale)
+				actions = append(actions, failedMetadataAction(appInfoDirName, locale, "", "create", "", localPatch.setFields, err))
+				applyErrors = append(applyErrors, err)
+				continue
 			}
-			resp, err := client.CreateAppInfoLocalization(ctx, appInfoID, appInfoAttributes(locale, localPatch.localization, true))
+			desired := appInfoFields(localPatch.localization)
+			id, action, err := runMetadataMutation(
+				ctx, "create",
+				func(requestCtx context.Context) (string, error) {
+					resp, mutationErr := client.CreateAppInfoLocalization(requestCtx, appInfoID, appInfoAttributes(locale, localPatch.localization, true))
+					if mutationErr != nil {
+						return "", mutationErr
+					}
+					return resp.Data.ID, nil
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					return readBackAppInfoLocalization(readbackCtx, client, appInfoID, locale, desired)
+				},
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"create app-info localization %s (fields: %s): %w",
-					locale,
-					formatAttemptedFieldMap(appInfoPlanFields, localPatch.setFields),
-					err,
-				)
+				actions = append(actions, failedMetadataAction(appInfoDirName, locale, "", "create", "", desired, err))
+				applyErrors = append(applyErrors, fmt.Errorf("create app-info localization %s (fields: %s): %w", locale, formatAttemptedFieldMap(appInfoPlanFields, localPatch.setFields), err))
+			} else {
+				actions = append(actions, successfulMetadataAction(appInfoDirName, locale, "", action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          appInfoDirName,
-				Locale:         locale,
-				Action:         "create",
-				LocalizationID: resp.Data.ID,
-			})
 		case remoteExists:
-			resp, err := client.UpdateAppInfoLocalization(ctx, remoteState.id, appInfoAttributes(locale, localPatch.localization, false))
+			id, action, err := runMetadataMutation(
+				ctx, "update",
+				func(requestCtx context.Context) (string, error) {
+					resp, mutationErr := client.UpdateAppInfoLocalizationFields(requestCtx, remoteState.id, cloneStringMap(localPatch.setFields))
+					if mutationErr != nil {
+						return "", mutationErr
+					}
+					return resp.Data.ID, nil
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					return readBackAppInfoLocalization(readbackCtx, client, appInfoID, locale, localPatch.setFields)
+				},
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"update app-info localization %s (fields: %s): %w",
-					locale,
-					formatAttemptedFieldMap(appInfoPlanFields, localPatch.setFields),
-					err,
-				)
+				actions = append(actions, failedMetadataAction(appInfoDirName, locale, "", "update", remoteState.id, localPatch.setFields, err))
+				applyErrors = append(applyErrors, fmt.Errorf("update app-info localization %s (fields: %s): %w", locale, formatAttemptedFieldMap(appInfoPlanFields, localPatch.setFields), err))
+			} else {
+				actions = append(actions, successfulMetadataAction(appInfoDirName, locale, "", action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          appInfoDirName,
-				Locale:         locale,
-				Action:         "update",
-				LocalizationID: resp.Data.ID,
-			})
 		}
 	}
 
-	return actions, nil
+	return actions, errors.Join(applyErrors...)
 }
 
 func applyVersionChanges(
@@ -771,24 +856,45 @@ func applyVersionChanges(
 	locales := sortedLocaleUnion(local, remoteByLocale)
 
 	actions := make([]ApplyAction, 0)
+	applyErrors := make([]error, 0)
+	contextErrorRecorded := false
 	for _, locale := range locales {
 		localPatch, localExists := local[locale]
 		remoteState, remoteExists := remoteByLocale[locale]
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if action, ok := canceledVersionAction(locale, version, localPatch, remoteState, localExists, remoteExists, allowDeletes, ctxErr); ok {
+				if !contextErrorRecorded {
+					applyErrors = append(applyErrors, ctxErr)
+					contextErrorRecorded = true
+				}
+				actions = append(actions, action)
+			}
+			continue
+		}
 
 		if !localExists && remoteExists {
+			if !hasTrackedRemoteFields(versionPlanFields, remoteState.fields) {
+				continue
+			}
 			if !allowDeletes {
-				return nil, fmt.Errorf("delete operations require --allow-deletes")
+				return actions, fmt.Errorf("delete operations require --allow-deletes")
 			}
-			if err := client.DeleteAppStoreVersionLocalization(ctx, remoteState.id); err != nil {
-				return nil, fmt.Errorf("delete version localization %s: %w", locale, err)
+			id, action, err := runMetadataMutation(
+				ctx, "delete",
+				func(requestCtx context.Context) (string, error) {
+					return remoteState.id, client.DeleteAppStoreVersionLocalization(requestCtx, remoteState.id)
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					_, exists, readErr := readBackVersionLocalization(readbackCtx, client, versionID, locale, nil)
+					return remoteState.id, !exists, readErr
+				},
+			)
+			if err != nil {
+				actions = append(actions, failedMetadataAction(versionDirName, locale, version, "delete", remoteState.id, nil, err))
+				applyErrors = append(applyErrors, fmt.Errorf("delete version localization %s: %w", locale, err))
+			} else {
+				actions = append(actions, successfulMetadataAction(versionDirName, locale, version, action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          versionDirName,
-				Locale:         locale,
-				Version:        version,
-				Action:         "delete",
-				LocalizationID: remoteState.id,
-			})
 			continue
 		}
 		if !localExists {
@@ -807,43 +913,253 @@ func applyVersionChanges(
 			if hasVersionContent(localPatch.createLocalization) {
 				createLoc = localPatch.createLocalization
 			}
-			resp, err := client.CreateAppStoreVersionLocalization(ctx, versionID, versionAttributes(locale, createLoc, true))
+			desired := versionFields(createLoc)
+			id, action, err := runMetadataMutation(
+				ctx, "create",
+				func(requestCtx context.Context) (string, error) {
+					resp, mutationErr := client.CreateAppStoreVersionLocalization(requestCtx, versionID, versionAttributes(locale, createLoc, true))
+					if mutationErr != nil {
+						return "", mutationErr
+					}
+					return resp.Data.ID, nil
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					return readBackVersionLocalization(readbackCtx, client, versionID, locale, desired)
+				},
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"create version localization %s (fields: %s): %w",
-					locale,
-					formatAttemptedFieldMap(versionPlanFields, localPatch.setFields),
-					err,
-				)
+				actions = append(actions, failedMetadataAction(versionDirName, locale, version, "create", "", desired, err))
+				applyErrors = append(applyErrors, fmt.Errorf("create version localization %s (fields: %s): %w", locale, formatAttemptedFieldMap(versionPlanFields, localPatch.setFields), err))
+			} else {
+				actions = append(actions, successfulMetadataAction(versionDirName, locale, version, action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          versionDirName,
-				Locale:         locale,
-				Version:        version,
-				Action:         "create",
-				LocalizationID: resp.Data.ID,
-			})
 		case remoteExists:
-			resp, err := client.UpdateAppStoreVersionLocalization(ctx, remoteState.id, versionAttributes(locale, localPatch.localization, false))
+			id, action, err := runMetadataMutation(
+				ctx, "update",
+				func(requestCtx context.Context) (string, error) {
+					resp, mutationErr := client.UpdateAppStoreVersionLocalizationFields(requestCtx, remoteState.id, cloneStringMap(localPatch.setFields))
+					if mutationErr != nil {
+						return "", mutationErr
+					}
+					return resp.Data.ID, nil
+				},
+				func(readbackCtx context.Context) (string, bool, error) {
+					return readBackVersionLocalization(readbackCtx, client, versionID, locale, localPatch.setFields)
+				},
+			)
 			if err != nil {
-				return nil, fmt.Errorf(
-					"update version localization %s (fields: %s): %w",
-					locale,
-					formatAttemptedFieldMap(versionPlanFields, localPatch.setFields),
-					err,
-				)
+				actions = append(actions, failedMetadataAction(versionDirName, locale, version, "update", remoteState.id, localPatch.setFields, err))
+				applyErrors = append(applyErrors, fmt.Errorf("update version localization %s (fields: %s): %w", locale, formatAttemptedFieldMap(versionPlanFields, localPatch.setFields), err))
+			} else {
+				actions = append(actions, successfulMetadataAction(versionDirName, locale, version, action, id))
 			}
-			actions = append(actions, ApplyAction{
-				Scope:          versionDirName,
-				Locale:         locale,
-				Version:        version,
-				Action:         "update",
-				LocalizationID: resp.Data.ID,
-			})
 		}
 	}
 
-	return actions, nil
+	return actions, errors.Join(applyErrors...)
+}
+
+func canceledAppInfoAction(
+	locale string,
+	localPatch appInfoLocalPatch,
+	remoteState remoteLocalizationState,
+	localExists bool,
+	remoteExists bool,
+	allowDeletes bool,
+	err error,
+) (ApplyAction, bool) {
+	if !localExists {
+		if remoteExists && allowDeletes && hasTrackedRemoteFields(appInfoPlanFields, remoteState.fields) {
+			return failedMetadataAction(appInfoDirName, locale, "", "delete", remoteState.id, nil, err), true
+		}
+		return ApplyAction{}, false
+	}
+	adds, updates := countIntentChanges(appInfoPlanFields, localPatch.setFields, remoteState.fields)
+	if adds == 0 && updates == 0 {
+		return ApplyAction{}, false
+	}
+	if !remoteExists {
+		return failedMetadataAction(appInfoDirName, locale, "", "create", "", appInfoFields(localPatch.localization), err), true
+	}
+	return failedMetadataAction(appInfoDirName, locale, "", "update", remoteState.id, localPatch.setFields, err), true
+}
+
+func canceledVersionAction(
+	locale string,
+	version string,
+	localPatch versionLocalPatch,
+	remoteState remoteLocalizationState,
+	localExists bool,
+	remoteExists bool,
+	allowDeletes bool,
+	err error,
+) (ApplyAction, bool) {
+	if !localExists {
+		if remoteExists && allowDeletes && hasTrackedRemoteFields(versionPlanFields, remoteState.fields) {
+			return failedMetadataAction(versionDirName, locale, version, "delete", remoteState.id, nil, err), true
+		}
+		return ApplyAction{}, false
+	}
+	adds, updates := countIntentChanges(versionPlanFields, localPatch.setFields, remoteState.fields)
+	if adds == 0 && updates == 0 {
+		return ApplyAction{}, false
+	}
+	if !remoteExists {
+		return failedMetadataAction(versionDirName, locale, version, "create", "", versionFields(effectiveVersionCreateLocalization(localPatch)), err), true
+	}
+	return failedMetadataAction(versionDirName, locale, version, "update", remoteState.id, localPatch.setFields, err), true
+}
+
+func hasTrackedRemoteFields(fields []string, values map[string]string) bool {
+	for _, field := range fields {
+		if _, ok := values[field]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func runMetadataMutation(
+	ctx context.Context,
+	action string,
+	mutate func(context.Context) (string, error),
+	readback func(context.Context) (string, bool, error),
+) (string, string, error) {
+	id, status, err := shared.RunReconciledMutation(ctx, mutate, readback)
+	if err != nil {
+		return "", action, err
+	}
+	if status == shared.ReconciledMutationRecovered {
+		return id, "reconcile", nil
+	}
+	return id, action, nil
+}
+
+func successfulMetadataAction(scope, locale, version, action, id string) ApplyAction {
+	return ApplyAction{
+		Scope:          scope,
+		Locale:         locale,
+		Version:        version,
+		Action:         action,
+		Status:         "succeeded",
+		LocalizationID: id,
+	}
+}
+
+func failedMetadataAction(scope, locale, version, action, id string, desired map[string]string, err error) ApplyAction {
+	return ApplyAction{
+		Scope:          scope,
+		Locale:         locale,
+		Version:        version,
+		Action:         action,
+		Status:         "failed",
+		LocalizationID: id,
+		Error:          err.Error(),
+		DesiredFields:  cloneStringMap(desired),
+	}
+}
+
+func writeMetadataPushFailureArtifact(result PushPlanResult, commandName string) (string, error) {
+	failures := make([]ApplyAction, 0, result.Failed)
+	for _, action := range result.Actions {
+		if action.Status == "failed" {
+			failures = append(failures, action)
+		}
+	}
+
+	command := strings.TrimSpace(commandName)
+	switch command {
+	case "apply", "push":
+	default:
+		command = "push"
+	}
+	artifact := metadataPushFailureArtifact{
+		SchemaVersion: 1,
+		Command:       command,
+		AppID:         result.AppID,
+		AppInfoID:     result.AppInfoID,
+		Version:       result.Version,
+		VersionID:     result.VersionID,
+		Dir:           result.Dir,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		Failures:      failures,
+	}
+	data, err := encodeCanonicalJSON(artifact)
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(
+		".asc",
+		"reports",
+		"metadata-"+command,
+		fmt.Sprintf("failures-%d.json", time.Now().UTC().UnixNano()),
+	)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := writeFileNoFollow(path, data); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func readBackAppInfoLocalization(ctx context.Context, client *asc.Client, appInfoID, locale string, desired map[string]string) (string, bool, error) {
+	items, err := fetchAppInfoLocalizations(ctx, client, appInfoID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Attributes.Locale) != locale {
+			continue
+		}
+		if desired == nil {
+			return item.ID, true, nil
+		}
+		remote := appInfoFields(AppInfoLocalization{
+			Name:              item.Attributes.Name,
+			Subtitle:          item.Attributes.Subtitle,
+			PrivacyPolicyURL:  item.Attributes.PrivacyPolicyURL,
+			PrivacyChoicesURL: item.Attributes.PrivacyChoicesURL,
+			PrivacyPolicyText: item.Attributes.PrivacyPolicyText,
+		})
+		return item.ID, metadataFieldsMatch(remote, desired), nil
+	}
+	return "", false, nil
+}
+
+func readBackVersionLocalization(ctx context.Context, client *asc.Client, versionID, locale string, desired map[string]string) (string, bool, error) {
+	items, err := fetchVersionLocalizations(ctx, client, versionID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Attributes.Locale) != locale {
+			continue
+		}
+		if desired == nil {
+			return item.ID, true, nil
+		}
+		remote := versionFields(VersionLocalization{
+			Description:     item.Attributes.Description,
+			Keywords:        item.Attributes.Keywords,
+			MarketingURL:    item.Attributes.MarketingURL,
+			PromotionalText: item.Attributes.PromotionalText,
+			SupportURL:      item.Attributes.SupportURL,
+			WhatsNew:        item.Attributes.WhatsNew,
+		})
+		return item.ID, metadataFieldsMatch(remote, desired), nil
+	}
+	return "", false, nil
+}
+
+func metadataFieldsMatch(remote, desired map[string]string) bool {
+	for field, value := range desired {
+		if remote[field] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func countIntentChanges(fields []string, localSet map[string]string, remote map[string]string) (int, int) {
@@ -1166,6 +1482,18 @@ func printPushPlanTable(result PushPlanResult) error {
 	if result.Applied {
 		fmt.Printf("Applied: %t\n\n", result.Applied)
 	}
+	if len(result.Actions) > 0 || result.Failed > 0 || result.FailureArtifactError != "" {
+		fmt.Printf("Total: %d\n", result.Total)
+		fmt.Printf("Succeeded: %d\n", result.Succeeded)
+		fmt.Printf("Failed: %d\n", result.Failed)
+		if result.FailureArtifactPath != "" {
+			fmt.Printf("Failure Artifact: %s\n", result.FailureArtifactPath)
+		}
+		if result.FailureArtifactError != "" {
+			fmt.Printf("Failure Artifact Error: %s\n", result.FailureArtifactError)
+		}
+		fmt.Println()
+	}
 
 	headers := []string{"change", "key", "scope", "locale", "version", "field", "reason", "from", "to"}
 	rows := buildPlanRows(result)
@@ -1177,7 +1505,7 @@ func printPushPlanTable(result PushPlanResult) error {
 	}
 	if len(result.Actions) > 0 {
 		fmt.Println()
-		asc.RenderTable([]string{"scope", "locale", "version", "action", "localizationId"}, buildApplyActionRows(result.Actions))
+		asc.RenderTable([]string{"scope", "locale", "version", "action", "status", "localizationId", "error"}, buildApplyActionRows(result.Actions))
 	}
 	return nil
 }
@@ -1190,6 +1518,17 @@ func printPushPlanMarkdown(result PushPlanResult) error {
 	if result.Applied {
 		fmt.Printf("**Applied:** %t\n\n", result.Applied)
 	}
+	if len(result.Actions) > 0 || result.Failed > 0 || result.FailureArtifactError != "" {
+		fmt.Printf("**Total:** %d\n\n", result.Total)
+		fmt.Printf("**Succeeded:** %d\n\n", result.Succeeded)
+		fmt.Printf("**Failed:** %d\n\n", result.Failed)
+		if result.FailureArtifactPath != "" {
+			fmt.Printf("**Failure Artifact:** %s\n\n", result.FailureArtifactPath)
+		}
+		if result.FailureArtifactError != "" {
+			fmt.Printf("**Failure Artifact Error:** %s\n\n", result.FailureArtifactError)
+		}
+	}
 
 	headers := []string{"change", "key", "scope", "locale", "version", "field", "reason", "from", "to"}
 	rows := buildPlanRows(result)
@@ -1201,7 +1540,7 @@ func printPushPlanMarkdown(result PushPlanResult) error {
 	}
 	if len(result.Actions) > 0 {
 		fmt.Println()
-		asc.RenderMarkdown([]string{"scope", "locale", "version", "action", "localizationId"}, buildApplyActionRows(result.Actions))
+		asc.RenderMarkdown([]string{"scope", "locale", "version", "action", "status", "localizationId", "error"}, buildApplyActionRows(result.Actions))
 	}
 	return nil
 }
@@ -1269,7 +1608,9 @@ func buildApplyActionRows(actions []ApplyAction) [][]string {
 			action.Locale,
 			action.Version,
 			action.Action,
+			action.Status,
 			action.LocalizationID,
+			sanitizePlanCell(action.Error),
 		})
 	}
 	return rows

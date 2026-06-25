@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMetadataHelpShowsKeywordsWorkflow(t *testing.T) {
@@ -1240,6 +1241,79 @@ func TestMetadataKeywordsPlanBuildsKeywordOnlyRemotePlan(t *testing.T) {
 	}
 	if len(payload.Warnings[0].MissingFields) != 2 || payload.Warnings[0].MissingFields[0] != "description" || payload.Warnings[0].MissingFields[1] != "supportUrl" {
 		t.Fatalf("expected missing description/supportUrl warning, got %+v", payload.Warnings[0])
+	}
+}
+
+func TestMetadataKeywordsPlanUsesFreshReadinessContextAfterSlowPagination(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_TIMEOUT", "100ms")
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	dir := t.TempDir()
+	versionDir := filepath.Join(dir, "version", "1.2.3")
+	if err := os.MkdirAll(versionDir, 0o755); err != nil {
+		t.Fatalf("mkdir version: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(versionDir, "ja.json"), []byte(`{"keywords":"nihongo"}`), 0o644); err != nil {
+		t.Fatalf("write ja: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	localizationReads := 0
+	readinessReads := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s %s", req.Method, req.URL.Path)
+		}
+		switch req.URL.Path {
+		case "/v1/apps/app-1/appStoreVersions":
+			if req.URL.Query().Get("filter[appStoreState]") != "" {
+				return metadataKeywordsJSONResponse(`{"data":[{"type":"appStoreVersions","id":"released","attributes":{"versionString":"1.0","platform":"IOS","appStoreState":"READY_FOR_SALE"}}],"links":{"next":""}}`)
+			}
+			return metadataKeywordsJSONResponse(`{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}],"links":{"next":""}}`)
+		case "/v1/appStoreVersions/version-1/appStoreVersionLocalizations":
+			localizationReads++
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 70*time.Millisecond {
+				t.Fatalf("expected fresh localization page deadline, remaining=%s", time.Until(deadline))
+			}
+			time.Sleep(60 * time.Millisecond)
+			if localizationReads == 1 {
+				return metadataKeywordsJSONResponse(`{"data":[],"links":{"next":"/v1/appStoreVersions/version-1/appStoreVersionLocalizations?cursor=next"}}`)
+			}
+			return metadataKeywordsJSONResponse(`{"data":[],"links":{"next":""}}`)
+		case "/v1/appStoreVersions/version-1":
+			readinessReads++
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 70*time.Millisecond {
+				t.Fatalf("expected fresh readiness deadline, remaining=%s", time.Until(deadline))
+			}
+			return metadataKeywordsJSONResponse(`{"data":{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}}}}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"metadata", "keywords", "plan", "--app", "app-1", "--version", "1.2.3", "--dir", dir}); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+	if stderr != "" || localizationReads != 2 || readinessReads != 1 {
+		t.Fatalf("unexpected request counts: localization=%d readiness=%d stderr=%q", localizationReads, readinessReads, stderr)
+	}
+	if !strings.Contains(stdout, `"whatsNew"`) {
+		t.Fatalf("expected update-context warning to require whatsNew: %s", stdout)
 	}
 }
 

@@ -2,6 +2,7 @@ package publish
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,13 +36,30 @@ func applyPublishVersionMetadata(ctx context.Context, client *asc.Client, opts p
 	}
 
 	results, warnings, err := shared.UploadVersionLocalizationsWithWarnings(ctx, client, versionID, valuesByLocale, false, shared.SubmitReadinessOptions{})
-	if err != nil {
+	if err != nil && len(results) == 0 {
 		return nil, err
 	}
 	if len(warnings) > 0 {
 		if warnErr := shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings); warnErr != nil {
 			return nil, warnErr
 		}
+	}
+	if err != nil {
+		result := asc.LocalizationUploadResult{
+			Type:      shared.LocalizationTypeVersion,
+			VersionID: versionID,
+			InputPath: strings.TrimSpace(opts.Dir),
+			Results:   results,
+		}
+		shared.FinalizeLocalizationUploadResult(&result, "publish")
+		recoveryErr := fmt.Errorf("publish version metadata: %d locale(s) failed", result.Failed)
+		if result.FailureArtifactPath != "" {
+			recoveryErr = fmt.Errorf("%w; retry artifact: %s", recoveryErr, result.FailureArtifactPath)
+		}
+		if result.FailureArtifactError != "" {
+			recoveryErr = fmt.Errorf("%w; write retry artifact: %s", recoveryErr, result.FailureArtifactError)
+		}
+		return results, errors.Join(recoveryErr, err)
 	}
 	return results, nil
 }

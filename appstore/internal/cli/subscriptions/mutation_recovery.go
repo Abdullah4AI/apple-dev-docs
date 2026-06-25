@@ -1,0 +1,42 @@
+package subscriptions
+
+import (
+	"context"
+	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+type reconciledMutationStatus string
+
+var subscriptionImportNow = func() time.Time { return time.Now().UTC() }
+
+const (
+	reconciledMutationCreated    reconciledMutationStatus = "created"
+	reconciledMutationSkipped    reconciledMutationStatus = "skipped"
+	reconciledMutationReconciled reconciledMutationStatus = "reconciled"
+)
+
+func runReconciledMutation(
+	ctx context.Context,
+	readback func(context.Context) (bool, error),
+	mutate func(context.Context) error,
+) (reconciledMutationStatus, error) {
+	_, status, err := shared.RunReconciledMutation(
+		ctx,
+		func(requestCtx context.Context) (struct{}, error) {
+			return struct{}{}, mutate(requestCtx)
+		},
+		func(readbackCtx context.Context) (struct{}, bool, error) {
+			exists, readErr := readback(readbackCtx)
+			return struct{}{}, exists, readErr
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+	if status == shared.ReconciledMutationRecovered {
+		return reconciledMutationReconciled, nil
+	}
+	return reconciledMutationCreated, nil
+}

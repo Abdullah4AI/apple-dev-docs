@@ -407,7 +407,7 @@ func PublishAppStoreCommand() *ffcli.Command {
 	dryRun := fs.Bool("dry-run", false, "Preview high-level publish plan without uploading or submitting")
 	wait := fs.Bool("wait", false, "Wait for build processing")
 	pollInterval := fs.Duration("poll-interval", shared.PublishDefaultPollInterval, "Polling interval for --wait and build discovery")
-	timeout := fs.Duration("timeout", 0, "Override upload + processing timeout (e.g., 30m)")
+	timeout := fs.Duration("timeout", 0, "Override upload + processing timeout; also applies to submission with --submit (e.g., 30m)")
 	localBuild := bindPublishLocalBuildFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
@@ -583,8 +583,6 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("publish appstore: %w", err)
 				}
-				requestCtx, cancel = newPublishRequestCtx()
-				defer cancel()
 				buildResp = localBuildResult.Build
 				versionValue = localBuildResult.Version
 				buildNumberValue = localBuildResult.BuildNumber
@@ -601,25 +599,32 @@ Examples:
 			}
 
 			if *wait {
+				cancel()
+				requestCtx, cancel = newPublishRequestCtx()
+				defer cancel()
 				buildResp, err = waitForPublishBuildProcessingFn(requestCtx, client, buildResp.Data.ID, *pollInterval)
 				if err != nil {
 					return fmt.Errorf("publish appstore: %w", err)
 				}
 			}
 
-			versionResp, err := client.FindOrCreateAppStoreVersion(requestCtx, resolvedPublishAppID, versionValue, platformValue)
+			versionResp, err := findOrCreatePublishAppStoreVersion(ctx, client, resolvedPublishAppID, versionValue, platformValue)
 			if err != nil {
 				return fmt.Errorf("publish appstore: %w", err)
 			}
 
 			if metadataDirValue != "" {
-				if _, err := applyPublishVersionMetadataFn(requestCtx, client, publishVersionMetadataOptions{
+				_, metadataErr := applyPublishVersionMetadataFn(ctx, client, publishVersionMetadataOptions{
 					VersionID:      versionResp.Data.ID,
 					Version:        versionValue,
 					Dir:            metadataDirValue,
 					ValuesByLocale: metadataValuesByLocale,
-				}); err != nil {
-					return fmt.Errorf("publish appstore: apply metadata: %w", err)
+				})
+				if metadataErr != nil {
+					if shared.IsLocalizationInputError(metadataErr) {
+						return shared.UsageErrorf("--metadata-dir %q: %v", metadataDirValue, metadataErr)
+					}
+					return fmt.Errorf("publish appstore: apply metadata: %w", metadataErr)
 				}
 			}
 
@@ -654,6 +659,10 @@ Examples:
 				}
 			}
 
+			cancel()
+			requestCtx, cancel = newPublishRequestCtx()
+			defer cancel()
+
 			submitCtx := requestCtx
 			submitRequestTimeout := time.Duration(0)
 			if *submit && *timeout > 0 {
@@ -679,13 +688,19 @@ Examples:
 				}
 			}
 
-			attachResult, err := submitcli.EnsureBuildAttached(requestCtx, client, versionResp.Data.ID, buildResp.Data.ID, false)
+			attachResult, err := submitcli.EnsureBuildAttached(ctx, client, versionResp.Data.ID, buildResp.Data.ID, false)
 			if err != nil {
 				return fmt.Errorf("publish appstore: %w", err)
 			}
 			result.Attached = attachResult.Attached || attachResult.AlreadyAttached
 
 			if *submit {
+				if submitRequestTimeout == 0 {
+					cancel()
+					requestCtx, cancel = newPublishRequestCtx()
+					defer cancel()
+					submitCtx = requestCtx
+				}
 
 				localizationPreflight := func() error {
 					if submitRequestTimeout > 0 {

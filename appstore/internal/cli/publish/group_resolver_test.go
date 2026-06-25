@@ -40,6 +40,7 @@ func setupTestAuth(t *testing.T) {
 	t.Setenv("ASC_ISSUER_ID", "TEST_ISSUER")
 	t.Setenv("ASC_PRIVATE_KEY_PATH", keyPath)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_MAX_RETRIES", "0")
 }
 
 func writeTestECDSAPEM(t *testing.T, path string) {

@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -94,7 +96,7 @@ func GenerateJWT(keyID, issuerID string, privateKey *ecdsa.PrivateKey) (string, 
 }
 
 // do performs an HTTP request and returns the response.
-// GET/HEAD requests use retry logic for rate limiting by default.
+// GET/HEAD requests use retry logic for transient failures by default.
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([]byte, error) {
 	var bodyBytes []byte
 	if body != nil {
@@ -212,7 +214,11 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body io.Reader
 				"elapsed", elapsed.String(),
 			)
 		}
-		return nil, fmt.Errorf("request failed: %w", err)
+		requestErr := fmt.Errorf("request failed: %w", err)
+		if isTransientTransportError(err) {
+			return nil, &RetryableError{Err: requestErr}
+		}
+		return nil, requestErr
 	}
 	defer resp.Body.Close()
 
@@ -229,8 +235,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body io.Reader
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 
-		// Check for rate limiting (429) or service unavailable (503)
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		if isRetryableHTTPStatus(resp.StatusCode) {
 			retryAfter := parseRetryAfterHeader(resp.Header.Get("Retry-After"))
 			return nil, &RetryableError{
 				Err:        buildRetryableError(resp.StatusCode, retryAfter, respBody),
@@ -244,7 +249,47 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body io.Reader
 		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		readErr := fmt.Errorf("failed to read response body: %w", err)
+		if isTransientTransportError(err) {
+			return nil, &RetryableError{Err: readErr}
+		}
+		return nil, readErr
+	}
+	return data, nil
+}
+
+func isTransientTransportError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.EPIPE)
+}
+
+func isRetryableHTTPStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusRequestTimeout,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // sanitizeAuthHeader redacts the JWT token from Authorization header for logging.
@@ -283,10 +328,18 @@ func shouldLimitMutatingMethod(method string) bool {
 func buildRetryableError(statusCode int, retryAfter time.Duration, respBody []byte) error {
 	base := "API request failed"
 	switch statusCode {
+	case http.StatusRequestTimeout:
+		base = "App Store Connect request timeout"
 	case http.StatusTooManyRequests:
 		base = "rate limited by App Store Connect"
+	case http.StatusInternalServerError:
+		base = "App Store Connect internal server error"
+	case http.StatusBadGateway:
+		base = "App Store Connect bad gateway"
 	case http.StatusServiceUnavailable:
 		base = "App Store Connect service unavailable"
+	case http.StatusGatewayTimeout:
+		base = "App Store Connect gateway timeout"
 	}
 
 	message := fmt.Sprintf("%s (status %d)", base, statusCode)

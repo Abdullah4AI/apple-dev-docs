@@ -943,7 +943,7 @@ func executeMetadataKeywordsPlan(ctx context.Context, opts metadataKeywordsPlanO
 		return MetadataKeywordsPlanResult{}, err
 	}
 
-	remoteVersionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
+	remoteVersionItems, err := fetchVersionLocalizations(ctx, client, versionIDValue)
 	if err != nil {
 		return MetadataKeywordsPlanResult{}, err
 	}
@@ -962,7 +962,9 @@ func executeMetadataKeywordsPlan(ctx context.Context, opts metadataKeywordsPlanO
 	sortPlanItems(updates)
 	submitOpts := shared.SubmitReadinessOptions{}
 	if versionCreateWarningsNeedUpdateContext(localPatches, remoteVersion) {
-		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, versionIDValue, resolvedAppID, platformValue)
+		readinessCtx, readinessCancel := shared.ContextWithTimeout(ctx)
+		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(readinessCtx, client, versionIDValue, resolvedAppID, platformValue)
+		readinessCancel()
 	}
 	warnings := buildMetadataKeywordWarnings(localState, remoteVersion, submitOpts)
 

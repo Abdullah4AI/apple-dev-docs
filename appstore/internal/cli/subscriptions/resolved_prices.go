@@ -42,26 +42,30 @@ func fetchResolvedSubscriptionPrices(
 		opts = append(opts, asc.WithSubscriptionPricesPlanType(planType))
 	}
 
-	firstPage, err := client.GetSubscriptionPrices(ctx, subscriptionID, opts...)
+	firstPage, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricesResponse, error) {
+		return client.GetSubscriptionPrices(requestCtx, subscriptionID, opts...)
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	candidates := make(map[string]resolvedSubscriptionPriceCandidate)
-	if err := asc.PaginateEach(ctx, firstPage, func(ctx context.Context, next string) (asc.PaginatedResponse, error) {
+	if err := asc.PaginateEach(ctx, firstPage, func(_ context.Context, next string) (asc.PaginatedResponse, error) {
 		nextURL, err := mergeSubscriptionPricesNextQuery(next, resolvedSubscriptionPricesQuery(limit, planType))
 		if err != nil {
 			return nil, err
 		}
-		return client.GetSubscriptionPrices(
-			ctx,
-			subscriptionID,
-			asc.WithSubscriptionPricesNextURL(nextURL),
-			asc.WithSubscriptionPricesInclude([]string{"subscriptionPricePoint", "territory"}),
-			asc.WithSubscriptionPricesPricePointFields([]string{"customerPrice", "proceeds", "proceedsYear2"}),
-			asc.WithSubscriptionPricesTerritoryFields([]string{"currency"}),
-			asc.WithSubscriptionPricesPlanType(planType),
-		)
+		return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricesResponse, error) {
+			return client.GetSubscriptionPrices(
+				requestCtx,
+				subscriptionID,
+				asc.WithSubscriptionPricesNextURL(nextURL),
+				asc.WithSubscriptionPricesInclude([]string{"subscriptionPricePoint", "territory"}),
+				asc.WithSubscriptionPricesPricePointFields([]string{"customerPrice", "proceeds", "proceedsYear2"}),
+				asc.WithSubscriptionPricesTerritoryFields([]string{"currency"}),
+				asc.WithSubscriptionPricesPlanType(planType),
+			)
+		})
 	}, func(page asc.PaginatedResponse) error {
 		resp, ok := page.(*asc.SubscriptionPricesResponse)
 		if !ok {

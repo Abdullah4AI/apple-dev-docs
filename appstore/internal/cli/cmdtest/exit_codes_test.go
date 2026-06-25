@@ -76,14 +76,23 @@ func TestRun_IntroductoryOffersImportPartialFailureReturnsExitError(t *testing.T
 		http.DefaultTransport = originalTransport
 	})
 
-	requestCount := 0
+	getCount := 0
+	postCount := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestCount++
+		if req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000003/introductoryOffers" {
+			getCount++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		}
 		if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionIntroductoryOffers" {
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
 		}
+		postCount++
 
-		switch requestCount {
+		switch postCount {
 		case 1:
 			body := `{"data":{"type":"subscriptionIntroductoryOffers","id":"offer-1"}}`
 			return &http.Response{
@@ -99,7 +108,7 @@ func TestRun_IntroductoryOffersImportPartialFailureReturnsExitError(t *testing.T
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			}, nil
 		default:
-			t.Fatalf("unexpected request count %d", requestCount)
+			t.Fatalf("unexpected POST count %d", postCount)
 			return nil, nil
 		}
 	})
@@ -128,6 +137,9 @@ func TestRun_IntroductoryOffersImportPartialFailureReturnsExitError(t *testing.T
 	}
 	if !strings.Contains(stdout, `"failed":1`) {
 		t.Fatalf("expected failure summary in stdout, got %q", stdout)
+	}
+	if getCount != 2 || postCount != 2 {
+		t.Fatalf("expected initial GET, two POSTs, and one readback GET; got GET=%d POST=%d", getCount, postCount)
 	}
 }
 

@@ -38,6 +38,28 @@ func versionCreateWarningsForPatches(local map[string]versionLocalPatch, remote 
 	return shared.NormalizeSubmitReadinessCreateWarnings(warnings)
 }
 
+func successfulVersionCreateWarnings(
+	warnings []shared.SubmitReadinessCreateWarning,
+	actions []ApplyAction,
+	remote map[string]VersionLocalization,
+) []shared.SubmitReadinessCreateWarning {
+	succeeded := make(map[string]struct{})
+	for _, action := range actions {
+		if action.Scope != versionDirName || action.Status != "succeeded" || hasRemoteVersionLocalization(remote, action.Locale) {
+			continue
+		}
+		succeeded[action.Locale] = struct{}{}
+	}
+
+	filtered := make([]shared.SubmitReadinessCreateWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		if _, ok := succeeded[warning.Locale]; ok {
+			filtered = append(filtered, warning)
+		}
+	}
+	return shared.NormalizeSubmitReadinessCreateWarnings(filtered)
+}
+
 func versionCreateWarningsNeedUpdateContext(local map[string]versionLocalPatch, remote map[string]VersionLocalization) bool {
 	for _, locale := range sortedKeys(local) {
 		if hasRemoteVersionLocalization(remote, locale) {

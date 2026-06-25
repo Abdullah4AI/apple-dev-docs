@@ -79,6 +79,63 @@ func TestUpdateSubscriptionPlanAvailability(t *testing.T) {
 	}
 }
 
+func TestSubscriptionPlanAvailabilityMutationsDoNotReplayTransientErrors(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "2")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		call   func(*Client) error
+	}{
+		{
+			name:   "create",
+			method: http.MethodPost,
+			path:   "/v1/subscriptionPlanAvailabilities",
+			call: func(client *Client) error {
+				_, err := client.CreateSubscriptionPlanAvailability(
+					context.Background(),
+					"sub-1",
+					[]string{"NOR"},
+					SubscriptionPlanAvailabilityAttributes{PlanType: SubscriptionPlanTypeMonthly},
+				)
+				return err
+			},
+		},
+		{
+			name:   "update",
+			method: http.MethodPatch,
+			path:   "/v1/subscriptionPlanAvailabilities/plan-1",
+			call: func(client *Client) error {
+				_, err := client.UpdateSubscriptionPlanAvailability(context.Background(), "plan-1", []string{"NOR"}, nil)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			client := newTestClient(t, func(req *http.Request) {
+				attempts++
+				if req.Method != tt.method || req.URL.Path != tt.path {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+				}
+			}, jsonResponse(http.StatusGatewayTimeout, `{"errors":[{"status":"504","code":"UNEXPECTED_ERROR","detail":"ambiguous"}]}`))
+
+			err := tt.call(client)
+			if err == nil || !IsRetryable(err) {
+				t.Fatalf("expected retryable error, got %v", err)
+			}
+			if attempts != 1 {
+				t.Fatalf("expected one mutation attempt, got %d", attempts)
+			}
+		})
+	}
+}
+
 func TestGetSubscriptionPlanAvailabilitiesForSubscriptionFiltersPlanType(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[
 		{"type":"subscriptionPlanAvailabilities","id":"plan-monthly","attributes":{"planType":"MONTHLY","availableInNewTerritories":true}},

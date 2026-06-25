@@ -122,11 +122,11 @@ Examples:
 				return fmt.Errorf("metadata pull: %w", err)
 			}
 
-			appInfoItems, err := fetchAppInfoLocalizations(requestCtx, client, appInfoIDValue)
+			appInfoItems, err := fetchAppInfoLocalizations(ctx, client, appInfoIDValue)
 			if err != nil {
 				return fmt.Errorf("metadata pull: %w", err)
 			}
-			versionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
+			versionItems, err := fetchVersionLocalizations(ctx, client, versionIDValue)
 			if err != nil {
 				return fmt.Errorf("metadata pull: %w", err)
 			}
@@ -291,7 +291,9 @@ func resolveMetadataPullAppInfoID(
 }
 
 func fetchAppInfoLocalizations(ctx context.Context, client *asc.Client, appInfoID string) ([]asc.Resource[asc.AppInfoLocalizationAttributes], error) {
-	firstPage, err := client.GetAppInfoLocalizations(ctx, appInfoID, asc.WithAppInfoLocalizationsLimit(200))
+	firstPage, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppInfoLocalizationsResponse, error) {
+		return client.GetAppInfoLocalizations(requestCtx, appInfoID, asc.WithAppInfoLocalizationsLimit(200))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -302,8 +304,10 @@ func fetchAppInfoLocalizations(ctx context.Context, client *asc.Client, appInfoI
 		return firstPage.Data, nil
 	}
 
-	paginated, err := asc.PaginateAll(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		return client.GetAppInfoLocalizations(ctx, appInfoID, asc.WithAppInfoLocalizationsNextURL(nextURL))
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppInfoLocalizationsResponse, error) {
+			return client.GetAppInfoLocalizations(requestCtx, appInfoID, asc.WithAppInfoLocalizationsNextURL(nextURL))
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -316,7 +320,9 @@ func fetchAppInfoLocalizations(ctx context.Context, client *asc.Client, appInfoI
 }
 
 func fetchVersionLocalizations(ctx context.Context, client *asc.Client, versionID string) ([]asc.Resource[asc.AppStoreVersionLocalizationAttributes], error) {
-	firstPage, err := client.GetAppStoreVersionLocalizations(ctx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	firstPage, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppStoreVersionLocalizationsResponse, error) {
+		return client.GetAppStoreVersionLocalizations(requestCtx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -327,8 +333,10 @@ func fetchVersionLocalizations(ctx context.Context, client *asc.Client, versionI
 		return firstPage.Data, nil
 	}
 
-	paginated, err := asc.PaginateAll(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		return client.GetAppStoreVersionLocalizations(ctx, versionID, asc.WithAppStoreVersionLocalizationsNextURL(nextURL))
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppStoreVersionLocalizationsResponse, error) {
+			return client.GetAppStoreVersionLocalizations(requestCtx, versionID, asc.WithAppStoreVersionLocalizationsNextURL(nextURL))
+		})
 	})
 	if err != nil {
 		return nil, err

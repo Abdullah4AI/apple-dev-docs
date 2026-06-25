@@ -511,17 +511,17 @@ func subscriptionHasImage(ctx context.Context, client *asc.Client, subscriptionI
 				SkipReason: "Image verification was skipped because this App Store Connect account cannot read subscription image assets",
 			}, nil
 		}
-		if asc.IsRetryable(err) {
-			return subscriptionImageStatus{
-				Verified:   false,
-				SkipReason: "Image verification was skipped because the App Store Connect image endpoint was temporarily unavailable or rate limited",
-			}, nil
-		}
 		var netErr net.Error
 		if errors.As(err, &netErr) {
 			return subscriptionImageStatus{
 				Verified:   false,
 				SkipReason: "Image verification was skipped because the App Store Connect image endpoint could not be reached",
+			}, nil
+		}
+		if asc.IsRetryable(err) {
+			return subscriptionImageStatus{
+				Verified:   false,
+				SkipReason: "Image verification was skipped because the App Store Connect image endpoint was temporarily unavailable or rate limited",
 			}, nil
 		}
 		return subscriptionImageStatus{}, err
@@ -540,15 +540,15 @@ func metadataCheckSkipReason(err error, resourceLabel string) (string, bool) {
 	if errors.Is(err, asc.ErrForbidden) || asc.IsUnauthorized(err) {
 		return fmt.Sprintf("Validation skipped %s because this App Store Connect account cannot read them", resourceLabel), true
 	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return fmt.Sprintf("Validation skipped %s because the App Store Connect endpoint could not be reached", resourceLabel), true
+	}
 	if asc.IsRetryable(err) {
 		return fmt.Sprintf("Validation skipped %s because the App Store Connect endpoint was temporarily unavailable or rate limited", resourceLabel), true
 	}
 	if asc.IsNotFound(err) {
 		return fmt.Sprintf("Validation skipped %s because the App Store Connect endpoint returned not found", resourceLabel), true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return fmt.Sprintf("Validation skipped %s because the App Store Connect endpoint could not be reached", resourceLabel), true
 	}
 	return "", false
 }

@@ -272,7 +272,7 @@ func TestFetchAllReviewSubmissions_ReturnsPaginationErrors(t *testing.T) {
 				"links": {"next":"`+nextURL+`"}
 			}`)
 		case 2:
-			return reviewSubmissionsSharedJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","detail":"boom"}]}`)
+			return reviewSubmissionsSharedJSONResponse(http.StatusBadRequest, `{"errors":[{"status":"400","detail":"boom"}]}`)
 		default:
 			t.Fatalf("unexpected extra request #%d: %s %s", requestCount, req.Method, req.URL.RequestURI())
 			return nil, nil

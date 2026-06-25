@@ -118,13 +118,11 @@ func (c *Client) CreateSubscriptionPlanAvailability(ctx context.Context, subID s
 		},
 	}
 
-	data, err := c.doRetriedSubscriptionMutation(ctx, func() ([]byte, error) {
-		body, err := BuildRequestBody(payload)
-		if err != nil {
-			return nil, err
-		}
-		return c.do(ctx, http.MethodPost, "/v1/subscriptionPlanAvailabilities", body)
-	})
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionPlanAvailabilities", body)
 	if err != nil {
 		return nil, err
 	}
@@ -161,14 +159,12 @@ func (c *Client) UpdateSubscriptionPlanAvailability(ctx context.Context, planAva
 		},
 	}
 
-	data, err := c.doRetriedSubscriptionMutation(ctx, func() ([]byte, error) {
-		body, err := BuildRequestBody(payload)
-		if err != nil {
-			return nil, err
-		}
-		path := fmt.Sprintf("/v1/subscriptionPlanAvailabilities/%s", planAvailabilityID)
-		return c.do(ctx, http.MethodPatch, path, body)
-	})
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/v1/subscriptionPlanAvailabilities/%s", planAvailabilityID)
+	data, err := c.do(ctx, http.MethodPatch, path, body)
 	if err != nil {
 		return nil, err
 	}

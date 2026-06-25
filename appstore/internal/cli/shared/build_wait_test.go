@@ -475,6 +475,7 @@ func TestWaitForBuildByNumberOrUploadFailureReturnsMalformedUploadRelationships(
 }
 
 func TestVerifyBuildUploadAfterCommitIgnoresRetryableLookupErrorsUntilBuildLinks(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "0")
 	lookupCalls := 0
 	client := newBuildWaitTestClient(t, func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {

@@ -23,6 +23,7 @@ type listCommandFlags struct {
 	buildID         *string
 	buildPreRelease *string
 	tester          *string
+	include         *string
 	sort            *string
 	limit           *int
 	next            *string
@@ -40,6 +41,7 @@ func bindListCommandFlags(fs *flag.FlagSet) listCommandFlags {
 		buildID:         fs.String("build", "", "Filter by build ID(s), comma-separated"),
 		buildPreRelease: fs.String("build-pre-release-version", "", "Filter by pre-release version ID(s), comma-separated"),
 		tester:          fs.String("tester", "", "Filter by tester ID(s), comma-separated"),
+		include:         fs.String("include", "", "Include related resources, comma-separated (build, tester)"),
 		sort:            fs.String("sort", "", "Sort by createdDate or -createdDate"),
 		limit:           fs.Int("limit", 0, "Maximum results per page (1-200)"),
 		next:            fs.String("next", "", "Fetch next page using a links.next URL"),
@@ -92,6 +94,10 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 	if err := shared.ValidateSort(*flags.sort, "createdDate", "-createdDate"); err != nil {
 		return fmt.Errorf("%s: %w", prefix, err)
 	}
+	if err := shared.ValidateInclude(*flags.include, "build", "tester"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n\n", err)
+		return flag.ErrHelp
+	}
 
 	resolvedAppID := shared.ResolveAppID(*flags.appID)
 	if resolvedAppID == "" && strings.TrimSpace(*flags.next) == "" {
@@ -122,6 +128,7 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 		asc.WithCrashBuildIDs(shared.SplitCSV(*flags.buildID)),
 		asc.WithCrashBuildPreReleaseVersionIDs(shared.SplitCSV(*flags.buildPreRelease)),
 		asc.WithCrashTesterIDs(shared.SplitCSV(*flags.tester)),
+		asc.WithCrashInclude(shared.SplitCSV(*flags.include)),
 		asc.WithCrashLimit(*flags.limit),
 		asc.WithCrashNextURL(*flags.next),
 	}

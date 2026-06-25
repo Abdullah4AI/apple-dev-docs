@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +24,7 @@ func TestSubscriptionsReviewScreenshotsCreatePrintsVerifiedScreenshot(t *testing
 	if err != nil {
 		t.Fatalf("stat review screenshot fixture: %v", err)
 	}
+	checksum := reviewScreenshotFileMD5(t, imagePath)
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -31,6 +34,9 @@ func TestSubscriptionsReviewScreenshotsCreatePrintsVerifiedScreenshot(t *testing
 	getRequests := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/appStoreReviewScreenshot":
+			assertSubscriptionReviewScreenshotSparseFields(t, req)
+			return jsonResponse(http.StatusOK, `{"data":null}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots":
 			body := fmt.Sprintf(`{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","fileSize":%d,"uploadOperations":[{"method":"PUT","url":"https://upload.example.com/upload/shot-1","length":%d,"offset":0}]}}}`, imageInfo.Size(), imageInfo.Size())
 			return jsonResponse(http.StatusCreated, body)
@@ -44,7 +50,8 @@ func TestSubscriptionsReviewScreenshotsCreatePrintsVerifiedScreenshot(t *testing
 			return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png"}}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots/shot-1":
 			getRequests++
-			return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","assetDeliveryState":{"state":"COMPLETE"}}}}`)
+			body := fmt.Sprintf(`{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","sourceFileChecksum":%q,"assetDeliveryState":{"state":"COMPLETE"}}}}`, checksum)
+			return jsonResponse(http.StatusOK, body)
 		default:
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
 			return nil, nil
@@ -104,6 +111,7 @@ func TestSubscriptionsReviewScreenshotsCreateFailsWhenDeliveryVerificationFails(
 	if err != nil {
 		t.Fatalf("stat review screenshot fixture: %v", err)
 	}
+	checksum := reviewScreenshotFileMD5(t, imagePath)
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -113,6 +121,9 @@ func TestSubscriptionsReviewScreenshotsCreateFailsWhenDeliveryVerificationFails(
 	getRequests := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/appStoreReviewScreenshot":
+			assertSubscriptionReviewScreenshotSparseFields(t, req)
+			return jsonResponse(http.StatusOK, `{"data":null}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots":
 			body := fmt.Sprintf(`{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","fileSize":%d,"uploadOperations":[{"method":"PUT","url":"https://upload.example.com/upload/shot-1","length":%d,"offset":0}]}}}`, imageInfo.Size(), imageInfo.Size())
 			return jsonResponse(http.StatusCreated, body)
@@ -126,7 +137,8 @@ func TestSubscriptionsReviewScreenshotsCreateFailsWhenDeliveryVerificationFails(
 			return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png"}}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots/shot-1":
 			getRequests++
-			return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","assetDeliveryState":{"state":"FAILED","errors":[{"message":"Virus scan failed"}]}}}}`)
+			body := fmt.Sprintf(`{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"review.png","sourceFileChecksum":%q,"assetDeliveryState":{"state":"FAILED","errors":[{"message":"Virus scan failed"}]}}}}`, checksum)
+			return jsonResponse(http.StatusOK, body)
 		default:
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
 			return nil, nil
@@ -164,4 +176,14 @@ func TestSubscriptionsReviewScreenshotsCreateFailsWhenDeliveryVerificationFails(
 	if getRequests != 1 {
 		t.Fatalf("expected 1 GET request from polling, got %d", getRequests)
 	}
+}
+
+func reviewScreenshotFileMD5(t *testing.T, path string) string {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read review screenshot fixture: %v", err)
+	}
+	sum := md5.Sum(contents)
+	return hex.EncodeToString(sum[:])
 }

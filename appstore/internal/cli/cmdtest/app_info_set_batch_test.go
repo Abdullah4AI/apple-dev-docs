@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
@@ -337,7 +338,7 @@ func TestAppInfoSetBatchApplyCreateWarningsStaySorted(t *testing.T) {
 		http.DefaultTransport = originalTransport
 	})
 
-	createCount := 0
+	var createCount atomic.Int32
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case "/v1/apps/app-1/appStoreVersions":
@@ -348,7 +349,7 @@ func TestAppInfoSetBatchApplyCreateWarningsStaySorted(t *testing.T) {
 			if req.Method != http.MethodPost {
 				t.Fatalf("expected POST for create, got %s", req.Method)
 			}
-			createCount++
+			createCount.Add(1)
 			body := `{"data":{"type":"appStoreVersionLocalizations","id":"loc-created","attributes":{"locale":"created"}}}`
 			return appInfoSetBatchJSONResponse(http.StatusCreated, body), nil
 		default:
@@ -374,8 +375,8 @@ func TestAppInfoSetBatchApplyCreateWarningsStaySorted(t *testing.T) {
 		}
 	})
 
-	if createCount != 2 {
-		t.Fatalf("expected 2 create calls, got %d", createCount)
+	if got := createCount.Load(); got != 2 {
+		t.Fatalf("expected 2 create calls, got %d", got)
 	}
 	firstIdx := strings.Index(stderr, "created locale de-DE now participates in submission validation")
 	secondIdx := strings.Index(stderr, "created locale fr-FR now participates in submission validation")

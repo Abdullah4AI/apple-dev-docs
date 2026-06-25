@@ -3,7 +3,6 @@ package asc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -291,13 +290,11 @@ func (c *Client) SetSubscriptionInitialPrice(ctx context.Context, subID, pricePo
 	}
 
 	path := fmt.Sprintf("/v1/subscriptions/%s", subID)
-	data, err := c.doRetriedSubscriptionMutation(ctx, func() ([]byte, error) {
-		body, err := BuildRequestBody(payload)
-		if err != nil {
-			return nil, err
-		}
-		return c.do(ctx, http.MethodPatch, path, body)
-	})
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.do(ctx, http.MethodPatch, path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -362,13 +359,11 @@ func (c *Client) CreateSubscriptionPrice(ctx context.Context, subID, pricePointI
 		},
 	}
 
-	data, err := c.doRetriedSubscriptionMutation(ctx, func() ([]byte, error) {
-		body, err := BuildRequestBody(payload)
-		if err != nil {
-			return nil, err
-		}
-		return c.do(ctx, http.MethodPost, "/v1/subscriptionPrices", body)
-	})
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionPrices", body)
 	if err != nil {
 		return nil, err
 	}
@@ -379,40 +374,6 @@ func (c *Client) CreateSubscriptionPrice(ctx context.Context, subID, pricePointI
 	}
 
 	return &response, nil
-}
-
-func (c *Client) doRetriedSubscriptionMutation(ctx context.Context, request func() ([]byte, error)) ([]byte, error) {
-	retryOpts := ResolveRetryOptions()
-	return WithRetry(ctx, func() ([]byte, error) {
-		data, err := request()
-		if err != nil {
-			if IsRetryable(err) {
-				return nil, err
-			}
-			if isRetryableSubscriptionMutationError(err) {
-				return nil, &RetryableError{Err: err}
-			}
-			return nil, err
-		}
-		return data, nil
-	}, retryOpts)
-}
-
-func isRetryableSubscriptionMutationError(err error) bool {
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr == nil {
-		return false
-	}
-
-	switch apiErr.StatusCode {
-	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
-		// App Store Connect intermittently returns UNEXPECTED_ERROR on this endpoint.
-		// Retry these transient server-side failures.
-		code := strings.ToUpper(strings.TrimSpace(apiErr.Code))
-		return code == "" || code == "UNEXPECTED_ERROR"
-	default:
-		return false
-	}
 }
 
 // DeleteSubscriptionPrice deletes a subscription price.
@@ -457,13 +418,11 @@ func (c *Client) CreateSubscriptionAvailability(ctx context.Context, subID strin
 		},
 	}
 
-	data, err := c.doRetriedSubscriptionMutation(ctx, func() ([]byte, error) {
-		body, err := BuildRequestBody(payload)
-		if err != nil {
-			return nil, err
-		}
-		return c.do(ctx, http.MethodPost, "/v1/subscriptionAvailabilities", body)
-	})
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionAvailabilities", body)
 	if err != nil {
 		return nil, err
 	}
@@ -554,13 +513,20 @@ func (c *Client) GetSubscriptionAvailabilityAvailableTerritories(ctx context.Con
 }
 
 // GetSubscriptionAppStoreReviewScreenshotForSubscription retrieves the review screenshot for a subscription.
-func (c *Client) GetSubscriptionAppStoreReviewScreenshotForSubscription(ctx context.Context, subID string) (*SubscriptionAppStoreReviewScreenshotResponse, error) {
+func (c *Client) GetSubscriptionAppStoreReviewScreenshotForSubscription(ctx context.Context, subID string, opts ...SubscriptionAppStoreReviewScreenshotOption) (*SubscriptionAppStoreReviewScreenshotResponse, error) {
 	subID = strings.TrimSpace(subID)
 	if subID == "" {
 		return nil, fmt.Errorf("subscription ID is required")
 	}
 
+	query := &subscriptionAppStoreReviewScreenshotQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/subscriptions/%s/appStoreReviewScreenshot", subID)
+	if queryString := buildSubscriptionAppStoreReviewScreenshotQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err

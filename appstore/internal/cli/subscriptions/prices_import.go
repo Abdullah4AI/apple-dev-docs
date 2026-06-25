@@ -1,13 +1,16 @@
 package subscriptions
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,16 +27,21 @@ import (
 )
 
 type subscriptionPriceImportSummary struct {
-	SubscriptionID  string                                `json:"subscriptionId"`
-	InputFile       string                                `json:"inputFile"`
-	DryRun          bool                                  `json:"dryRun"`
-	ContinueOnError bool                                  `json:"continueOnError"`
-	DefaultStart    string                                `json:"defaultStartDate,omitempty"`
-	DefaultPreserve bool                                  `json:"defaultPreserved"`
-	Total           int                                   `json:"total"`
-	Created         int                                   `json:"created"`
-	Failed          int                                   `json:"failed"`
-	Failures        []subscriptionPriceImportSummaryError `json:"failures,omitempty"`
+	SubscriptionID       string                                `json:"subscriptionId"`
+	InputFile            string                                `json:"inputFile"`
+	DryRun               bool                                  `json:"dryRun"`
+	ContinueOnError      bool                                  `json:"continueOnError"`
+	DefaultStart         string                                `json:"defaultStartDate,omitempty"`
+	DefaultPreserve      bool                                  `json:"defaultPreserved"`
+	Total                int                                   `json:"total"`
+	Created              int                                   `json:"created"`
+	Skipped              int                                   `json:"skipped,omitempty"`
+	Reconciled           int                                   `json:"reconciled,omitempty"`
+	Failed               int                                   `json:"failed"`
+	Failures             []subscriptionPriceImportSummaryError `json:"failures,omitempty"`
+	FailureArtifact      string                                `json:"failureArtifactPath,omitempty"`
+	FailureArtifactError string                                `json:"failureArtifactError,omitempty"`
+	Results              []subscriptionPriceImportResultItem   `json:"results,omitempty"`
 }
 
 type subscriptionPriceImportSummaryError struct {
@@ -41,6 +49,29 @@ type subscriptionPriceImportSummaryError struct {
 	Territory string `json:"territory,omitempty"`
 	Price     string `json:"price,omitempty"`
 	Error     string `json:"error"`
+}
+
+type subscriptionPriceImportResultItem struct {
+	Row                  int    `json:"row"`
+	Territory            string `json:"territory,omitempty"`
+	Price                string `json:"price,omitempty"`
+	PricePointID         string `json:"pricePointId,omitempty"`
+	StartDate            string `json:"startDate,omitempty"`
+	PreserveCurrentPrice bool   `json:"preserveCurrentPrice"`
+	PreserveCurrentSet   bool   `json:"preserveCurrentPriceSet"`
+	PlanType             string `json:"planType"`
+	Status               string `json:"status"`
+	Error                string `json:"error,omitempty"`
+}
+
+type subscriptionPriceImportFailureArtifact struct {
+	SchemaVersion  int                                 `json:"schemaVersion"`
+	Command        string                              `json:"command"`
+	SubscriptionID string                              `json:"subscriptionId"`
+	InputFile      string                              `json:"inputFile"`
+	Failed         int                                 `json:"failed"`
+	GeneratedAt    string                              `json:"generatedAt"`
+	Results        []subscriptionPriceImportResultItem `json:"results"`
 }
 
 type subscriptionPriceImportCSVRow struct {
@@ -63,11 +94,25 @@ type subscriptionPriceImportResolvedRow struct {
 	preserveSet          bool
 	preserveCurrentPrice bool
 	pricePointID         string
+	planType             asc.SubscriptionPlanType
 }
 
 type subscriptionPricePointLookupCache struct {
 	mu          sync.Mutex
 	byTerritory map[string]map[string][]string
+}
+
+type subscriptionPriceImportState struct {
+	territoryID          string
+	pricePointID         string
+	startDate            string
+	preserveCurrentPrice bool
+	planType             asc.SubscriptionPlanType
+}
+
+type subscriptionPriceImportStateIndex struct {
+	now    time.Time
+	states []subscriptionPriceImportState
 }
 
 var subscriptionPricesImportKnownColumns = map[string]string{
@@ -162,15 +207,22 @@ Examples:
 				Total:           len(rows),
 			}
 
-			resolveCtx, resolveCancel := shared.ContextWithTimeout(ctx)
-			summary.SubscriptionID, err = resolveSubscriptionLookupID(resolveCtx, client, *appID, summary.SubscriptionID)
-			resolveCancel()
+			summary.SubscriptionID, err = shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (string, error) {
+				return resolveSubscriptionLookupID(requestCtx, client, *appID, summary.SubscriptionID)
+			})
 			if err != nil {
 				return err
 			}
 
 			lookupCache := &subscriptionPricePointLookupCache{
 				byTerritory: make(map[string]map[string][]string),
+			}
+			var stateIndex *subscriptionPriceImportStateIndex
+			if !*dryRun {
+				stateIndex, err = fetchSubscriptionPriceImportState(ctx, client, summary.SubscriptionID)
+				if err != nil {
+					return fmt.Errorf("subscriptions prices import: fetch existing prices: %w", err)
+				}
 			}
 
 			for _, csvRow := range rows {
@@ -197,19 +249,47 @@ Examples:
 
 				if *dryRun {
 					summary.Created++
+					summary.Results = append(summary.Results, subscriptionPriceImportResultItem{
+						Row:                  resolvedRow.row,
+						Territory:            resolvedRow.territoryID,
+						Price:                resolvedRow.price,
+						PricePointID:         pricePointID,
+						StartDate:            resolvedRow.startDate,
+						PreserveCurrentPrice: resolvedRow.preserveCurrentPrice,
+						PreserveCurrentSet:   resolvedRow.preserveSet,
+						PlanType:             string(resolvedRow.planType),
+						Status:               "planned",
+					})
 					continue
 				}
 
 				attrs := asc.SubscriptionPriceCreateAttributes{
 					StartDate: resolvedRow.startDate,
+					PlanType:  resolvedRow.planType,
 				}
 				if resolvedRow.preserveSet {
 					attrs.Preserved = &resolvedRow.preserveCurrentPrice
 				}
 
-				createCtx, createCancel := shared.ContextWithTimeout(ctx)
-				_, rowErr = client.CreateSubscriptionPrice(createCtx, summary.SubscriptionID, pricePointID, resolvedRow.territoryID, attrs)
-				createCancel()
+				resolvedRow.pricePointID = pricePointID
+				status := reconciledMutationSkipped
+				if !stateIndex.matches(resolvedRow) {
+					status, rowErr = runReconciledMutation(
+						ctx,
+						func(readbackCtx context.Context) (bool, error) {
+							refreshed, err := fetchSubscriptionPriceImportState(readbackCtx, client, summary.SubscriptionID)
+							if err != nil {
+								return false, err
+							}
+							stateIndex = refreshed
+							return stateIndex.matches(resolvedRow), nil
+						},
+						func(mutationCtx context.Context) error {
+							_, err := client.CreateSubscriptionPrice(mutationCtx, summary.SubscriptionID, pricePointID, resolvedRow.territoryID, attrs)
+							return err
+						},
+					)
+				}
 				if rowErr != nil {
 					appendSubscriptionPriceImportFailure(summary, resolvedRow, rowErr)
 					if !*continueOnError {
@@ -218,7 +298,38 @@ Examples:
 					continue
 				}
 
-				summary.Created++
+				result := subscriptionPriceImportResultItem{
+					Row:                  resolvedRow.row,
+					Territory:            resolvedRow.territoryID,
+					Price:                resolvedRow.price,
+					PricePointID:         pricePointID,
+					StartDate:            resolvedRow.startDate,
+					PreserveCurrentPrice: resolvedRow.preserveCurrentPrice,
+					PreserveCurrentSet:   resolvedRow.preserveSet,
+					PlanType:             string(resolvedRow.planType),
+					Status:               string(status),
+				}
+				summary.Results = append(summary.Results, result)
+				if status != reconciledMutationSkipped {
+					stateIndex.add(resolvedRow)
+				}
+				switch status {
+				case reconciledMutationCreated:
+					summary.Created++
+				case reconciledMutationSkipped:
+					summary.Skipped++
+				case reconciledMutationReconciled:
+					summary.Reconciled++
+				}
+			}
+
+			if summary.Failed > 0 {
+				artifactPath, artifactErr := writeSubscriptionPriceImportFailureArtifact(summary)
+				if artifactErr != nil {
+					summary.FailureArtifactError = artifactErr.Error()
+				} else {
+					summary.FailureArtifact = artifactPath
+				}
 			}
 
 			if err := shared.PrintOutputWithRenderers(
@@ -232,7 +343,11 @@ Examples:
 			}
 
 			if summary.Failed > 0 {
-				return shared.NewReportedError(fmt.Errorf("subscriptions prices import: %d row(s) failed", summary.Failed))
+				rowErr := fmt.Errorf("subscriptions prices import: %d row(s) failed", summary.Failed)
+				if summary.FailureArtifactError != "" {
+					rowErr = errors.Join(rowErr, fmt.Errorf("write failure artifact: %s", summary.FailureArtifactError))
+				}
+				return shared.NewReportedError(rowErr)
 			}
 			return nil
 		},
@@ -250,14 +365,18 @@ func renderSubscriptionPriceImportSummaryTables(summary *subscriptionPriceImport
 	}
 
 	render(
-		[]string{"Subscription ID", "Input File", "Dry Run", "Total", "Created", "Failed"},
+		[]string{"Subscription ID", "Input File", "Dry Run", "Total", "Created", "Skipped", "Reconciled", "Failed", "Failure Artifact", "Failure Artifact Error"},
 		[][]string{{
 			summary.SubscriptionID,
 			summary.InputFile,
 			fmt.Sprintf("%t", summary.DryRun),
 			fmt.Sprintf("%d", summary.Total),
 			fmt.Sprintf("%d", summary.Created),
+			fmt.Sprintf("%d", summary.Skipped),
+			fmt.Sprintf("%d", summary.Reconciled),
 			fmt.Sprintf("%d", summary.Failed),
+			summary.FailureArtifact,
+			summary.FailureArtifactError,
 		}},
 	)
 
@@ -288,6 +407,165 @@ func appendSubscriptionPriceImportFailure(summary *subscriptionPriceImportSummar
 		Price:     row.price,
 		Error:     err.Error(),
 	})
+	summary.Results = append(summary.Results, subscriptionPriceImportResultItem{
+		Row:                  row.row,
+		Territory:            row.territoryID,
+		Price:                row.price,
+		PricePointID:         row.pricePointID,
+		StartDate:            row.startDate,
+		PreserveCurrentPrice: row.preserveCurrentPrice,
+		PreserveCurrentSet:   row.preserveSet,
+		PlanType:             string(row.planType),
+		Status:               "failed",
+		Error:                err.Error(),
+	})
+}
+
+func fetchSubscriptionPriceImportState(ctx context.Context, client *asc.Client, subscriptionID string) (*subscriptionPriceImportStateIndex, error) {
+	query := url.Values{
+		"fields[subscriptionPrices]": []string{"startDate,preserved,planType,territory,subscriptionPricePoint"},
+		"filter[planType]":           []string{string(asc.SubscriptionPlanTypeUpfront)},
+		"include":                    []string{"territory,subscriptionPricePoint"},
+		"limit":                      []string{"200"},
+	}
+	fetchPage := func(nextURL string) (*asc.SubscriptionPricesResponse, error) {
+		if nextURL != "" {
+			mergedNext, err := mergeSubscriptionPricesNextQuery(nextURL, query)
+			if err != nil {
+				return nil, err
+			}
+			return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricesResponse, error) {
+				return client.GetSubscriptionPrices(requestCtx, subscriptionID, asc.WithSubscriptionPricesNextURL(mergedNext))
+			})
+		}
+		return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricesResponse, error) {
+			return client.GetSubscriptionPrices(
+				requestCtx,
+				subscriptionID,
+				asc.WithSubscriptionPricesLimit(200),
+				asc.WithSubscriptionPricesPlanType(asc.SubscriptionPlanTypeUpfront),
+				asc.WithSubscriptionPricesFields([]string{"startDate", "preserved", "planType", "territory", "subscriptionPricePoint"}),
+				asc.WithSubscriptionPricesInclude([]string{"territory", "subscriptionPricePoint"}),
+			)
+		})
+	}
+
+	firstPage, err := fetchPage("")
+	if err != nil {
+		return nil, err
+	}
+	index := &subscriptionPriceImportStateIndex{}
+	err = asc.PaginateEach(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return fetchPage(nextURL)
+	}, func(page asc.PaginatedResponse) error {
+		prices, ok := page.(*asc.SubscriptionPricesResponse)
+		if !ok {
+			return fmt.Errorf("unexpected subscription prices response type %T", page)
+		}
+		for _, price := range prices.Data {
+			index.states = append(index.states, subscriptionPriceImportState{
+				territoryID:          strings.ToUpper(strings.TrimSpace(extractSubscriptionPriceRelationshipID(price, "territory"))),
+				pricePointID:         strings.TrimSpace(extractSubscriptionPriceRelationshipID(price, "subscriptionPricePoint")),
+				startDate:            strings.TrimSpace(price.Attributes.StartDate),
+				preserveCurrentPrice: price.Attributes.Preserved,
+				planType:             price.Attributes.PlanType,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	index.now = subscriptionImportNow()
+	return index, nil
+}
+
+func (index *subscriptionPriceImportStateIndex) matches(target subscriptionPriceImportResolvedRow) bool {
+	if index == nil {
+		return false
+	}
+	targetTerritory := strings.ToUpper(strings.TrimSpace(target.territoryID))
+	targetStart := strings.TrimSpace(target.startDate)
+	if targetStart != "" {
+		for _, state := range index.states {
+			if state.territoryID == targetTerritory &&
+				state.planType == target.planType &&
+				state.pricePointID == target.pricePointID &&
+				state.startDate == targetStart {
+				return true
+			}
+		}
+		return false
+	}
+
+	asOf := dateOnlyUTC(index.now)
+	var selected *subscriptionPriceImportState
+	selectedStart := time.Time{}
+	for _, state := range index.states {
+		if state.territoryID != targetTerritory ||
+			state.planType != target.planType {
+			continue
+		}
+		start := time.Time{}
+		if state.startDate != "" {
+			parsed, err := time.Parse(equalizeDateLayout, state.startDate)
+			if err != nil || parsed.After(asOf) {
+				continue
+			}
+			start = parsed
+		}
+		if selected == nil || start.After(selectedStart) ||
+			(start.Equal(selectedStart) && selected.preserveCurrentPrice && !state.preserveCurrentPrice) {
+			candidate := state
+			selected = &candidate
+			selectedStart = start
+		}
+	}
+	return selected != nil && selected.pricePointID == target.pricePointID
+}
+
+func (index *subscriptionPriceImportStateIndex) add(target subscriptionPriceImportResolvedRow) {
+	if index == nil {
+		return
+	}
+	startDate := strings.TrimSpace(target.startDate)
+	if startDate == "" {
+		startDate = dateOnlyUTC(index.now).Format(equalizeDateLayout)
+	}
+	index.states = append(index.states, subscriptionPriceImportState{
+		territoryID:          strings.ToUpper(strings.TrimSpace(target.territoryID)),
+		pricePointID:         strings.TrimSpace(target.pricePointID),
+		startDate:            startDate,
+		preserveCurrentPrice: target.preserveCurrentPrice,
+		planType:             target.planType,
+	})
+}
+
+func writeSubscriptionPriceImportFailureArtifact(summary *subscriptionPriceImportSummary) (string, error) {
+	failures := make([]subscriptionPriceImportResultItem, 0, summary.Failed)
+	for _, result := range summary.Results {
+		if result.Status == "failed" {
+			failures = append(failures, result)
+		}
+	}
+	artifact := subscriptionPriceImportFailureArtifact{
+		SchemaVersion:  1,
+		Command:        "subscriptions pricing prices import",
+		SubscriptionID: summary.SubscriptionID,
+		InputFile:      summary.InputFile,
+		Failed:         summary.Failed,
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		Results:        failures,
+	}
+	data, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(".asc", "reports", "subscription-prices-import", fmt.Sprintf("failures-%d.json", time.Now().UTC().UnixNano()))
+	if _, err := shared.WriteStreamToFile(path, bytes.NewReader(data)); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func readSubscriptionPricesImportCSV(path string) ([]subscriptionPriceImportCSVRow, error) {
@@ -429,6 +707,7 @@ func resolveSubscriptionPriceImportRow(
 		preserveSet:          row.preserveSet,
 		preserveCurrentPrice: row.preserveCurrentPrice,
 		pricePointID:         strings.TrimSpace(row.pricePointID),
+		planType:             asc.SubscriptionPlanTypeUpfront,
 	}
 
 	if resolved.startDate == "" {
@@ -495,24 +774,34 @@ func fetchSubscriptionPricePointsByTerritory(
 	territoryID string,
 ) (map[string][]string, error) {
 	priceByAmount := make(map[string][]string)
+	query := url.Values{
+		"fields[subscriptionPricePoints]": []string{"customerPrice"},
+		"filter[territory]":               []string{strings.ToUpper(strings.TrimSpace(territoryID))},
+		"limit":                           []string{"200"},
+	}
 	fetchPage := func(nextURL string) (*asc.SubscriptionPricePointsResponse, error) {
-		pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-		defer pageCancel()
-
 		if nextURL == "" {
-			return client.GetSubscriptionPricePoints(
-				pageCtx,
-				subscriptionID,
-				asc.WithSubscriptionPricePointsTerritory(territoryID),
-				asc.WithSubscriptionPricePointsLimit(200),
-			)
-		} else {
-			return client.GetSubscriptionPricePoints(
-				pageCtx,
-				subscriptionID,
-				asc.WithSubscriptionPricePointsNextURL(nextURL),
-			)
+			return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricePointsResponse, error) {
+				return client.GetSubscriptionPricePoints(
+					requestCtx,
+					subscriptionID,
+					asc.WithSubscriptionPricePointsTerritory(territoryID),
+					asc.WithSubscriptionPricePointsFields([]string{"customerPrice"}),
+					asc.WithSubscriptionPricePointsLimit(200),
+				)
+			})
 		}
+		mergedNext, err := mergeSubscriptionPricesNextQuery(nextURL, query)
+		if err != nil {
+			return nil, err
+		}
+		return shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionPricePointsResponse, error) {
+			return client.GetSubscriptionPricePoints(
+				requestCtx,
+				subscriptionID,
+				asc.WithSubscriptionPricePointsNextURL(mergedNext),
+			)
+		})
 	}
 
 	firstPage, err := fetchPage("")

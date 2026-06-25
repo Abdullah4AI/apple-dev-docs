@@ -7,9 +7,51 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+func TestSubscriptionsPricingPricesListResolvedUsesFreshDeadlinePerPage(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_TIMEOUT", "100ms")
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	requestCount := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if requestCount == 1 {
+			time.Sleep(60 * time.Millisecond)
+			return jsonResponse(http.StatusOK, `{"data":[],"links":{"next":"/v1/subscriptions/8000000001/prices?cursor=next"}}`)
+		}
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) < 70*time.Millisecond {
+			t.Fatalf("expected fresh second-page deadline, remaining=%s", time.Until(deadline))
+		}
+		return jsonResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`)
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "pricing", "prices", "list",
+			"--subscription-id", "8000000001",
+			"--resolved",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected two page requests, got %d; stdout=%q", requestCount, stdout)
+	}
+}
 
 func TestSubscriptionsPricingPricesListResolvedJSON(t *testing.T) {
 	setupAuth(t)

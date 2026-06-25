@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -41,6 +42,7 @@ type subscriptionIntroductoryOfferImportResolvedRow struct {
 	startDate       string
 	endDate         string
 	pricePointID    string
+	planType        asc.SubscriptionPlanType
 }
 
 var subscriptionIntroductoryOffersImportKnownColumns = map[string]string{
@@ -285,6 +287,7 @@ func resolveSubscriptionIntroductoryOfferImportRows(
 			startDate:       startDate,
 			endDate:         endDate,
 			pricePointID:    row.pricePointID,
+			planType:        asc.SubscriptionPlanTypeUpfront,
 		})
 	}
 	return resolved, nil

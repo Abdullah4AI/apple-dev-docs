@@ -372,6 +372,9 @@ func TestPublishTestFlightLocalBuildTableIncludesArchiveAndExportSections(t *tes
 		http.DefaultTransport = originalTransport
 	})
 	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if err := req.Context().Err(); err != nil {
+			t.Fatalf("expected healthy post-upload request context, got %v", err)
+		}
 		switch req.URL.Path {
 		case "/v1/apps/app-123/betaGroups":
 			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"group-1","isInternalGroup":false}}]}`)
@@ -854,6 +857,7 @@ func TestPublishAppStoreLocalBuildRequiresExportOptionsWhenDefaultMissing(t *tes
 func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *testing.T) {
 	restore := overridePublishCommandTestHooks(t)
 	defer restore()
+	t.Setenv("ASC_TIMEOUT", "500ms")
 
 	metadataDir := t.TempDir()
 	writePublishVersionMetadataFixture(t, metadataDir, "1.2.3")
@@ -866,7 +870,12 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
 		return newPublishTestFileInfo(t)
 	}
-	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+	uploadBuildAndWaitForIDFn = func(stageCtx context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		_, ok := stageCtx.Deadline()
+		if !ok {
+			t.Fatal("expected upload stage deadline")
+		}
+		time.Sleep(550 * time.Millisecond)
 		return &publishUploadResult{
 			Build: &asc.BuildResponse{
 				Data: asc.Resource[asc.BuildAttributes]{
@@ -878,8 +887,14 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 			BuildNumber: buildNumber,
 		}, nil
 	}
-	applyPublishVersionMetadataFn = func(_ context.Context, _ *asc.Client, opts publishVersionMetadataOptions) ([]asc.LocalizationUploadLocaleResult, error) {
+	applyPublishVersionMetadataFn = func(metadataCtx context.Context, _ *asc.Client, opts publishVersionMetadataOptions) ([]asc.LocalizationUploadLocaleResult, error) {
 		sequence = append(sequence, "apply_metadata")
+		if _, ok := metadataCtx.Deadline(); ok {
+			t.Fatal("metadata batch should receive the healthy command parent without a batch-wide request deadline")
+		}
+		if err := metadataCtx.Err(); err != nil {
+			t.Fatalf("expected healthy metadata parent context: %v", err)
+		}
 		if opts.VersionID != "version-1" {
 			t.Fatalf("expected metadata version ID version-1, got %q", opts.VersionID)
 		}
@@ -892,6 +907,7 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 		if got := opts.ValuesByLocale["en-US"]["description"]; got != "Updated description" {
 			t.Fatalf("expected preflighted metadata values, got %+v", opts.ValuesByLocale)
 		}
+		time.Sleep(550 * time.Millisecond)
 		return nil, nil
 	}
 
@@ -901,12 +917,25 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/appStoreVersions":
 			sequence = append(sequence, "ensure_version")
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 350*time.Millisecond {
+				t.Fatalf("expected fresh post-upload stage deadline, remaining=%s", time.Until(deadline))
+			}
 			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
 			sequence = append(sequence, "lookup_build")
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 350*time.Millisecond {
+				t.Fatalf("expected fresh post-metadata stage deadline, remaining=%s", time.Until(deadline))
+			}
+			time.Sleep(450 * time.Millisecond)
 			return publishCommandJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appStoreVersions/version-1/relationships/build":
 			sequence = append(sequence, "attach_build")
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 350*time.Millisecond {
+				t.Fatalf("expected fresh attach deadline, remaining=%s", time.Until(deadline))
+			}
 			return publishCommandJSONResponse(http.StatusNoContent, "")
 		default:
 			t.Fatalf("unexpected request: %s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
@@ -922,6 +951,7 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 		"--version", "1.2.3",
 		"--build-number", "42",
 		"--metadata-dir", metadataDir,
+		"--timeout", "500ms",
 		"--output", "json",
 	}); err != nil {
 		t.Fatalf("parse flags: %v", err)
@@ -942,6 +972,163 @@ func TestPublishAppStoreMetadataDirAppliesAfterEnsureVersionBeforeAttach(t *test
 	wantSequence := strings.Join([]string{"ensure_version", "apply_metadata", "lookup_build", "attach_build"}, ",")
 	if gotSequence := strings.Join(sequence, ","); gotSequence != wantSequence {
 		t.Fatalf("expected sequence %s, got %s", wantSequence, gotSequence)
+	}
+}
+
+func TestPublishAppStoreMetadataInputFailureUsesUsageExit(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	metadataDir := t.TempDir()
+	writePublishVersionMetadataFixture(t, metadataDir, "1.2.3")
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+			t.Fatalf("unexpected input validation request: %s %s", req.Method, req.URL.Path)
+		}
+		return publishCommandJSONResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`)
+	})
+	inputClient := newPublishCommandTestClient(t)
+	_, _, inputErr := shared.UploadVersionLocalizationsWithWarnings(
+		context.Background(),
+		inputClient,
+		"version-1",
+		map[string]map[string]string{"en-US": {"promotionalText": ""}},
+		false,
+		shared.SubmitReadinessOptions{},
+	)
+	if inputErr == nil || !shared.IsLocalizationInputError(inputErr) {
+		t.Fatalf("failed to construct localization input error: %v", inputErr)
+	}
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, appID string) (string, error) {
+		return appID, nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+				ID:         "build-42",
+				Attributes: asc.BuildAttributes{Version: buildNumber},
+			}},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+	applyPublishVersionMetadataFn = func(context.Context, *asc.Client, publishVersionMetadataOptions) ([]asc.LocalizationUploadLocaleResult, error) {
+		return nil, inputErr
+	}
+
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/appStoreVersions" {
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`)
+		}
+		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	cmd := PublishAppStoreCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-1",
+		"--ipa", "app.ipa",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--metadata-dir", metadataDir,
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected usage error, got %T: %v", runErr, runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected no stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, `Error: --metadata-dir "`+metadataDir+`"`) || strings.Contains(stderr, "0 locale(s) failed") {
+		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+}
+
+func TestPublishAppStoreRefreshesVersionContextAfterProcessingWait(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+	t.Setenv("ASC_TIMEOUT", "500ms")
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, appID string) (string, error) {
+		return appID, nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+				ID:         "build-42",
+				Attributes: asc.BuildAttributes{Version: buildNumber},
+			}},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+	waitForPublishBuildProcessingFn = func(waitCtx context.Context, _ *asc.Client, _ string, _ time.Duration) (*asc.BuildResponse, error) {
+		if _, ok := waitCtx.Deadline(); !ok {
+			t.Fatal("expected processing wait stage deadline")
+		}
+		time.Sleep(550 * time.Millisecond)
+		return &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+			ID:         "build-42",
+			Attributes: asc.BuildAttributes{Version: "42"},
+		}}, nil
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/appStoreVersions":
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 350*time.Millisecond {
+				t.Fatalf("expected fresh post-wait version deadline, remaining=%s", time.Until(deadline))
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
+			return publishCommandJSONResponse(http.StatusOK, `{"data":{"type":"builds","id":"build-42","attributes":{"version":"42"}}}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	cmd := PublishAppStoreCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-1",
+		"--ipa", "app.ipa",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--wait",
+		"--timeout", "500ms",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	stdout, stderr := capturePublishCommandOutput(t, func() error {
+		return cmd.Exec(context.Background(), nil)
+	})
+	if stderr != "" || !strings.Contains(stdout, `"attached":true`) {
+		t.Fatalf("unexpected publish result: stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 

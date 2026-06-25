@@ -264,7 +264,8 @@ func (r *webhookServeRuntime) newHandler() http.Handler {
 }
 
 func (r *webhookServeRuntime) startWorkers(_ context.Context) {
-	if r.eventQueue == nil {
+	eventQueue := r.eventQueue
+	if eventQueue == nil {
 		return
 	}
 
@@ -274,12 +275,12 @@ func (r *webhookServeRuntime) startWorkers(_ context.Context) {
 	}
 	r.workersWG.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
-		go func() {
+		go func(queue <-chan webhookServeEvent) {
 			defer r.workersWG.Done()
-			for event := range r.eventQueue {
+			for event := range queue {
 				r.processEvent(event)
 			}
-		}()
+		}(eventQueue)
 	}
 }
 

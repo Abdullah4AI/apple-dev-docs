@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,18 @@ func TestWebhooksServeAllowsNonLoopbackWithAllowRemote(t *testing.T) {
 	if statusCode != http.StatusAccepted {
 		t.Fatalf("expected status %d, got %d", http.StatusAccepted, statusCode)
 	}
+}
+
+func TestWebhookServeRuntimeStopsWorkersImmediatelyAfterStart(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+
+	serveRuntime := &webhookServeRuntime{
+		eventQueue:  make(chan webhookServeEvent),
+		workerCount: webhooksServeDefaultWorkerCount,
+	}
+	serveRuntime.startWorkers(context.Background())
+	serveRuntime.stopWorkers()
 }
 
 func TestReadWebhookServeJSONPayloadAllowsMaxInt64Limit(t *testing.T) {

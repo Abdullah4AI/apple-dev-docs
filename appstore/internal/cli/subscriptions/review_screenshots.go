@@ -105,6 +105,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageErrorf("subscriptions review screenshots create does not accept positional arguments: %s", strings.Join(args, " "))
+			}
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
@@ -116,12 +119,19 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
 				return flag.ErrHelp
 			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return shared.UsageError(err.Error())
+			}
 
 			file, info, err := openSubscriptionImageFile(pathValue)
 			if err != nil {
 				return fmt.Errorf("subscriptions review-screenshots create: %w", err)
 			}
 			defer file.Close()
+			checksum, err := asc.ComputeFileChecksum(pathValue, asc.ChecksumAlgorithmMD5)
+			if err != nil {
+				return fmt.Errorf("subscriptions review-screenshots create: checksum failed: %w", err)
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -133,43 +143,9 @@ Examples:
 				return err
 			}
 
-			requestCtx, cancel := shared.ContextWithUploadTimeout(ctx)
-			defer cancel()
-
-			resp, err := client.CreateSubscriptionAppStoreReviewScreenshot(requestCtx, id, info.Name(), info.Size())
+			finalResp, err := createOrResumeSubscriptionReviewScreenshot(ctx, client, id, pathValue, info, checksum.Hash)
 			if err != nil {
-				return fmt.Errorf("subscriptions review-screenshots create: failed to create: %w", err)
-			}
-			if resp == nil || len(resp.Data.Attributes.UploadOperations) == 0 {
-				return fmt.Errorf("subscriptions review-screenshots create: no upload operations returned")
-			}
-
-			if err := asc.UploadAssetFromFile(requestCtx, file, info.Size(), resp.Data.Attributes.UploadOperations); err != nil {
-				return fmt.Errorf("subscriptions review-screenshots create: upload failed: %w", err)
-			}
-
-			checksum, err := asc.ComputeFileChecksum(pathValue, asc.ChecksumAlgorithmMD5)
-			if err != nil {
-				return fmt.Errorf("subscriptions review-screenshots create: checksum failed: %w", err)
-			}
-
-			uploaded := true
-			updateAttrs := asc.SubscriptionAppStoreReviewScreenshotUpdateAttributes{
-				SourceFileChecksum: &checksum.Hash,
-				Uploaded:           &uploaded,
-			}
-
-			if _, err := client.UpdateSubscriptionAppStoreReviewScreenshot(requestCtx, resp.Data.ID, updateAttrs); err != nil {
-				return fmt.Errorf("subscriptions review-screenshots create: failed to commit upload: %w", err)
-			}
-
-			// Verify asset delivery — poll until COMPLETE or FAILED
-			screenshotID := resp.Data.ID
-			verifyCtx, verifyCancel := shared.ContextWithUploadTimeout(ctx)
-			defer verifyCancel()
-			finalResp, verifyErr := waitForSubscriptionReviewScreenshotDelivery(verifyCtx, client, screenshotID)
-			if verifyErr != nil {
-				return fmt.Errorf("subscriptions review-screenshots create: %w", verifyErr)
+				return fmt.Errorf("subscriptions review-screenshots create: %w", err)
 			}
 
 			return shared.PrintOutput(finalResp, *output.Output, *output.Pretty)
@@ -286,10 +262,12 @@ Examples:
 
 // waitForSubscriptionReviewScreenshotDelivery polls until the screenshot reaches
 // a terminal delivery state and returns the successful response for output.
-func waitForSubscriptionReviewScreenshotDelivery(ctx context.Context, client *asc.Client, screenshotID string) (*asc.SubscriptionAppStoreReviewScreenshotResponse, error) {
+func waitForSubscriptionReviewScreenshotDelivery(ctx context.Context, client *asc.Client, screenshotID, expectedChecksum string) (*asc.SubscriptionAppStoreReviewScreenshotResponse, error) {
 	var verifiedResp *asc.SubscriptionAppStoreReviewScreenshotResponse
 	_, err := asc.PollUntil(ctx, reviewScreenshotPollInterval, func(ctx context.Context) (struct{}, bool, error) {
-		resp, err := client.GetSubscriptionAppStoreReviewScreenshot(ctx, screenshotID)
+		resp, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.SubscriptionAppStoreReviewScreenshotResponse, error) {
+			return client.GetSubscriptionAppStoreReviewScreenshot(requestCtx, screenshotID)
+		})
 		if err != nil {
 			return struct{}{}, false, err
 		}
@@ -297,6 +275,10 @@ func waitForSubscriptionReviewScreenshotDelivery(ctx context.Context, client *as
 		if state != nil && state.State != nil {
 			switch strings.ToUpper(*state.State) {
 			case "COMPLETE":
+				actualChecksum := strings.TrimSpace(resp.Data.Attributes.SourceFileChecksum)
+				if !strings.EqualFold(actualChecksum, strings.TrimSpace(expectedChecksum)) {
+					return struct{}{}, false, fmt.Errorf("screenshot %s checksum changed while waiting for delivery", screenshotID)
+				}
 				verifiedResp = resp
 				return struct{}{}, true, nil
 			case "FAILED":

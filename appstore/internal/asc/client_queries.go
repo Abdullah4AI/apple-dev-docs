@@ -3,6 +3,7 @@ package asc
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -22,6 +23,7 @@ type feedbackQuery struct {
 	buildPreReleaseVersionIDs []string
 	testerIDs                 []string
 	sort                      string
+	include                   []string
 	includeScreenshots        bool
 }
 
@@ -35,6 +37,7 @@ type crashQuery struct {
 	buildPreReleaseVersionIDs []string
 	testerIDs                 []string
 	sort                      string
+	include                   []string
 }
 
 type reviewQuery struct {
@@ -762,7 +765,7 @@ func buildNominationsDetailQuery(query *nominationsQuery) string {
 func buildFeedbackQuery(query *feedbackQuery) string {
 	values := url.Values{}
 	if query.includeScreenshots {
-		values.Set("fields[betaFeedbackScreenshotSubmissions]", strings.Join([]string{
+		fields := []string{
 			"createdDate",
 			"comment",
 			"email",
@@ -771,7 +774,18 @@ func buildFeedbackQuery(query *feedbackQuery) string {
 			"appPlatform",
 			"devicePlatform",
 			"screenshots",
-		}, ","))
+		}
+		// A sparse fieldset omits any field not listed, including relationship
+		// fields. If the caller also requested relationships via include, those
+		// relationship names must be present here or ASC will not return the
+		// linked resources. `build`/`tester` are valid screenshot submission
+		// fields, so append whatever was included.
+		for _, rel := range normalizeList(query.include) {
+			if !slices.Contains(fields, rel) {
+				fields = append(fields, rel)
+			}
+		}
+		values.Set("fields[betaFeedbackScreenshotSubmissions]", strings.Join(fields, ","))
 	}
 	addCSV(values, "filter[deviceModel]", query.deviceModels)
 	addCSV(values, "filter[osVersion]", query.osVersions)
@@ -780,6 +794,7 @@ func buildFeedbackQuery(query *feedbackQuery) string {
 	addCSV(values, "filter[build]", query.buildIDs)
 	addCSV(values, "filter[build.preReleaseVersion]", query.buildPreReleaseVersionIDs)
 	addCSV(values, "filter[tester]", query.testerIDs)
+	addBetaSubmissionInclude(values, query.include)
 	if query.sort != "" {
 		values.Set("sort", query.sort)
 	}
@@ -796,11 +811,27 @@ func buildCrashQuery(query *crashQuery) string {
 	addCSV(values, "filter[build]", query.buildIDs)
 	addCSV(values, "filter[build.preReleaseVersion]", query.buildPreReleaseVersionIDs)
 	addCSV(values, "filter[tester]", query.testerIDs)
+	addBetaSubmissionInclude(values, query.include)
 	if query.sort != "" {
 		values.Set("sort", query.sort)
 	}
 	addLimit(values, query.limit)
 	return values.Encode()
+}
+
+// addBetaSubmissionInclude sets the `include` parameter for beta feedback crash
+// and screenshot submission queries. When the `build` relationship is requested
+// it also narrows `fields[builds]` to the build version (CFBundleVersion, i.e.
+// the build number) and its preReleaseVersion relationship, so callers can
+// resolve the marketing version (CFBundleShortVersionString) without parsing the
+// crash log. The submission endpoints only support including `build` and
+// `tester`.
+func addBetaSubmissionInclude(values url.Values, include []string) {
+	include = normalizeList(include)
+	addCSV(values, "include", include)
+	if slices.Contains(include, "build") {
+		addCSV(values, "fields[builds]", []string{"version", "preReleaseVersion"})
+	}
 }
 
 func buildBetaGroupsQuery(query *betaGroupsQuery) string {

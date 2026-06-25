@@ -157,7 +157,7 @@ func TestFetchAppBuildCount_PropagatesCanceledContext(t *testing.T) {
 
 func TestFetchAppBuildCount_WrapsUnexpectedErrors(t *testing.T) {
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(*http.Request) (*http.Response, error) {
-		return buildsJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"INTERNAL_ERROR","title":"Internal Error","detail":"boom"}]}`)
+		return buildsJSONResponse(http.StatusBadRequest, `{"errors":[{"status":"400","code":"INVALID_REQUEST","title":"Invalid Request","detail":"boom"}]}`)
 	}))
 
 	_, _, err := fetchAppBuildCount(context.Background(), client, "app-1")
@@ -171,6 +171,7 @@ func TestFetchAppBuildCount_WrapsUnexpectedErrors(t *testing.T) {
 
 func newBuildsTestClient(t *testing.T, transport http.RoundTripper) *asc.Client {
 	t.Helper()
+	t.Setenv("ASC_MAX_RETRIES", "0")
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "AuthKey.p8")

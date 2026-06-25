@@ -9,6 +9,17 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+func TestPublishAppStoreTimeoutHelpMatchesScope(t *testing.T) {
+	timeoutFlag := PublishAppStoreCommand().FlagSet.Lookup("timeout")
+	if timeoutFlag == nil {
+		t.Fatal("expected --timeout flag")
+	}
+	want := "Override upload + processing timeout; also applies to submission with --submit (e.g., 30m)"
+	if timeoutFlag.Usage != want {
+		t.Fatalf("expected timeout help %q, got %q", want, timeoutFlag.Usage)
+	}
+}
+
 func TestValidateIPAPathRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.ipa")

@@ -80,27 +80,35 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
-	requestCtx, cancel := shared.ContextWithTimeout(ctx)
-	defer cancel()
-
-	versionIDValue, versionStateValue, err := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
+	type versionResolution struct {
+		id    string
+		state string
+	}
+	resolvedVersion, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (versionResolution, error) {
+		id, state, resolveErr := resolveVersionID(requestCtx, client, resolvedAppID, versionValue, platformValue)
+		return versionResolution{id: id, state: state}, resolveErr
+	})
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return PushPlanResult{}, nil, err
 		}
 		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
-	appInfoIDValue, err := resolveMetadataPushAppInfoID(
-		requestCtx,
-		client,
-		opts.CommandName,
-		resolvedAppID,
-		strings.TrimSpace(opts.AppInfoID),
-		versionValue,
-		platformValue,
-		dirValue,
-		versionStateValue,
-	)
+	versionIDValue := resolvedVersion.id
+	versionStateValue := resolvedVersion.state
+	appInfoIDValue, err := shared.RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (string, error) {
+		return resolveMetadataPushAppInfoID(
+			requestCtx,
+			client,
+			opts.CommandName,
+			resolvedAppID,
+			strings.TrimSpace(opts.AppInfoID),
+			versionValue,
+			platformValue,
+			dirValue,
+			versionStateValue,
+		)
+	})
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return PushPlanResult{}, nil, err
@@ -108,11 +116,11 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
 
-	remoteAppInfoItems, err := fetchAppInfoLocalizations(requestCtx, client, appInfoIDValue)
+	remoteAppInfoItems, err := fetchAppInfoLocalizations(ctx, client, appInfoIDValue)
 	if err != nil {
 		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
-	remoteVersionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
+	remoteVersionItems, err := fetchVersionLocalizations(ctx, client, versionIDValue)
 	if err != nil {
 		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, err)
 	}
@@ -136,13 +144,18 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 
 	localAppInfo := applyDefaultAppInfoFallback(localBundle.appInfo, localBundle.defaultAppInfo, remoteAppInfo, opts.AllowDeletes)
 	localVersion := applyDefaultVersionFallback(localBundle.version, localBundle.defaultVersion, remoteVersion, opts.AllowDeletes)
+	if err := validateMetadataCreatePrerequisites(localAppInfo, remoteAppInfo); err != nil {
+		return PushPlanResult{}, nil, shared.UsageError(err.Error())
+	}
 	warningMode := shared.SubmitReadinessCreateModePlanned
 	if !opts.DryRun {
 		warningMode = shared.SubmitReadinessCreateModeApplied
 	}
 	submitOpts := shared.SubmitReadinessOptions{}
 	if versionCreateWarningsNeedUpdateContext(localVersion, remoteVersion) {
-		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, versionIDValue, resolvedAppID, platformValue)
+		readinessCtx, readinessCancel := shared.ContextWithTimeout(ctx)
+		submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(readinessCtx, client, versionIDValue, resolvedAppID, platformValue)
+		readinessCancel()
 	}
 	warnings := versionCreateWarningsForPatches(localVersion, remoteVersion, warningMode, submitOpts)
 
@@ -198,7 +211,7 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 	}
 
 	actions, applyErr := applyMetadataPlan(
-		requestCtx,
+		ctx,
 		client,
 		appInfoIDValue,
 		versionIDValue,
@@ -209,12 +222,32 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 		remoteVersionItems,
 		opts.AllowDeletes,
 	)
-	if applyErr != nil {
-		return PushPlanResult{}, nil, fmt.Errorf("%s: %w", errorPrefix, applyErr)
-	}
-	result.Applied = true
 	result.Actions = actions
+	result.Total = len(actions)
+	for _, action := range actions {
+		if action.Status == "failed" {
+			result.Failed++
+			continue
+		}
+		result.Succeeded++
+	}
+	result.Applied = applyErr == nil && result.Failed == 0
 
+	if result.Failed > 0 {
+		artifactPath, artifactErr := writeMetadataPushFailureArtifact(result, opts.CommandName)
+		if artifactErr != nil {
+			result.FailureArtifactError = artifactErr.Error()
+		} else {
+			result.FailureArtifactPath = artifactPath
+		}
+	}
+	if !opts.DryRun {
+		warnings = successfulVersionCreateWarnings(warnings, actions, remoteVersion)
+	}
+
+	if applyErr != nil {
+		return result, warnings, fmt.Errorf("%s: %w", errorPrefix, applyErr)
+	}
 	return result, warnings, nil
 }
 

@@ -10,9 +10,11 @@ import (
 	"hash"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // UploadOptions configure how upload operations are executed.
@@ -28,6 +30,19 @@ type UploadOption func(*UploadOptions)
 type uploadTask struct {
 	index int
 	op    UploadOperation
+}
+
+type sanitizedUploadError struct {
+	message string
+	err     error
+}
+
+func (e *sanitizedUploadError) Error() string {
+	return e.message
+}
+
+func (e *sanitizedUploadError) Unwrap() error {
+	return e.err
 }
 
 // WithUploadConcurrency sets the number of concurrent upload workers.
@@ -129,6 +144,7 @@ func ExecuteUploadOperations(ctx context.Context, filePath string, operations []
 
 	jobs := make(chan uploadTask)
 	var wg sync.WaitGroup
+	var completed atomic.Int64
 
 	worker := func() {
 		defer wg.Done()
@@ -140,6 +156,7 @@ func ExecuteUploadOperations(ctx context.Context, filePath string, operations []
 				setErr(err)
 				return
 			}
+			completed.Add(1)
 		}
 	}
 
@@ -159,7 +176,17 @@ sendLoop:
 	close(jobs)
 
 	wg.Wait()
-	return firstErr
+	if firstErr != nil {
+		return firstErr
+	}
+	completedCount := completed.Load()
+	if completedCount == int64(len(operations)) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("upload operations incomplete: completed %d of %d", completedCount, len(operations))
 }
 
 func openUploadSourceFile(filePath string) (*os.File, error) {
@@ -192,12 +219,19 @@ func executeUploadOperation(ctx context.Context, file *os.File, task uploadTask,
 	if method == "" {
 		method = http.MethodPut
 	}
+	replaySafe := method == http.MethodPut
 
 	_, err := WithRetry(ctx, func() (struct{}, error) {
-		reader := io.NewSectionReader(file, task.op.Offset, task.op.Length)
-		req, err := http.NewRequestWithContext(ctx, method, task.op.URL, reader)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return struct{}{}, err
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, ResolveUploadTimeout())
+		defer cancel()
+
+		reader := io.NewSectionReader(file, task.op.Offset, task.op.Length)
+		req, err := http.NewRequestWithContext(requestCtx, method, task.op.URL, reader)
+		if err != nil {
+			return struct{}{}, newSanitizedUploadError("create upload request", task.op.URL, err)
 		}
 		req.ContentLength = task.op.Length
 		for _, header := range task.op.RequestHeaders {
@@ -206,15 +240,19 @@ func executeUploadOperation(ctx context.Context, file *os.File, task uploadTask,
 
 		resp, err := uploadOpts.Client.Do(req)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return struct{}{}, err
+			if parentErr := ctx.Err(); parentErr != nil {
+				return struct{}{}, parentErr
 			}
-			return struct{}{}, &RetryableError{Err: fmt.Errorf("upload request failed: %w", err)}
+			requestErr := newSanitizedUploadError("upload request", task.op.URL, err)
+			if replaySafe && (errors.Is(err, context.DeadlineExceeded) || isTransientTransportError(err)) {
+				return struct{}{}, &RetryableError{Err: requestErr}
+			}
+			return struct{}{}, requestErr
 		}
 		defer resp.Body.Close()
 		_, _ = io.Copy(io.Discard, resp.Body)
 
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		if replaySafe && isRetryableHTTPStatus(resp.StatusCode) {
 			retryAfter := parseRetryAfterHeader(resp.Header.Get("Retry-After"))
 			return struct{}{}, &RetryableError{
 				Err:        buildRetryableError(resp.StatusCode, retryAfter, nil),
@@ -231,6 +269,23 @@ func executeUploadOperation(ctx context.Context, file *os.File, task uploadTask,
 		return fmt.Errorf("upload operation %d: %w", task.index, err)
 	}
 	return nil
+}
+
+func newSanitizedUploadError(operation, rawURL string, err error) error {
+	safeURL := sanitizeURLForLog(rawURL)
+	parsedURL, parseErr := url.Parse(safeURL)
+	if parseErr != nil {
+		safeURL = "[REDACTED]"
+	} else {
+		parsedURL.RawQuery = ""
+		parsedURL.ForceQuery = false
+		parsedURL.Fragment = ""
+		safeURL = parsedURL.String()
+	}
+	return &sanitizedUploadError{
+		message: fmt.Sprintf("%s failed for %s", operation, safeURL),
+		err:     err,
+	}
 }
 
 // VerifySourceFileChecksums computes and compares checksums provided by the API.

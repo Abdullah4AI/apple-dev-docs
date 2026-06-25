@@ -739,7 +739,7 @@ func TestAppEventMethodsRequireIDs(t *testing.T) {
 }
 
 func TestAppEventMethodsReturnAPIError(t *testing.T) {
-	response := jsonResponse(http.StatusInternalServerError, `{"errors":[{"title":"Server error","detail":"boom"}]}`)
+	response := jsonResponse(http.StatusBadRequest, `{"errors":[{"title":"Invalid request","detail":"boom"}]}`)
 	tests := []struct {
 		name string
 		call func(client *Client) error

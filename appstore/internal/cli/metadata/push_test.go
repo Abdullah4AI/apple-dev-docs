@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestExecutePushPrefixesLocalMetadataReadErrors(t *testing.T) {
@@ -121,6 +123,23 @@ func TestBuildScopePlanTreatsMissingLocalFieldsAsNoOp(t *testing.T) {
 	}
 	if calls.create != 0 || calls.delete != 0 || calls.update != 1 {
 		t.Fatalf("unexpected call counts: %+v", calls)
+	}
+}
+
+func TestApplyAppInfoChangesIgnoresRemoteOnlyEmptyLocalization(t *testing.T) {
+	remote := []asc.Resource[asc.AppInfoLocalizationAttributes]{
+		{
+			ID: "loc-empty",
+			Attributes: asc.AppInfoLocalizationAttributes{
+				Locale: "en-US",
+			},
+		},
+	}
+	for _, allowDeletes := range []bool{false, true} {
+		actions, err := applyAppInfoChanges(context.Background(), nil, "appinfo-1", map[string]appInfoLocalPatch{}, remote, allowDeletes)
+		if err != nil || len(actions) != 0 {
+			t.Fatalf("allowDeletes=%t: expected empty remote locale no-op, actions=%+v err=%v", allowDeletes, actions, err)
+		}
 	}
 }
 

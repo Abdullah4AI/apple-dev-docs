@@ -847,16 +847,16 @@ Examples:
 				}
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			if *resolved {
-				resp, err := fetchResolvedSubscriptionPrices(requestCtx, client, id, *limit, *next, time.Now().UTC(), planTypeFilter)
+				resp, err := fetchResolvedSubscriptionPrices(ctx, client, id, *limit, *next, time.Now().UTC(), planTypeFilter)
 				if err != nil {
 					return fmt.Errorf("subscriptions prices list: failed to resolve: %w", err)
 				}
 				return shared.PrintResolvedPrices(resp, *output.Output, *output.Pretty)
 			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
 
 			nextURL := strings.TrimSpace(*next)
 			if nextURL != "" && planTypeFilter != "" {

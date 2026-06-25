@@ -22,6 +22,23 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+type timeoutTransportError struct{}
+
+func (timeoutTransportError) Error() string { return "transport timeout" }
+func (timeoutTransportError) Timeout() bool { return true }
+
+type unexpectedEOFReader struct {
+	read bool
+}
+
+func (r *unexpectedEOFReader) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, io.EOF
+	}
+	r.read = true
+	return copy(p, `{"data":`), io.ErrUnexpectedEOF
+}
+
 func newTestClient(t *testing.T, check func(*http.Request), responses ...*http.Response) *Client {
 	t.Helper()
 	if len(responses) == 0 {
@@ -380,6 +397,141 @@ func TestGetApps_RateLimitedIncludesRetryAfter(t *testing.T) {
 	}
 	if got := GetRetryAfter(err); got != 2*time.Minute {
 		t.Fatalf("expected retry-after 2m, got %s", got)
+	}
+}
+
+func TestGetApps_RetriesTransientServerErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{name: "request timeout", status: http.StatusRequestTimeout},
+		{name: "internal server error", status: http.StatusInternalServerError},
+		{name: "bad gateway", status: http.StatusBadGateway},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ASC_MAX_RETRIES", "1")
+			t.Setenv("ASC_BASE_DELAY", "1ms")
+			t.Setenv("ASC_MAX_DELAY", "1ms")
+			resetConfigCacheForTest()
+			t.Cleanup(resetConfigCacheForTest)
+
+			attempts := 0
+			client := newTestClient(
+				t, func(req *http.Request) {
+					attempts++
+					if req.Method != http.MethodGet {
+						t.Fatalf("expected GET, got %s", req.Method)
+					}
+				},
+				jsonResponse(tt.status, `{"errors":[{"code":"UNEXPECTED_ERROR","detail":"temporary"}]}`),
+				jsonResponse(http.StatusOK, `{"data":[]}`),
+			)
+
+			if _, err := client.GetApps(context.Background()); err != nil {
+				t.Fatalf("GetApps() error: %v", err)
+			}
+			if attempts != 2 {
+				t.Fatalf("expected 2 attempts, got %d", attempts)
+			}
+		})
+	}
+}
+
+func TestGetApps_RetriesTransportTimeout(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+	resetConfigCacheForTest()
+	t.Cleanup(resetConfigCacheForTest)
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	attempts := 0
+	client := &Client{
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, timeoutTransportError{}
+			}
+			return jsonResponse(http.StatusOK, `{"data":[]}`), nil
+		})},
+		keyID:      "KEY123",
+		issuerID:   "ISS456",
+		privateKey: key,
+	}
+
+	if _, err := client.GetApps(context.Background()); err != nil {
+		t.Fatalf("GetApps() error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestGetApps_RetriesTruncatedSuccessBody(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+	resetConfigCacheForTest()
+	t.Cleanup(resetConfigCacheForTest)
+
+	attempts := 0
+	client := newTestClient(
+		t, func(req *http.Request) {
+			attempts++
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET, got %s", req.Method)
+			}
+		},
+		&http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(&unexpectedEOFReader{}),
+		},
+		jsonResponse(http.StatusOK, `{"data":[]}`),
+	)
+
+	if _, err := client.GetApps(context.Background()); err != nil {
+		t.Fatalf("GetApps() error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestGetApps_DoesNotRetryDeadlineExceeded(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "3")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	resetConfigCacheForTest()
+	t.Cleanup(resetConfigCacheForTest)
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	attempts := 0
+	client := &Client{
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			return nil, context.DeadlineExceeded
+		})},
+		keyID:      "KEY123",
+		issuerID:   "ISS456",
+		privateKey: key,
+	}
+
+	_, err = client.GetApps(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
 
@@ -3002,6 +3154,45 @@ func TestUpdateAppStoreVersionLocalization_OmitsLocale(t *testing.T) {
 	}
 }
 
+func TestUpdateAppStoreVersionLocalizationFields_PreservesExplicitEmpty(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"description":"Updated","promotionalText":""}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var envelope struct {
+			Data struct {
+				Type       string            `json:"type"`
+				ID         string            `json:"id"`
+				Attributes map[string]string `json:"attributes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if envelope.Data.Type != string(ResourceTypeAppStoreVersionLocalizations) || envelope.Data.ID != "loc-1" {
+			t.Fatalf("unexpected resource identity: %+v", envelope.Data)
+		}
+		if value, ok := envelope.Data.Attributes["promotionalText"]; !ok || value != "" {
+			t.Fatalf("expected explicit empty promotionalText, got %+v", envelope.Data.Attributes)
+		}
+		if _, ok := envelope.Data.Attributes["keywords"]; ok {
+			t.Fatalf("expected omitted keywords, got %+v", envelope.Data.Attributes)
+		}
+	}, response)
+
+	if _, err := client.UpdateAppStoreVersionLocalizationFields(context.Background(), "loc-1", map[string]string{
+		"description":     "Updated",
+		"promotionalText": "",
+	}); err != nil {
+		t.Fatalf("UpdateAppStoreVersionLocalizationFields() error: %v", err)
+	}
+}
+
 func TestDeleteAppStoreVersionLocalization_SendsRequest(t *testing.T) {
 	response := jsonResponse(http.StatusNoContent, "")
 	client := newTestClient(t, func(req *http.Request) {
@@ -3428,6 +3619,45 @@ func TestUpdateAppInfoLocalization_OmitsLocale(t *testing.T) {
 	}
 	if _, err := client.UpdateAppInfoLocalization(context.Background(), "loc-1", attrs); err != nil {
 		t.Fatalf("UpdateAppInfoLocalization() error: %v", err)
+	}
+}
+
+func TestUpdateAppInfoLocalizationFields_PreservesExplicitEmpty(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"appInfoLocalizations","id":"loc-1","attributes":{"name":"Updated","subtitle":""}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPatch || req.URL.Path != "/v1/appInfoLocalizations/loc-1" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var envelope struct {
+			Data struct {
+				Type       string            `json:"type"`
+				ID         string            `json:"id"`
+				Attributes map[string]string `json:"attributes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if envelope.Data.Type != string(ResourceTypeAppInfoLocalizations) || envelope.Data.ID != "loc-1" {
+			t.Fatalf("unexpected resource identity: %+v", envelope.Data)
+		}
+		if value, ok := envelope.Data.Attributes["subtitle"]; !ok || value != "" {
+			t.Fatalf("expected explicit empty subtitle, got %+v", envelope.Data.Attributes)
+		}
+		if _, ok := envelope.Data.Attributes["privacyPolicyUrl"]; ok {
+			t.Fatalf("expected omitted privacyPolicyUrl, got %+v", envelope.Data.Attributes)
+		}
+	}, response)
+
+	if _, err := client.UpdateAppInfoLocalizationFields(context.Background(), "loc-1", map[string]string{
+		"name":     "Updated",
+		"subtitle": "",
+	}); err != nil {
+		t.Fatalf("UpdateAppInfoLocalizationFields() error: %v", err)
 	}
 }
 
@@ -7918,7 +8148,7 @@ func TestSetSubscriptionInitialPrice(t *testing.T) {
 	}
 }
 
-func TestSetSubscriptionInitialPrice_RetriesUnexpectedServerError(t *testing.T) {
+func TestSetSubscriptionInitialPrice_DoesNotReplayUnexpectedServerError(t *testing.T) {
 	t.Setenv("ASC_MAX_RETRIES", "2")
 	t.Setenv("ASC_BASE_DELAY", "1ms")
 	t.Setenv("ASC_MAX_DELAY", "2ms")
@@ -7943,10 +8173,7 @@ func TestSetSubscriptionInitialPrice_RetriesUnexpectedServerError(t *testing.T) 
 				}
 				assertAuthorized(t, req)
 
-				if attempts < 3 {
-					return jsonResponse(http.StatusGatewayTimeout, `{"errors":[{"status":"504","code":"UNEXPECTED_ERROR","title":"timeout","detail":"timed out"}]}`), nil
-				}
-				return jsonResponse(http.StatusOK, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Monthly","productId":"com.example.sub.monthly"}}}`), nil
+				return jsonResponse(http.StatusGatewayTimeout, `{"errors":[{"status":"504","code":"UNEXPECTED_ERROR","title":"timeout","detail":"timed out"}]}`), nil
 			}),
 		},
 		keyID:      "KEY123",
@@ -7955,11 +8182,14 @@ func TestSetSubscriptionInitialPrice_RetriesUnexpectedServerError(t *testing.T) 
 	}
 
 	_, err = client.SetSubscriptionInitialPrice(context.Background(), "sub-1", "price-point-1", "USA", SubscriptionPriceCreateAttributes{})
-	if err != nil {
-		t.Fatalf("SetSubscriptionInitialPrice() error: %v", err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if attempts != 3 {
-		t.Fatalf("expected 3 attempts (2 retries + success), got %d", attempts)
+	if !IsRetryable(err) {
+		t.Fatalf("expected retryable error, got %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
 
@@ -8059,7 +8289,7 @@ func TestCreateSubscriptionPriceWithPlanType(t *testing.T) {
 	}
 }
 
-func TestCreateSubscriptionPrice_RetriesUnexpectedServerError(t *testing.T) {
+func TestCreateSubscriptionPrice_DoesNotReplayRequestTimeout(t *testing.T) {
 	t.Setenv("ASC_MAX_RETRIES", "2")
 	t.Setenv("ASC_BASE_DELAY", "1ms")
 	t.Setenv("ASC_MAX_DELAY", "2ms")
@@ -8084,10 +8314,7 @@ func TestCreateSubscriptionPrice_RetriesUnexpectedServerError(t *testing.T) {
 				}
 				assertAuthorized(t, req)
 
-				if attempts < 3 {
-					return jsonResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"UNEXPECTED_ERROR","title":"An unexpected error occurred.","detail":"An unexpected error occurred on the server side."}]}`), nil
-				}
-				return jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionPrices","id":"price-1","attributes":{"startDate":"2026-01-01","preserved":true}}}`), nil
+				return jsonResponse(http.StatusRequestTimeout, `{"errors":[{"status":"408","code":"REQUEST_TIMEOUT","title":"Request timeout","detail":"The request may have completed."}]}`), nil
 			}),
 		},
 		keyID:      "KEY123",
@@ -8096,11 +8323,14 @@ func TestCreateSubscriptionPrice_RetriesUnexpectedServerError(t *testing.T) {
 	}
 
 	_, err = client.CreateSubscriptionPrice(context.Background(), "sub-1", "price-point-1", "USA", SubscriptionPriceCreateAttributes{})
-	if err != nil {
-		t.Fatalf("CreateSubscriptionPrice() error: %v", err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if attempts != 3 {
-		t.Fatalf("expected 3 attempts (2 retries + success), got %d", attempts)
+	if !IsRetryable(err) {
+		t.Fatalf("expected retryable error, got %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
 
@@ -8179,7 +8409,7 @@ func TestCreateSubscriptionAvailability(t *testing.T) {
 	}
 }
 
-func TestCreateSubscriptionAvailability_RetriesUnexpectedServerError(t *testing.T) {
+func TestCreateSubscriptionAvailability_DoesNotReplayUnexpectedServerError(t *testing.T) {
 	t.Setenv("ASC_MAX_RETRIES", "2")
 	t.Setenv("ASC_BASE_DELAY", "1ms")
 	t.Setenv("ASC_MAX_DELAY", "2ms")
@@ -8204,10 +8434,7 @@ func TestCreateSubscriptionAvailability_RetriesUnexpectedServerError(t *testing.
 				}
 				assertAuthorized(t, req)
 
-				if attempts < 3 {
-					return jsonResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"UNEXPECTED_ERROR","title":"unexpected","detail":"retry me"}]}`), nil
-				}
-				return jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionAvailabilities","id":"avail-1","attributes":{"availableInNewTerritories":true}}}`), nil
+				return jsonResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"UNEXPECTED_ERROR","title":"unexpected","detail":"retry me"}]}`), nil
 			}),
 		},
 		keyID:      "KEY123",
@@ -8216,11 +8443,14 @@ func TestCreateSubscriptionAvailability_RetriesUnexpectedServerError(t *testing.
 	}
 
 	_, err = client.CreateSubscriptionAvailability(context.Background(), "sub-1", []string{"USA", "CAN"}, SubscriptionAvailabilityAttributes{AvailableInNewTerritories: true})
-	if err != nil {
-		t.Fatalf("CreateSubscriptionAvailability() error: %v", err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if attempts != 3 {
-		t.Fatalf("expected 3 attempts (2 retries + success), got %d", attempts)
+	if !IsRetryable(err) {
+		t.Fatalf("expected retryable error, got %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
 	}
 }
 

@@ -115,6 +115,43 @@ func TestRenderHelpersProduceOutput(t *testing.T) {
 	}
 }
 
+func TestPushPlanPartialRenderersExposeRecoveryDetails(t *testing.T) {
+	result := PushPlanResult{
+		AppID:               "app-1",
+		Version:             "1.2.3",
+		Dir:                 "/tmp/meta",
+		Total:               2,
+		Succeeded:           1,
+		Failed:              1,
+		FailureArtifactPath: ".asc/reports/metadata-apply/failures-1.json",
+		Actions: []ApplyAction{
+			{Scope: appInfoDirName, Locale: "en-US", Action: "update", Status: "succeeded", LocalizationID: "loc-en"},
+			{Scope: versionDirName, Locale: "fr-FR", Action: "update", Status: "failed", LocalizationID: "loc-fr", Error: "rejected"},
+		},
+	}
+	tableOut := captureStdout(t, func() {
+		if err := printPushPlanTable(result); err != nil {
+			t.Fatalf("printPushPlanTable() error: %v", err)
+		}
+	})
+	for _, expected := range []string{"Total: 2", "Succeeded: 1", "Failed: 1", "Failure Artifact: .asc/reports/metadata-apply/", "rejected"} {
+		if !strings.Contains(tableOut, expected) {
+			t.Fatalf("table output missing %q: %s", expected, tableOut)
+		}
+	}
+
+	result.FailureArtifactPath = ""
+	result.FailureArtifactError = "mkdir .asc/reports: not a directory"
+	markdownOut := captureStdout(t, func() {
+		if err := printPushPlanMarkdown(result); err != nil {
+			t.Fatalf("printPushPlanMarkdown() error: %v", err)
+		}
+	})
+	if !strings.Contains(markdownOut, "**Failure Artifact Error:**") || !strings.Contains(markdownOut, "not a directory") {
+		t.Fatalf("markdown output missing artifact write failure: %s", markdownOut)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 

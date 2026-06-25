@@ -1,7 +1,9 @@
 package shared
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -21,6 +24,27 @@ const (
 	LocalizationTypeVersion = "version"
 	LocalizationTypeAppInfo = "app-info"
 )
+
+type localizationInputError struct {
+	err error
+}
+
+func (e localizationInputError) Error() string { return e.err.Error() }
+func (e localizationInputError) Unwrap() error { return e.err }
+
+func newLocalizationInputError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return localizationInputError{err: err}
+}
+
+// IsLocalizationInputError reports malformed locale/file input that should use
+// CLI usage exit semantics rather than a runtime failure.
+func IsLocalizationInputError(err error) bool {
+	_, ok := errors.AsType[localizationInputError](err)
+	return ok
+}
 
 var (
 	versionLocalizationKeys = []string{
@@ -77,6 +101,9 @@ func ValidateVersionLocalizationValueSet(valuesByLocale map[string]map[string]st
 	sort.Strings(locales)
 
 	for _, locale := range locales {
+		if err := validateLocalizationValuesForBatch(locale, valuesByLocale[locale]); err != nil {
+			return err
+		}
 		if err := ValidateVersionLocalizationValues(locale, valuesByLocale[locale]); err != nil {
 			return err
 		}
@@ -105,16 +132,36 @@ func ValidateAppInfoLocalizationKeys(locale string, values map[string]string) er
 	return validateLocalizationKeys(locale, values, appInfoLocalizationAllowedKeys)
 }
 
+// ValidateAppInfoLocalizationValueSet validates every locale before auth or
+// remote state is read.
+func ValidateAppInfoLocalizationValueSet(valuesByLocale map[string]map[string]string) error {
+	locales := make([]string, 0, len(valuesByLocale))
+	for locale := range valuesByLocale {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+	for _, locale := range locales {
+		values := valuesByLocale[locale]
+		if err := validateLocalizationValuesForBatch(locale, values); err != nil {
+			return err
+		}
+		if err := ValidateAppInfoLocalizationKeys(locale, values); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type versionLocalizationClient interface {
 	GetAppStoreVersionLocalizations(context.Context, string, ...asc.AppStoreVersionLocalizationsOption) (*asc.AppStoreVersionLocalizationsResponse, error)
 	CreateAppStoreVersionLocalization(context.Context, string, asc.AppStoreVersionLocalizationAttributes) (*asc.AppStoreVersionLocalizationResponse, error)
-	UpdateAppStoreVersionLocalization(context.Context, string, asc.AppStoreVersionLocalizationAttributes) (*asc.AppStoreVersionLocalizationResponse, error)
+	UpdateAppStoreVersionLocalizationFields(context.Context, string, map[string]string) (*asc.AppStoreVersionLocalizationResponse, error)
 }
 
 type appInfoLocalizationClient interface {
 	GetAppInfoLocalizations(context.Context, string, ...asc.AppInfoLocalizationsOption) (*asc.AppInfoLocalizationsResponse, error)
 	CreateAppInfoLocalization(context.Context, string, asc.AppInfoLocalizationAttributes) (*asc.AppInfoLocalizationResponse, error)
-	UpdateAppInfoLocalization(context.Context, string, asc.AppInfoLocalizationAttributes) (*asc.AppInfoLocalizationResponse, error)
+	UpdateAppInfoLocalizationFields(context.Context, string, map[string]string) (*asc.AppInfoLocalizationResponse, error)
 }
 
 func NormalizeLocalizationType(value string) (string, error) {
@@ -271,12 +318,19 @@ func ReadLocalizationStrings(inputPath string, locales []string) (map[string]map
 
 	filter := make(map[string]bool)
 	for _, locale := range locales {
-		filter[locale] = true
+		canonical, err := CanonicalizeAppStoreLocalizationLocale(locale)
+		if err != nil {
+			return nil, newLocalizationInputError(err)
+		}
+		if filter[canonical] {
+			return nil, newLocalizationInputError(fmt.Errorf("duplicate canonical locale %q in --locale", canonical))
+		}
+		filter[canonical] = true
 	}
 
 	if !info.IsDir() {
 		if len(locales) > 1 {
-			return nil, fmt.Errorf("single file input only supports one locale")
+			return nil, newLocalizationInputError(fmt.Errorf("single file input only supports one locale"))
 		}
 		locale := ""
 		if len(locales) == 1 {
@@ -284,8 +338,12 @@ func ReadLocalizationStrings(inputPath string, locales []string) (map[string]map
 		} else {
 			locale = strings.TrimSuffix(filepath.Base(inputPath), ".strings")
 			if locale == "" || locale == filepath.Base(inputPath) {
-				return nil, fmt.Errorf("cannot infer locale from %q (use --locale)", inputPath)
+				return nil, newLocalizationInputError(fmt.Errorf("cannot infer locale from %q (use --locale)", inputPath))
 			}
+		}
+		locale, err = CanonicalizeAppStoreLocalizationLocale(locale)
+		if err != nil {
+			return nil, newLocalizationInputError(err)
 		}
 
 		entries, err := readStringsFile(inputPath)
@@ -301,6 +359,7 @@ func ReadLocalizationStrings(inputPath string, locales []string) (map[string]map
 	}
 
 	values := make(map[string]map[string]string)
+	sources := make(map[string]string)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -308,9 +367,13 @@ func ReadLocalizationStrings(inputPath string, locales []string) (map[string]map
 		if filepath.Ext(entry.Name()) != ".strings" {
 			continue
 		}
-		locale := strings.TrimSuffix(entry.Name(), ".strings")
-		if locale == "" {
+		rawLocale := strings.TrimSuffix(entry.Name(), ".strings")
+		if rawLocale == "" {
 			continue
+		}
+		locale, err := CanonicalizeAppStoreLocalizationLocale(rawLocale)
+		if err != nil {
+			return nil, newLocalizationInputError(fmt.Errorf("invalid localization file %q: %w", entry.Name(), err))
 		}
 		if len(filter) > 0 && !filter[locale] {
 			continue
@@ -321,13 +384,14 @@ func ReadLocalizationStrings(inputPath string, locales []string) (map[string]map
 			return nil, err
 		}
 		if _, exists := values[locale]; exists {
-			return nil, fmt.Errorf("duplicate locale %q in %s", locale, inputPath)
+			return nil, newLocalizationInputError(fmt.Errorf("duplicate canonical locale %q from files %q and %q", locale, sources[locale], entry.Name()))
 		}
 		values[locale] = parsed
+		sources[locale] = entry.Name()
 	}
 
 	if len(values) == 0 {
-		return nil, fmt.Errorf("no .strings files found in %q", inputPath)
+		return nil, newLocalizationInputError(fmt.Errorf("no .strings files found in %q", inputPath))
 	}
 	return values, nil
 }
@@ -347,16 +411,21 @@ func UploadVersionLocalizationsWithWarnings(ctx context.Context, client versionL
 // UploadPrevalidatedVersionLocalizationsWithWarnings uploads version localizations
 // after the caller has already validated the input value set.
 func UploadPrevalidatedVersionLocalizationsWithWarnings(ctx context.Context, client versionLocalizationClient, versionID string, valuesByLocale map[string]map[string]string, dryRun bool, submitOpts SubmitReadinessOptions) ([]asc.LocalizationUploadLocaleResult, []SubmitReadinessCreateWarning, error) {
-	existing, err := client.GetAppStoreVersionLocalizations(ctx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	existing, err := fetchAllVersionLocalizations(ctx, client, versionID)
 	if err != nil {
 		return nil, nil, err
 	}
-	existingByLocale := make(map[string]string, len(existing.Data))
-	for _, item := range existing.Data {
+	existingByLocale := make(map[string]string, len(existing))
+	existingItems := make(map[string]asc.Resource[asc.AppStoreVersionLocalizationAttributes], len(existing))
+	for _, item := range existing {
 		if strings.TrimSpace(item.Attributes.Locale) == "" {
 			continue
 		}
 		existingByLocale[item.Attributes.Locale] = item.ID
+		existingItems[item.Attributes.Locale] = item
+	}
+	if err := validateVersionLocalizationCreates(valuesByLocale, existingByLocale); err != nil {
+		return nil, nil, newLocalizationInputError(err)
 	}
 
 	mode := SubmitReadinessCreateModeApplied
@@ -365,83 +434,294 @@ func UploadPrevalidatedVersionLocalizationsWithWarnings(ctx context.Context, cli
 	}
 	warnings := make([]SubmitReadinessCreateWarning, 0, len(valuesByLocale))
 
-	results, err := uploadLocalizationValues(valuesByLocale, existingByLocale, func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error) {
+	results, err := uploadLocalizationValues(valuesByLocale, existingByLocale, dryRun, func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error) {
 		attributes := buildVersionLocalizationAttributes(locale, values, existingID == "")
+		if existing, ok := existingItems[locale]; ok && versionLocalizationMatchesValues(existing.Attributes, values) {
+			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "skip", LocalizationID: existing.ID}, nil
+		}
 		if existingID == "" {
-			if warning, ok := SubmitReadinessCreateWarningForLocaleWithOptions(locale, attributes, mode, submitOpts); ok {
-				warnings = append(warnings, warning)
-			}
+			warning, hasWarning := SubmitReadinessCreateWarningForLocaleWithOptions(locale, attributes, mode, submitOpts)
 			if dryRun {
+				if hasWarning {
+					warnings = append(warnings, warning)
+				}
 				return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "create"}, nil
 			}
-			resp, err := client.CreateAppStoreVersionLocalization(ctx, versionID, attributes)
+			id, reconciled, err := runLocalizationMutationWithReadback(
+				ctx,
+				func(requestCtx context.Context) (string, error) {
+					resp, err := client.CreateAppStoreVersionLocalization(requestCtx, versionID, attributes)
+					if err != nil {
+						return "", err
+					}
+					return resp.Data.ID, nil
+				},
+				func(requestCtx context.Context) (string, bool, error) {
+					return findMatchingVersionLocalization(requestCtx, client, versionID, locale, values)
+				},
+			)
 			if err != nil {
 				return asc.LocalizationUploadLocaleResult{}, err
 			}
-			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "create", LocalizationID: resp.Data.ID}, nil
+			if hasWarning {
+				warnings = append(warnings, warning)
+			}
+			action := "create"
+			if reconciled {
+				action = "reconcile"
+			}
+			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: action, LocalizationID: id}, nil
 		}
 		if dryRun {
 			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "update", LocalizationID: existingID}, nil
 		}
-		resp, err := client.UpdateAppStoreVersionLocalization(ctx, existingID, attributes)
-		// If the API rejects whatsNew (e.g. on an initial v1.0 release where
-		// there is no previous version), retry without it and warn the user.
-		if err != nil && strings.TrimSpace(attributes.WhatsNew) != "" && isWhatsNewUnsupportedError(err) {
-			fmt.Fprintln(os.Stderr, "Warning: 'whatsNew' cannot be set for this version (initial releases have no What's New section). Retrying without it.")
-			attributes.WhatsNew = ""
-			resp, err = client.UpdateAppStoreVersionLocalization(ctx, existingID, attributes)
-		}
+		probeValues := cloneLocalizationValues(values)
+		updateFields := cloneLocalizationValues(values)
+		id, reconciled, err := runLocalizationMutationWithReadback(
+			ctx,
+			func(requestCtx context.Context) (string, error) {
+				resp, err := client.UpdateAppStoreVersionLocalizationFields(requestCtx, existingID, updateFields)
+				// A rejected whatsNew mutation is known not to have applied, so the
+				// documented initial-release fallback remains safe to send immediately.
+				if err != nil && strings.TrimSpace(updateFields["whatsNew"]) != "" && isWhatsNewUnsupportedError(err) {
+					fmt.Fprintln(os.Stderr, "Warning: 'whatsNew' cannot be set for this version (initial releases have no What's New section). Retrying without it.")
+					delete(updateFields, "whatsNew")
+					delete(probeValues, "whatsNew")
+					resp, err = client.UpdateAppStoreVersionLocalizationFields(requestCtx, existingID, updateFields)
+				}
+				if err != nil {
+					return "", err
+				}
+				return resp.Data.ID, nil
+			},
+			func(requestCtx context.Context) (string, bool, error) {
+				return findMatchingVersionLocalization(requestCtx, client, versionID, locale, probeValues)
+			},
+		)
 		if err != nil {
 			return asc.LocalizationUploadLocaleResult{}, err
 		}
-		return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "update", LocalizationID: resp.Data.ID}, nil
+		action := "update"
+		if reconciled {
+			action = "reconcile"
+		}
+		return asc.LocalizationUploadLocaleResult{Locale: locale, Action: action, LocalizationID: id}, nil
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return results, NormalizeSubmitReadinessCreateWarnings(warnings), nil
+	return results, NormalizeSubmitReadinessCreateWarnings(warnings), err
 }
 
 func UploadAppInfoLocalizations(ctx context.Context, client appInfoLocalizationClient, appInfoID string, valuesByLocale map[string]map[string]string, dryRun bool) ([]asc.LocalizationUploadLocaleResult, error) {
-	for locale, values := range valuesByLocale {
-		if err := ValidateAppInfoLocalizationKeys(locale, values); err != nil {
-			return nil, err
-		}
+	if err := ValidateAppInfoLocalizationValueSet(valuesByLocale); err != nil {
+		return nil, err
 	}
 
-	existing, err := client.GetAppInfoLocalizations(ctx, appInfoID, asc.WithAppInfoLocalizationsLimit(200))
+	existing, err := fetchAllAppInfoLocalizations(ctx, client, appInfoID)
 	if err != nil {
 		return nil, err
 	}
-	existingByLocale := make(map[string]string, len(existing.Data))
-	for _, item := range existing.Data {
+	existingByLocale := make(map[string]string, len(existing))
+	existingItems := make(map[string]asc.Resource[asc.AppInfoLocalizationAttributes], len(existing))
+	for _, item := range existing {
 		if strings.TrimSpace(item.Attributes.Locale) == "" {
 			continue
 		}
 		existingByLocale[item.Attributes.Locale] = item.ID
+		existingItems[item.Attributes.Locale] = item
+	}
+	if err := validateAppInfoLocalizationCreates(valuesByLocale, existingByLocale); err != nil {
+		return nil, newLocalizationInputError(err)
 	}
 
-	return uploadLocalizationValues(valuesByLocale, existingByLocale, func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error) {
+	return uploadLocalizationValues(valuesByLocale, existingByLocale, dryRun, func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error) {
 		attributes := buildAppInfoLocalizationAttributes(locale, values, existingID == "")
+		if existing, ok := existingItems[locale]; ok && appInfoLocalizationMatchesValues(existing.Attributes, values) {
+			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "skip", LocalizationID: existing.ID}, nil
+		}
 		if existingID == "" {
 			if dryRun {
 				return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "create"}, nil
 			}
-			resp, err := client.CreateAppInfoLocalization(ctx, appInfoID, attributes)
+			id, reconciled, err := runLocalizationMutationWithReadback(
+				ctx,
+				func(requestCtx context.Context) (string, error) {
+					resp, err := client.CreateAppInfoLocalization(requestCtx, appInfoID, attributes)
+					if err != nil {
+						return "", err
+					}
+					return resp.Data.ID, nil
+				},
+				func(requestCtx context.Context) (string, bool, error) {
+					return findMatchingAppInfoLocalization(requestCtx, client, appInfoID, locale, values)
+				},
+			)
 			if err != nil {
 				return asc.LocalizationUploadLocaleResult{}, err
 			}
-			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "create", LocalizationID: resp.Data.ID}, nil
+			action := "create"
+			if reconciled {
+				action = "reconcile"
+			}
+			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: action, LocalizationID: id}, nil
 		}
 		if dryRun {
 			return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "update", LocalizationID: existingID}, nil
 		}
-		resp, err := client.UpdateAppInfoLocalization(ctx, existingID, attributes)
+		id, reconciled, err := runLocalizationMutationWithReadback(
+			ctx,
+			func(requestCtx context.Context) (string, error) {
+				resp, err := client.UpdateAppInfoLocalizationFields(requestCtx, existingID, cloneLocalizationValues(values))
+				if err != nil {
+					return "", err
+				}
+				return resp.Data.ID, nil
+			},
+			func(requestCtx context.Context) (string, bool, error) {
+				return findMatchingAppInfoLocalization(requestCtx, client, appInfoID, locale, values)
+			},
+		)
 		if err != nil {
 			return asc.LocalizationUploadLocaleResult{}, err
 		}
-		return asc.LocalizationUploadLocaleResult{Locale: locale, Action: "update", LocalizationID: resp.Data.ID}, nil
+		action := "update"
+		if reconciled {
+			action = "reconcile"
+		}
+		return asc.LocalizationUploadLocaleResult{Locale: locale, Action: action, LocalizationID: id}, nil
 	})
+}
+
+func runLocalizationMutationWithReadback(
+	ctx context.Context,
+	mutate func(context.Context) (string, error),
+	probe func(context.Context) (string, bool, error),
+) (string, bool, error) {
+	id, status, err := RunReconciledMutation(ctx, mutate, probe)
+	return id, status == ReconciledMutationRecovered, err
+}
+
+func findMatchingVersionLocalization(ctx context.Context, client versionLocalizationClient, versionID, locale string, values map[string]string) (string, bool, error) {
+	items, err := fetchAllVersionLocalizations(ctx, client, versionID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, item := range items {
+		if item.Attributes.Locale == locale && versionLocalizationMatchesValues(item.Attributes, values) {
+			return item.ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func findMatchingAppInfoLocalization(ctx context.Context, client appInfoLocalizationClient, appInfoID, locale string, values map[string]string) (string, bool, error) {
+	items, err := fetchAllAppInfoLocalizations(ctx, client, appInfoID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, item := range items {
+		if item.Attributes.Locale == locale && appInfoLocalizationMatchesValues(item.Attributes, values) {
+			return item.ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func fetchAllVersionLocalizations(ctx context.Context, client versionLocalizationClient, versionID string) ([]asc.Resource[asc.AppStoreVersionLocalizationAttributes], error) {
+	firstPage, err := RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppStoreVersionLocalizationsResponse, error) {
+		return client.GetAppStoreVersionLocalizations(requestCtx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	})
+	if err != nil {
+		return nil, err
+	}
+	if firstPage == nil {
+		return nil, fmt.Errorf("empty version localization response")
+	}
+	if strings.TrimSpace(firstPage.Links.Next) == "" {
+		return firstPage.Data, nil
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		nextPage, err := RetryReadWithFreshTimeout(pageCtx, func(requestCtx context.Context) (*asc.AppStoreVersionLocalizationsResponse, error) {
+			return client.GetAppStoreVersionLocalizations(requestCtx, versionID, asc.WithAppStoreVersionLocalizationsNextURL(nextURL))
+		})
+		if err != nil {
+			return nil, err
+		}
+		if nextPage == nil {
+			return nil, fmt.Errorf("empty version localization response")
+		}
+		return nextPage, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	allPages, ok := paginated.(*asc.AppStoreVersionLocalizationsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected version localization pagination response type")
+	}
+	return allPages.Data, nil
+}
+
+func fetchAllAppInfoLocalizations(ctx context.Context, client appInfoLocalizationClient, appInfoID string) ([]asc.Resource[asc.AppInfoLocalizationAttributes], error) {
+	firstPage, err := RetryReadWithFreshTimeout(ctx, func(requestCtx context.Context) (*asc.AppInfoLocalizationsResponse, error) {
+		return client.GetAppInfoLocalizations(requestCtx, appInfoID, asc.WithAppInfoLocalizationsLimit(200))
+	})
+	if err != nil {
+		return nil, err
+	}
+	if firstPage == nil {
+		return nil, fmt.Errorf("empty app-info localization response")
+	}
+	if strings.TrimSpace(firstPage.Links.Next) == "" {
+		return firstPage.Data, nil
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		nextPage, err := RetryReadWithFreshTimeout(pageCtx, func(requestCtx context.Context) (*asc.AppInfoLocalizationsResponse, error) {
+			return client.GetAppInfoLocalizations(requestCtx, appInfoID, asc.WithAppInfoLocalizationsNextURL(nextURL))
+		})
+		if err != nil {
+			return nil, err
+		}
+		if nextPage == nil {
+			return nil, fmt.Errorf("empty app-info localization response")
+		}
+		return nextPage, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	allPages, ok := paginated.(*asc.AppInfoLocalizationsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected app-info localization pagination response type")
+	}
+	return allPages.Data, nil
+}
+
+func versionLocalizationMatchesValues(attrs asc.AppStoreVersionLocalizationAttributes, values map[string]string) bool {
+	remote := mapVersionLocalizationStrings(attrs)
+	return localizationValuesMatch(remote, values)
+}
+
+func appInfoLocalizationMatchesValues(attrs asc.AppInfoLocalizationAttributes, values map[string]string) bool {
+	remote := mapAppInfoLocalizationStrings(attrs)
+	return localizationValuesMatch(remote, values)
+}
+
+func localizationValuesMatch(remote, desired map[string]string) bool {
+	for key, value := range desired {
+		if remote[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneLocalizationValues(values map[string]string) map[string]string {
+	clone := make(map[string]string, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
 }
 
 func isWhatsNewUnsupportedError(err error) bool {
@@ -468,7 +748,7 @@ func containsWhatsNewToken(value string) bool {
 	return strings.Contains(normalized, "whatsnew")
 }
 
-func uploadLocalizationValues(valuesByLocale map[string]map[string]string, existing map[string]string, handler func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error)) ([]asc.LocalizationUploadLocaleResult, error) {
+func uploadLocalizationValues(valuesByLocale map[string]map[string]string, existing map[string]string, dryRun bool, handler func(locale string, values map[string]string, existingID string) (asc.LocalizationUploadLocaleResult, error)) ([]asc.LocalizationUploadLocaleResult, error) {
 	locales := make([]string, 0, len(valuesByLocale))
 	for locale := range valuesByLocale {
 		locales = append(locales, locale)
@@ -476,21 +756,181 @@ func uploadLocalizationValues(valuesByLocale map[string]map[string]string, exist
 	sort.Strings(locales)
 
 	results := make([]asc.LocalizationUploadLocaleResult, 0, len(locales))
+	batchErrors := make([]error, 0)
 	for _, locale := range locales {
 		values := valuesByLocale[locale]
-		if len(values) == 0 {
-			return nil, fmt.Errorf("no localization values for locale %q", locale)
-		}
-		if !hasNonEmptyLocalizationValues(values) {
-			return nil, fmt.Errorf("localization values for locale %q are empty", locale)
-		}
 		result, err := handler(locale, values, existing[locale])
 		if err != nil {
-			return nil, err
+			if result.Locale == "" {
+				result.Locale = locale
+			}
+			if result.Action == "" {
+				result.Action = localizationUploadMutationAction(existing[locale])
+			}
+			if result.LocalizationID == "" {
+				result.LocalizationID = existing[locale]
+			}
+			result.Status = "failed"
+			result.Error = err.Error()
+			result.DesiredValues = cloneLocalizationValues(values)
+			results = append(results, result)
+			batchErrors = append(batchErrors, fmt.Errorf("locale %q: %w", locale, err))
+			continue
+		}
+		if result.Status == "" {
+			if dryRun {
+				result.Status = "planned"
+			} else {
+				result.Status = "succeeded"
+			}
 		}
 		results = append(results, result)
 	}
-	return results, nil
+	return results, errors.Join(batchErrors...)
+}
+
+func localizationUploadMutationAction(existingID string) string {
+	if existingID == "" {
+		return "create"
+	}
+	return "update"
+}
+
+func validateLocalizationValuesForBatch(locale string, values map[string]string) error {
+	if len(values) == 0 {
+		return fmt.Errorf("no localization values for locale %q", locale)
+	}
+	return nil
+}
+
+func validateVersionLocalizationCreates(valuesByLocale map[string]map[string]string, existing map[string]string) error {
+	locales := make([]string, 0, len(valuesByLocale))
+	for locale := range valuesByLocale {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+	for _, locale := range locales {
+		if existing[locale] == "" && !hasNonEmptyLocalizationValues(valuesByLocale[locale]) {
+			return fmt.Errorf("cannot create version localization %q without a non-empty value", locale)
+		}
+	}
+	return nil
+}
+
+func validateAppInfoLocalizationCreates(valuesByLocale map[string]map[string]string, existing map[string]string) error {
+	locales := make([]string, 0, len(valuesByLocale))
+	for locale := range valuesByLocale {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+	for _, locale := range locales {
+		if existing[locale] == "" && strings.TrimSpace(valuesByLocale[locale]["name"]) == "" {
+			return fmt.Errorf("cannot create app-info localization %q without a non-empty name", locale)
+		}
+	}
+	return nil
+}
+
+type localizationUploadFailureArtifact struct {
+	SchemaVersion int                                  `json:"schemaVersion"`
+	Command       string                               `json:"command"`
+	Type          string                               `json:"type"`
+	VersionID     string                               `json:"versionId,omitempty"`
+	AppID         string                               `json:"appId,omitempty"`
+	AppInfoID     string                               `json:"appInfoId,omitempty"`
+	InputPath     string                               `json:"inputPath,omitempty"`
+	Failed        int                                  `json:"failed"`
+	GeneratedAt   string                               `json:"generatedAt"`
+	Results       []asc.LocalizationUploadLocaleResult `json:"results"`
+}
+
+// FinalizeLocalizationUploadResult computes batch counts and writes a
+// versioned retry artifact for failed locales. Artifact failures are retained
+// in the result so callers can print the batch before returning an error.
+func FinalizeLocalizationUploadResult(result *asc.LocalizationUploadResult, command string) {
+	if result == nil {
+		return
+	}
+	result.Total = len(result.Results)
+	result.Succeeded = 0
+	result.Failed = 0
+	for _, item := range result.Results {
+		if item.Status == "failed" || item.Error != "" {
+			result.Failed++
+			continue
+		}
+		result.Succeeded++
+	}
+	if result.Failed == 0 {
+		return
+	}
+	path, err := writeLocalizationUploadFailureArtifact(result, command)
+	if err != nil {
+		result.FailureArtifactError = err.Error()
+		return
+	}
+	result.FailureArtifactPath = path
+}
+
+// RenderLocalizationUploadResult renders both the batch summary and per-locale
+// details so interactive output includes retry artifact information.
+func RenderLocalizationUploadResult(result *asc.LocalizationUploadResult, markdown bool) error {
+	if result == nil {
+		return fmt.Errorf("localization upload result is nil")
+	}
+	render := asc.RenderTable
+	if markdown {
+		render = asc.RenderMarkdown
+	}
+	render(
+		[]string{"Type", "Input Path", "Dry Run", "Total", "Succeeded", "Failed", "Failure Artifact", "Failure Artifact Error"},
+		[][]string{{
+			result.Type,
+			result.InputPath,
+			fmt.Sprintf("%t", result.DryRun),
+			strconv.Itoa(result.Total),
+			strconv.Itoa(result.Succeeded),
+			strconv.Itoa(result.Failed),
+			result.FailureArtifactPath,
+			result.FailureArtifactError,
+		}},
+	)
+	rows := make([][]string, 0, len(result.Results))
+	for _, item := range result.Results {
+		rows = append(rows, []string{item.Locale, item.Action, item.Status, item.LocalizationID, item.Error})
+	}
+	render([]string{"Locale", "Action", "Status", "Localization ID", "Error"}, rows)
+	return nil
+}
+
+func writeLocalizationUploadFailureArtifact(result *asc.LocalizationUploadResult, command string) (string, error) {
+	failures := make([]asc.LocalizationUploadLocaleResult, 0, result.Failed)
+	for _, item := range result.Results {
+		if item.Status == "failed" || item.Error != "" {
+			failures = append(failures, item)
+		}
+	}
+	artifact := localizationUploadFailureArtifact{
+		SchemaVersion: 1,
+		Command:       strings.TrimSpace(command),
+		Type:          result.Type,
+		VersionID:     result.VersionID,
+		AppID:         result.AppID,
+		AppInfoID:     result.AppInfoID,
+		InputPath:     result.InputPath,
+		Failed:        result.Failed,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		Results:       failures,
+	}
+	data, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(".asc", "reports", "localizations-upload", fmt.Sprintf("failures-%d.json", time.Now().UTC().UnixNano()))
+	if _, err := WriteStreamToFile(path, bytes.NewReader(data)); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func hasNonEmptyLocalizationValues(values map[string]string) bool {
@@ -601,7 +1041,11 @@ func readStringsFile(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseStringsContent(string(data))
+	values, err := parseStringsContent(string(data))
+	if err != nil {
+		return nil, newLocalizationInputError(err)
+	}
+	return values, nil
 }
 
 func parseStringsContent(content string) (map[string]string, error) {

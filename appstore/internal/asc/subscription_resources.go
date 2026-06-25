@@ -104,20 +104,22 @@ type SubscriptionImageUpdateRequest struct {
 
 // SubscriptionIntroductoryOfferAttributes describes a subscription introductory offer.
 type SubscriptionIntroductoryOfferAttributes struct {
-	StartDate       string                    `json:"startDate,omitempty"`
-	EndDate         string                    `json:"endDate,omitempty"`
-	Duration        SubscriptionOfferDuration `json:"duration,omitempty"`
-	OfferMode       SubscriptionOfferMode     `json:"offerMode,omitempty"`
-	NumberOfPeriods int                       `json:"numberOfPeriods,omitempty"`
+	StartDate                  string                    `json:"startDate,omitempty"`
+	EndDate                    string                    `json:"endDate,omitempty"`
+	Duration                   SubscriptionOfferDuration `json:"duration,omitempty"`
+	OfferMode                  SubscriptionOfferMode     `json:"offerMode,omitempty"`
+	NumberOfPeriods            int                       `json:"numberOfPeriods,omitempty"`
+	TargetSubscriptionPlanType SubscriptionPlanType      `json:"targetSubscriptionPlanType,omitempty"`
 }
 
 // SubscriptionIntroductoryOfferCreateAttributes describes attributes for creating an introductory offer.
 type SubscriptionIntroductoryOfferCreateAttributes struct {
-	StartDate       string                    `json:"startDate,omitempty"`
-	EndDate         string                    `json:"endDate,omitempty"`
-	Duration        SubscriptionOfferDuration `json:"duration"`
-	OfferMode       SubscriptionOfferMode     `json:"offerMode"`
-	NumberOfPeriods int                       `json:"numberOfPeriods"`
+	StartDate                  string                    `json:"startDate,omitempty"`
+	EndDate                    string                    `json:"endDate,omitempty"`
+	Duration                   SubscriptionOfferDuration `json:"duration"`
+	OfferMode                  SubscriptionOfferMode     `json:"offerMode"`
+	NumberOfPeriods            int                       `json:"numberOfPeriods"`
+	TargetSubscriptionPlanType SubscriptionPlanType      `json:"targetSubscriptionPlanType,omitempty"`
 }
 
 // SubscriptionIntroductoryOfferUpdateAttributes describes attributes for updating an introductory offer.

@@ -190,6 +190,112 @@ func TestBuildCrashQuery(t *testing.T) {
 	}
 }
 
+func TestBuildCrashQueryIncludeBuild(t *testing.T) {
+	query := &crashQuery{}
+	WithCrashInclude([]string{"build"})(query)
+
+	values, err := url.ParseQuery(buildCrashQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+
+	if got := values.Get("include"); got != "build" {
+		t.Fatalf("expected include=build, got %q", got)
+	}
+	// Including the build relationship narrows the build fields so callers can
+	// resolve the build number (version) and marketing version (preReleaseVersion).
+	if got := values.Get("fields[builds]"); got != "version,preReleaseVersion" {
+		t.Fatalf("expected fields[builds]=version,preReleaseVersion, got %q", got)
+	}
+}
+
+func TestBuildCrashQueryIncludeTesterOnly(t *testing.T) {
+	query := &crashQuery{}
+	WithCrashInclude([]string{"tester"})(query)
+
+	values, err := url.ParseQuery(buildCrashQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+
+	if got := values.Get("include"); got != "tester" {
+		t.Fatalf("expected include=tester, got %q", got)
+	}
+	// fields[builds] should only be set when the build relationship is included.
+	if got := values.Get("fields[builds]"); got != "" {
+		t.Fatalf("expected no fields[builds] without build include, got %q", got)
+	}
+}
+
+func TestBuildCrashQueryNoIncludeByDefault(t *testing.T) {
+	values, err := url.ParseQuery(buildCrashQuery(&crashQuery{}))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if got := values.Get("include"); got != "" {
+		t.Fatalf("expected no include by default, got %q", got)
+	}
+}
+
+func TestBuildFeedbackQueryIncludeBuild(t *testing.T) {
+	query := &feedbackQuery{}
+	WithFeedbackInclude([]string{"build"})(query)
+
+	values, err := url.ParseQuery(buildFeedbackQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+
+	if got := values.Get("include"); got != "build" {
+		t.Fatalf("expected include=build, got %q", got)
+	}
+	if got := values.Get("fields[builds]"); got != "version,preReleaseVersion" {
+		t.Fatalf("expected fields[builds]=version,preReleaseVersion, got %q", got)
+	}
+}
+
+// When --include-screenshots and --include build are combined, the requested
+// relationship must appear in the screenshot sparse fieldset, otherwise ASC
+// drops the included build from the response.
+func TestBuildFeedbackQueryIncludeBuildWithScreenshots(t *testing.T) {
+	query := &feedbackQuery{}
+	WithFeedbackIncludeScreenshots()(query)
+	WithFeedbackInclude([]string{"build"})(query)
+
+	values, err := url.ParseQuery(buildFeedbackQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+
+	if got := values.Get("include"); got != "build" {
+		t.Fatalf("expected include=build, got %q", got)
+	}
+	fields := values.Get("fields[betaFeedbackScreenshotSubmissions]")
+	if !strings.Contains(fields, "build") {
+		t.Fatalf("expected screenshot fieldset to contain build, got %q", fields)
+	}
+	if !strings.Contains(fields, "screenshots") {
+		t.Fatalf("expected screenshot fieldset to retain screenshots, got %q", fields)
+	}
+}
+
+func TestBuildCrashQueryIncludeBuildAndTester(t *testing.T) {
+	query := &crashQuery{}
+	WithCrashInclude([]string{"build", "tester"})(query)
+
+	values, err := url.ParseQuery(buildCrashQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+
+	if got := values.Get("include"); got != "build,tester" {
+		t.Fatalf("expected include=build,tester, got %q", got)
+	}
+	if got := values.Get("fields[builds]"); got != "version,preReleaseVersion" {
+		t.Fatalf("expected fields[builds]=version,preReleaseVersion, got %q", got)
+	}
+}
+
 func TestBuildBetaGroupsQuery(t *testing.T) {
 	query := &betaGroupsQuery{}
 	WithBetaGroupsLimit(10)(query)

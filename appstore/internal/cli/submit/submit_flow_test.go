@@ -3,11 +3,13 @@ package submit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
@@ -277,6 +279,118 @@ func TestEnsureBuildAttachedAttachesWhenNoCurrentBuild(t *testing.T) {
 	}
 	if !buildAttach {
 		t.Fatal("expected attach request when no current build exists")
+	}
+}
+
+func TestEnsureBuildAttachedUsesFreshDeadlineForMutation(t *testing.T) {
+	t.Setenv("ASC_TIMEOUT", "100ms")
+	t.Setenv("ASC_MAX_RETRIES", "0")
+	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
+			time.Sleep(60 * time.Millisecond)
+			return submitJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND"}]}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appStoreVersions/version-1/relationships/build":
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 70*time.Millisecond {
+				t.Fatalf("expected fresh attach deadline, remaining=%s", time.Until(deadline))
+			}
+			return submitJSONResponse(http.StatusNoContent, "")
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
+		}
+	}))
+
+	result, err := EnsureBuildAttached(context.Background(), client, "version-1", "build-new", false)
+	if err != nil || !result.Attached {
+		t.Fatalf("unexpected attach result: result=%+v err=%v", result, err)
+	}
+}
+
+func TestEnsureBuildAttachedReconcilesAmbiguousMutation(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "0")
+	t.Setenv("ASC_TIMEOUT", "100ms")
+	reads := 0
+	patches := 0
+	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
+			reads++
+			if reads == 1 {
+				return submitJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND"}]}`)
+			}
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 70*time.Millisecond {
+				t.Fatalf("expected fresh readback deadline, remaining=%s", time.Until(deadline))
+			}
+			return submitJSONResponse(http.StatusOK, `{"data":{"type":"builds","id":"build-new"}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appStoreVersions/version-1/relationships/build":
+			patches++
+			time.Sleep(60 * time.Millisecond)
+			return submitJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"INTERNAL_ERROR","detail":"ambiguous"}]}`)
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
+		}
+	}))
+
+	result, err := EnsureBuildAttached(context.Background(), client, "version-1", "build-new", false)
+	if err != nil || !result.Attached || reads != 2 || patches != 1 {
+		t.Fatalf("unexpected reconcile result: result=%+v reads=%d patches=%d err=%v", result, reads, patches, err)
+	}
+}
+
+func TestEnsureBuildAttachedReplaysOnlyAfterTwoNegativeReadbacks(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+	reads := 0
+	patches := 0
+	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
+			reads++
+			return submitJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND"}]}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appStoreVersions/version-1/relationships/build":
+			patches++
+			if patches == 1 {
+				return submitJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"INTERNAL_ERROR","detail":"temporary"}]}`)
+			}
+			return submitJSONResponse(http.StatusNoContent, "")
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
+		}
+	}))
+
+	result, err := EnsureBuildAttached(context.Background(), client, "version-1", "build-new", false)
+	if err != nil || !result.Attached || reads != 3 || patches != 2 {
+		t.Fatalf("unexpected bounded replay: result=%+v reads=%d patches=%d err=%v", result, reads, patches, err)
+	}
+}
+
+func TestEnsureBuildAttachedPreservesNonTransientFailure(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	reads := 0
+	patches := 0
+	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/build":
+			reads++
+			return submitJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND"}]}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appStoreVersions/version-1/relationships/build":
+			patches++
+			return submitJSONResponse(http.StatusUnprocessableEntity, `{"errors":[{"status":"422","code":"ENTITY_ERROR","detail":"invalid build"}]}`)
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
+		}
+	}))
+
+	result, err := EnsureBuildAttached(context.Background(), client, "version-1", "build-new", false)
+	var apiErr *asc.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected typed non-transient error, result=%+v err=%T %v", result, err, err)
+	}
+	if reads != 2 || patches != 1 || result.Attached {
+		t.Fatalf("unexpected non-transient calls: result=%+v reads=%d patches=%d", result, reads, patches)
 	}
 }
 

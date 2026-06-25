@@ -142,11 +142,11 @@ Examples:
 				return fmt.Errorf("metadata keywords audit: %w", err)
 			}
 
-			versionItems, err := fetchVersionLocalizations(requestCtx, client, versionIDValue)
+			versionItems, err := fetchVersionLocalizations(ctx, client, versionIDValue)
 			if err != nil {
 				return fmt.Errorf("metadata keywords audit: %w", err)
 			}
-			appInfoItems, err := fetchAppInfoLocalizations(requestCtx, client, appInfoIDValue)
+			appInfoItems, err := fetchAppInfoLocalizations(ctx, client, appInfoIDValue)
 			if err != nil {
 				return fmt.Errorf("metadata keywords audit: %w", err)
 			}

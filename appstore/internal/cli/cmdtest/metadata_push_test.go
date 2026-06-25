@@ -1857,6 +1857,7 @@ func TestMetadataPushApplyFailsOnPartialMutation(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("ASC_APP_ID", "")
+	t.Chdir(t.TempDir())
 
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "app-info"), 0o755); err != nil {
@@ -1949,17 +1950,25 @@ func TestMetadataPushApplyFailsOnPartialMutation(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
-	if runErr == nil {
-		t.Fatal("expected apply failure error")
+	if _, ok := errors.AsType[ReportedError](runErr); !ok {
+		t.Fatalf("expected reported partial failure, got %T: %v", runErr, runErr)
 	}
 	if patchCount != 2 {
 		t.Fatalf("expected two patch attempts before failure, got %d", patchCount)
 	}
-	if !strings.Contains(runErr.Error(), "metadata push: update version localization en-US") {
-		t.Fatalf("expected wrapped version-localization failure, got %v", runErr)
+	if !strings.Contains(runErr.Error(), "metadata push: 1 localization(s) failed") {
+		t.Fatalf("expected batch failure summary, got %v", runErr)
 	}
-	if stdout != "" {
-		t.Fatalf("expected empty stdout on failure, got %q", stdout)
+	var result struct {
+		Succeeded           int    `json:"succeeded"`
+		Failed              int    `json:"failed"`
+		FailureArtifactPath string `json:"failureArtifactPath"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse partial output: %v\nstdout=%q", err, stdout)
+	}
+	if result.Succeeded != 1 || result.Failed != 1 || result.FailureArtifactPath == "" {
+		t.Fatalf("unexpected partial summary: %+v", result)
 	}
 	if stderr != "" {
 		t.Fatalf("expected empty stderr on failure, got %q", stderr)

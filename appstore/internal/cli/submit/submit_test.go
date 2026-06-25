@@ -666,6 +666,7 @@ func setupSubmitAuth(t *testing.T) {
 	t.Setenv("ASC_ISSUER_ID", "TEST_ISSUER")
 	t.Setenv("ASC_PRIVATE_KEY_PATH", keyPath)
 	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_MAX_RETRIES", "0")
 }
 
 func writeSubmitECDSAPEM(t *testing.T, path string) {

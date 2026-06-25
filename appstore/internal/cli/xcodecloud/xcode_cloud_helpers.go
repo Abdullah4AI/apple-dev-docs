@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"syscall"
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -16,7 +14,7 @@ import (
 func waitForBuildCompletion(ctx context.Context, client *asc.Client, buildRunID string, pollInterval time.Duration, outputFormat string, pretty bool) error {
 	lastStatus := "unknown"
 	_, err := asc.PollUntil(ctx, pollInterval, func(ctx context.Context) (struct{}, bool, error) {
-		resp, err := getCiBuildRunWithRetry(ctx, client, buildRunID)
+		resp, err := getCiBuildRun(ctx, client, buildRunID)
 		if err != nil {
 			return struct{}{}, false, fmt.Errorf("xcode-cloud: failed to check status: %w", err)
 		}
@@ -84,31 +82,6 @@ func contextWithXcodeCloudTimeout(ctx context.Context, timeout time.Duration) (c
 	return context.WithTimeout(ctx, timeout)
 }
 
-func getCiBuildRunWithRetry(ctx context.Context, client *asc.Client, buildRunID string, opts ...asc.CiBuildRunGetOption) (*asc.CiBuildRunResponse, error) {
-	retryOpts := asc.ResolveRetryOptions()
-	return asc.WithRetry(ctx, func() (*asc.CiBuildRunResponse, error) {
-		resp, err := client.GetCiBuildRun(ctx, buildRunID, opts...)
-		if err != nil {
-			if isTransientNetworkError(err) {
-				return nil, &asc.RetryableError{Err: err}
-			}
-			return nil, err
-		}
-		return resp, nil
-	}, retryOpts)
-}
-
-func isTransientNetworkError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return false
-	}
-	if _, ok := errors.AsType[net.Error](err); ok {
-		return true
-	}
-	return errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.EPIPE) ||
-		errors.Is(err, syscall.ECONNREFUSED)
+func getCiBuildRun(ctx context.Context, client *asc.Client, buildRunID string, opts ...asc.CiBuildRunGetOption) (*asc.CiBuildRunResponse, error) {
+	return client.GetCiBuildRun(ctx, buildRunID, opts...)
 }

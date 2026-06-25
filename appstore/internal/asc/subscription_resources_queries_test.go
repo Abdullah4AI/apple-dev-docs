@@ -5,6 +5,54 @@ import (
 	"testing"
 )
 
+func TestBuildSubscriptionIntroductoryOffersQueryFieldsAndInclude(t *testing.T) {
+	query := &subscriptionIntroductoryOffersQuery{}
+	WithSubscriptionIntroductoryOffersFields([]string{
+		"startDate",
+		"endDate",
+		"duration",
+		"offerMode",
+		"numberOfPeriods",
+		"targetSubscriptionPlanType",
+		"territory",
+		"subscriptionPricePoint",
+	})(query)
+	WithSubscriptionIntroductoryOffersInclude([]string{"territory", "subscriptionPricePoint"})(query)
+
+	values, err := url.ParseQuery(buildSubscriptionIntroductoryOffersQuery(query))
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := values.Get("fields[subscriptionIntroductoryOffers]"); got != "startDate,endDate,duration,offerMode,numberOfPeriods,targetSubscriptionPlanType,territory,subscriptionPricePoint" {
+		t.Fatalf("unexpected introductory offer fields: %q", got)
+	}
+	if got := values.Get("include"); got != "territory,subscriptionPricePoint" {
+		t.Fatalf("unexpected introductory offer include: %q", got)
+	}
+}
+
+func TestBuildSubscriptionLocalizationQueriesFields(t *testing.T) {
+	subscriptionQuery := &subscriptionLocalizationsQuery{}
+	WithSubscriptionLocalizationsFields([]string{"name", "locale", "description"})(subscriptionQuery)
+	subscriptionValues, err := url.ParseQuery(buildSubscriptionLocalizationsQuery(subscriptionQuery))
+	if err != nil {
+		t.Fatalf("parse subscription localization query: %v", err)
+	}
+	if got := subscriptionValues.Get("fields[subscriptionLocalizations]"); got != "name,locale,description" {
+		t.Fatalf("unexpected subscription localization fields: %q", got)
+	}
+
+	groupQuery := &subscriptionGroupLocalizationsQuery{}
+	WithSubscriptionGroupLocalizationsFields([]string{"name", "locale", "customAppName"})(groupQuery)
+	groupValues, err := url.ParseQuery(buildSubscriptionGroupLocalizationsQuery(groupQuery))
+	if err != nil {
+		t.Fatalf("parse group localization query: %v", err)
+	}
+	if got := groupValues.Get("fields[subscriptionGroupLocalizations]"); got != "name,locale,customAppName" {
+		t.Fatalf("unexpected group localization fields: %q", got)
+	}
+}
+
 func TestBuildSubscriptionPricesQueryPlanType(t *testing.T) {
 	query := &subscriptionPricesQuery{}
 	WithSubscriptionPricesPlanType(SubscriptionPlanTypeMonthly)(query)
@@ -15,6 +63,19 @@ func TestBuildSubscriptionPricesQueryPlanType(t *testing.T) {
 	}
 	if got := values.Get("filter[planType]"); got != "MONTHLY" {
 		t.Fatalf("expected filter[planType]=MONTHLY, got %q", got)
+	}
+}
+
+func TestBuildSubscriptionPricesQueryFields(t *testing.T) {
+	query := &subscriptionPricesQuery{}
+	WithSubscriptionPricesFields([]string{"startDate", "preserved", "planType", "territory", "subscriptionPricePoint"})(query)
+
+	values, err := url.ParseQuery(buildSubscriptionPricesQuery(query))
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := values.Get("fields[subscriptionPrices]"); got != "startDate,preserved,planType,territory,subscriptionPricePoint" {
+		t.Fatalf("unexpected subscription price fields: %q", got)
 	}
 }
 

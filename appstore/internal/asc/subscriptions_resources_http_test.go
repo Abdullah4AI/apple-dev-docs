@@ -1208,10 +1208,17 @@ func TestGetSubscriptionAppStoreReviewScreenshotForSubscription(t *testing.T) {
 		if req.URL.Path != "/v1/subscriptions/sub-1/appStoreReviewScreenshot" {
 			t.Fatalf("expected path /v1/subscriptions/sub-1/appStoreReviewScreenshot, got %s", req.URL.Path)
 		}
+		if got := req.URL.Query().Get("fields[subscriptionAppStoreReviewScreenshots]"); got != "fileName,fileSize,sourceFileChecksum,uploadOperations,assetDeliveryState" {
+			t.Fatalf("unexpected screenshot fields: %q", got)
+		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetSubscriptionAppStoreReviewScreenshotForSubscription(context.Background(), "sub-1"); err != nil {
+	if _, err := client.GetSubscriptionAppStoreReviewScreenshotForSubscription(
+		context.Background(),
+		"sub-1",
+		WithSubscriptionAppStoreReviewScreenshotFields([]string{"fileName", "fileSize", "sourceFileChecksum", "uploadOperations", "assetDeliveryState"}),
+	); err != nil {
 		t.Fatalf("GetSubscriptionAppStoreReviewScreenshotForSubscription() error: %v", err)
 	}
 }

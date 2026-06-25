@@ -217,7 +217,7 @@ Examples:
 					}
 				}
 			} else {
-				sourceRunResp, err := getCiBuildRunWithRetry(
+				sourceRunResp, err := getCiBuildRun(
 					requestCtx,
 					client,
 					resolvedSourceRunID,
@@ -363,7 +363,7 @@ Examples:
 			}
 
 			// Single status check
-			resp, err := getCiBuildRunWithRetry(requestCtx, client, strings.TrimSpace(*runID))
+			resp, err := getCiBuildRun(requestCtx, client, strings.TrimSpace(*runID))
 			if err != nil {
 				return fmt.Errorf("xcode-cloud status: %w", err)
 			}

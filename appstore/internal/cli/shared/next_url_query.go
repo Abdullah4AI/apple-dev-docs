@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -11,13 +12,17 @@ func MergeNextURLQuery(next string, additions url.Values) (string, error) {
 	if next == "" {
 		return "", nil
 	}
-	if err := validateNextURL(next); err != nil {
-		return "", err
-	}
 
 	parsed, err := url.Parse(next)
 	if err != nil {
 		return "", err
+	}
+	if parsed.IsAbs() {
+		if err := validateNextURL(next); err != nil {
+			return "", err
+		}
+	} else if parsed.Host != "" || strings.HasPrefix(next, "//") {
+		return "", fmt.Errorf("relative next URL must not specify a host")
 	}
 
 	query := parsed.Query()

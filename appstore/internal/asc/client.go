@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -167,6 +168,16 @@ type AppInfoLocalizationAttributes struct {
 	PrivacyPolicyURL  string `json:"privacyPolicyUrl,omitempty"`
 	PrivacyChoicesURL string `json:"privacyChoicesUrl,omitempty"`
 	PrivacyPolicyText string `json:"privacyPolicyText,omitempty"`
+}
+
+type localizationFieldsUpdateData struct {
+	Type       ResourceType      `json:"type"`
+	ID         string            `json:"id"`
+	Attributes map[string]string `json:"attributes"`
+}
+
+type localizationFieldsUpdateRequest struct {
+	Data localizationFieldsUpdateData `json:"data"`
 }
 
 // AppInfoAttributes describes app info resources.
@@ -1253,6 +1264,30 @@ func (c *Client) UpdateAppStoreVersionLocalization(ctx context.Context, localiza
 	return &response, nil
 }
 
+// UpdateAppStoreVersionLocalizationFields updates exactly the supplied fields,
+// preserving explicit empty strings while leaving omitted fields unchanged.
+func (c *Client) UpdateAppStoreVersionLocalizationFields(ctx context.Context, localizationID string, fields map[string]string) (*AppStoreVersionLocalizationResponse, error) {
+	payload := localizationFieldsUpdateRequest{Data: localizationFieldsUpdateData{
+		Type:       ResourceTypeAppStoreVersionLocalizations,
+		ID:         localizationID,
+		Attributes: fields,
+	}}
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/v1/appStoreVersionLocalizations/%s", localizationID)
+	data, err := c.do(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var response AppStoreVersionLocalizationResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &response, nil
+}
+
 // DeleteAppStoreVersionLocalization deletes a localization by ID.
 func (c *Client) DeleteAppStoreVersionLocalization(ctx context.Context, localizationID string) error {
 	path := fmt.Sprintf("/v1/appStoreVersionLocalizations/%s", localizationID)
@@ -1553,6 +1588,30 @@ func (c *Client) UpdateAppInfoLocalization(ctx context.Context, localizationID s
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	return &response, nil
+}
+
+// UpdateAppInfoLocalizationFields updates exactly the supplied fields,
+// preserving explicit empty strings while leaving omitted fields unchanged.
+func (c *Client) UpdateAppInfoLocalizationFields(ctx context.Context, localizationID string, fields map[string]string) (*AppInfoLocalizationResponse, error) {
+	payload := localizationFieldsUpdateRequest{Data: localizationFieldsUpdateData{
+		Type:       ResourceTypeAppInfoLocalizations,
+		ID:         localizationID,
+		Attributes: fields,
+	}}
+	body, err := BuildRequestBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/v1/appInfoLocalizations/%s", localizationID)
+	data, err := c.do(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var response AppInfoLocalizationResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
 	return &response, nil
 }
 

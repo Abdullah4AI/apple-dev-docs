@@ -403,6 +403,18 @@ func WithFeedbackIncludeScreenshots() FeedbackOption {
 	}
 }
 
+// WithFeedbackInclude specifies related resources to include in screenshot
+// feedback responses (e.g., "build" to surface the build the feedback was
+// submitted against, or "tester").
+func WithFeedbackInclude(include []string) FeedbackOption {
+	return func(q *feedbackQuery) {
+		normalized := normalizeList(include)
+		if len(normalized) > 0 {
+			q.include = normalized
+		}
+	}
+}
+
 // WithCrashDeviceModels filters crashes by device model(s).
 func WithCrashDeviceModels(models []string) CrashOption {
 	return func(q *crashQuery) {
@@ -1002,6 +1014,19 @@ func WithCrashSort(sort string) CrashOption {
 	return func(q *crashQuery) {
 		if strings.TrimSpace(sort) != "" {
 			q.sort = strings.TrimSpace(sort)
+		}
+	}
+}
+
+// WithCrashInclude specifies related resources to include in crash submission
+// responses (e.g., "build" to surface the build the crash occurred on, or
+// "tester"). Including "build" also returns the build's version and
+// preReleaseVersion so the marketing version can be resolved.
+func WithCrashInclude(include []string) CrashOption {
+	return func(q *crashQuery) {
+		normalized := normalizeList(include)
+		if len(normalized) > 0 {
+			q.include = normalized
 		}
 	}
 }

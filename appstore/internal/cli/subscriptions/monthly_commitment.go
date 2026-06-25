@@ -502,11 +502,8 @@ func validateMonthlyCommitmentUpfrontPrices(
 	territoryIDs []string,
 	monthlyPrice string,
 ) error {
-	pricesCtx, pricesCancel := shared.ContextWithTimeout(ctx)
-	defer pricesCancel()
-
 	resolved, err := fetchResolvedSubscriptionPrices(
-		pricesCtx,
+		ctx,
 		client,
 		subscriptionID,
 		200,
@@ -561,9 +558,8 @@ func prepareMonthlySubscriptionPrices(
 	monthlyPrice string,
 ) ([]monthlySubscriptionPriceCreate, error) {
 	now := time.Now().UTC()
-	pricesCtx, pricesCancel := shared.ContextWithTimeout(ctx)
 	resolvedPrices, err := fetchResolvedSubscriptionPrices(
-		pricesCtx,
+		ctx,
 		client,
 		subscriptionID,
 		200,
@@ -571,7 +567,6 @@ func prepareMonthlySubscriptionPrices(
 		now,
 		asc.SubscriptionPlanTypeMonthly,
 	)
-	pricesCancel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch MONTHLY subscription prices: %w", err)
 	}

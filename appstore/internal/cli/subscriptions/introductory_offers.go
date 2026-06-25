@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+const subscriptionIntroductoryOfferCreateTimeout = 5 * time.Minute
 
 // SubscriptionsIntroductoryOffersCommand returns the introductory offers command group.
 func SubscriptionsIntroductoryOffersCommand() *ffcli.Command {
@@ -198,7 +201,10 @@ func SubscriptionsIntroductoryOffersCreateCommand() *ffcli.Command {
 Examples:
   asc subscriptions introductory-offers create --subscription-id "SUB_ID" --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
   asc subscriptions introductory-offers create --subscription-id "SUB_ID" --all-territories --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
-  asc subscriptions introductory-offers create --subscription-id "SUB_ID" --territory ALL --dry-run --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1`,
+  asc subscriptions introductory-offers create --subscription-id "SUB_ID" --territory ALL --dry-run --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
+
+Timeouts:
+  An explicit ASC_TIMEOUT caps the full create operation. Without an override, the operation uses a 5m fallback while individual requests retain the standard request timeout.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -269,7 +275,10 @@ Examples:
 				return fmt.Errorf("subscriptions introductory-offers create: %w", err)
 			}
 
-			id, err = resolveSubscriptionLookupIDWithTimeout(ctx, client, *appID, id)
+			operationCtx, operationCancel := contextWithSubscriptionIntroductoryOfferCreateTimeout(ctx)
+			defer operationCancel()
+
+			id, err = resolveSubscriptionLookupIDWithTimeout(operationCtx, client, *appID, id)
 			if err != nil {
 				return err
 			}
@@ -288,7 +297,7 @@ Examples:
 
 			if useAllTerritories {
 				return createSubscriptionIntroductoryOffersForAllTerritories(
-					ctx,
+					operationCtx,
 					client,
 					id,
 					attrs,
@@ -299,7 +308,7 @@ Examples:
 				)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			requestCtx, cancel := shared.ContextWithTimeout(operationCtx)
 			defer cancel()
 
 			resp, err := client.CreateSubscriptionIntroductoryOffer(
@@ -371,10 +380,17 @@ func createSubscriptionIntroductoryOffersForAllTerritories(
 		Total:           len(territories),
 	}
 
+	var operationErr error
 	for _, territoryID := range territories {
 		if _, ok := existing[territoryID]; ok {
 			appendSubscriptionIntroductoryOfferCreateBulkSkip(summary, territoryID, "introductory offer already exists for territory")
 			continue
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			appendSubscriptionIntroductoryOfferCreateBulkFailure(summary, territoryID, ctxErr)
+			operationErr = ctxErr
+			break
 		}
 
 		if dryRun {
@@ -387,6 +403,10 @@ func createSubscriptionIntroductoryOffersForAllTerritories(
 		createCancel()
 		if err != nil {
 			appendSubscriptionIntroductoryOfferCreateBulkFailure(summary, territoryID, err)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				operationErr = ctxErr
+				break
+			}
 			if !continueOnError {
 				break
 			}
@@ -405,10 +425,17 @@ func createSubscriptionIntroductoryOffersForAllTerritories(
 	); err != nil {
 		return err
 	}
+	if operationErr != nil {
+		return shared.NewReportedError(fmt.Errorf("subscriptions introductory-offers create: operation stopped: %w", operationErr))
+	}
 	if summary.Failed > 0 {
 		return shared.NewReportedError(fmt.Errorf("subscriptions introductory-offers create: %d territor%s failed", summary.Failed, pluralizeIntroductoryOfferCreateTerritories(summary.Failed)))
 	}
 	return nil
+}
+
+func contextWithSubscriptionIntroductoryOfferCreateTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithResolvedTimeout(ctx, subscriptionIntroductoryOfferCreateTimeout)
 }
 
 func fetchIntroductoryOfferAvailabilityTerritories(ctx context.Context, client *asc.Client, subscriptionID string) (string, []string, error) {

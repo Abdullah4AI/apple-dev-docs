@@ -1546,6 +1546,17 @@ func validateSort(value string, allowed ...string) error {
 	return fmt.Errorf("--sort must be one of: %s", strings.Join(allowed, ", "))
 }
 
+// ValidateInclude validates a comma-separated --include value against the set
+// of allowed relationship names. An empty value is valid (no includes).
+func ValidateInclude(value string, allowed ...string) error {
+	for _, item := range SplitCSV(value) {
+		if !slices.Contains(allowed, item) {
+			return fmt.Errorf("--include must be a comma-separated list of: %s", strings.Join(allowed, ", "))
+		}
+	}
+	return nil
+}
+
 // Exported wrappers for shared helpers.
 func GetASCClient() (*asc.Client, error) {
 	// Auth resolution can block on macOS keychain prompts. Show a subtle spinner on stderr

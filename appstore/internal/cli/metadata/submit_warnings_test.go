@@ -131,3 +131,19 @@ func TestVersionCreateWarningsForPatches_RequiresWhatsNewForUpdates(t *testing.T
 		t.Fatalf("expected missing fields [whatsNew], got %+v", warnings[0].MissingFields)
 	}
 }
+
+func TestSuccessfulVersionCreateWarningsFiltersFailedCreates(t *testing.T) {
+	warnings := []shared.SubmitReadinessCreateWarning{
+		{Locale: "en-US", Mode: shared.SubmitReadinessCreateModeApplied, MissingFields: []string{"keywords"}},
+		{Locale: "fr-FR", Mode: shared.SubmitReadinessCreateModeApplied, MissingFields: []string{"supportUrl"}},
+	}
+	actions := []ApplyAction{
+		{Scope: versionDirName, Locale: "en-US", Action: "create", Status: "succeeded", LocalizationID: "en-id"},
+		{Scope: versionDirName, Locale: "fr-FR", Action: "create", Status: "failed", Error: "rejected"},
+	}
+
+	filtered := successfulVersionCreateWarnings(warnings, actions, nil)
+	if len(filtered) != 1 || filtered[0].Locale != "en-US" {
+		t.Fatalf("unexpected applied warnings: %+v", filtered)
+	}
+}
