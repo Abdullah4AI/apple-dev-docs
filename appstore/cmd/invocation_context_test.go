@@ -25,6 +25,13 @@ func TestRuntimeFailureContextClassifiesLowCardinalityFailures(t *testing.T) {
 			wantStage: telemetry.FailureStageValidation,
 		},
 		{
+			name:      "reported validation failure",
+			err:       shared.NewValidationReportedError(errors.New("found blocking issues")),
+			exitCode:  ExitError,
+			wantKind:  telemetry.ErrorKindOther,
+			wantStage: telemetry.FailureStageValidation,
+		},
+		{
 			name:      "API conflict",
 			err:       errors.New("conflict"),
 			exitCode:  ExitConflict,

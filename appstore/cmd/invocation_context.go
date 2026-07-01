@@ -158,6 +158,8 @@ func runtimeFailureContext(analysis invocationAnalysis, err error, exitCode int)
 	switch {
 	case errors.Is(err, shared.ErrMissingAuth):
 		eventContext.FailureStage = telemetry.FailureStageValidation
+	case shared.IsValidationError(err):
+		eventContext.FailureStage = telemetry.FailureStageValidation
 	case errors.Is(err, context.DeadlineExceeded):
 		eventContext.FailureStage = telemetry.FailureStageRequest
 	case exitCode == ExitConflict:

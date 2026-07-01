@@ -74,7 +74,7 @@ func (c *Client) fetchHistogram(ctx context.Context, appID, country string, rati
 		return fmt.Errorf("unknown country code: %s", country)
 	}
 
-	req, err := c.newRequest(ctx, http.MethodGet, fmt.Sprintf("/%s/customer-reviews/id%s", country, appID), nil)
+	req, err := c.newRequest(ctx, fmt.Sprintf("/%s/customer-reviews/id%s", country, appID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create histogram request: %w", err)
 	}

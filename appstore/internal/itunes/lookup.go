@@ -132,7 +132,7 @@ func (c *Client) LookupApps(ctx context.Context, ids []string, opts LookupOption
 		query.Set("entity", "software")
 	}
 
-	req, err := c.newRequest(ctx, http.MethodGet, "/lookup", query)
+	req, err := c.newRequest(ctx, "/lookup", query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -195,6 +195,55 @@ func (c *Client) LookupApp(ctx context.Context, appID string, opts LookupOptions
 		return nil, fmt.Errorf("app not found: %s", appID)
 	}
 	return &app, nil
+}
+
+// LookupAppByBundleID fetches public App Store metadata for an exact bundle ID.
+func (c *Client) LookupAppByBundleID(ctx context.Context, bundleID string, opts LookupOptions) (*App, error) {
+	bundleID = strings.TrimSpace(bundleID)
+	if bundleID == "" {
+		return nil, fmt.Errorf("bundle ID is required")
+	}
+
+	query := url.Values{}
+	query.Set("bundleId", bundleID)
+	country, err := NormalizeCountryCode(opts.Country)
+	if err != nil {
+		return nil, err
+	}
+	if country != "" {
+		query.Set("country", country)
+	}
+	if opts.IncludeSoftwareEntity {
+		query.Set("entity", "software")
+	}
+
+	req, err := c.newRequest(ctx, "/lookup", query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("lookup request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("lookup request returned status %d", resp.StatusCode)
+	}
+
+	var lookup lookupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
+		return nil, fmt.Errorf("failed to parse lookup response: %w", err)
+	}
+	for _, result := range lookup.Results {
+		if result.TrackID == 0 || !strings.EqualFold(strings.TrimSpace(result.BundleID), bundleID) {
+			continue
+		}
+		app := buildApp(result, country)
+		return &app, nil
+	}
+	return nil, nil
 }
 
 func buildApp(result lookupResult, country string) App {

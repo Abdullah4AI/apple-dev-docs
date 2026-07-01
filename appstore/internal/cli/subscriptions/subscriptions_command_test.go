@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -45,5 +46,42 @@ func TestMergeSubscriptionPricesPlanTypeLeavesUnfilteredRelativeNextURLUntouched
 	}
 	if merged != next {
 		t.Fatalf("expected unfiltered relative next URL to be unchanged, got %q", merged)
+	}
+}
+
+func TestSubscriptionPriceMatchesTargetComparesDefaultScheduleAndPreserved(t *testing.T) {
+	price := asc.Resource[asc.SubscriptionPriceAttributes]{
+		ID:         "existing-price-1",
+		Type:       "subscriptionPrices",
+		Attributes: asc.SubscriptionPriceAttributes{},
+		Relationships: json.RawMessage(`{
+			"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"PP_ID"}},
+			"territory":{"data":{"type":"territories","id":"USA"}}
+		}`),
+	}
+
+	if !subscriptionPriceMatchesTarget(price, "PP_ID", "USA", asc.SubscriptionPriceCreateAttributes{}) {
+		t.Fatal("expected default price to match default requested state")
+	}
+
+	price.Attributes.StartDate = "2026-05-01"
+	if subscriptionPriceMatchesTarget(price, "PP_ID", "USA", asc.SubscriptionPriceCreateAttributes{}) {
+		t.Fatal("expected scheduled price not to match omitted start date")
+	}
+	price.Attributes.StartDate = ""
+
+	price.Attributes.Preserved = true
+	if subscriptionPriceMatchesTarget(price, "PP_ID", "USA", asc.SubscriptionPriceCreateAttributes{}) {
+		t.Fatal("expected preserved price not to match omitted preserved flag")
+	}
+	price.Attributes.Preserved = false
+
+	price.Attributes.PlanType = asc.SubscriptionPlanTypeMonthly
+	if subscriptionPriceMatchesTarget(price, "PP_ID", "USA", asc.SubscriptionPriceCreateAttributes{}) {
+		t.Fatal("expected monthly plan price not to match omitted upfront plan type")
+	}
+	price.Attributes.PlanType = asc.SubscriptionPlanTypeUpfront
+	if !subscriptionPriceMatchesTarget(price, "PP_ID", "USA", asc.SubscriptionPriceCreateAttributes{}) {
+		t.Fatal("expected upfront plan price to match omitted plan type")
 	}
 }

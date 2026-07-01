@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestUploadScreenshotsFanoutUsesLocaleDirectoriesForResolvedVersion(t *testing.T) {
@@ -591,6 +592,9 @@ func TestExecuteScreenshotUploadCommandValidatesFanoutFilesBeforeClientCreation(
 	})
 	if err == nil {
 		t.Fatal("expected local validation error")
+	}
+	if !shared.IsValidationError(err) {
+		t.Fatalf("expected shared validation error, got %T: %v", err, err)
 	}
 	if clientCalled {
 		t.Fatal("expected client creation to be skipped on local validation failure")

@@ -15,7 +15,19 @@ type ReportedError interface {
 	Reported() bool
 }
 
+// ValidationFailure marks an error as a command/domain validation result rather
+// than a generic runtime failure. It intentionally carries no command-specific
+// value so telemetry can classify the stage without increasing cardinality.
+type ValidationFailure interface {
+	error
+	ValidationFailure() bool
+}
+
 type reportedError struct {
+	err error
+}
+
+type validationError struct {
 	err error
 }
 
@@ -52,12 +64,45 @@ func (e reportedError) Reported() bool {
 	return true
 }
 
+func (e validationError) Error() string {
+	return e.err.Error()
+}
+
+func (e validationError) Unwrap() error {
+	return e.err
+}
+
+func (e validationError) ValidationFailure() bool {
+	return true
+}
+
 // NewReportedError wraps an error that has already been printed.
 func NewReportedError(err error) error {
 	if err == nil {
 		return nil
 	}
 	return reportedError{err: err}
+}
+
+// NewValidationError wraps an error that represents local/domain validation.
+func NewValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return validationError{err: err}
+}
+
+// NewValidationReportedError wraps an already printed validation result.
+func NewValidationReportedError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return NewReportedError(NewValidationError(err))
+}
+
+func IsValidationError(err error) bool {
+	var validationErr ValidationFailure
+	return errors.As(err, &validationErr) && validationErr.ValidationFailure()
 }
 
 // UsageError prints a CLI validation error and returns flag.ErrHelp so callers

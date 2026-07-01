@@ -110,7 +110,7 @@ func runValidateIAP(ctx context.Context, opts validateIAPOptions) error {
 	}
 
 	if report.Summary.Blocking > 0 {
-		return shared.NewReportedError(fmt.Errorf("validate iap: found %d blocking issue(s)", report.Summary.Blocking))
+		return shared.NewValidationReportedError(fmt.Errorf("validate iap: found %d blocking issue(s)", report.Summary.Blocking))
 	}
 
 	return nil

@@ -133,7 +133,7 @@ func runValidateSubscriptions(ctx context.Context, opts validateSubscriptionsOpt
 	}
 
 	if report.Summary.Blocking > 0 {
-		return shared.NewReportedError(fmt.Errorf("validate subscriptions: found %d blocking issue(s)", report.Summary.Blocking))
+		return shared.NewValidationReportedError(fmt.Errorf("validate subscriptions: found %d blocking issue(s)", report.Summary.Blocking))
 	}
 
 	return nil

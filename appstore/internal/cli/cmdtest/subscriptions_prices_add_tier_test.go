@@ -5,12 +5,35 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+func subscriptionPriceListFixture(pricePointID, territoryID, attrs string) string {
+	if strings.TrimSpace(attrs) == "" {
+		attrs = "{}"
+	}
+
+	territoryRelationship := ""
+	if territoryID != "" {
+		territoryRelationship = fmt.Sprintf(
+			`,"territory":{"data":{"type":"territories","id":%q}}`,
+			territoryID,
+		)
+	}
+
+	return fmt.Sprintf(
+		`{"data":[{"type":"subscriptionPrices","id":%q,"attributes":%s,"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":%q}}%s}}],"links":{"next":""}}`,
+		"existing-price-1",
+		attrs,
+		pricePointID,
+		territoryRelationship,
+	)
+}
 
 func TestSubscriptionsPricesAdd_TierAndPricePointMutualExclusion(t *testing.T) {
 	root := RootCommand("1.2.3")
@@ -69,6 +92,13 @@ func TestSubscriptionsPricesAdd_TierUsesSubscriptionPricePoints(t *testing.T) {
 		case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/apps/"):
 			t.Fatalf("unexpected app price points request: %s", req.URL.Path)
 			return nil, nil
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/prices"):
+			body := subscriptionPriceListFixture("sub-pp-1", "USA", "")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
 		case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/subscriptionPrices"):
 			bodyBytes, _ := io.ReadAll(req.Body)
 			bodyStr := string(bodyBytes)
@@ -141,6 +171,13 @@ func TestSubscriptionsPricesAdd_NormalizesTerritory(t *testing.T) {
 				],
 				"links":{"next":""}
 			}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/prices"):
+			body := subscriptionPriceListFixture("different-pp", "FRA", "")
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(body)),
@@ -341,6 +378,13 @@ func TestSubscriptionsPricesAdd_ExistingPriceForwardsTerritoryOverridePayload(t 
 				Body:       io.NopCloser(strings.NewReader(body)),
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			}, nil
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/prices"):
+			body := subscriptionPriceListFixture("different-pp", "NOR", `{"startDate":"2026-05-01","preserved":true}`)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/subscriptionPrices":
 			var payload map[string]any
 			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
@@ -442,6 +486,76 @@ func TestSubscriptionsPricesAdd_ExistingPriceForwardsTerritoryOverridePayload(t 
 	}
 	if !strings.Contains(stdout, `"id":"sub-price-1"`) {
 		t.Fatalf("expected subscription price response in stdout, got %q", stdout)
+	}
+}
+
+func TestSubscriptionsPricesAdd_ExistingMatchingPriceSkipsCreate(t *testing.T) {
+	setupAuth(t)
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	var posted bool
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/relationships/prices"):
+			body := `{"data":[{"type":"subscriptionPrices","id":"existing-price-1"}],"links":{}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/prices"):
+			query := req.URL.Query()
+			if got := query.Get("filter[territory]"); got != "USA" {
+				t.Fatalf("expected filter[territory]=USA, got %q", got)
+			}
+			if got := query.Get("include"); got != "subscriptionPricePoint,territory" {
+				t.Fatalf("expected relationship include query, got %q", got)
+			}
+			body := subscriptionPriceListFixture("PP_ID", "USA", `{"startDate":"2026-05-01","preserved":true}`)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/subscriptionPrices":
+			posted = true
+			t.Fatalf("unexpected POST request for already matching price")
+			return nil, nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	t.Setenv("HOME", t.TempDir())
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "pricing", "prices", "set",
+			"--subscription-id", "8000000003",
+			"--price-point", "PP_ID",
+			"--territory", "USA",
+			"--start-date", "2026-05-01",
+			"--preserved",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if posted {
+		t.Fatal("did not expect create request")
+	}
+	if !strings.Contains(stdout, `"id":"existing-price-1"`) {
+		t.Fatalf("expected existing subscription price response in stdout, got %q", stdout)
 	}
 }
 
@@ -555,6 +669,13 @@ func TestSubscriptionsPricesAddRefreshesContextAfterTierResolution(t *testing.T)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/prices"):
+			resp := subscriptionPriceListFixture("sub-pp-1", "USA", "")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(resp)),
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			}, nil
 		case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/subscriptionPrices"):

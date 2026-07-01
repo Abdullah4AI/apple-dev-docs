@@ -136,7 +136,7 @@ Examples:
 				return err
 			}
 			if result.ErrorCount > 0 {
-				return shared.NewReportedError(fmt.Errorf("screenshots plan: found %d blocking issue(s)", result.ErrorCount))
+				return shared.NewValidationReportedError(fmt.Errorf("screenshots plan: found %d blocking issue(s)", result.ErrorCount))
 			}
 			return nil
 		},
@@ -205,7 +205,7 @@ Examples:
 				return err
 			}
 			if result.ErrorCount > 0 {
-				return shared.NewReportedError(fmt.Errorf("screenshots apply: found %d blocking issue(s)", result.ErrorCount))
+				return shared.NewValidationReportedError(fmt.Errorf("screenshots apply: found %d blocking issue(s)", result.ErrorCount))
 			}
 			return nil
 		},

@@ -42,7 +42,7 @@ func (c *Client) baseURL() string {
 	return strings.TrimRight(base, "/")
 }
 
-func (c *Client) newRequest(ctx context.Context, method, path string, query url.Values) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, path string, query url.Values) (*http.Request, error) {
 	base, err := url.Parse(c.baseURL())
 	if err != nil {
 		return nil, fmt.Errorf("invalid iTunes base URL: %w", err)
@@ -54,7 +54,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, query url.
 		reqURL.RawQuery = query.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, reqURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}

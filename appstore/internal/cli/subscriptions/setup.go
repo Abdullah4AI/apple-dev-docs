@@ -2,6 +2,8 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -12,6 +14,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/ascterritory"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+var errSubscriptionsSetupExistingResourceFound = errors.New("existing subscription setup resource found")
 
 const (
 	subscriptionsSetupStepEnsureGroup        = "ensure_group"
@@ -335,11 +339,10 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 		return result, fmt.Errorf("subscriptions setup: %w", err)
 	}
 
+	reusedGroup := strings.TrimSpace(opts.GroupID) != ""
 	if strings.TrimSpace(opts.GroupID) == "" {
 		groupCtx, groupCancel := shared.ContextWithTimeout(ctx)
-		groupResp, err := client.CreateSubscriptionGroup(groupCtx, opts.AppID, asc.SubscriptionGroupCreateAttributes{
-			ReferenceName: opts.GroupReferenceName,
-		})
+		groupID, found, err := findExistingSubscriptionSetupGroup(groupCtx, client, opts.AppID, opts.GroupReferenceName)
 		groupCancel()
 		if err != nil {
 			result.Status = "error"
@@ -350,14 +353,41 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 				Status:  "failed",
 				Message: err.Error(),
 			})
-			return result, fmt.Errorf("subscriptions setup: failed to create group: %w", err)
+			return result, fmt.Errorf("subscriptions setup: failed to find existing group: %w", err)
 		}
-		result.GroupID = strings.TrimSpace(groupResp.Data.ID)
-		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-			Name:   subscriptionsSetupStepEnsureGroup,
-			Status: "completed",
-			ID:     result.GroupID,
-		})
+		if found {
+			reusedGroup = true
+			result.GroupID = groupID
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepEnsureGroup,
+				Status:  "completed",
+				ID:      result.GroupID,
+				Message: "used existing group",
+			})
+		} else {
+			groupCtx, groupCancel := shared.ContextWithTimeout(ctx)
+			groupResp, err := client.CreateSubscriptionGroup(groupCtx, opts.AppID, asc.SubscriptionGroupCreateAttributes{
+				ReferenceName: opts.GroupReferenceName,
+			})
+			groupCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepEnsureGroup
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepEnsureGroup,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: failed to create group: %w", err)
+			}
+			result.GroupID = strings.TrimSpace(groupResp.Data.ID)
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:   subscriptionsSetupStepEnsureGroup,
+				Status: "completed",
+				ID:     result.GroupID,
+			})
+		}
 	} else {
 		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
 			Name:    subscriptionsSetupStepEnsureGroup,
@@ -379,27 +409,158 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 		subAttrs.FamilySharable = &val
 	}
 
-	subCtx, subCancel := shared.ContextWithTimeout(ctx)
-	subResp, err := client.CreateSubscription(subCtx, result.GroupID, subAttrs)
-	subCancel()
-	if err != nil {
-		result.Status = "error"
-		result.Error = err.Error()
-		result.FailedStep = subscriptionsSetupStepCreateSubscription
+	reusedSubscription := false
+	if reusedGroup {
+		subCtx, subCancel := shared.ContextWithTimeout(ctx)
+		existingSub, found, err := findExistingSubscriptionSetupSubscription(subCtx, client, result.GroupID, opts.ProductID)
+		subCancel()
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepCreateSubscription
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepCreateSubscription,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, fmt.Errorf("subscriptions setup: failed to find existing subscription: %w", err)
+		}
+		if found {
+			if err := validateExistingSubscriptionSetupSubscription(existingSub, subAttrs, opts.FamilySharable); err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepCreateSubscription
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepCreateSubscription,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: %w", err)
+			}
+			reusedSubscription = true
+			result.SubscriptionID = strings.TrimSpace(existingSub.ID)
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepCreateSubscription,
+				Status:  "completed",
+				ID:      result.SubscriptionID,
+				Message: "used existing subscription",
+			})
+		}
+	}
+	if !reusedSubscription {
+		subCtx, subCancel := shared.ContextWithTimeout(ctx)
+		subResp, err := client.CreateSubscription(subCtx, result.GroupID, subAttrs)
+		subCancel()
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepCreateSubscription
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepCreateSubscription,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, fmt.Errorf("subscriptions setup: failed to create subscription: %w", err)
+		}
+
+		result.SubscriptionID = strings.TrimSpace(subResp.Data.ID)
 		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-			Name:    subscriptionsSetupStepCreateSubscription,
-			Status:  "failed",
-			Message: err.Error(),
+			Name:   subscriptionsSetupStepCreateSubscription,
+			Status: "completed",
+			ID:     result.SubscriptionID,
 		})
-		return result, fmt.Errorf("subscriptions setup: failed to create subscription: %w", err)
 	}
 
-	result.SubscriptionID = strings.TrimSpace(subResp.Data.ID)
-	result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-		Name:   subscriptionsSetupStepCreateSubscription,
-		Status: "completed",
-		ID:     result.SubscriptionID,
-	})
+	var preflightPricePointID string
+	var preflightExistingPrice asc.Resource[asc.SubscriptionPriceAttributes]
+	var preflightFoundPrice bool
+	var preflightHasExistingPrices bool
+	pricePreflightDone := false
+	if reusedSubscription && opts.hasPricing(opts.StartDate) {
+		pricePointCtx, pricePointCancel := shared.ContextWithTimeout(ctx)
+		resolvedPricePointID, err := resolveExpectedSubscriptionSetupPricePoint(pricePointCtx, client, result.SubscriptionID, opts)
+		pricePointCancel()
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepResolvePricePoint
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepResolvePricePoint,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, err
+		}
+		preflightPricePointID = resolvedPricePointID
+		priceAttrs := asc.SubscriptionPriceCreateAttributes{
+			StartDate: opts.StartDate,
+			PlanType:  asc.SubscriptionPlanTypeUpfront,
+		}
+		priceCtx, priceCancel := shared.ContextWithTimeout(ctx)
+		preflightExistingPrice, preflightFoundPrice, preflightHasExistingPrices, err = findExistingSubscriptionSetupPrice(priceCtx, client, result.SubscriptionID, resolvedPricePointID, opts.PriceTerritory, priceAttrs)
+		priceCancel()
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepSetPrice
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetPrice,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, fmt.Errorf("subscriptions setup: failed to find existing price: %w", err)
+		}
+		pricePreflightDone = true
+		if preflightHasExistingPrices && !preflightFoundPrice {
+			err := mismatchedExistingSubscriptionSetupPriceError(result.SubscriptionID)
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepSetPrice
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetPrice,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, err
+		}
+	}
+
+	var preflightAvailabilityID string
+	var preflightFoundAvailability bool
+	var preflightHasAvailability bool
+	availabilityPreflightDone := false
+	if reusedSubscription && len(availabilityTerritories) > 0 {
+		availabilityAttrs := asc.SubscriptionAvailabilityAttributes{
+			AvailableInNewTerritories: opts.AvailableInNewTerritories,
+		}
+		availabilityCtx, availabilityCancel := shared.ContextWithTimeout(ctx)
+		preflightAvailabilityID, preflightFoundAvailability, preflightHasAvailability, err = findExistingSubscriptionSetupAvailability(availabilityCtx, client, result.SubscriptionID, availabilityTerritories, availabilityAttrs)
+		availabilityCancel()
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepSetAvailability
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetAvailability,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, fmt.Errorf("subscriptions setup: failed to find existing availability: %w", err)
+		}
+		availabilityPreflightDone = true
+		if preflightHasAvailability && !preflightFoundAvailability {
+			err := mismatchedExistingSubscriptionSetupAvailabilityError(result.SubscriptionID)
+			result.Status = "error"
+			result.Error = err.Error()
+			result.FailedStep = subscriptionsSetupStepSetAvailability
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetAvailability,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			return result, err
+		}
+	}
 
 	if !opts.hasLocalization() {
 		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
@@ -408,30 +569,70 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 			Message: "no localization flags provided",
 		})
 	} else {
-		locCtx, locCancel := shared.ContextWithTimeout(ctx)
-		locResp, err := client.CreateSubscriptionLocalization(locCtx, result.SubscriptionID, asc.SubscriptionLocalizationCreateAttributes{
-			Name:        opts.DisplayName,
-			Locale:      opts.Locale,
-			Description: opts.Description,
-		})
-		locCancel()
-		if err != nil {
-			result.Status = "error"
-			result.Error = err.Error()
-			result.FailedStep = subscriptionsSetupStepCreateLocalization
-			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-				Name:    subscriptionsSetupStepCreateLocalization,
-				Status:  "failed",
-				Message: err.Error(),
-			})
-			return result, fmt.Errorf("subscriptions setup: failed to create localization: %w", err)
+		reusedLocalization := false
+		if reusedSubscription {
+			locCtx, locCancel := shared.ContextWithTimeout(ctx)
+			localization, found, err := findExistingSubscriptionSetupLocalization(locCtx, client, result.SubscriptionID, opts.Locale)
+			locCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepCreateLocalization
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepCreateLocalization,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: failed to find existing localization: %w", err)
+			}
+			if found {
+				if err := validateExistingSubscriptionSetupLocalization(localization, opts); err != nil {
+					result.Status = "error"
+					result.Error = err.Error()
+					result.FailedStep = subscriptionsSetupStepCreateLocalization
+					result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+						Name:    subscriptionsSetupStepCreateLocalization,
+						Status:  "failed",
+						Message: err.Error(),
+					})
+					return result, fmt.Errorf("subscriptions setup: %w", err)
+				}
+				reusedLocalization = true
+				result.LocalizationID = strings.TrimSpace(localization.ID)
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepCreateLocalization,
+					Status:  "completed",
+					ID:      result.LocalizationID,
+					Message: "used existing localization",
+				})
+			}
 		}
-		result.LocalizationID = strings.TrimSpace(locResp.Data.ID)
-		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-			Name:   subscriptionsSetupStepCreateLocalization,
-			Status: "completed",
-			ID:     result.LocalizationID,
-		})
+		if !reusedLocalization {
+			locCtx, locCancel := shared.ContextWithTimeout(ctx)
+			locResp, err := client.CreateSubscriptionLocalization(locCtx, result.SubscriptionID, asc.SubscriptionLocalizationCreateAttributes{
+				Name:        opts.DisplayName,
+				Locale:      opts.Locale,
+				Description: opts.Description,
+			})
+			locCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepCreateLocalization
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepCreateLocalization,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: failed to create localization: %w", err)
+			}
+			result.LocalizationID = strings.TrimSpace(locResp.Data.ID)
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:   subscriptionsSetupStepCreateLocalization,
+				Status: "completed",
+				ID:     result.LocalizationID,
+			})
+		}
 	}
 
 	if !opts.hasPricing(opts.StartDate) {
@@ -449,19 +650,23 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 			},
 		)
 	} else {
-		pricePointCtx, pricePointCancel := shared.ContextWithTimeout(ctx)
-		resolvedPricePointID, err := resolveExpectedSubscriptionSetupPricePoint(pricePointCtx, client, result.SubscriptionID, opts)
-		pricePointCancel()
-		if err != nil {
-			result.Status = "error"
-			result.Error = err.Error()
-			result.FailedStep = subscriptionsSetupStepResolvePricePoint
-			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-				Name:    subscriptionsSetupStepResolvePricePoint,
-				Status:  "failed",
-				Message: err.Error(),
-			})
-			return result, err
+		resolvedPricePointID := preflightPricePointID
+		if !pricePreflightDone {
+			pricePointCtx, pricePointCancel := shared.ContextWithTimeout(ctx)
+			var err error
+			resolvedPricePointID, err = resolveExpectedSubscriptionSetupPricePoint(pricePointCtx, client, result.SubscriptionID, opts)
+			pricePointCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepResolvePricePoint
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepResolvePricePoint,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, err
+			}
 		}
 		result.ResolvedPricePointID = resolvedPricePointID
 		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
@@ -470,12 +675,44 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 			ID:     result.ResolvedPricePointID,
 		})
 
-		priceCtx, priceCancel := shared.ContextWithTimeout(ctx)
-		_, err = client.SetSubscriptionInitialPrice(priceCtx, result.SubscriptionID, result.ResolvedPricePointID, opts.PriceTerritory, asc.SubscriptionPriceCreateAttributes{
+		priceAttrs := asc.SubscriptionPriceCreateAttributes{
 			StartDate: opts.StartDate,
-		})
-		priceCancel()
-		if err != nil {
+			PlanType:  asc.SubscriptionPlanTypeUpfront,
+		}
+		var existingPrice asc.Resource[asc.SubscriptionPriceAttributes]
+		found := false
+		hasExistingPrices := false
+		if reusedSubscription {
+			if pricePreflightDone {
+				existingPrice = preflightExistingPrice
+				found = preflightFoundPrice
+				hasExistingPrices = preflightHasExistingPrices
+			} else {
+				priceCtx, priceCancel := shared.ContextWithTimeout(ctx)
+				existingPrice, found, hasExistingPrices, err = findExistingSubscriptionSetupPrice(priceCtx, client, result.SubscriptionID, result.ResolvedPricePointID, opts.PriceTerritory, priceAttrs)
+				priceCancel()
+				if err != nil {
+					result.Status = "error"
+					result.Error = err.Error()
+					result.FailedStep = subscriptionsSetupStepSetPrice
+					result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+						Name:    subscriptionsSetupStepSetPrice,
+						Status:  "failed",
+						Message: err.Error(),
+					})
+					return result, fmt.Errorf("subscriptions setup: failed to find existing price: %w", err)
+				}
+			}
+		}
+		if found {
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetPrice,
+				Status:  "completed",
+				ID:      strings.TrimSpace(existingPrice.ID),
+				Message: "used existing price",
+			})
+		} else if hasExistingPrices {
+			err := mismatchedExistingSubscriptionSetupPriceError(result.SubscriptionID)
 			result.Status = "error"
 			result.Error = err.Error()
 			result.FailedStep = subscriptionsSetupStepSetPrice
@@ -484,13 +721,28 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 				Status:  "failed",
 				Message: err.Error(),
 			})
-			return result, fmt.Errorf("subscriptions setup: failed to set initial price: %w", err)
+			return result, err
+		} else {
+			priceCtx, priceCancel := shared.ContextWithTimeout(ctx)
+			_, err = client.SetSubscriptionInitialPrice(priceCtx, result.SubscriptionID, result.ResolvedPricePointID, opts.PriceTerritory, priceAttrs)
+			priceCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepSetPrice
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepSetPrice,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: failed to set initial price: %w", err)
+			}
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:   subscriptionsSetupStepSetPrice,
+				Status: "completed",
+				ID:     result.SubscriptionID,
+			})
 		}
-		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-			Name:   subscriptionsSetupStepSetPrice,
-			Status: "completed",
-			ID:     result.SubscriptionID,
-		})
 	}
 
 	if len(availabilityTerritories) == 0 {
@@ -500,12 +752,44 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 			Message: "no availability flags provided",
 		})
 	} else {
-		availabilityCtx, availabilityCancel := shared.ContextWithTimeout(ctx)
-		availabilityResp, err := client.CreateSubscriptionAvailability(availabilityCtx, result.SubscriptionID, availabilityTerritories, asc.SubscriptionAvailabilityAttributes{
+		availabilityAttrs := asc.SubscriptionAvailabilityAttributes{
 			AvailableInNewTerritories: opts.AvailableInNewTerritories,
-		})
-		availabilityCancel()
-		if err != nil {
+		}
+		existingAvailabilityID := ""
+		found := false
+		hasExistingAvailability := false
+		if reusedSubscription {
+			if availabilityPreflightDone {
+				existingAvailabilityID = preflightAvailabilityID
+				found = preflightFoundAvailability
+				hasExistingAvailability = preflightHasAvailability
+			} else {
+				availabilityCtx, availabilityCancel := shared.ContextWithTimeout(ctx)
+				existingAvailabilityID, found, hasExistingAvailability, err = findExistingSubscriptionSetupAvailability(availabilityCtx, client, result.SubscriptionID, availabilityTerritories, availabilityAttrs)
+				availabilityCancel()
+				if err != nil {
+					result.Status = "error"
+					result.Error = err.Error()
+					result.FailedStep = subscriptionsSetupStepSetAvailability
+					result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+						Name:    subscriptionsSetupStepSetAvailability,
+						Status:  "failed",
+						Message: err.Error(),
+					})
+					return result, fmt.Errorf("subscriptions setup: failed to find existing availability: %w", err)
+				}
+			}
+		}
+		if found {
+			result.AvailabilityID = existingAvailabilityID
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetAvailability,
+				Status:  "completed",
+				ID:      result.AvailabilityID,
+				Message: "used existing availability",
+			})
+		} else if hasExistingAvailability {
+			err := mismatchedExistingSubscriptionSetupAvailabilityError(result.SubscriptionID)
 			result.Status = "error"
 			result.Error = err.Error()
 			result.FailedStep = subscriptionsSetupStepSetAvailability
@@ -514,15 +798,30 @@ func executeSubscriptionsSetup(ctx context.Context, opts subscriptionsSetupOptio
 				Status:  "failed",
 				Message: err.Error(),
 			})
-			return result, fmt.Errorf("subscriptions setup: failed to set availability: %w", err)
+			return result, err
+		} else {
+			availabilityCtx, availabilityCancel := shared.ContextWithTimeout(ctx)
+			availabilityResp, err := client.CreateSubscriptionAvailability(availabilityCtx, result.SubscriptionID, availabilityTerritories, availabilityAttrs)
+			availabilityCancel()
+			if err != nil {
+				result.Status = "error"
+				result.Error = err.Error()
+				result.FailedStep = subscriptionsSetupStepSetAvailability
+				result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+					Name:    subscriptionsSetupStepSetAvailability,
+					Status:  "failed",
+					Message: err.Error(),
+				})
+				return result, fmt.Errorf("subscriptions setup: failed to set availability: %w", err)
+			}
+			result.AvailabilityID = strings.TrimSpace(availabilityResp.Data.ID)
+			result.Steps = append(result.Steps, subscriptionsSetupStepResult{
+				Name:    subscriptionsSetupStepSetAvailability,
+				Status:  "completed",
+				ID:      result.AvailabilityID,
+				Message: subscriptionsSetupAvailabilityMessage(opts, availabilityTerritories),
+			})
 		}
-		result.AvailabilityID = strings.TrimSpace(availabilityResp.Data.ID)
-		result.Steps = append(result.Steps, subscriptionsSetupStepResult{
-			Name:    subscriptionsSetupStepSetAvailability,
-			Status:  "completed",
-			ID:      result.AvailabilityID,
-			Message: subscriptionsSetupAvailabilityMessage(opts, availabilityTerritories),
-		})
 	}
 
 	if opts.NoVerify {
@@ -670,21 +969,11 @@ func verifySubscriptionsSetupState(ctx context.Context, client *asc.Client, resu
 			return verification, subscriptionsSetupStepResult{Name: subscriptionsSetupStepVerifyState, Status: "failed", Message: "available-in-new-territories mismatch"}, fmt.Errorf("available-in-new-territories mismatch")
 		}
 		territoriesCtx, territoriesCancel := shared.ContextWithTimeout(ctx)
-		territoriesResp, err := client.GetSubscriptionAvailabilityAvailableTerritories(territoriesCtx, resultID, asc.WithSubscriptionAvailabilityTerritoriesLimit(200))
+		actualSet, actualTerritories, err := fetchSubscriptionSetupAvailabilityTerritories(territoriesCtx, client, resultID)
 		territoriesCancel()
 		if err != nil {
 			verification.Status = "failed"
 			return verification, subscriptionsSetupStepResult{Name: subscriptionsSetupStepVerifyState, Status: "failed", Message: err.Error()}, fmt.Errorf("fetch availability territories: %w", err)
-		}
-		actualTerritories := make([]string, 0, len(territoriesResp.Data))
-		actualSet := map[string]struct{}{}
-		for _, item := range territoriesResp.Data {
-			id := strings.ToUpper(strings.TrimSpace(item.ID))
-			if id == "" {
-				continue
-			}
-			actualTerritories = append(actualTerritories, id)
-			actualSet[id] = struct{}{}
 		}
 		for _, expected := range availabilityTerritories {
 			if _, ok := actualSet[expected]; !ok {
@@ -698,6 +987,317 @@ func verifySubscriptionsSetupState(ctx context.Context, client *asc.Client, resu
 	}
 
 	return verification, subscriptionsSetupStepResult{Name: subscriptionsSetupStepVerifyState, Status: "completed"}, nil
+}
+
+func findExistingSubscriptionSetupGroup(ctx context.Context, client *asc.Client, appID, referenceName string) (string, bool, error) {
+	referenceName = strings.TrimSpace(referenceName)
+	if referenceName == "" {
+		return "", false, nil
+	}
+	firstPage, err := client.GetSubscriptionGroups(ctx, appID, asc.WithSubscriptionGroupsLimit(200))
+	if err != nil {
+		return "", false, err
+	}
+	if firstPage == nil {
+		return "", false, nil
+	}
+
+	var foundIDs []string
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionGroups(ctx, appID, asc.WithSubscriptionGroupsNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionGroupsResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscription groups pagination type %T", page)
+			}
+			for _, group := range resp.Data {
+				if strings.TrimSpace(group.Attributes.ReferenceName) != referenceName {
+					continue
+				}
+				foundID := strings.TrimSpace(group.ID)
+				if foundID != "" {
+					foundIDs = append(foundIDs, foundID)
+				}
+			}
+			return nil
+		},
+	); err != nil {
+		return "", false, err
+	}
+	if len(foundIDs) > 1 {
+		return "", false, fmt.Errorf("multiple subscription groups match reference name %q; pass --group-id to choose one", referenceName)
+	}
+	var foundID string
+	if len(foundIDs) == 1 {
+		foundID = foundIDs[0]
+	}
+	return foundID, foundID != "", nil
+}
+
+func findExistingSubscriptionSetupSubscription(ctx context.Context, client *asc.Client, groupID, productID string) (asc.Resource[asc.SubscriptionAttributes], bool, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return asc.Resource[asc.SubscriptionAttributes]{}, false, nil
+	}
+	firstPage, err := client.GetSubscriptions(ctx, groupID, asc.WithSubscriptionsLimit(200), asc.WithSubscriptionsProductIDs([]string{productID}))
+	if err != nil {
+		return asc.Resource[asc.SubscriptionAttributes]{}, false, err
+	}
+	if firstPage == nil {
+		return asc.Resource[asc.SubscriptionAttributes]{}, false, nil
+	}
+
+	var foundSubscription asc.Resource[asc.SubscriptionAttributes]
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptions(ctx, groupID, asc.WithSubscriptionsNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionsResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscriptions pagination type %T", page)
+			}
+			for _, subscription := range resp.Data {
+				if strings.TrimSpace(subscription.Attributes.ProductID) != productID {
+					continue
+				}
+				foundSubscription = subscription
+				return errSubscriptionsSetupExistingResourceFound
+			}
+			return nil
+		},
+	); err != nil && !errors.Is(err, errSubscriptionsSetupExistingResourceFound) {
+		return asc.Resource[asc.SubscriptionAttributes]{}, false, err
+	}
+	return foundSubscription, strings.TrimSpace(foundSubscription.ID) != "", nil
+}
+
+func findExistingSubscriptionSetupLocalization(ctx context.Context, client *asc.Client, subscriptionID, locale string) (asc.Resource[asc.SubscriptionLocalizationAttributes], bool, error) {
+	locale = strings.TrimSpace(locale)
+	if locale == "" {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, nil
+	}
+	firstPage, err := client.GetSubscriptionLocalizations(ctx, subscriptionID, asc.WithSubscriptionLocalizationsLimit(200))
+	if err != nil {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, err
+	}
+	if firstPage == nil {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, nil
+	}
+
+	var foundLocalization asc.Resource[asc.SubscriptionLocalizationAttributes]
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionLocalizations(ctx, subscriptionID, asc.WithSubscriptionLocalizationsNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionLocalizationsResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscription localizations pagination type %T", page)
+			}
+			for _, localization := range resp.Data {
+				if strings.TrimSpace(localization.Attributes.Locale) != locale {
+					continue
+				}
+				foundLocalization = localization
+				return errSubscriptionsSetupExistingResourceFound
+			}
+			return nil
+		},
+	); err != nil && !errors.Is(err, errSubscriptionsSetupExistingResourceFound) {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, err
+	}
+	return foundLocalization, strings.TrimSpace(foundLocalization.ID) != "", nil
+}
+
+func findExistingSubscriptionSetupPrice(ctx context.Context, client *asc.Client, subID, pricePointID, territoryID string, attrs asc.SubscriptionPriceCreateAttributes) (asc.Resource[asc.SubscriptionPriceAttributes], bool, bool, error) {
+	pricePointID = strings.TrimSpace(pricePointID)
+	territoryID = strings.ToUpper(strings.TrimSpace(territoryID))
+	if pricePointID == "" {
+		return asc.Resource[asc.SubscriptionPriceAttributes]{}, false, false, nil
+	}
+
+	opts := []asc.SubscriptionPricesOption{
+		asc.WithSubscriptionPricesLimit(200),
+		asc.WithSubscriptionPricesInclude([]string{"subscriptionPricePoint", "territory"}),
+	}
+	firstPage, err := client.GetSubscriptionPrices(ctx, subID, opts...)
+	if err != nil {
+		return asc.Resource[asc.SubscriptionPriceAttributes]{}, false, false, err
+	}
+	if firstPage == nil {
+		return asc.Resource[asc.SubscriptionPriceAttributes]{}, false, false, nil
+	}
+
+	var foundPrice asc.Resource[asc.SubscriptionPriceAttributes]
+	hasExistingPrices := false
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionPrices(ctx, subID, asc.WithSubscriptionPricesNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionPricesResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscription prices pagination type %T", page)
+			}
+			for _, price := range resp.Data {
+				hasExistingPrices = true
+				if subscriptionSetupPriceMatchesTarget(price, pricePointID, territoryID, attrs) {
+					foundPrice = price
+					return errSubscriptionsSetupExistingResourceFound
+				}
+			}
+			return nil
+		},
+	); err != nil && !errors.Is(err, errSubscriptionsSetupExistingResourceFound) {
+		return asc.Resource[asc.SubscriptionPriceAttributes]{}, false, false, err
+	}
+	return foundPrice, strings.TrimSpace(foundPrice.ID) != "", hasExistingPrices, nil
+}
+
+func mismatchedExistingSubscriptionSetupPriceError(subscriptionID string) error {
+	return fmt.Errorf("existing subscription %q already has prices but none match the requested price point, territory, start date, and upfront plan type; use subscriptions prices add to add the requested price", subscriptionID)
+}
+
+func subscriptionSetupPriceMatchesTarget(price asc.Resource[asc.SubscriptionPriceAttributes], pricePointID, territoryID string, attrs asc.SubscriptionPriceCreateAttributes) bool {
+	var relationships subscriptionSetupPriceRelationships
+	if len(price.Relationships) > 0 {
+		if err := json.Unmarshal(price.Relationships, &relationships); err != nil {
+			return false
+		}
+	}
+	if relationships.SubscriptionPricePoint == nil || relationships.SubscriptionPricePoint.Data.ID != pricePointID {
+		return false
+	}
+
+	actualTerritory := ""
+	if relationships.Territory != nil {
+		actualTerritory = strings.ToUpper(strings.TrimSpace(relationships.Territory.Data.ID))
+	}
+	if strings.ToUpper(strings.TrimSpace(territoryID)) != actualTerritory {
+		return false
+	}
+	if strings.TrimSpace(price.Attributes.StartDate) != strings.TrimSpace(attrs.StartDate) {
+		return false
+	}
+	if attrs.PlanType != "" && price.Attributes.PlanType != attrs.PlanType {
+		return false
+	}
+	return true
+}
+
+type subscriptionSetupPriceRelationships struct {
+	SubscriptionPricePoint *asc.Relationship `json:"subscriptionPricePoint"`
+	Territory              *asc.Relationship `json:"territory"`
+}
+
+func findExistingSubscriptionSetupAvailability(ctx context.Context, client *asc.Client, subID string, territories []string, attrs asc.SubscriptionAvailabilityAttributes) (string, bool, bool, error) {
+	resp, err := client.GetSubscriptionAvailabilityForSubscription(ctx, subID)
+	if err != nil {
+		if errors.Is(err, asc.ErrNotFound) {
+			return "", false, false, nil
+		}
+		return "", false, false, err
+	}
+	if resp == nil || strings.TrimSpace(resp.Data.ID) == "" {
+		return "", false, false, nil
+	}
+	availabilityID := strings.TrimSpace(resp.Data.ID)
+	if resp.Data.Attributes.AvailableInNewTerritories != attrs.AvailableInNewTerritories {
+		return availabilityID, false, true, nil
+	}
+
+	actual, _, err := fetchSubscriptionSetupAvailabilityTerritories(ctx, client, availabilityID)
+	if err != nil {
+		return "", false, true, err
+	}
+	for _, territory := range territories {
+		if _, ok := actual[strings.ToUpper(strings.TrimSpace(territory))]; !ok {
+			return availabilityID, false, true, nil
+		}
+	}
+	return availabilityID, true, true, nil
+}
+
+func mismatchedExistingSubscriptionSetupAvailabilityError(subscriptionID string) error {
+	return fmt.Errorf("existing subscription %q already has availability but it does not match the requested territories and available-in-new-territories setting; update availability or choose a different product ID", subscriptionID)
+}
+
+func fetchSubscriptionSetupAvailabilityTerritories(ctx context.Context, client *asc.Client, availabilityID string) (map[string]struct{}, []string, error) {
+	firstPage, err := client.GetSubscriptionAvailabilityAvailableTerritories(ctx, availabilityID, asc.WithSubscriptionAvailabilityTerritoriesLimit(200))
+	if err != nil {
+		return nil, nil, err
+	}
+	actualSet := map[string]struct{}{}
+	actualTerritories := []string{}
+	if firstPage == nil {
+		return actualSet, actualTerritories, nil
+	}
+
+	err = asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionAvailabilityAvailableTerritories(ctx, availabilityID, asc.WithSubscriptionAvailabilityTerritoriesNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.TerritoriesResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscription availability territories pagination type %T", page)
+			}
+			for _, item := range resp.Data {
+				id := strings.ToUpper(strings.TrimSpace(item.ID))
+				if id == "" {
+					continue
+				}
+				if _, seen := actualSet[id]; !seen {
+					actualTerritories = append(actualTerritories, id)
+				}
+				actualSet[id] = struct{}{}
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return actualSet, actualTerritories, nil
+}
+
+func validateExistingSubscriptionSetupSubscription(subscription asc.Resource[asc.SubscriptionAttributes], target asc.SubscriptionCreateAttributes, expectedFamilySharable bool) error {
+	if strings.TrimSpace(subscription.Attributes.Name) != strings.TrimSpace(target.Name) {
+		return fmt.Errorf("existing subscription %q has a different reference name; update it or choose a different product ID", strings.TrimSpace(subscription.ID))
+	}
+	if target.SubscriptionPeriod != "" && strings.TrimSpace(subscription.Attributes.SubscriptionPeriod) != strings.TrimSpace(target.SubscriptionPeriod) {
+		return fmt.Errorf("existing subscription %q has a different subscription period; update it or choose a different product ID", strings.TrimSpace(subscription.ID))
+	}
+	if subscription.Attributes.FamilySharable != expectedFamilySharable {
+		return fmt.Errorf("existing subscription %q has a different family sharing setting; update it or choose a different product ID", strings.TrimSpace(subscription.ID))
+	}
+	return nil
+}
+
+func validateExistingSubscriptionSetupLocalization(localization asc.Resource[asc.SubscriptionLocalizationAttributes], opts subscriptionsSetupOptions) error {
+	if strings.TrimSpace(localization.Attributes.Locale) != strings.TrimSpace(opts.Locale) {
+		return fmt.Errorf("existing subscription localization %q has a different locale; update it or choose a different locale", strings.TrimSpace(localization.ID))
+	}
+	if strings.TrimSpace(opts.DisplayName) != "" && strings.TrimSpace(localization.Attributes.Name) != strings.TrimSpace(opts.DisplayName) {
+		return fmt.Errorf("existing subscription localization %q has a different display name; update it or choose a different locale", strings.TrimSpace(localization.ID))
+	}
+	if strings.TrimSpace(localization.Attributes.Description) != strings.TrimSpace(opts.Description) {
+		return fmt.Errorf("existing subscription localization %q has a different description; update it or choose a different locale", strings.TrimSpace(localization.ID))
+	}
+	return nil
 }
 
 func subscriptionsSetupAvailabilityTerritories(opts subscriptionsSetupOptions) []string {

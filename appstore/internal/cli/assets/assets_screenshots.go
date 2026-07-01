@@ -597,10 +597,10 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	if locID != "" {
 		files, err := collectScreenshotUploadFiles(pathValue, opts.MaxScreenshots)
 		if err != nil {
-			return nil, err
+			return nil, shared.NewValidationError(err)
 		}
 		if err := validateScreenshotDimensions(files, apiDisplayType); err != nil {
-			return nil, err
+			return nil, shared.NewValidationError(err)
 		}
 		client, err := deps.GetClient()
 		if err != nil {
@@ -629,11 +629,11 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 
 	localeAssets, err := collectLocaleAssetFilesWithLimit(pathValue, apiDisplayType, opts.MaxScreenshots)
 	if err != nil {
-		return nil, err
+		return nil, shared.NewValidationError(err)
 	}
 	localeAssets, err = limitScreenshotFanoutUploadFiles(localeAssets, opts.MaxScreenshots)
 	if err != nil {
-		return nil, err
+		return nil, shared.NewValidationError(err)
 	}
 
 	client, err := deps.GetClient()

@@ -137,6 +137,26 @@ func TestReviewCommandItemsValidationErrors(t *testing.T) {
 			args:    []string{"review", "items-remove", "--id", "ITEM_ID"},
 			wantErr: "--confirm is required to remove",
 		},
+		{
+			name:    "nested review items list missing submission",
+			args:    []string{"review", "items", "list"},
+			wantErr: "--submission is required",
+		},
+		{
+			name:    "nested review items add missing item-id",
+			args:    []string{"review", "items", "add", "--submission", "SUBMISSION_ID", "--item-type", "appStoreVersions"},
+			wantErr: "--item-id is required",
+		},
+		{
+			name:    "nested review items update missing state",
+			args:    []string{"review", "items", "update", "--id", "ITEM_ID"},
+			wantErr: "--state is required",
+		},
+		{
+			name:    "nested review items remove missing confirm",
+			args:    []string{"review", "items", "remove", "--id", "ITEM_ID"},
+			wantErr: "--confirm is required to remove",
+		},
 	}
 
 	for _, test := range tests {
@@ -204,15 +224,38 @@ func TestReviewCommandItemsInvalidItemType(t *testing.T) {
 }
 
 func TestReviewCommandItemsInvalidState(t *testing.T) {
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
+	tests := []struct {
+		name       string
+		args       []string
+		wantPrefix string
+	}{
+		{
+			name:       "legacy",
+			args:       []string{"review", "items-update", "--id", "ITEM_ID", "--state", "nope"},
+			wantPrefix: "review items-update:",
+		},
+		{
+			name:       "nested",
+			args:       []string{"review", "items", "update", "--id", "ITEM_ID", "--state", "nope"},
+			wantPrefix: "review items update:",
+		},
+	}
 
-	if err := root.Parse([]string{"review", "items-update", "--id", "ITEM_ID", "--state", "nope"}); err != nil {
-		t.Fatalf("parse error: %v", err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			if err := root.Parse(test.args); err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			err := root.Run(context.Background())
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.HasPrefix(err.Error(), test.wantPrefix) {
+				t.Fatalf("expected error prefix %q, got %v", test.wantPrefix, err)
+			}
+		})
 	}
-	err := root.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	t.Logf("got expected error: %v", err)
 }

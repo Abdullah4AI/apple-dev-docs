@@ -32,9 +32,9 @@ Examples:
   asc review submissions-submit --id "SUBMISSION_ID" --confirm
   asc review submissions-update --id "SUBMISSION_ID" --canceled=true
   asc review submissions-items-ids --id "SUBMISSION_ID"
-  asc review items-get --id "ITEM_ID"
-  asc review items-add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
-  asc review items-update --id "ITEM_ID" --state READY_FOR_REVIEW
+  asc review items list --submission "SUBMISSION_ID"
+  asc review items add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
+  asc review items update --id "ITEM_ID" --state READY_FOR_REVIEW
   asc review history --app "123456789"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -58,6 +58,7 @@ Examples:
 			ReviewSubmissionsCancelCommand(),
 			ReviewSubmissionsUpdateCommand(),
 			ReviewSubmissionsItemsIDsCommand(),
+			ReviewItemsCommand(),
 			ReviewItemsGetCommand(),
 			ReviewItemsListCommand(),
 			ReviewItemsAddCommand(),

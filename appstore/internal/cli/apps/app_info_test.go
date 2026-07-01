@@ -1,10 +1,22 @@
 package apps
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestSelectLatestAppStoreVersion(t *testing.T) {
@@ -62,4 +74,400 @@ func TestWarnAppInfoSetSubmitIncompleteLocaleMentionsCanonicalPublishFlow(t *tes
 	if strings.Contains(stderr, "release run") {
 		t.Fatalf("expected warning to avoid removed compatibility guidance, got %q", stderr)
 	}
+}
+
+func TestRunAppInfoSetSingleLocaleRefetchesAndUpdatesAfterCreateConflict(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected initial request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US" {
+				t.Fatalf("expected refetch filter[locale]=en-US, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Old description"}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			if !strings.Contains(string(body), `"description":"New description"`) {
+				t.Fatalf("expected update body to contain new description, got %s", string(body))
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"New description"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	outputFormat := "json"
+	pretty := false
+	output := shared.OutputFlags{Output: &outputFormat, Pretty: &pretty}
+	stderr := captureAppsCreateOutput(t, func() {
+		err := runAppInfoSetSingleLocale(context.Background(), client, "version-1", "en-US", "", asc.AppStoreVersionLocalizationAttributes{
+			Description: "New description",
+		}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, output)
+		if err != nil {
+			t.Fatalf("runAppInfoSetSingleLocale() error: %v", err)
+		}
+	})
+
+	if !strings.Contains(stderr, "whatsNew") {
+		t.Fatalf("expected RequireWhatsNew warning after conflict fallback, got %q", stderr)
+	}
+	if got, want := strings.Join(requests, ","), "GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,POST /v1/appStoreVersionLocalizations,GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,PATCH /v1/appStoreVersionLocalizations/loc-1"; got != want {
+		t.Fatalf("request sequence = %s, want %s", got, want)
+	}
+}
+
+func TestRunAppInfoSetBatchRefetchesAndUpdatesAfterCreateConflict(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			return appInfoJSONResponse(http.StatusOK, `{"data":[]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US" {
+				t.Fatalf("expected refetch filter[locale]=en-US, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Old description"}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			if !strings.Contains(string(body), `"description":"New description"`) {
+				t.Fatalf("expected update body to contain new description, got %s", string(body))
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"New description"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	result, warnings, err := runAppInfoSetBatch(context.Background(), client, "app-1", "version-1", map[string]asc.AppStoreVersionLocalizationAttributes{
+		"en-US": {Description: "New description"},
+	}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, false)
+	if err != nil {
+		t.Fatalf("runAppInfoSetBatch() error: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected one warning, got %+v", warnings)
+	}
+	if warnings[0].Locale != "en-US" || warnings[0].Mode != shared.SubmitReadinessCreateModeApplied {
+		t.Fatalf("unexpected warning identity: %+v", warnings[0])
+	}
+	if !slices.Equal(warnings[0].MissingFields, []string{"keywords", "supportUrl", "whatsNew"}) {
+		t.Fatalf("unexpected warning missing fields: %+v", warnings[0].MissingFields)
+	}
+	if result == nil || result.Failed != 0 || result.Succeeded != 1 {
+		t.Fatalf("unexpected batch result: %+v", result)
+	}
+	if len(result.Results) != 1 || result.Results[0].Action != "update" || result.Results[0].LocalizationID != "loc-1" {
+		t.Fatalf("unexpected locale result: %+v", result.Results)
+	}
+}
+
+func TestRunAppInfoSetBatchConflictWarningsUseRefetchedFields(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			return appInfoJSONResponse(http.StatusOK, `{"data":[]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Existing description","keywords":"existing,keywords","supportUrl":"https://example.com/support"}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			if !strings.Contains(string(body), `"whatsNew":"Bug fixes"`) {
+				t.Fatalf("expected update body to contain whatsNew, got %s", string(body))
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","whatsNew":"Bug fixes"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	result, warnings, err := runAppInfoSetBatch(context.Background(), client, "app-1", "version-1", map[string]asc.AppStoreVersionLocalizationAttributes{
+		"en-US": {WhatsNew: "Bug fixes"},
+	}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, false)
+	if err != nil {
+		t.Fatalf("runAppInfoSetBatch() error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings from refetched complete fields, got %+v", warnings)
+	}
+	if result == nil || result.Failed != 0 || result.Succeeded != 1 {
+		t.Fatalf("unexpected batch result: %+v", result)
+	}
+}
+
+func TestRunAppInfoSetSingleLocaleConflictRechecksCopyFromAfterRefetch(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US,fr-FR" {
+				t.Fatalf("expected initial filter[locale]=en-US,fr-FR, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-source","attributes":{"locale":"fr-FR","description":"Source description","keywords":"source,keywords","supportUrl":"https://example.com/source"}}]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US" {
+				t.Fatalf("expected refetch filter[locale]=en-US, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Target description","keywords":"target,keywords","supportUrl":"https://example.com/target"}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			bodyString := string(body)
+			if !strings.Contains(bodyString, `"whatsNew":"Bug fixes"`) {
+				t.Fatalf("expected update body to contain explicit whatsNew, got %s", bodyString)
+			}
+			if strings.Contains(bodyString, "Source description") || strings.Contains(bodyString, "source,keywords") || strings.Contains(bodyString, "https://example.com/source") {
+				t.Fatalf("copy-from values should not overwrite refetched target fields, got %s", bodyString)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","whatsNew":"Bug fixes"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	outputFormat := "json"
+	pretty := false
+	output := shared.OutputFlags{Output: &outputFormat, Pretty: &pretty}
+	captureAppsCreateOutput(t, func() {
+		err := runAppInfoSetSingleLocale(context.Background(), client, "version-1", "en-US", "fr-FR", asc.AppStoreVersionLocalizationAttributes{
+			WhatsNew: "Bug fixes",
+		}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, output)
+		if err != nil {
+			t.Fatalf("runAppInfoSetSingleLocale() error: %v", err)
+		}
+	})
+
+	if got, want := strings.Join(requests, ","), "GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,POST /v1/appStoreVersionLocalizations,GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,PATCH /v1/appStoreVersionLocalizations/loc-1"; got != want {
+		t.Fatalf("request sequence = %s, want %s", got, want)
+	}
+}
+
+func TestRunAppInfoSetSingleLocaleConflictBackfillsMissingRefetchedTarget(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US,fr-FR" {
+				t.Fatalf("expected initial filter[locale]=en-US,fr-FR, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-source","attributes":{"locale":"fr-FR","description":"Source description","keywords":"source,keywords","supportUrl":"https://example.com/source"}}]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US" {
+				t.Fatalf("expected refetch filter[locale]=en-US, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US"}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			bodyString := string(body)
+			for _, want := range []string{`"description":"Source description"`, `"keywords":"source,keywords"`, `"supportUrl":"https://example.com/source"`, `"whatsNew":"Bug fixes"`} {
+				if !strings.Contains(bodyString, want) {
+					t.Fatalf("expected update body to contain %s, got %s", want, bodyString)
+				}
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Source description","keywords":"source,keywords","supportUrl":"https://example.com/source","whatsNew":"Bug fixes"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	outputFormat := "json"
+	pretty := false
+	output := shared.OutputFlags{Output: &outputFormat, Pretty: &pretty}
+	captureAppsCreateOutput(t, func() {
+		err := runAppInfoSetSingleLocale(context.Background(), client, "version-1", "en-US", "fr-FR", asc.AppStoreVersionLocalizationAttributes{
+			WhatsNew: "Bug fixes",
+		}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, output)
+		if err != nil {
+			t.Fatalf("runAppInfoSetSingleLocale() error: %v", err)
+		}
+	})
+
+	if got, want := strings.Join(requests, ","), "GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,POST /v1/appStoreVersionLocalizations,GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,PATCH /v1/appStoreVersionLocalizations/loc-1"; got != want {
+		t.Fatalf("request sequence = %s, want %s", got, want)
+	}
+}
+
+func TestRunAppInfoSetSingleLocaleConflictBackfillsBlankRefetchedTarget(t *testing.T) {
+	requests := make([]string, 0)
+	client := newAppInfoTestClient(t, appInfoRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch len(requests) {
+		case 1:
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US,fr-FR" {
+				t.Fatalf("expected initial filter[locale]=en-US,fr-FR, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-source","attributes":{"locale":"fr-FR","description":"Source description","keywords":"source,keywords","supportUrl":"https://example.com/source"}}]}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected create request: %s %s", req.Method, req.URL.String())
+			}
+			return appInfoJSONResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"Conflict","detail":"localization already exists"}]}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1/appStoreVersionLocalizations" {
+				t.Fatalf("unexpected refetch request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[locale]"); got != "en-US" {
+				t.Fatalf("expected refetch filter[locale]=en-US, got %q", got)
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":[{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"","keywords":"","supportUrl":""}}]}`), nil
+		case 4:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+				t.Fatalf("unexpected update request: %s %s", req.Method, req.URL.String())
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+			bodyString := string(body)
+			for _, want := range []string{
+				`"description":"Source description"`,
+				`"keywords":"source,keywords"`,
+				`"supportUrl":"https://example.com/source"`,
+				`"whatsNew":"Bug fixes"`,
+			} {
+				if !strings.Contains(bodyString, want) {
+					t.Fatalf("expected update body to contain %s, got %s", want, bodyString)
+				}
+			}
+			return appInfoJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Source description","keywords":"source,keywords","supportUrl":"https://example.com/source","whatsNew":"Bug fixes"}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	outputFormat := "json"
+	pretty := false
+	output := shared.OutputFlags{Output: &outputFormat, Pretty: &pretty}
+	captureAppsCreateOutput(t, func() {
+		err := runAppInfoSetSingleLocale(context.Background(), client, "version-1", "en-US", "fr-FR", asc.AppStoreVersionLocalizationAttributes{
+			WhatsNew: "Bug fixes",
+		}, shared.SubmitReadinessOptions{RequireWhatsNew: true}, output)
+		if err != nil {
+			t.Fatalf("runAppInfoSetSingleLocale() error: %v", err)
+		}
+	})
+
+	if got, want := strings.Join(requests, ","), "GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,POST /v1/appStoreVersionLocalizations,GET /v1/appStoreVersions/version-1/appStoreVersionLocalizations,PATCH /v1/appStoreVersionLocalizations/loc-1"; got != want {
+		t.Fatalf("request sequence = %s, want %s", got, want)
+	}
+}
+
+type appInfoRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn appInfoRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func appInfoJSONResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func newAppInfoTestClient(t *testing.T, transport http.RoundTripper) *asc.Client {
+	t.Helper()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "AuthKey.p8")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	client, err := asc.NewClientWithHTTPClient("KEY123", "ISS456", keyPath, &http.Client{Transport: transport})
+	if err != nil {
+		t.Fatalf("NewClientWithHTTPClient() error: %v", err)
+	}
+	return client
 }

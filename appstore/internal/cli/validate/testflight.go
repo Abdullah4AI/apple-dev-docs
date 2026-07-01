@@ -164,7 +164,7 @@ func runValidateTestFlight(ctx context.Context, opts validateTestFlightOptions) 
 	}
 
 	if report.Summary.Blocking > 0 {
-		return shared.NewReportedError(fmt.Errorf("validate testflight: found %d blocking issue(s)", report.Summary.Blocking))
+		return shared.NewValidationReportedError(fmt.Errorf("validate testflight: found %d blocking issue(s)", report.Summary.Blocking))
 	}
 
 	return nil

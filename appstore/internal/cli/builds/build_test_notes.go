@@ -284,15 +284,10 @@ Examples:
 				return fmt.Errorf("builds test-notes create: %w", err)
 			}
 
-			attrs := asc.BetaBuildLocalizationAttributes{
-				Locale:   localeValue,
-				WhatsNew: whatsNewValue,
-			}
-
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.CreateBetaBuildLocalization(requestCtx, buildResp.Data.ID, attrs)
+			resp, err := shared.UpsertBetaBuildLocalization(requestCtx, client, buildResp.Data.ID, localeValue, whatsNewValue)
 			if err != nil {
 				return fmt.Errorf("builds test-notes create: %w", err)
 			}

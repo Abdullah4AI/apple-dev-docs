@@ -213,7 +213,7 @@ func runValidate(ctx context.Context, opts validateOptions) error {
 	}
 
 	if report.Summary.Blocking > 0 {
-		return shared.NewReportedError(fmt.Errorf("validate: found %d blocking issue(s)", report.Summary.Blocking))
+		return shared.NewValidationReportedError(fmt.Errorf("validate: found %d blocking issue(s)", report.Summary.Blocking))
 	}
 
 	return nil

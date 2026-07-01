@@ -15,11 +15,13 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/itunes"
 )
 
+const ratingsAppSearchLimit = 200
+
 // ReviewsRatingsCommand returns the reviews ratings subcommand.
 func ReviewsRatingsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("ratings", flag.ExitOnError)
 
-	appID := fs.String("app", "", "App Store app ID (required)")
+	appID := fs.String("app", "", "App Store app ID, exact bundle ID, or exact app name (required)")
 	country := fs.String("country", "us", "Country code (e.g., us, gb, de)")
 	all := fs.Bool("all", false, "Fetch ratings from all countries")
 	workers := fs.Int("workers", 10, "Number of parallel workers for --all")
@@ -38,6 +40,7 @@ No authentication is required.
 
 Examples:
   asc reviews ratings --app "1479784361"
+  asc reviews ratings --app "com.example.app"
   asc reviews ratings --app "1479784361" --country de
   asc reviews ratings --app "1479784361" --output table
   asc reviews ratings --app "1479784361" --all
@@ -72,21 +75,96 @@ Examples:
 }
 
 func executeRatings(ctx context.Context, appID, country string, all bool, workers int, output string, pretty bool) error {
+	client := itunes.NewClient()
+	return executeRatingsWithClient(ctx, client, appID, country, all, workers, output, pretty)
+}
+
+func executeRatingsWithClient(ctx context.Context, client *itunes.Client, appID, country string, all bool, workers int, output string, pretty bool) error {
 	format, err := normalizeRatingsOutput(output, pretty)
 	if err != nil {
 		return err
 	}
 
-	client := itunes.NewClient()
-
 	requestCtx, cancel := shared.ContextWithTimeout(ctx)
 	defer cancel()
 
-	if all {
-		return executeAllRatings(requestCtx, client, appID, workers, format, pretty)
+	resolvedAppID, err := resolveRatingsAppID(requestCtx, client, appID, ratingsAppLookupCountry(country, all))
+	if err != nil {
+		return fmt.Errorf("reviews ratings: %w", err)
 	}
 
-	return executeSingleRatings(requestCtx, client, appID, country, format, pretty)
+	if all {
+		return executeAllRatings(requestCtx, client, resolvedAppID, workers, format, pretty)
+	}
+
+	return executeSingleRatings(requestCtx, client, resolvedAppID, country, format, pretty)
+}
+
+func ratingsAppLookupCountry(country string, all bool) string {
+	if all {
+		return "us"
+	}
+	return country
+}
+
+func resolveRatingsAppID(ctx context.Context, client *itunes.Client, app string, country string) (string, error) {
+	app = strings.TrimSpace(app)
+	if app == "" {
+		return "", fmt.Errorf("app ID is required")
+	}
+	if parsed, err := strconv.ParseInt(app, 10, 64); err == nil {
+		return strconv.FormatInt(parsed, 10), nil
+	}
+	if looksLikeRatingsBundleID(app) {
+		result, err := client.LookupAppByBundleID(ctx, app, itunes.LookupOptions{
+			Country:               country,
+			IncludeSoftwareEntity: true,
+		})
+		if err != nil {
+			return "", fmt.Errorf("could not resolve --app by bundle ID; pass a numeric App Store ID or try again later")
+		}
+		if result != nil && result.AppID != 0 {
+			return strconv.FormatInt(result.AppID, 10), nil
+		}
+	}
+
+	results, err := client.SearchApps(ctx, app, country, ratingsAppSearchLimit)
+	if err != nil {
+		return "", err
+	}
+
+	if resolved, ok := uniqueExactRatingsAppMatch(results, app, func(result itunes.SearchResult) string {
+		return result.BundleID
+	}); ok {
+		return resolved, nil
+	}
+	if resolved, ok := uniqueExactRatingsAppMatch(results, app, func(result itunes.SearchResult) string {
+		return result.Name
+	}); ok {
+		return resolved, nil
+	}
+
+	return "", fmt.Errorf("could not resolve --app; pass a numeric App Store ID, exact bundle ID, or exact app name")
+}
+
+func looksLikeRatingsBundleID(app string) bool {
+	app = strings.TrimSpace(app)
+	return strings.Contains(app, ".") && !strings.ContainsAny(app, " \t\r\n")
+}
+
+func uniqueExactRatingsAppMatch(results []itunes.SearchResult, app string, value func(itunes.SearchResult) string) (string, bool) {
+	var resolved string
+	for _, result := range results {
+		if result.AppID == 0 || !strings.EqualFold(strings.TrimSpace(value(result)), app) {
+			continue
+		}
+		appID := strconv.FormatInt(result.AppID, 10)
+		if resolved != "" && resolved != appID {
+			return "", false
+		}
+		resolved = appID
+	}
+	return resolved, resolved != ""
 }
 
 func executeSingleRatings(ctx context.Context, client *itunes.Client, appID, country, output string, pretty bool) error {

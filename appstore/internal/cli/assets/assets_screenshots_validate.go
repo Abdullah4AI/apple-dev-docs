@@ -112,7 +112,7 @@ Examples:
 			}
 
 			if result.ErrorCount > 0 {
-				return shared.NewReportedError(fmt.Errorf("screenshots validate: found %d error(s)", result.ErrorCount))
+				return shared.NewValidationReportedError(fmt.Errorf("screenshots validate: found %d error(s)", result.ErrorCount))
 			}
 
 			return nil

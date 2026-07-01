@@ -2,8 +2,10 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+var errSubscriptionLocalizationFound = errors.New("subscription localization found")
 
 // SubscriptionsLocalizationsCommand returns the subscription localizations command group.
 func SubscriptionsLocalizationsCommand() *ffcli.Command {
@@ -228,6 +232,29 @@ Examples:
 				attrs.Description = desc
 			}
 
+			existing, found, err := findSubscriptionLocalizationByLocale(requestCtx, client, id, localeValue)
+			if err != nil {
+				return fmt.Errorf("subscriptions localizations create: failed to check existing localizations: %w", err)
+			}
+			if found {
+				if subscriptionLocalizationMatchesCreateAttributes(existing, attrs) {
+					resp := &asc.SubscriptionLocalizationResponse{Data: existing}
+					return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+				}
+				message := fmt.Sprintf(
+					"localization for locale %q already exists as %s; use subscriptions localizations update --id %s to change it",
+					localeValue,
+					strings.TrimSpace(existing.ID),
+					strings.TrimSpace(existing.ID),
+				)
+				return fmt.Errorf("subscriptions localizations create: %w", &asc.APIError{
+					Code:       "CONFLICT",
+					Title:      "Conflict",
+					Detail:     message,
+					StatusCode: http.StatusConflict,
+				})
+			}
+
 			resp, err := client.CreateSubscriptionLocalization(requestCtx, id, attrs)
 			if err != nil {
 				return fmt.Errorf("subscriptions localizations create: failed to create: %w", err)
@@ -236,6 +263,53 @@ Examples:
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func findSubscriptionLocalizationByLocale(ctx context.Context, client *asc.Client, subscriptionID, locale string) (asc.Resource[asc.SubscriptionLocalizationAttributes], bool, error) {
+	locale = strings.TrimSpace(locale)
+	if locale == "" {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, nil
+	}
+	firstPage, err := client.GetSubscriptionLocalizations(ctx, subscriptionID, asc.WithSubscriptionLocalizationsLimit(200))
+	if err != nil {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, err
+	}
+	if firstPage == nil {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, nil
+	}
+
+	var found asc.Resource[asc.SubscriptionLocalizationAttributes]
+	if err := asc.PaginateEach(
+		ctx,
+		firstPage,
+		func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionLocalizations(ctx, subscriptionID, asc.WithSubscriptionLocalizationsNextURL(nextURL))
+		},
+		func(page asc.PaginatedResponse) error {
+			resp, ok := page.(*asc.SubscriptionLocalizationsResponse)
+			if !ok {
+				return fmt.Errorf("unexpected subscription localizations pagination type %T", page)
+			}
+			for _, localization := range resp.Data {
+				if !strings.EqualFold(strings.TrimSpace(localization.Attributes.Locale), locale) {
+					continue
+				}
+				found = localization
+				return errSubscriptionLocalizationFound
+			}
+			return nil
+		},
+	); err != nil && !errors.Is(err, errSubscriptionLocalizationFound) {
+		return asc.Resource[asc.SubscriptionLocalizationAttributes]{}, false, err
+	}
+
+	return found, strings.TrimSpace(found.ID) != "", nil
+}
+
+func subscriptionLocalizationMatchesCreateAttributes(localization asc.Resource[asc.SubscriptionLocalizationAttributes], attrs asc.SubscriptionLocalizationCreateAttributes) bool {
+	return strings.EqualFold(strings.TrimSpace(localization.Attributes.Locale), strings.TrimSpace(attrs.Locale)) &&
+		strings.TrimSpace(localization.Attributes.Name) == strings.TrimSpace(attrs.Name) &&
+		strings.TrimSpace(localization.Attributes.Description) == strings.TrimSpace(attrs.Description)
 }
 
 // SubscriptionsLocalizationsUpdateCommand returns the localizations update subcommand.

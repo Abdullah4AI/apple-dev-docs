@@ -13,21 +13,58 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+// ReviewItemsCommand returns the nested review items command group.
+func ReviewItemsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("items", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "items",
+		ShortUsage: "asc review items <subcommand> [flags]",
+		ShortHelp:  "Manage review submission items.",
+		LongHelp: `Manage review submission items.
+
+Examples:
+  asc review items get --id "ITEM_ID"
+  asc review items list --submission "SUBMISSION_ID"
+  asc review items add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
+  asc review items update --id "ITEM_ID" --state READY_FOR_REVIEW
+  asc review items remove --id "ITEM_ID" --confirm`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			reviewItemsGetCommand("get", "review items get", `asc review items get --id "ITEM_ID"`),
+			reviewItemsListCommand("list", "review items list", `asc review items list [flags]`, `asc review items list --submission "SUBMISSION_ID"
+  asc review items list --submission "SUBMISSION_ID" --paginate`),
+			reviewItemsAddCommand("add", "review items add", `asc review items add [flags]`, `asc review items add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
+  asc review items add --submission "SUBMISSION_ID" --item-type gameCenterChallengeVersions --item-id "VERSION_ID"`),
+			reviewItemsUpdateCommand("update", "review items update", `asc review items update --id "ITEM_ID" --state READY_FOR_REVIEW [flags]`, `asc review items update --id "ITEM_ID" --state READY_FOR_REVIEW`),
+			reviewItemsRemoveCommand("remove", "review items remove", `asc review items remove [flags]`, `asc review items remove --id "ITEM_ID" --confirm`),
+		},
+		Exec: func(ctx context.Context, args []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
 // ReviewItemsGetCommand returns the review items get subcommand.
 func ReviewItemsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("items-get", flag.ExitOnError)
+	return reviewItemsGetCommand("items-get", "review items-get", `asc review items-get --id "ITEM_ID"`)
+}
+
+func reviewItemsGetCommand(name, errorPrefix, example string) *ffcli.Command {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	itemID := fs.String("id", "", "Review submission item ID (required)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "items-get",
-		ShortUsage: "asc review items-get --id \"ITEM_ID\" [flags]",
+		Name:       name,
+		ShortUsage: example + " [flags]",
 		ShortHelp:  "Get a review submission item by ID.",
 		LongHelp: `Get a review submission item by ID.
 
 Examples:
-  asc review items-get --id "ITEM_ID"`,
+  ` + example,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -39,7 +76,7 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("review items-get: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -47,7 +84,7 @@ Examples:
 
 			resp, err := client.GetReviewSubmissionItem(requestCtx, trimmedID)
 			if err != nil {
-				return fmt.Errorf("review items-get: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -57,7 +94,12 @@ Examples:
 
 // ReviewItemsListCommand returns the review items list subcommand.
 func ReviewItemsListCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("items-list", flag.ExitOnError)
+	return reviewItemsListCommand("items-list", "review items-list", `asc review items-list [flags]`, `asc review items-list --submission "SUBMISSION_ID"
+  asc review items-list --submission "SUBMISSION_ID" --paginate`)
+}
+
+func reviewItemsListCommand(name, errorPrefix, shortUsage, examples string) *ffcli.Command {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	submissionID := fs.String("submission", "", "Review submission ID (required)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
@@ -66,22 +108,21 @@ func ReviewItemsListCommand() *ffcli.Command {
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "items-list",
-		ShortUsage: "asc review items-list [flags]",
+		Name:       name,
+		ShortUsage: shortUsage,
 		ShortHelp:  "List items in a review submission.",
 		LongHelp: `List items in a review submission.
 
 Examples:
-  asc review items-list --submission "SUBMISSION_ID"
-  asc review items-list --submission "SUBMISSION_ID" --paginate`,
+  ` + examples,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("review items-list: --limit must be between 1 and 200")
+				return fmt.Errorf("%s: --limit must be between 1 and 200", errorPrefix)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("review items-list: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 			if strings.TrimSpace(*submissionID) == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --submission is required")
@@ -90,7 +131,7 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("review items-list: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -113,7 +154,7 @@ Examples:
 					},
 				)
 				if err != nil {
-					return fmt.Errorf("review items-list: %w", err)
+					return fmt.Errorf("%s: %w", errorPrefix, err)
 				}
 
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -121,7 +162,7 @@ Examples:
 
 			resp, err := client.GetReviewSubmissionItems(requestCtx, strings.TrimSpace(*submissionID), opts...)
 			if err != nil {
-				return fmt.Errorf("review items-list: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -131,7 +172,12 @@ Examples:
 
 // ReviewItemsAddCommand returns the review items add subcommand.
 func ReviewItemsAddCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("items-add", flag.ExitOnError)
+	return reviewItemsAddCommand("items-add", "review items-add", `asc review items-add [flags]`, `asc review items-add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
+  asc review items-add --submission "SUBMISSION_ID" --item-type gameCenterChallengeVersions --item-id "VERSION_ID"`)
+}
+
+func reviewItemsAddCommand(name, errorPrefix, shortUsage, examples string) *ffcli.Command {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	submissionID := fs.String("submission", "", "Review submission ID (required)")
 	itemTypeValues := strings.Join(reviewSubmissionItemTypeList(), ", ")
@@ -140,14 +186,13 @@ func ReviewItemsAddCommand() *ffcli.Command {
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "items-add",
-		ShortUsage: "asc review items-add [flags]",
+		Name:       name,
+		ShortUsage: shortUsage,
 		ShortHelp:  "Add an item to a review submission.",
 		LongHelp: `Add an item to a review submission.
 
 Examples:
-  asc review items-add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
-  asc review items-add --submission "SUBMISSION_ID" --item-type gameCenterChallengeVersions --item-id "VERSION_ID"`,
+  ` + examples,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -171,7 +216,7 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("review items-add: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -179,7 +224,7 @@ Examples:
 
 			resp, err := client.CreateReviewSubmissionItem(requestCtx, strings.TrimSpace(*submissionID), normalizedType, strings.TrimSpace(*itemID))
 			if err != nil {
-				return fmt.Errorf("review items-add: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -189,20 +234,24 @@ Examples:
 
 // ReviewItemsUpdateCommand returns the review items update subcommand.
 func ReviewItemsUpdateCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("items-update", flag.ExitOnError)
+	return reviewItemsUpdateCommand("items-update", "review items-update", `asc review items-update --id "ITEM_ID" --state READY_FOR_REVIEW [flags]`, `asc review items-update --id "ITEM_ID" --state READY_FOR_REVIEW`)
+}
+
+func reviewItemsUpdateCommand(name, errorPrefix, shortUsage, examples string) *ffcli.Command {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	itemID := fs.String("id", "", "Review submission item ID (required)")
 	state := fs.String("state", "", "Item state: READY_FOR_REVIEW, ACCEPTED, APPROVED, REJECTED, REMOVED (required)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "items-update",
-		ShortUsage: "asc review items-update --id \"ITEM_ID\" --state READY_FOR_REVIEW [flags]",
+		Name:       name,
+		ShortUsage: shortUsage,
 		ShortHelp:  "Update a review submission item.",
 		LongHelp: `Update a review submission item.
 
 Examples:
-  asc review items-update --id "ITEM_ID" --state READY_FOR_REVIEW`,
+  ` + examples,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -218,12 +267,12 @@ Examples:
 
 			normalizedState, err := normalizeReviewSubmissionItemState(*state)
 			if err != nil {
-				return fmt.Errorf("review items-update: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("review items-update: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -234,7 +283,7 @@ Examples:
 			}
 			resp, err := client.UpdateReviewSubmissionItem(requestCtx, trimmedID, attrs)
 			if err != nil {
-				return fmt.Errorf("review items-update: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -244,20 +293,24 @@ Examples:
 
 // ReviewItemsRemoveCommand returns the review items remove subcommand.
 func ReviewItemsRemoveCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("items-remove", flag.ExitOnError)
+	return reviewItemsRemoveCommand("items-remove", "review items-remove", `asc review items-remove [flags]`, `asc review items-remove --id "ITEM_ID" --confirm`)
+}
+
+func reviewItemsRemoveCommand(name, errorPrefix, shortUsage, examples string) *ffcli.Command {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	itemID := fs.String("id", "", "Review submission item ID (required)")
 	confirm := fs.Bool("confirm", false, "Confirm removal (required)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "items-remove",
-		ShortUsage: "asc review items-remove [flags]",
+		Name:       name,
+		ShortUsage: shortUsage,
 		ShortHelp:  "Remove an item from a review submission.",
 		LongHelp: `Remove an item from a review submission.
 
 Examples:
-  asc review items-remove --id "ITEM_ID" --confirm`,
+  ` + examples,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -272,14 +325,14 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("review items-remove: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
 			if err := client.DeleteReviewSubmissionItem(requestCtx, strings.TrimSpace(*itemID)); err != nil {
-				return fmt.Errorf("review items-remove: %w", err)
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 
 			result := &asc.ReviewSubmissionItemDeleteResult{

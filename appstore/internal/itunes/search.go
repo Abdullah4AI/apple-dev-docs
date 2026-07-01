@@ -47,7 +47,7 @@ func (c *Client) SearchApps(ctx context.Context, term, country string, limit int
 		query.Set("limit", fmt.Sprintf("%d", limit))
 	}
 
-	req, err := c.newRequest(ctx, http.MethodGet, "/search", query)
+	req, err := c.newRequest(ctx, "/search", query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

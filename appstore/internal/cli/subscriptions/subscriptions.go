@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
@@ -374,6 +375,7 @@ func SubscriptionsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	groupID := fs.String("group-id", "", "Subscription group ID")
+	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env); lists subscriptions across all groups")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -381,13 +383,14 @@ func SubscriptionsListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc subscriptions list --group-id \"GROUP_ID\" [flags]",
-		ShortHelp:  "List subscriptions in a group.",
-		LongHelp: `List subscriptions in a group.
+		ShortUsage: "asc subscriptions list (--group-id \"GROUP_ID\" | --app \"APP_ID\") [flags]",
+		ShortHelp:  "List subscriptions in a group or app.",
+		LongHelp: `List subscriptions in a group or across all groups in an app.
 
 Examples:
   asc subscriptions list --group-id "GROUP_ID"
-  asc subscriptions list --group-id "GROUP_ID" --paginate`,
+  asc subscriptions list --group-id "GROUP_ID" --paginate
+  asc subscriptions list --app "APP_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -399,8 +402,20 @@ Examples:
 			}
 
 			id := strings.TrimSpace(*groupID)
-			if id == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
+			appFlag := strings.TrimSpace(*appID)
+			nextURL := strings.TrimSpace(*next)
+			if id != "" && appFlag != "" {
+				return shared.UsageError("--group-id and --app are mutually exclusive")
+			}
+			if appFlag != "" && nextURL != "" {
+				return shared.UsageError("--next cannot be combined with --app; use --group-id with the group-scoped next URL")
+			}
+			resolvedAppID := ""
+			if appFlag != "" || (id == "" && nextURL == "") {
+				resolvedAppID = shared.ResolveAppID(*appID)
+			}
+			if id == "" && resolvedAppID == "" && nextURL == "" {
+				fmt.Fprintln(os.Stderr, "Error: --group-id or --app is required (or set ASC_APP_ID)")
 				return shared.MissingRequiredUsageError()
 			}
 
@@ -412,9 +427,17 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
+			if resolvedAppID != "" {
+				resp, err := listSubscriptionsForApp(requestCtx, client, resolvedAppID, *limit, true)
+				if err != nil {
+					return fmt.Errorf("subscriptions list: %w", err)
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+
 			opts := []asc.SubscriptionsOption{
 				asc.WithSubscriptionsLimit(*limit),
-				asc.WithSubscriptionsNextURL(*next),
+				asc.WithSubscriptionsNextURL(nextURL),
 			}
 
 			if *paginate {
@@ -442,6 +465,56 @@ Examples:
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func listSubscriptionsForApp(ctx context.Context, client *asc.Client, appID string, limit int, paginate bool) (*asc.SubscriptionsResponse, error) {
+	pageLimit := limit
+	if pageLimit == 0 {
+		pageLimit = 200
+	}
+	groupsResp, err := client.GetSubscriptionGroups(ctx, appID, asc.WithSubscriptionGroupsLimit(pageLimit))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch groups: %w", err)
+	}
+
+	if paginate {
+		paginatedGroups, err := asc.PaginateAll(ctx, groupsResp, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetSubscriptionGroups(ctx, appID, asc.WithSubscriptionGroupsNextURL(nextURL))
+		})
+		if err != nil {
+			return nil, fmt.Errorf("paginate groups: %w", err)
+		}
+		var ok bool
+		groupsResp, ok = paginatedGroups.(*asc.SubscriptionGroupsResponse)
+		if !ok {
+			return nil, fmt.Errorf("unexpected groups response type %T", paginatedGroups)
+		}
+	}
+
+	result := &asc.SubscriptionsResponse{Data: []asc.Resource[asc.SubscriptionAttributes]{}}
+	for _, group := range groupsResp.Data {
+		subsResp, err := client.GetSubscriptions(ctx, group.ID, asc.WithSubscriptionsLimit(pageLimit))
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch subscriptions for group %s: %w", group.ID, err)
+		}
+
+		if paginate {
+			paginatedSubs, err := asc.PaginateAll(ctx, subsResp, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+				return client.GetSubscriptions(ctx, group.ID, asc.WithSubscriptionsNextURL(nextURL))
+			})
+			if err != nil {
+				return nil, fmt.Errorf("paginate subscriptions for group %s: %w", group.ID, err)
+			}
+			var ok bool
+			subsResp, ok = paginatedSubs.(*asc.SubscriptionsResponse)
+			if !ok {
+				return nil, fmt.Errorf("unexpected subscriptions response type %T", paginatedSubs)
+			}
+		}
+
+		result.Data = append(result.Data, subsResp.Data...)
+	}
+	return result, nil
 }
 
 // SubscriptionsCreateCommand returns the subscriptions create subcommand.
@@ -778,6 +851,7 @@ func SubscriptionsPricesListCommand() *ffcli.Command {
 	subID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
 	appID := addSubscriptionLookupAppFlag(fs)
 	planType := fs.String("plan-type", "", "Filter by plan type: MONTHLY or UPFRONT")
+	territory := fs.String("territory", "", "Filter by territory (accepts alpha-2, alpha-3, or exact English country name; e.g., US, USA, United States)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -786,16 +860,18 @@ func SubscriptionsPricesListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc subscriptions prices list --subscription-id \"SUB_ID\" [--plan-type MONTHLY|UPFRONT]",
+		ShortUsage: "asc subscriptions prices list --subscription-id \"SUB_ID\" [--plan-type MONTHLY|UPFRONT] [--territory USA]",
 		ShortHelp:  "List prices for a subscription.",
 		LongHelp: `List prices for a subscription.
 
 Use --plan-type to filter by MONTHLY or UPFRONT billing plan prices.
+Use --territory to filter by a single territory.
 
 Examples:
   asc subscriptions prices list --subscription-id "SUB_ID"
   asc subscriptions prices list --subscription-id "SUB_ID" --paginate
   asc subscriptions prices list --subscription-id "SUB_ID" --resolved
+  asc subscriptions prices list --subscription-id "SUB_ID" --resolved --territory USA
   asc subscriptions prices list --subscription-id "SUB_ID" --plan-type MONTHLY`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -835,6 +911,24 @@ Examples:
 				planTypeFilter = normalized
 			}
 
+			territoryFilter := strings.TrimSpace(*territory)
+			territoryProvided := false
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "territory" {
+					territoryProvided = true
+				}
+			})
+			if territoryProvided {
+				if territoryFilter == "" {
+					return shared.UsageError("invalid value for --territory: cannot be empty")
+				}
+				normalizedTerritory, normalizeErr := ascterritory.Normalize(territoryFilter)
+				if normalizeErr != nil {
+					return shared.UsageError(normalizeErr.Error())
+				}
+				territoryFilter = normalizedTerritory
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("subscriptions prices list: %w", err)
@@ -848,7 +942,7 @@ Examples:
 			}
 
 			if *resolved {
-				resp, err := fetchResolvedSubscriptionPrices(ctx, client, id, *limit, *next, time.Now().UTC(), planTypeFilter)
+				resp, err := fetchResolvedSubscriptionPrices(ctx, client, id, *limit, *next, time.Now().UTC(), planTypeFilter, territoryFilter)
 				if err != nil {
 					return fmt.Errorf("subscriptions prices list: failed to resolve: %w", err)
 				}
@@ -859,8 +953,8 @@ Examples:
 			defer cancel()
 
 			nextURL := strings.TrimSpace(*next)
-			if nextURL != "" && planTypeFilter != "" {
-				nextURL, err = mergeSubscriptionPricesPlanType(nextURL, planTypeFilter)
+			if nextURL != "" && (planTypeFilter != "" || territoryFilter != "") {
+				nextURL, err = mergeSubscriptionPricesListFilters(nextURL, planTypeFilter, territoryFilter)
 				if err != nil {
 					return fmt.Errorf("subscriptions prices list: %w", err)
 				}
@@ -872,6 +966,9 @@ Examples:
 			if planTypeFilter != "" && nextURL == "" {
 				opts = append(opts, asc.WithSubscriptionPricesPlanType(planTypeFilter))
 			}
+			if territoryFilter != "" && nextURL == "" {
+				opts = append(opts, asc.WithSubscriptionPricesTerritory(territoryFilter))
+			}
 
 			if *paginate {
 				paginateOpts := append(opts, asc.WithSubscriptionPricesLimit(200))
@@ -881,7 +978,7 @@ Examples:
 				}
 
 				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					nextURL, err := mergeSubscriptionPricesPlanType(nextURL, planTypeFilter)
+					nextURL, err := mergeSubscriptionPricesListFilters(nextURL, planTypeFilter, territoryFilter)
 					if err != nil {
 						return nil, err
 					}
@@ -905,14 +1002,23 @@ Examples:
 }
 
 func mergeSubscriptionPricesPlanType(next string, planType asc.SubscriptionPlanType) (string, error) {
-	if planType == "" {
+	return mergeSubscriptionPricesListFilters(next, planType, "")
+}
+
+func mergeSubscriptionPricesListFilters(next string, planType asc.SubscriptionPlanType, territory string) (string, error) {
+	if planType == "" && strings.TrimSpace(territory) == "" {
 		return next, nil
 	}
 
-	return mergeSubscriptionPricesNextQuery(
-		next,
-		url.Values{"filter[planType]": []string{string(planType)}},
-	)
+	additions := url.Values{}
+	if planType != "" {
+		additions.Set("filter[planType]", string(planType))
+	}
+	if strings.TrimSpace(territory) != "" {
+		additions.Set("filter[territory]", strings.ToUpper(strings.TrimSpace(territory)))
+	}
+
+	return mergeSubscriptionPricesNextQuery(next, additions)
 }
 
 func mergeSubscriptionPricesNextQuery(next string, additions url.Values) (string, error) {
@@ -941,6 +1047,95 @@ func mergeSubscriptionPricesNextQuery(next string, additions url.Values) (string
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+type subscriptionPriceRelationshipData struct {
+	SubscriptionPricePoint *asc.Relationship `json:"subscriptionPricePoint"`
+	Territory              *asc.Relationship `json:"territory"`
+}
+
+func findMatchingSubscriptionPrice(ctx context.Context, client *asc.Client, subID, pricePointID, territoryID string, attrs asc.SubscriptionPriceCreateAttributes) (*asc.SubscriptionPriceResponse, error) {
+	pricePointID = strings.TrimSpace(pricePointID)
+	territoryID = strings.ToUpper(strings.TrimSpace(territoryID))
+
+	opts := []asc.SubscriptionPricesOption{
+		asc.WithSubscriptionPricesLimit(200),
+		asc.WithSubscriptionPricesInclude([]string{"subscriptionPricePoint", "territory"}),
+	}
+	if territoryID != "" {
+		opts = append(opts, asc.WithSubscriptionPricesTerritory(territoryID))
+	}
+	if attrs.PlanType != "" {
+		opts = append(opts, asc.WithSubscriptionPricesPlanType(attrs.PlanType))
+	}
+
+	for {
+		resp, err := client.GetSubscriptionPrices(ctx, subID, opts...)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, price := range resp.Data {
+			if subscriptionPriceMatchesTarget(price, pricePointID, territoryID, attrs) {
+				return &asc.SubscriptionPriceResponse{Data: price}, nil
+			}
+		}
+
+		next := strings.TrimSpace(resp.Links.Next)
+		if next == "" {
+			return nil, nil
+		}
+		nextURL, err := mergeSubscriptionPricesPlanType(next, attrs.PlanType)
+		if err != nil {
+			return nil, err
+		}
+		opts = []asc.SubscriptionPricesOption{asc.WithSubscriptionPricesNextURL(nextURL)}
+	}
+}
+
+func subscriptionPriceMatchesTarget(price asc.Resource[asc.SubscriptionPriceAttributes], pricePointID, territoryID string, attrs asc.SubscriptionPriceCreateAttributes) bool {
+	if strings.TrimSpace(pricePointID) == "" {
+		return false
+	}
+
+	var relationships subscriptionPriceRelationshipData
+	if len(price.Relationships) > 0 {
+		if err := json.Unmarshal(price.Relationships, &relationships); err != nil {
+			return false
+		}
+	}
+	if relationships.SubscriptionPricePoint == nil || relationships.SubscriptionPricePoint.Data.ID != pricePointID {
+		return false
+	}
+
+	actualTerritory := ""
+	if relationships.Territory != nil {
+		actualTerritory = strings.ToUpper(strings.TrimSpace(relationships.Territory.Data.ID))
+	}
+	if strings.ToUpper(strings.TrimSpace(territoryID)) != actualTerritory {
+		return false
+	}
+
+	if strings.TrimSpace(price.Attributes.StartDate) != strings.TrimSpace(attrs.StartDate) {
+		return false
+	}
+	targetPreserved := attrs.Preserved != nil && *attrs.Preserved
+	if price.Attributes.Preserved != targetPreserved {
+		return false
+	}
+	targetPlanType := attrs.PlanType
+	if targetPlanType == "" {
+		targetPlanType = asc.SubscriptionPlanTypeUpfront
+	}
+	actualPlanType := price.Attributes.PlanType
+	if actualPlanType == "" {
+		actualPlanType = asc.SubscriptionPlanTypeUpfront
+	}
+	if actualPlanType != targetPlanType {
+		return false
+	}
+
+	return true
 }
 
 // SubscriptionsPricesAddCommand returns the subscriptions prices add subcommand.
@@ -1061,6 +1256,14 @@ Examples:
 					return fmt.Errorf("subscriptions prices add: failed to set initial price: %w", err)
 				}
 				return shared.PrintOutput(subResp, *output.Output, *output.Pretty)
+			}
+
+			matchingPrice, err := findMatchingSubscriptionPrice(requestCtx, client, id, pricePoint, territoryID, attrs)
+			if err != nil {
+				return fmt.Errorf("subscriptions prices add: failed to check matching price: %w", err)
+			}
+			if matchingPrice != nil {
+				return shared.PrintOutput(matchingPrice, *output.Output, *output.Pretty)
 			}
 
 			// Existing prices: use POST /v1/subscriptionPrices for a price change

@@ -189,6 +189,86 @@ func TestBuildsTestNotesUpdateByBuildNumberAndLocale(t *testing.T) {
 	}
 }
 
+func TestBuildsTestNotesCreateUpdatesExistingLocale(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-1" {
+				t.Fatalf("unexpected first request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonResponse(http.StatusOK, `{
+				"data":{"type":"builds","id":"build-1","attributes":{"version":"42","processingState":"VALID"}}
+			}`)
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-1/betaBuildLocalizations" {
+				t.Fatalf("unexpected second request: %s %s", req.Method, req.URL.String())
+			}
+			query := req.URL.Query()
+			if query.Get("limit") != "200" {
+				t.Fatalf("expected limit=200, got %q", query.Get("limit"))
+			}
+			return jsonResponse(http.StatusOK, `{
+				"data":[{"type":"betaBuildLocalizations","id":"loc-en","attributes":{"locale":"en-US","whatsNew":"Old notes"}}]
+			}`)
+		case 3:
+			if req.Method != http.MethodPatch || req.URL.Path != "/v1/betaBuildLocalizations/loc-en" {
+				t.Fatalf("unexpected third request: %s %s", req.Method, req.URL.String())
+			}
+			payload, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read body error: %v", err)
+			}
+			if !strings.Contains(string(payload), `"whatsNew":"Updated notes"`) {
+				t.Fatalf("expected whatsNew payload, got %s", string(payload))
+			}
+			return jsonResponse(http.StatusOK, `{
+				"data":{"type":"betaBuildLocalizations","id":"loc-en","attributes":{"locale":"en-US","whatsNew":"Updated notes"}}
+			}`)
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"builds", "test-notes", "create",
+			"--build-id", "build-1",
+			"--locale", "en-US",
+			"--whats-new", "Updated notes",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, `"id":"loc-en"`) {
+		t.Fatalf("expected existing localization output, got %q", stdout)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected three requests, got %d", requestCount)
+	}
+}
+
 func TestBuildsTestNotesListLegacyBuildAliasWarnsAndMatchesCanonicalOutput(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

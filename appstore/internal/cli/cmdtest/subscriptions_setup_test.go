@@ -237,6 +237,12 @@ func TestSubscriptionsSetupCreateOnlySuccess(t *testing.T) {
 		requestCount++
 		switch requestCount {
 		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			body := `{"data":[],"links":{"next":""}}`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
+		case 2:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionGroups" {
 				t.Fatalf("unexpected group create request: %s %s", req.Method, req.URL.Path)
 			}
@@ -249,7 +255,7 @@ func TestSubscriptionsSetupCreateOnlySuccess(t *testing.T) {
 			}
 			body := `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 2:
+		case 3:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
 				t.Fatalf("unexpected subscription create request: %s %s", req.Method, req.URL.Path)
 			}
@@ -265,13 +271,13 @@ func TestSubscriptionsSetupCreateOnlySuccess(t *testing.T) {
 			}
 			body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA","familySharable":false}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 3:
+		case 4:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1" {
 				t.Fatalf("unexpected verify group request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 4:
+		case 5:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1" {
 				t.Fatalf("unexpected verify subscription request: %s %s", req.Method, req.URL.Path)
 			}
@@ -307,7 +313,7 @@ func TestSubscriptionsSetupCreateOnlySuccess(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if requestCount != 4 {
+	if requestCount != 5 {
 		t.Fatalf("expected create and verify requests, got %d", requestCount)
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
@@ -331,18 +337,32 @@ func TestSubscriptionsSetupExistingGroupNoVerifySuccess(t *testing.T) {
 	requestCount := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requestCount++
-		if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
-			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[productId]"); got != "com.example.pro.monthly" {
+				t.Fatalf("expected product ID lookup, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
+				t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			}
+			var payload asc.SubscriptionCreateRequest
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode subscription payload: %v", err)
+			}
+			if payload.Data.Relationships.Group.Data.ID != "group-1" {
+				t.Fatalf("expected group-1 relationship, got %q", payload.Data.Relationships.Group.Data.ID)
+			}
+			body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`
+			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
 		}
-		var payload asc.SubscriptionCreateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode subscription payload: %v", err)
-		}
-		if payload.Data.Relationships.Group.Data.ID != "group-1" {
-			t.Fatalf("expected group-1 relationship, got %q", payload.Data.Relationships.Group.Data.ID)
-		}
-		body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`
-		return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
 	})
 
 	root := RootCommand("1.2.3")
@@ -369,7 +389,7 @@ func TestSubscriptionsSetupExistingGroupNoVerifySuccess(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if requestCount != 1 {
+	if requestCount != 2 {
 		t.Fatalf("expected only subscription create request with --no-verify, got %d", requestCount)
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
@@ -380,6 +400,653 @@ func TestSubscriptionsSetupExistingGroupNoVerifySuccess(t *testing.T) {
 	}
 	if result.Verification.Status != "skipped" {
 		t.Fatalf("expected skipped verification with --no-verify, got %+v", result.Verification)
+	}
+}
+
+func TestSubscriptionsSetupReusesExistingGroupSubscriptionAndLocalization(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method == http.MethodPost {
+			t.Fatalf("setup should not create existing resources, got POST %s", req.URL.Path)
+		}
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[productId]"); got != "com.example.pro.monthly" {
+				t.Fatalf("expected product ID lookup, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}],"links":{"next":""}}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionLocalizations" {
+				t.Fatalf("unexpected localization lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro Monthly","locale":"en-US","description":"All premium features."}}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var result subscriptionsSetupOutput
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--app", "app-1",
+			"--group-reference-name", "Pro",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--locale", "en-US",
+			"--display-name", "Pro Monthly",
+			"--description", "All premium features.",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected only lookup requests, got %d", requestCount)
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "ok" || result.GroupID != "group-1" || result.SubscriptionID != "sub-1" || result.LocalizationID != "loc-1" {
+		t.Fatalf("unexpected reused setup result: %+v", result)
+	}
+	wantMessages := map[string]string{
+		"ensure_group":        "used existing group",
+		"create_subscription": "used existing subscription",
+		"create_localization": "used existing localization",
+	}
+	seenMessages := map[string]bool{}
+	for _, step := range result.Steps {
+		if want, ok := wantMessages[step.Name]; ok && step.Message != want {
+			t.Fatalf("expected %s message %q, got %q", step.Name, want, step.Message)
+		}
+		if _, ok := wantMessages[step.Name]; ok {
+			seenMessages[step.Name] = true
+		}
+	}
+	for name := range wantMessages {
+		if !seenMessages[name] {
+			t.Fatalf("expected reuse step %q in %+v", name, result.Steps)
+		}
+	}
+}
+
+func TestSubscriptionsSetupRejectsMismatchedExistingSubscription(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Old Name","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH"}}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--app", "app-1",
+			"--group-reference-name", "Pro",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "different reference name") {
+		t.Fatalf("expected different reference name error, got %v", runErr)
+	}
+
+	var result subscriptionsSetupOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "error" || result.FailedStep != "create_subscription" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected lookup requests only, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsMismatchedExistingSubscriptionFamilySharingDefault(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+			t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+		}
+		return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","familySharable":true}}],"links":{"next":""}}`), nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--group-id", "group-1",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "different family sharing setting") {
+		t.Fatalf("expected different family sharing error, got %v", runErr)
+	}
+
+	var result subscriptionsSetupOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "error" || result.FailedStep != "create_subscription" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected only subscription lookup request, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsAmbiguousExistingGroupReference(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+			t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+		}
+		return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}},{"type":"subscriptionGroups","id":"group-2","attributes":{"referenceName":"Pro"}}],"links":{"next":""}}`), nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--app", "app-1",
+			"--group-reference-name", "Pro",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "multiple subscription groups match reference name") {
+		t.Fatalf("expected ambiguous group reference error, got %v", runErr)
+	}
+
+	var result subscriptionsSetupOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "error" || result.FailedStep != "ensure_group" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected only group lookup request, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsMismatchedExistingLocalization(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[productId]"); got != "com.example.pro.monthly" {
+				t.Fatalf("expected product ID lookup, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH"}}],"links":{"next":""}}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionLocalizations" {
+				t.Fatalf("unexpected localization lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Old Name","locale":"en-US","description":"All premium features."}}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--app", "app-1",
+			"--group-reference-name", "Pro",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--locale", "en-US",
+			"--display-name", "Pro Monthly",
+			"--description", "All premium features.",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "different display name") {
+		t.Fatalf("expected different display name error, got %v", runErr)
+	}
+
+	var result subscriptionsSetupOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "error" || result.FailedStep != "create_localization" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected lookup requests only, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsMismatchedExistingLocalizationDescription(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH"}}],"links":{"next":""}}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionLocalizations" {
+				t.Fatalf("unexpected localization lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro Monthly","locale":"en-US","description":"Old description."}}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--app", "app-1",
+			"--group-reference-name", "Pro",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--locale", "en-US",
+			"--display-name", "Pro Monthly",
+			"--description", "All premium features.",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "different description") {
+		t.Fatalf("expected different description error, got %v", runErr)
+	}
+
+	var result subscriptionsSetupOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "error" || result.FailedStep != "create_localization" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected lookup requests only, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupReusesExistingPriceAndAvailability(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method == http.MethodPost || req.Method == http.MethodPatch {
+			t.Fatalf("setup rerun should not mutate matching existing state, got %s %s", req.Method, req.URL.Path)
+		}
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("filter[productId]"); got != "com.example.pro.monthly" {
+				t.Fatalf("expected product ID lookup, got %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/prices" {
+				t.Fatalf("unexpected price lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-1","attributes":{"planType":"UPFRONT"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"price-point-1"}},"territory":{"data":{"type":"territories","id":"USA"}}}}],"links":{"next":""}}`), nil
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionAvailability" {
+				t.Fatalf("unexpected availability lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"subscriptionAvailabilities","id":"availability-1","attributes":{"availableInNewTerritories":true}}}`), nil
+		case 4:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionAvailabilities/availability-1/availableTerritories" {
+				t.Fatalf("unexpected availability territories request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("cursor"); got != "" {
+				t.Fatalf("expected first availability territories page, got cursor %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"territories","id":"CAN"}],"links":{"next":"/v1/subscriptionAvailabilities/availability-1/availableTerritories?cursor=page-2"}}`), nil
+		case 5:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionAvailabilities/availability-1/availableTerritories" {
+				t.Fatalf("unexpected availability territories page request: %s %s", req.Method, req.URL.String())
+			}
+			if got := req.URL.Query().Get("cursor"); got != "page-2" {
+				t.Fatalf("expected second availability territories page, got cursor %q", got)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"territories","id":"USA"}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var result subscriptionsSetupOutput
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--group-id", "group-1",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--price-point-id", "price-point-1",
+			"--price-territory", "USA",
+			"--available-in-new-territories",
+			"--no-verify",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+	if result.Status != "ok" || result.SubscriptionID != "sub-1" || result.AvailabilityID != "availability-1" {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	wantMessages := map[string]string{
+		"set_price":        "used existing price",
+		"set_availability": "used existing availability",
+	}
+	for name, want := range wantMessages {
+		found := false
+		for _, step := range result.Steps {
+			if step.Name == name {
+				found = true
+				if step.Message != want {
+					t.Fatalf("expected %s message %q, got %q", name, want, step.Message)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("expected step %q in %+v", name, result.Steps)
+		}
+	}
+	if requestCount != 5 {
+		t.Fatalf("expected lookup requests only, got %d", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsInitialPricePatchWhenExistingPricesMismatch(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method == http.MethodPost || req.Method == http.MethodPatch {
+			t.Fatalf("setup rerun should not mutate priced subscription with nonmatching price, got %s %s", req.Method, req.URL.Path)
+		}
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH"}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/prices" {
+				t.Fatalf("unexpected price lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-1","attributes":{"planType":"MONTHLY"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"price-point-other"}},"territory":{"data":{"type":"territories","id":"USA"}}}}],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	_, _ = captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--group-id", "group-1",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--locale", "en-US",
+			"--display-name", "Pro Monthly",
+			"--description", "All premium features.",
+			"--price-point-id", "price-point-1",
+			"--price-territory", "USA",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		err := root.Run(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "already has prices but none match") {
+			t.Fatalf("expected existing prices mismatch error, got %v", err)
+		}
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected subscription and price lookup only, got %d requests", requestCount)
+	}
+}
+
+func TestSubscriptionsSetupRejectsStaleExistingAvailabilityBeforeLocalization(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method == http.MethodPost || req.Method == http.MethodPatch {
+			t.Fatalf("setup rerun should not mutate before stale availability failure, got %s %s", req.Method, req.URL.Path)
+		}
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1/subscriptions" {
+				t.Fatalf("unexpected subscription lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","familySharable":false}}],"links":{"next":""}}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionAvailability" {
+				t.Fatalf("unexpected availability lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"subscriptionAvailabilities","id":"availability-1","attributes":{"availableInNewTerritories":false}}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	_, _ = captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "setup",
+			"--group-id", "group-1",
+			"--reference-name", "Pro Monthly",
+			"--product-id", "com.example.pro.monthly",
+			"--subscription-period", "ONE_MONTH",
+			"--locale", "en-US",
+			"--display-name", "Pro Monthly",
+			"--description", "All premium features.",
+			"--available-in-new-territories",
+			"--territories", "USA",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		err := root.Run(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "already has availability") {
+			t.Fatalf("expected stale availability error, got %v", err)
+		}
+	})
+
+	if requestCount != 2 {
+		t.Fatalf("expected subscription and availability lookup only, got %d requests", requestCount)
 	}
 }
 
@@ -396,16 +1063,21 @@ func TestSubscriptionsSetupPricingAutoEnablesPriceTerritoryAvailability(t *testi
 		requestCount++
 		switch requestCount {
 		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case 2:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionGroups" {
 				t.Fatalf("unexpected group create request: %s %s", req.Method, req.URL.Path)
 			}
 			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`), nil
-		case 2:
+		case 3:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
 				t.Fatalf("unexpected subscription create request: %s %s", req.Method, req.URL.Path)
 			}
 			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`), nil
-		case 3:
+		case 4:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/pricePoints" {
 				t.Fatalf("unexpected price-point lookup request: %s %s", req.Method, req.URL.String())
 			}
@@ -413,7 +1085,7 @@ func TestSubscriptionsSetupPricingAutoEnablesPriceTerritoryAvailability(t *testi
 				t.Fatalf("expected filter[territory]=NOR, got %q", got)
 			}
 			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"pp-nok-19","attributes":{"customerPrice":"19.00","proceeds":"14.00","proceedsYear2":"14.00"}}],"links":{"next":""}}`), nil
-		case 4:
+		case 5:
 			if req.Method != http.MethodPatch || req.URL.Path != "/v1/subscriptions/sub-1" {
 				t.Fatalf("unexpected initial price request: %s %s", req.Method, req.URL.Path)
 			}
@@ -424,11 +1096,14 @@ func TestSubscriptionsSetupPricingAutoEnablesPriceTerritoryAvailability(t *testi
 			if len(payload.Included) != 1 {
 				t.Fatalf("expected one included price resource, got %d", len(payload.Included))
 			}
+			if payload.Included[0].Attributes == nil || payload.Included[0].Attributes.PlanType != asc.SubscriptionPlanTypeUpfront {
+				t.Fatalf("expected UPFRONT initial price, got %+v", payload.Included[0].Attributes)
+			}
 			if payload.Included[0].Relationships.Territory == nil || payload.Included[0].Relationships.Territory.Data.ID != "NOR" {
 				t.Fatalf("expected pricing territory NOR, got %+v", payload.Included[0].Relationships.Territory)
 			}
 			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`), nil
-		case 5:
+		case 6:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionAvailabilities" {
 				t.Fatalf("unexpected availability request: %s %s", req.Method, req.URL.Path)
 			}
@@ -483,7 +1158,7 @@ func TestSubscriptionsSetupPricingAutoEnablesPriceTerritoryAvailability(t *testi
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if requestCount != 5 {
+	if requestCount != 6 {
 		t.Fatalf("expected create, price, and auto-availability requests, got %d", requestCount)
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
@@ -523,12 +1198,17 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 		requestCount++
 		switch requestCount {
 		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case 2:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionGroups" {
 				t.Fatalf("unexpected group create request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 2:
+		case 3:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
 				t.Fatalf("unexpected subscription create request: %s %s", req.Method, req.URL.Path)
 			}
@@ -550,7 +1230,7 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 			}
 			body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA","familySharable":true}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 3:
+		case 4:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionLocalizations" {
 				t.Fatalf("unexpected localization request: %s %s", req.Method, req.URL.Path)
 			}
@@ -566,7 +1246,7 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 			}
 			body := `{"data":{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro Monthly","locale":"en-US","description":"All premium features."}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 4:
+		case 5:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/pricePoints" {
 				t.Fatalf("unexpected price-point lookup request: %s %s", req.Method, req.URL.String())
 			}
@@ -578,7 +1258,7 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 				{"type":"subscriptionPricePoints","id":"pp-399","attributes":{"customerPrice":"3.99","proceeds":"3.39","proceedsYear2":"3.39"}}
 			],"links":{"next":""}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 5:
+		case 6:
 			if req.Method != http.MethodPatch || req.URL.Path != "/v1/subscriptions/sub-1" {
 				t.Fatalf("unexpected initial price request: %s %s", req.Method, req.URL.Path)
 			}
@@ -589,9 +1269,12 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 			if len(payload.Included) != 1 || payload.Included[0].Relationships.SubscriptionPricePoint.Data.ID != "pp-399" {
 				t.Fatalf("expected resolved price point pp-399, got %+v", payload.Included)
 			}
+			if payload.Included[0].Attributes == nil || payload.Included[0].Attributes.PlanType != asc.SubscriptionPlanTypeUpfront {
+				t.Fatalf("expected UPFRONT initial price, got %+v", payload.Included[0].Attributes)
+			}
 			body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA","familySharable":true}}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 6:
+		case 7:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionAvailabilities" {
 				t.Fatalf("unexpected availability request: %s %s", req.Method, req.URL.Path)
 			}
@@ -610,25 +1293,25 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 			}
 			body := `{"data":{"type":"subscriptionAvailabilities","id":"avail-1","attributes":{"availableInNewTerritories":false}}}`
 			return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 7:
+		case 8:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionGroups/group-1" {
 				t.Fatalf("unexpected verify group request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 8:
+		case 9:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1" {
 				t.Fatalf("unexpected verify subscription request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA","familySharable":true}}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 9:
+		case 10:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionLocalizations" {
 				t.Fatalf("unexpected verify localizations request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":[{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro Monthly","locale":"en-US","description":"All premium features."}}],"links":{"next":""}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 10:
+		case 11:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/prices" {
 				t.Fatalf("unexpected verify pricing request: %s %s", req.Method, req.URL.String())
 			}
@@ -641,13 +1324,13 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 				"links":{"next":""}
 			}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 11:
+		case 12:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/subscriptionAvailability" {
 				t.Fatalf("unexpected verify availability request: %s %s", req.Method, req.URL.Path)
 			}
 			body := `{"data":{"type":"subscriptionAvailabilities","id":"avail-1","attributes":{"availableInNewTerritories":false}}}`
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
-		case 12:
+		case 13:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptionAvailabilities/avail-1/availableTerritories" {
 				t.Fatalf("unexpected verify availability territories request: %s %s", req.Method, req.URL.String())
 			}
@@ -693,7 +1376,7 @@ func TestSubscriptionsSetupCreateLocalizationPricingAndAvailabilitySuccess(t *te
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if requestCount != 12 {
+	if requestCount != 13 {
 		t.Fatalf("expected full create and verify flow, got %d requests", requestCount)
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
@@ -732,16 +1415,21 @@ func TestSubscriptionsSetupNormalizesTerritories(t *testing.T) {
 		requestCount++
 		switch requestCount {
 		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/subscriptionGroups" {
+				t.Fatalf("unexpected group lookup request: %s %s", req.Method, req.URL.String())
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":""}}`), nil
+		case 2:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionGroups" {
 				t.Fatalf("unexpected group create request: %s %s", req.Method, req.URL.Path)
 			}
 			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`), nil
-		case 2:
+		case 3:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptions" {
 				t.Fatalf("unexpected subscription create request: %s %s", req.Method, req.URL.Path)
 			}
 			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`), nil
-		case 3:
+		case 4:
 			if req.Method != http.MethodGet || req.URL.Path != "/v1/subscriptions/sub-1/pricePoints" {
 				t.Fatalf("unexpected price-point lookup request: %s %s", req.Method, req.URL.String())
 			}
@@ -749,12 +1437,12 @@ func TestSubscriptionsSetupNormalizesTerritories(t *testing.T) {
 				t.Fatalf("expected normalized filter[territory]=USA, got %q", got)
 			}
 			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"pp-399","attributes":{"customerPrice":"3.99","proceeds":"3.39","proceedsYear2":"3.39"}}],"links":{"next":""}}`), nil
-		case 4:
+		case 5:
 			if req.Method != http.MethodPatch || req.URL.Path != "/v1/subscriptions/sub-1" {
 				t.Fatalf("unexpected initial price request: %s %s", req.Method, req.URL.Path)
 			}
 			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"MISSING_METADATA"}}}`), nil
-		case 5:
+		case 6:
 			if req.Method != http.MethodPost || req.URL.Path != "/v1/subscriptionAvailabilities" {
 				t.Fatalf("unexpected availability request: %s %s", req.Method, req.URL.Path)
 			}
@@ -799,7 +1487,7 @@ func TestSubscriptionsSetupNormalizesTerritories(t *testing.T) {
 	if err := root.Run(context.Background()); err != nil {
 		t.Fatalf("run error: %v", err)
 	}
-	if requestCount != 5 {
+	if requestCount != 6 {
 		t.Fatalf("expected 5 setup requests, got %d", requestCount)
 	}
 }
