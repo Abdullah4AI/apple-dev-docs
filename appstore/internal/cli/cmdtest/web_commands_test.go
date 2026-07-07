@@ -9,19 +9,19 @@ import (
 	"testing"
 )
 
-func TestRootUsageIncludesExperimentalWebGroup(t *testing.T) {
+func TestRootUsageIncludesWebSessionGroup(t *testing.T) {
 	root := RootCommand("1.2.3")
 	usage := root.UsageFunc(root)
 
-	if !strings.Contains(usage, "EXPERIMENTAL COMMANDS") {
-		t.Fatalf("expected experimental group in root usage, got %q", usage)
+	if !strings.Contains(usage, "WEB SESSION COMMANDS") {
+		t.Fatalf("expected web session group in root usage, got %q", usage)
 	}
 	if !strings.Contains(usage, "  web:") {
 		t.Fatalf("expected web command in root usage, got %q", usage)
 	}
 }
 
-func TestWebCommandIncludesWarningContract(t *testing.T) {
+func TestWebCommandUsesProductionHelpContract(t *testing.T) {
 	root := RootCommand("1.2.3")
 	webCmd := findSubcommand(root, "web")
 	if webCmd == nil {
@@ -30,10 +30,15 @@ func TestWebCommandIncludesWarningContract(t *testing.T) {
 	}
 
 	usage := webCmd.UsageFunc(webCmd)
-	for _, token := range []string{"EXPERIMENTAL", "UNOFFICIAL", "DISCOURAGED"} {
-		if !strings.Contains(usage, token) {
-			t.Fatalf("expected %q token in web usage, got %q", token, usage)
+	if !strings.Contains(usage, "WEB SESSION WORKFLOWS") {
+		t.Fatalf("expected web-session help heading, got %q", usage)
+	}
+	lowerUsage := strings.ToLower(usage)
+	for _, token := range []string{"experimental", "unofficial", "discouraged", "private", "risk"} {
+		if !strings.Contains(lowerUsage, token) {
+			continue
 		}
+		t.Fatalf("expected %q not to appear in web usage, got %q", token, usage)
 	}
 }
 
@@ -41,6 +46,20 @@ func TestWebAppsCreateSubcommandIsRegistered(t *testing.T) {
 	root := RootCommand("1.2.3")
 	if sub := findSubcommand(root, "web", "apps", "create"); sub == nil {
 		t.Fatalf("expected web apps create to be registered")
+	}
+}
+
+func TestWebRemovedAppsListSubcommandIsRegistered(t *testing.T) {
+	root := RootCommand("1.2.3")
+	if sub := findSubcommand(root, "web", "removed-apps", "list"); sub == nil {
+		t.Fatalf("expected web removed-apps list to be registered")
+	}
+}
+
+func TestWebAppsDeleteSubcommandIsRegistered(t *testing.T) {
+	root := RootCommand("1.2.3")
+	if sub := findSubcommand(root, "web", "apps", "delete"); sub == nil {
+		t.Fatalf("expected web apps delete to be registered")
 	}
 }
 

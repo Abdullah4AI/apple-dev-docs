@@ -30,13 +30,13 @@ func WebAppsCompatibilityCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "compatibility",
 		ShortUsage: "asc web apps compatibility <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage App Store Mac and Vision Pro opt-in settings.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage App Store Mac and Vision Pro opt-in settings.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage App Store compatibility opt-in settings for iPhone and iPad apps on
 Apple silicon Mac and Apple Vision Pro using Apple's internal web API.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -60,7 +60,7 @@ func WebAppsCompatibilityViewCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "view",
 		ShortUsage: "asc web apps compatibility view --app APP_ID [flags]",
-		ShortHelp:  "[experimental] View App Store Mac and Vision Pro opt-in settings.",
+		ShortHelp:  "View App Store Mac and Vision Pro opt-in settings.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -112,7 +112,7 @@ func WebAppsCompatibilityEditCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "edit",
 		ShortUsage: "asc web apps compatibility edit --app APP_ID [--ios-app-on-mac true|false] [--ios-app-on-vision-pro true|false] [flags]",
-		ShortHelp:  "[experimental] Edit App Store Mac and Vision Pro opt-in settings.",
+		ShortHelp:  "Edit App Store Mac and Vision Pro opt-in settings.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

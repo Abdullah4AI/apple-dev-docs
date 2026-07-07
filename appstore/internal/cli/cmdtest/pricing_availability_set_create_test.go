@@ -27,7 +27,7 @@ func TestAvailabilitySet_MissingAvailabilityReturnsUpdateOnlyError(t *testing.T)
 				"--output", "json",
 			},
 			wantPrefix: `pricing availability edit: app availability not found for app "app-1"; this command only updates existing app availability`,
-			wantHint:   `use the experimental "asc web apps availability create" flow`,
+			wantHint:   `use the "asc web apps availability create" flow`,
 		},
 		{
 			name: "app-setup availability edit",
@@ -40,7 +40,7 @@ func TestAvailabilitySet_MissingAvailabilityReturnsUpdateOnlyError(t *testing.T)
 				"--output", "json",
 			},
 			wantPrefix: `app-setup availability edit: app availability not found for app "app-1"; this command only updates existing app availability`,
-			wantHint:   `use the experimental "asc web apps availability create" flow`,
+			wantHint:   `use the "asc web apps availability create" flow`,
 		},
 	}
 

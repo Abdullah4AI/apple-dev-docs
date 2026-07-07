@@ -688,8 +688,8 @@ func WebReviewCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "review",
 		ShortUsage: "asc web review <subcommand> [flags]",
-		ShortHelp:  "[experimental] App-centric review and rejection inspection.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "App-centric review and rejection inspection.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 App-centric review workflows over Apple web-session /iris endpoints.
 Use --app to scope all operations to one app.
@@ -700,7 +700,7 @@ Subcommands:
   subscriptions  Inspect and mutate next-version subscription review selection
   iaps  Attach non-renewing IAPs to the next app version review
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -727,7 +727,7 @@ func WebReviewListCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc web review list --app APP_ID [--state CSV] [flags]",
-		ShortHelp:  "[experimental] List app review submissions.",
+		ShortHelp:  "List app review submissions.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -786,8 +786,8 @@ func WebReviewShowCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "show",
 		ShortUsage: "asc web review show --app APP_ID [--submission ID] [--out DIR] [--pattern GLOB] [--overwrite] [flags]",
-		ShortHelp:  "[experimental] Show review details and auto-download screenshots.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show review details and auto-download screenshots.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show one submission's review context (threads, messages, rejections) and
 auto-download available screenshots/attachments in the same command.
@@ -796,7 +796,7 @@ Selection:
   - --submission ID          Use an explicit submission
   - without --submission     Pick latest UNRESOLVED_ISSUES submission, otherwise latest submission
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

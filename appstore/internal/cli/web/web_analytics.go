@@ -69,13 +69,13 @@ func WebAnalyticsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "analytics",
 		ShortUsage: "asc web analytics <subcommand> [flags]",
-		ShortHelp:  "[experimental] Recreate App Store Connect analytics web dashboards.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Recreate App Store Connect analytics web dashboards.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-	Query Apple's private analytics web endpoints using a user-owned App Store Connect
+	Query Apple's analytics web endpoints using a user-owned App Store Connect
 	web session. These commands are separate from the official Analytics Reports API.
 
-` + webWarningText + `
+
 
 Examples:
   asc web analytics overview --app "123456789" --start 2025-12-24 --end 2026-03-23 --apple-id "user@example.com"
@@ -121,13 +121,13 @@ func WebAnalyticsOverviewCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "overview",
 		ShortUsage: "asc web analytics overview [flags]",
-		ShortHelp:  "[experimental] Recreate the Analytics overview dashboard.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Recreate the Analytics overview dashboard.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 	Recreate the App Store Connect Analytics overview dashboard: acquisition, sales,
 	subscription summary cards, top breakdowns, and retention/cohort payloads.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -174,14 +174,14 @@ func WebAnalyticsSubscriptionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "subscriptions",
 		ShortUsage: "asc web analytics subscriptions [flags]",
-		ShortHelp:  "[experimental] Recreate the subscriptions summary dashboard.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Recreate the subscriptions summary dashboard.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 	Recreate the App Store Connect subscriptions summary view: active/paid plan cards,
 	monthly recurring revenue, net plan timeline, active plans by subscription, and
 	subscription retention cohorts.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -230,12 +230,12 @@ func WebAnalyticsMetricsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "metrics",
 		ShortUsage: "asc web analytics metrics [flags]",
-		ShortHelp:  "[experimental] Query private analytics measures.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Query analytics measures.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-	Query private App Store Connect analytics measures over a custom date range.
+	Query App Store Connect analytics measures over a custom date range.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -291,7 +291,7 @@ func WebAnalyticsMetricsCommand() *ffcli.Command {
 	}
 }
 
-// WebAnalyticsRetentionCommand queries private analytics retention data.
+// WebAnalyticsRetentionCommand queries analytics retention data.
 func WebAnalyticsRetentionCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web analytics retention", flag.ExitOnError)
 	sessionFlags := bindWebSessionFlags(fs)
@@ -304,12 +304,12 @@ func WebAnalyticsRetentionCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "retention",
 		ShortUsage: "asc web analytics retention [flags]",
-		ShortHelp:  "[experimental] Query private analytics retention data.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Query analytics retention data.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-	Query private App Store Connect app retention data over a custom date range.
+	Query App Store Connect app retention data over a custom date range.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -360,7 +360,7 @@ func WebAnalyticsRetentionCommand() *ffcli.Command {
 	}
 }
 
-// WebAnalyticsCohortsCommand queries private analytics cohorts directly.
+// WebAnalyticsCohortsCommand queries analytics cohorts directly.
 func WebAnalyticsCohortsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web analytics cohorts", flag.ExitOnError)
 	sessionFlags := bindWebSessionFlags(fs)
@@ -375,13 +375,13 @@ func WebAnalyticsCohortsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "cohorts",
 		ShortUsage: "asc web analytics cohorts [flags]",
-		ShortHelp:  "[experimental] Query private analytics cohort data.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Query analytics cohort data.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-	Query private App Store Connect cohort data such as download-to-paid or
+	Query App Store Connect cohort data such as download-to-paid or
 	subscription retention cohorts.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

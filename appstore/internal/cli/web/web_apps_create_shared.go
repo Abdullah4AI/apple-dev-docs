@@ -103,7 +103,7 @@ func promptAppsCreateFields(opts *AppsCreateRunOptions) error {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Create a new app in App Store Connect")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Note: App creation uses Apple's unofficial web-session create flow.")
+	fmt.Fprintln(os.Stderr, "Note: App creation uses Apple's web-session create flow.")
 	fmt.Fprintln(os.Stderr)
 
 	nameValue := strings.TrimSpace(opts.Name)

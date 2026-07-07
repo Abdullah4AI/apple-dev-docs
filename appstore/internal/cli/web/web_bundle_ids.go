@@ -19,20 +19,19 @@ var syncAppClipBundleIDCapabilityFn = func(ctx context.Context, client *webcore.
 	return client.SyncAppClipBundleIDCapability(ctx, req)
 }
 
-// WebBundleIDsCommand returns the private Bundle ID command group.
+// WebBundleIDsCommand returns the Bundle ID command group.
 func WebBundleIDsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web bundle-ids", flag.ExitOnError)
 
 	return &ffcli.Command{
 		Name:       "bundle-ids",
 		ShortUsage: "asc web bundle-ids <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage Bundle IDs via private web-session endpoints.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage Bundle IDs via web-session endpoints.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Manage Bundle ID operations that are only available through Apple's private
-web-session endpoints.
+Manage Bundle ID operations that are only available through Apple web-session web-session endpoints.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -44,19 +43,19 @@ web-session endpoints.
 	}
 }
 
-// WebBundleIDCapabilitiesCommand returns the private Bundle ID capabilities group.
+// WebBundleIDCapabilitiesCommand returns the Bundle ID capabilities group.
 func WebBundleIDCapabilitiesCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web bundle-ids capabilities", flag.ExitOnError)
 
 	return &ffcli.Command{
 		Name:       "capabilities",
 		ShortUsage: "asc web bundle-ids capabilities <subcommand> [flags]",
-		ShortHelp:  "[experimental] Sync Bundle ID capabilities via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Sync Bundle ID capabilities via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Sync Bundle ID capabilities through Apple's private Bundle ID patch endpoint.
+Sync Bundle ID capabilities through Apple's Bundle ID patch endpoint.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -82,10 +81,10 @@ func WebBundleIDCapabilitiesSyncAppClipCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "sync-app-clip",
 		ShortUsage: "asc web bundle-ids capabilities sync-app-clip --bundle-id BUNDLE_ID --parent-bundle-id PARENT_BUNDLE_ID --capability CAPABILITY [flags]",
-		ShortHelp:  "[experimental] Sync an App Clip capability with parentBundleId.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Sync an App Clip capability with parentBundleId.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Patch an App Clip Bundle ID capability through Apple's private Bundle ID update
+Patch an App Clip Bundle ID capability through Apple's Bundle ID update
 payload and include the parentBundleId relationship required for App Clip
 targets. This mirrors the App Store Connect web-session shape used for App Clip
 Bundle IDs, not the public API-key capability endpoint.
@@ -94,7 +93,7 @@ Examples:
   asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS"
   asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS" --settings-json '[{"key":"PUSH_NOTIFICATION_FEATURES","options":[{"key":"PUSH_NOTIFICATION_FEATURE_BROADCAST","enabled":true}]}]'
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

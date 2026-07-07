@@ -22,7 +22,7 @@ var rootUsageGroups = []rootCommandGroup{
 		commands: []string{"auth", "doctor", "install-skills", "init", "docs"},
 	},
 	{
-		title:    "EXPERIMENTAL COMMANDS",
+		title:    "WEB SESSION COMMANDS",
 		commands: []string{"web"},
 	},
 	{

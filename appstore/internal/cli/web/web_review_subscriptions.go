@@ -418,11 +418,10 @@ func WebReviewSubscriptionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "subscriptions",
 		ShortUsage: "asc web review subscriptions <subcommand> [flags]",
-		ShortHelp:  "[experimental] Inspect and mutate review-attached subscriptions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Inspect and mutate review-attached subscriptions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Inspect and mutate subscription selection for the next app version review.
-This uses private Apple web-session /iris endpoints and may break without notice.
 
 Subcommands:
   list    List subscriptions and their next-version attach state
@@ -431,7 +430,7 @@ Subcommands:
   remove  Remove one subscription from the next app version review
   remove-group  Remove all attached subscriptions in one group
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -458,7 +457,7 @@ func WebReviewSubscriptionsListCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc web review subscriptions list --app APP_ID [flags]",
-		ShortHelp:  "[experimental] List subscriptions and next-version attach state.",
+		ShortHelp:  "List subscriptions and next-version attach state.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -510,7 +509,7 @@ func WebReviewSubscriptionsAttachCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "attach",
 		ShortUsage: "asc web review subscriptions attach --app APP_ID --subscription-id SUB_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Attach a subscription to the next app version review.",
+		ShortHelp:  "Attach a subscription to the next app version review.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -599,7 +598,7 @@ func WebReviewSubscriptionsAttachGroupCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "attach-group",
 		ShortUsage: "asc web review subscriptions attach-group --app APP_ID --group-id GROUP_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Attach all READY_TO_SUBMIT subscriptions in one group.",
+		ShortHelp:  "Attach all READY_TO_SUBMIT subscriptions in one group.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -711,7 +710,7 @@ func WebReviewSubscriptionsRemoveCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "remove",
 		ShortUsage: "asc web review subscriptions remove --app APP_ID --subscription-id SUB_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Remove a subscription from the next app version review.",
+		ShortHelp:  "Remove a subscription from the next app version review.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -795,7 +794,7 @@ func WebReviewSubscriptionsRemoveGroupCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "remove-group",
 		ShortUsage: "asc web review subscriptions remove-group --app APP_ID --group-id GROUP_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Remove all attached subscriptions in one group.",
+		ShortHelp:  "Remove all attached subscriptions in one group.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

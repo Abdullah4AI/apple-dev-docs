@@ -48,17 +48,17 @@ func TestRun_CapabilitiesJSONReportsKnownGaps(t *testing.T) {
 	if resp.Summary.SchemaEndpointCount == 0 {
 		t.Fatalf("expected embedded schema endpoint count to be populated")
 	}
-	for _, status := range []string{"cli-supported", "experimental-web", "not-public-api"} {
+	for _, status := range []string{"cli-supported", "web-session", "not-public-api"} {
 		if resp.Summary.Statuses[status] == 0 {
 			t.Fatalf("expected status %q to be represented in summary: %+v", status, resp.Summary.Statuses)
 		}
 	}
 
 	assertCapability(t, resp, "App Store release submission", "cli-supported", "asc publish appstore --submit")
-	assertCapability(t, resp, "App creation", "experimental-web", "asc web apps create")
+	assertCapability(t, resp, "App creation", "web-session", "asc web apps create")
 	assertCapability(t, resp, "Metadata and localization sync", "cli-supported", "asc metadata init")
 	assertCapability(t, resp, "Metadata and localization sync", "cli-supported", "asc metadata validate")
-	assertCapability(t, resp, "App privacy data-use declarations", "experimental-web", "asc web privacy")
+	assertCapability(t, resp, "App privacy data-use declarations", "web-session", "asc web privacy")
 	assertCapability(t, resp, "Transaction tax reports", "not-public-api", "")
 }
 

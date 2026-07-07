@@ -38,15 +38,15 @@ func webXcodeCloudWorkflowOptionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "options",
 		ShortUsage: "asc web xcode-cloud workflows options <subcommand> [flags]",
-		ShortHelp:  "[experimental] Inspect private workflow editor option endpoints.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Inspect workflow editor option endpoints.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Inspect Xcode Cloud workflow editor option endpoints from Apple's private CI API.
+Inspect Xcode Cloud workflow editor option endpoints from Apple's CI API.
 These endpoints surface UI-driven data such as team workflow defaults, product
 configuration recommendations, schemes, test destinations, and Slack notification
 targets. JSON output only.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud workflows options team-config --apple-id "user@example.com"
@@ -79,13 +79,13 @@ func webXcodeCloudWorkflowOptionsTeamConfigCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "team-config",
 		ShortUsage: "asc web xcode-cloud workflows options team-config [flags]",
-		ShortHelp:  "[experimental] Show team workflow editor configuration.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show team workflow editor configuration.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show team-level workflow editor configuration, including available platforms
 and default timezone settings. JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -111,13 +111,13 @@ func webXcodeCloudWorkflowOptionsBuildVersionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "build-versions",
 		ShortUsage: "asc web xcode-cloud workflows options build-versions [flags]",
-		ShortHelp:  "[experimental] Show workflow build version defaults.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show workflow build version defaults.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Show workflow build version defaults/options exposed by the private CI API.
+Show workflow build version defaults/options exposed by the CI API.
 JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -144,13 +144,13 @@ func webXcodeCloudWorkflowOptionsProductConfigCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "product-config",
 		ShortUsage: "asc web xcode-cloud workflows options product-config --product-id ID [flags]",
-		ShortHelp:  "[experimental] Show product workflow configuration options.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show product workflow configuration options.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show product-level workflow configuration options, such as repository defaults
 and container file path recommendations. JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -186,13 +186,13 @@ func webXcodeCloudWorkflowOptionsSchemesCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "schemes",
 		ShortUsage: "asc web xcode-cloud workflows options schemes --product-id ID [flags]",
-		ShortHelp:  "[experimental] Show available workflow schemes.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show available workflow schemes.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show available schemes and test plans for a product's container file paths.
 JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -229,12 +229,12 @@ func webXcodeCloudWorkflowOptionsTestDestinationsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "test-destinations",
 		ShortUsage: "asc web xcode-cloud workflows options test-destinations --xcode-version VALUE [flags]",
-		ShortHelp:  "[experimental] Show workflow test destination options.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show workflow test destination options.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show workflow test destination options for a given Xcode version. JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -266,13 +266,13 @@ func webXcodeCloudWorkflowOptionsSlackProviderCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "slack-provider",
 		ShortUsage: "asc web xcode-cloud workflows options slack-provider [flags]",
-		ShortHelp:  "[experimental] Show Slack workflow notification integration state.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show Slack workflow notification integration state.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show Slack integration state used by workflow notification post-actions.
 JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -298,13 +298,13 @@ func webXcodeCloudWorkflowOptionsSlackChannelsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "slack-channels",
 		ShortUsage: "asc web xcode-cloud workflows options slack-channels [flags]",
-		ShortHelp:  "[experimental] Show Slack channels available to workflow notifications.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show Slack channels available to workflow notifications.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show Slack channels available for workflow notification post-actions.
 JSON output only.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

@@ -1179,3 +1179,261 @@ func TestBundleIDPlatformForWebApp(t *testing.T) {
 		}
 	})
 }
+
+func TestWebAppsDeleteByBundleID(t *testing.T) {
+	restoreSession := SetResolveWebSession(func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	})
+	origNewWebClient := newWebClientFn
+	origFindWebApp := findWebAppFn
+	origGetWebApp := getWebAppFn
+	origDeleteWebApp := deleteWebAppFn
+	t.Cleanup(func() {
+		restoreSession()
+		newWebClientFn = origNewWebClient
+		findWebAppFn = origFindWebApp
+		getWebAppFn = origGetWebApp
+		deleteWebAppFn = origDeleteWebApp
+	})
+
+	var deletedID string
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client {
+		return &webcore.Client{}
+	}
+	findWebAppFn = func(ctx context.Context, client *webcore.Client, bundleID string) (*webcore.AppResponse, error) {
+		if bundleID != "com.example.throwaway" {
+			t.Fatalf("expected bundle ID lookup, got %q", bundleID)
+		}
+		resp := &webcore.AppResponse{}
+		resp.Data.ID = "1234567890"
+		resp.Data.Type = "apps"
+		resp.Data.Attributes = map[string]any{
+			"name":     "Throwaway",
+			"bundleId": "com.example.throwaway",
+		}
+		return resp, nil
+	}
+	getWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
+		t.Fatal("did not expect app get when bundle lookup already loaded attributes")
+		return nil, nil
+	}
+	deleteWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
+		deletedID = appID
+		resp := &webcore.AppResponse{}
+		resp.Data.ID = appID
+		resp.Data.Type = "apps"
+		resp.Data.Attributes = map[string]any{
+			"name":     "Throwaway",
+			"bundleId": "com.example.throwaway",
+			"removed":  true,
+		}
+		return resp, nil
+	}
+
+	cmd := WebAppsDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "com.example.throwaway",
+		"--expected-bundle-id", "com.example.throwaway",
+		"--confirm",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if deletedID != "1234567890" {
+		t.Fatalf("expected deleted app ID, got %q", deletedID)
+	}
+	for _, want := range []string{`"appId":"1234567890"`, `"bundleId":"com.example.throwaway"`, `"removed":true`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %s, got %q", want, stdout)
+		}
+	}
+}
+
+func TestWebAppsDeleteResultKeepsRemovedTrueWhenDeleteResponseOmitsAttributes(t *testing.T) {
+	deleted := &webcore.AppResponse{}
+	deleted.Data.ID = "1234567890"
+	deleted.Data.Type = "apps"
+
+	fallback := &webcore.AppResponse{}
+	fallback.Data.ID = "1234567890"
+	fallback.Data.Type = "apps"
+	fallback.Data.Attributes = map[string]any{
+		"name":     "Throwaway",
+		"bundleId": "com.example.throwaway",
+		"removed":  false,
+	}
+
+	result := webAppDeleteResultFromResponse("1234567890", deleted, fallback)
+	if result.AppID != "1234567890" {
+		t.Fatalf("expected app ID from delete response, got %q", result.AppID)
+	}
+	if result.Name != "Throwaway" {
+		t.Fatalf("expected fallback name, got %q", result.Name)
+	}
+	if result.BundleID != "com.example.throwaway" {
+		t.Fatalf("expected fallback bundle ID, got %q", result.BundleID)
+	}
+	if !result.Removed {
+		t.Fatal("expected removed to stay true when delete response omits attributes")
+	}
+}
+
+func TestWebAppsDeleteBundleIDLookupMismatchStopsBeforeDelete(t *testing.T) {
+	restoreSession := SetResolveWebSession(func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	})
+	origNewWebClient := newWebClientFn
+	origFindWebApp := findWebAppFn
+	origDeleteWebApp := deleteWebAppFn
+	t.Cleanup(func() {
+		restoreSession()
+		newWebClientFn = origNewWebClient
+		findWebAppFn = origFindWebApp
+		deleteWebAppFn = origDeleteWebApp
+	})
+
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client {
+		return &webcore.Client{}
+	}
+	findWebAppFn = func(ctx context.Context, client *webcore.Client, bundleID string) (*webcore.AppResponse, error) {
+		resp := &webcore.AppResponse{}
+		resp.Data.ID = "1234567890"
+		resp.Data.Type = "apps"
+		resp.Data.Attributes = map[string]any{
+			"name":     "Wrong App",
+			"bundleId": "com.example.actual",
+		}
+		return resp, nil
+	}
+	deleteWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
+		t.Fatal("did not expect delete after bundle lookup mismatch")
+		return nil, nil
+	}
+
+	cmd := WebAppsDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "com.example.expected",
+		"--confirm",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var err error
+	stdout, stderr := captureOutput(t, func() {
+		err = cmd.Exec(context.Background(), nil)
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err == nil {
+		t.Fatal("expected bundle lookup mismatch error")
+	}
+	if !strings.Contains(err.Error(), `exact bundle ID lookup for "com.example.expected" returned "com.example.actual"`) {
+		t.Fatalf("expected lookup mismatch error, got %v", err)
+	}
+}
+
+func TestWebAppsDeleteExpectedBundleIDMismatchStopsBeforeDelete(t *testing.T) {
+	restoreSession := SetResolveWebSession(func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	})
+	origNewWebClient := newWebClientFn
+	origGetWebApp := getWebAppFn
+	origDeleteWebApp := deleteWebAppFn
+	t.Cleanup(func() {
+		restoreSession()
+		newWebClientFn = origNewWebClient
+		getWebAppFn = origGetWebApp
+		deleteWebAppFn = origDeleteWebApp
+	})
+
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client {
+		return &webcore.Client{}
+	}
+	getWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
+		resp := &webcore.AppResponse{}
+		resp.Data.ID = appID
+		resp.Data.Type = "apps"
+		resp.Data.Attributes = map[string]any{
+			"name":     "Throwaway",
+			"bundleId": "com.example.actual",
+		}
+		return resp, nil
+	}
+	deleteWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
+		t.Fatal("did not expect delete after identity guard mismatch")
+		return nil, nil
+	}
+
+	cmd := WebAppsDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "1234567890",
+		"--expected-bundle-id", "com.example.expected",
+		"--confirm",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var err error
+	stdout, stderr := captureOutput(t, func() {
+		err = cmd.Exec(context.Background(), nil)
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err == nil {
+		t.Fatal("expected guard mismatch error")
+	}
+	if !strings.Contains(err.Error(), `expected bundle ID "com.example.expected"`) {
+		t.Fatalf("expected bundle mismatch error, got %v", err)
+	}
+}
+
+func TestWebAppsDeleteRequiresConfirmBeforeResolvingSession(t *testing.T) {
+	resolveCalled := false
+	restoreSession := SetResolveWebSession(func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		resolveCalled = true
+		return &webcore.AuthSession{}, "cache", nil
+	})
+	t.Cleanup(restoreSession)
+
+	cmd := WebAppsDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "1234567890"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var err error
+	stdout, stderr := captureOutput(t, func() {
+		err = cmd.Exec(context.Background(), nil)
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--confirm is required") {
+		t.Fatalf("expected confirm stderr, got %q", stderr)
+	}
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected usage error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "--confirm is required") {
+		t.Fatalf("expected confirm error, got %v", err)
+	}
+	if resolveCalled {
+		t.Fatal("did not expect session resolution before confirm validation")
+	}
+}

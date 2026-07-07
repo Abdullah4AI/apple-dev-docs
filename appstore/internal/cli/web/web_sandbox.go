@@ -35,14 +35,13 @@ func WebSandboxCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "sandbox",
 		ShortUsage: "asc web sandbox <subcommand> [flags]",
-		ShortHelp:  "[experimental] Create sandbox testers via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Create sandbox testers via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Create sandbox testers using App Store Connect's private web session endpoints.
-This command is intentionally detached from the official App Store Connect API
-because Apple does not expose sandbox tester creation there.
+Create sandbox testers using App Store Connect's web session endpoints.
+Use this command to create sandbox testers through App Store Connect web sessions.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -55,7 +54,7 @@ because Apple does not expose sandbox tester creation there.
 }
 
 // WebSandboxCreateCommand creates a sandbox tester via App Store Connect's
-// private web session endpoints.
+// web session endpoints.
 func WebSandboxCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web sandbox create", flag.ExitOnError)
 
@@ -70,10 +69,10 @@ func WebSandboxCreateCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "create",
 		ShortUsage: "asc web sandbox create --first-name NAME --last-name NAME --email EMAIL --password PASS --territory USA [flags]",
-		ShortHelp:  "[experimental] Create a sandbox tester via web API.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Create a sandbox tester via web API.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Create a sandbox tester through App Store Connect's private web API.
+Create a sandbox tester through App Store Connect's web API.
 The current web flow validates the name/email first, validates the password,
 then submits the create request with a 3-letter storefront code such as USA.
 Apple may still require email verification before the tester is usable.
@@ -85,7 +84,7 @@ Examples:
   asc web sandbox create --first-name "Jane" --last-name "Tester" --email "jane+sandbox@example.com" --password "Passwordtest1" --territory "USA"
   asc web sandbox create --first-name "Monthly" --last-name "Probe" --email "billing+monthly@example.com" --password "Passwordtest1" --territory "USA" --apple-id "user@example.com"
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

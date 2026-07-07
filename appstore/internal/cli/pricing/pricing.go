@@ -602,7 +602,7 @@ Examples:
 
 Note:
   Pricing availability commands operate on existing availability records.
-  For initial bootstrap, use App Store Connect or the experimental
+  For initial bootstrap, use App Store Connect or the
   "asc web apps availability create" flow.`,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -743,7 +743,7 @@ Examples:
 Note:
   This command only updates an existing app availability. If the app has no
   availability record yet, initialize availability in App Store Connect first,
-  or use the experimental "asc web apps availability create" flow.`,
+  or use the "asc web apps availability create" flow.`,
 		ErrorPrefix:                      "pricing availability set",
 		IncludeAvailableInNewTerritories: true,
 	})

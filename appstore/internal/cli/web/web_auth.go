@@ -691,13 +691,12 @@ func WebAuthCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "auth",
 		ShortUsage: "asc web auth <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage unofficial Apple web sessions (discouraged).",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage Apple web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage Apple web-session authentication used by "asc web" commands.
-This is not the official App Store Connect API-key auth flow.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -726,11 +725,11 @@ func WebAuthLoginCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "login",
 		ShortUsage: "asc web auth login --apple-id EMAIL [--public-provider-id TEAM_ID]",
-		ShortHelp:  "[experimental] Authenticate unofficial Apple web session.",
+		ShortHelp:  "Authenticate Apple web session.",
 		LongHelp: fmt.Sprintf(
-			`EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+			`WEB SESSION WORKFLOWS
 
-Authenticate using Apple web-session behavior for detached "asc web" workflows.
+Authenticate using Apple web-session behavior for "asc web" workflows.
 
 Password input options:
   - secure interactive prompt (default and recommended for local use)
@@ -746,7 +745,7 @@ Provider selection:
   - --public-provider-id selects the public App Store Connect provider/team ID
   - --provider-id selects Apple's numeric App Store Connect provider ID
 
-`+webWarningText+`
+
 
 Examples:
   asc web auth login --apple-id "user@example.com"
@@ -800,13 +799,13 @@ func WebAuthStatusCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "status",
 		ShortUsage: "asc web auth status [--apple-id EMAIL]",
-		ShortHelp:  "[experimental] Show unofficial web-session status.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show web-session status.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Check whether an existing cached web session can be resumed.
 If --apple-id is not provided, this checks the last cached session.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -856,12 +855,12 @@ func WebAuthLogoutCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "logout",
 		ShortUsage: "asc web auth logout [--apple-id EMAIL | --all]",
-		ShortHelp:  "[experimental] Clear unofficial web-session cache.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Clear web-session cache.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Remove cached web-session credentials for detached "asc web" commands.
+Remove cached web-session credentials for "asc web" commands.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

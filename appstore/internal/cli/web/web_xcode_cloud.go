@@ -27,13 +27,13 @@ func WebXcodeCloudCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "xcode-cloud",
 		ShortUsage: "asc web xcode-cloud <subcommand> [flags]",
-		ShortHelp:  "[experimental] Xcode Cloud usage and workflow management.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Xcode Cloud usage and workflow management.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Query Xcode Cloud compute usage (plan quota, monthly/daily breakdowns, products)
-using Apple's private CI API. Requires a web session.
+using Apple's CI API. Requires a web session.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud usage summary --apple-id "user@example.com"
@@ -69,12 +69,12 @@ func webXcodeCloudUsageCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "usage",
 		ShortUsage: "asc web xcode-cloud usage <subcommand> [flags]",
-		ShortHelp:  "[experimental] Xcode Cloud usage queries.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Xcode Cloud usage queries.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Query Xcode Cloud compute usage: plan summary, monthly history, daily breakdown, per-workflow usage.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -98,12 +98,12 @@ func webXcodeCloudUsageSummaryCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "summary",
 		ShortUsage: "asc web xcode-cloud usage summary [flags]",
-		ShortHelp:  "[experimental] Show Xcode Cloud plan quota.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show Xcode Cloud plan quota.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show current Xcode Cloud plan usage: used/available/total compute minutes and reset date.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud usage summary --apple-id "user@example.com"
@@ -162,13 +162,13 @@ func webXcodeCloudUsageMonthsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "months",
 		ShortUsage: "asc web xcode-cloud usage months [flags]",
-		ShortHelp:  "[experimental] Show monthly Xcode Cloud usage.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show monthly Xcode Cloud usage.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show monthly Xcode Cloud compute usage with per-product breakdown.
 Defaults to the last 12 months. Use --product-ids to filter the product breakdown.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud usage months --apple-id "user@example.com"
@@ -254,14 +254,14 @@ func webXcodeCloudUsageDaysCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "days",
 		ShortUsage: "asc web xcode-cloud usage days --product-ids IDS [flags]",
-		ShortHelp:  "[experimental] Show daily Xcode Cloud usage for products.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show daily Xcode Cloud usage for products.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show daily Xcode Cloud compute usage for one or more products with per-workflow breakdown.
 The first product ID drives the daily/workflow tables; all product IDs are shown in the scope comparison table.
 Defaults to the last 30 days.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud usage days --product-ids "UUID" --apple-id "user@example.com"
@@ -382,15 +382,15 @@ func webXcodeCloudUsageWorkflowsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "workflows",
 		ShortUsage: "asc web xcode-cloud usage workflows --product-id ID [flags]",
-		ShortHelp:  "[experimental] Show per-workflow Xcode Cloud usage.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Show per-workflow Xcode Cloud usage.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Show Xcode Cloud compute usage broken down by workflow for a product.
 Without --workflow-id, lists all workflows and their usage.
 With --workflow-id, shows daily breakdown for that specific workflow.
 Defaults to the last 30 days.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud usage workflows --product-id "UUID" --apple-id "user@example.com" --output table
@@ -627,13 +627,13 @@ func webXcodeCloudProductsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "products",
 		ShortUsage: "asc web xcode-cloud products [flags]",
-		ShortHelp:  "[experimental] List Xcode Cloud products.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "List Xcode Cloud products.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 List Xcode Cloud products (apps) for the authenticated team.
 Use the product IDs with 'usage days' for per-product daily breakdowns.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud products --apple-id "user@example.com"

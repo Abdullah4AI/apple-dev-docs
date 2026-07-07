@@ -121,11 +121,10 @@ func WebReviewIAPsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "iaps",
 		ShortUsage: "asc web review iaps <subcommand> [flags]",
-		ShortHelp:  "[experimental] Attach non-renewing IAPs to the next app version review.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Attach non-renewing IAPs to the next app version review.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Attach a non-renewing in-app purchase to the next app version review. This
-uses private Apple web-session /iris endpoints and may break without notice.
+Attach a non-renewing in-app purchase to the next app version review.
 
 Subcommands:
   attach  Attach one non-renewing IAP to the next app version review
@@ -137,7 +136,7 @@ FIRST_IAP_MUST_BE_SUBMITTED_ON_VERSION. The web UI's "Add App In-App Purchase
 or Subscription" dialog posts to /iris/v1/inAppPurchaseSubmissions with
 submitWithNextAppStoreVersion=true; this command exposes that same call.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -150,7 +149,7 @@ submitWithNextAppStoreVersion=true; this command exposes that same call.
 }
 
 // WebReviewIAPsAttachCommand attaches a non-renewing IAP to the next app
-// version review via the private iris endpoint.
+// version review via the iris endpoint.
 func WebReviewIAPsAttachCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web review iaps attach", flag.ExitOnError)
 
@@ -163,16 +162,16 @@ func WebReviewIAPsAttachCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "attach",
 		ShortUsage: "asc web review iaps attach --app APP_ID --iap-id IAP_ID_OR_PRODUCT_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Attach a non-renewing IAP to the next app version review.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Attach a non-renewing IAP to the next app version review.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Attach a non-renewing in-app purchase to the next app version review.
 
-The --iap-id selector accepts the private Iris resource id or the bundle-style
+The --iap-id selector accepts the Iris resource id or the bundle-style
 productId from ` + "`asc iap list`" + `. Apple's Iris listing does not expose the
 public numeric ASC IAP id, so that numeric id is not resolved by this command.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

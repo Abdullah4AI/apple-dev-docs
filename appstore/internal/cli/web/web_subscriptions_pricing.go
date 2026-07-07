@@ -53,12 +53,12 @@ func WebSubscriptionsPricingCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "pricing",
 		ShortUsage: "asc web subscriptions pricing <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage subscription pricing via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage subscription pricing via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage subscription pricing through Apple's internal web API.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -78,12 +78,12 @@ func WebSubscriptionsPricingMonthlyCommitmentCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "monthly-commitment",
 		ShortUsage: "asc web subscriptions pricing monthly-commitment <subcommand> [flags]",
-		ShortHelp:  "[experimental] Bootstrap monthly-with-commitment pricing.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Bootstrap monthly-with-commitment pricing.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Bootstrap monthly-with-12-month-commitment pricing through Apple's internal web API.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -115,14 +115,14 @@ func WebSubscriptionsPricingMonthlyCommitmentBootstrapCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "bootstrap",
 		ShortUsage: "asc web subscriptions pricing monthly-commitment bootstrap --subscription-id SUB_ID --territory NOR (--upfront-price PRICE | --upfront-price-point-id ID) (--monthly-price PRICE | --monthly-price-point-id ID) [--dry-run | --confirm] [flags]",
-		ShortHelp:  "[experimental] Create monthly plan availability and paired prices.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Create monthly plan availability and paired prices.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Create MONTHLY plan availability, then attach paired UPFRONT and MONTHLY prices
-using the same private inline subscription PATCH as App Store Connect.
+using the same inline subscription PATCH as App Store Connect.
 
 Prefer asc subscriptions pricing monthly-commitment enable for normal setup.
-Use this private command only when you specifically need App Store Connect's
+Use this command when you specifically need App Store Connect's
 paired web pricing workflow or a paired scheduled price change.
 
 Prices may be supplied as exact customer prices or price point IDs. Use
@@ -130,7 +130,7 @@ Prices may be supplied as exact customer prices or price point IDs. Use
 applies only to scheduled changes. --dry-run performs all reads and price
 resolution but does not mutate App Store Connect.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -255,7 +255,7 @@ func WebSubscriptionsPricingAdjustedEqualizationsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web subscriptions pricing adjusted-equalizations", flag.ExitOnError)
 	return &ffcli.Command{
 		Name: "adjusted-equalizations", ShortUsage: "asc web subscriptions pricing adjusted-equalizations view [flags]",
-		ShortHelp: "[experimental] Inspect Apple's adjusted subscription price matrix.",
+		ShortHelp: "Inspect Apple's adjusted subscription price matrix.",
 		FlagSet:   fs, UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{WebSubscriptionsPricingAdjustedEqualizationsViewCommand()},
 		Exec:        func(ctx context.Context, args []string) error { return flag.ErrHelp },
@@ -272,7 +272,7 @@ func WebSubscriptionsPricingAdjustedEqualizationsViewCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "view",
 		ShortUsage: "asc web subscriptions pricing adjusted-equalizations view --price-point-id PRICE_POINT_ID [--plan-type MONTHLY] [flags]",
-		ShortHelp:  "[experimental] View a generated MONTHLY subscription price matrix.",
+		ShortHelp:  "View a generated MONTHLY subscription price matrix.",
 		FlagSet:    fs, UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
@@ -284,7 +284,7 @@ func WebSubscriptionsPricingAdjustedEqualizationsViewCommand() *ffcli.Command {
 				return shared.UsageError("--price-point-id is required")
 			}
 			if normalizedPlanType != "MONTHLY" {
-				return shared.UsageError(`--plan-type only supports "MONTHLY"; Apple's private endpoint rejects UPFRONT`)
+				return shared.UsageError(`--plan-type only supports "MONTHLY"; Apple's endpoint rejects UPFRONT`)
 			}
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()

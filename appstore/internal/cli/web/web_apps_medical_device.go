@@ -24,8 +24,8 @@ func WebAppsMedicalDeviceCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "medical-device",
 		ShortUsage: "asc web apps medical-device <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage the regulated medical device declaration via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage the regulated medical device declaration via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage the regulated medical device declaration exposed in App Store Connect
 under App Information -> App Store Regulations & Permits.
@@ -34,7 +34,7 @@ This command currently automates only the common "No" path. If your app is
 actually a regulated medical device, continue using the App Store Connect web UI
 until the full undocumented "Yes" write contract is captured safely.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -59,11 +59,10 @@ func WebAppsMedicalDeviceSetCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "set",
 		ShortUsage: "asc web apps medical-device set --app APP_ID --declared false [flags]",
-		ShortHelp:  "[experimental] Set regulated medical device declaration via web API.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Set regulated medical device declaration via web API.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
-Set the regulated medical device declaration through Apple's private
-compliance-form web endpoint used by App Store Connect.
+Set the regulated medical device declaration through Apple web-session compliance-form web endpoint used by App Store Connect.
 
 Only the "No" path is currently supported, which covers the common case for
 apps that are not regulated medical devices.
@@ -71,7 +70,7 @@ apps that are not regulated medical devices.
 Examples:
   asc web apps medical-device set --app "6748252780" --declared false
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

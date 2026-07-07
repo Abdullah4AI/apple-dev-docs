@@ -41,12 +41,12 @@ func WebSubscriptionsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "subscriptions",
 		ShortUsage: "asc web subscriptions <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage subscriptions via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage subscriptions via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage subscription workflows that App Store Connect exposes only through web-session endpoints.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -66,12 +66,12 @@ func WebSubscriptionsAvailabilityCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "availability",
 		ShortUsage: "asc web subscriptions availability <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage subscription sale availability via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage subscription sale availability via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage subscription sale availability through Apple's internal web API.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -97,8 +97,8 @@ func WebSubscriptionsAvailabilityRemoveFromSaleCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "remove-from-sale",
 		ShortUsage: "asc web subscriptions availability remove-from-sale --subscription-id SUB_ID --confirm [flags]",
-		ShortHelp:  "[experimental] Remove an auto-renewable subscription from sale.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Remove an auto-renewable subscription from sale.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Remove an approved auto-renewable subscription from sale using the same internal web API flow
 as App Store Connect. Apple allows this action only for Account Holder users.
@@ -108,7 +108,7 @@ Examples:
   asc web subscriptions availability remove-from-sale --app "APP_ID" --subscription-id "com.example.monthly" --confirm
   asc web subscriptions availability remove-from-sale --subscription-id "SUB_ID" --plan-availability-id "PLAN_AVAILABILITY_ID" --confirm
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

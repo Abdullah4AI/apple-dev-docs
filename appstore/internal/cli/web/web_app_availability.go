@@ -36,13 +36,13 @@ func WebAppsAvailabilityCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "availability",
 		ShortUsage: "asc web apps availability <subcommand> [flags]",
-		ShortHelp:  "[experimental] Bootstrap app availability via web sessions.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Bootstrap app availability via web sessions.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Create the initial app availability record through Apple's internal web API.
 This path is intended only for apps that do not yet have an availability record.
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -68,8 +68,8 @@ func WebAppsAvailabilityCreateCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "create",
 		ShortUsage: "asc web apps availability create --app APP_ID --territory \"US,France\" [flags]",
-		ShortHelp:  "[experimental] Create initial app availability via web API.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Create initial app availability via web API.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Create the initial app availability record for an app that does not yet have one.
 The territories passed with --territory become initially available.
@@ -78,7 +78,7 @@ Examples:
   asc web apps availability create --app "123456789" --territory "United States" --available-in-new-territories false
   asc web apps availability create --app "123456789" --territory "US,France" --available-in-new-territories true
 
-` + webWarningText,
+`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

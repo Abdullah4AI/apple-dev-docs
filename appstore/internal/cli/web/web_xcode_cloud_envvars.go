@@ -22,16 +22,16 @@ func webXcodeCloudEnvVarsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "env-vars",
 		ShortUsage: "asc web xcode-cloud env-vars <subcommand> [flags]",
-		ShortHelp:  "[experimental] Manage Xcode Cloud environment variables.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Manage Xcode Cloud environment variables.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Manage environment variables on Xcode Cloud workflows and products
-using Apple's private CI API. Requires a web session.
+using Apple's CI API. Requires a web session.
 
 Use list/set/delete for workflow-scoped variables.
 Use "shared" subcommand for product-level shared variables.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud env-vars list --product-id "UUID" --workflow-id "WF-UUID" --apple-id "user@example.com"
@@ -87,13 +87,13 @@ func webXcodeCloudEnvVarsListCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc web xcode-cloud env-vars list --product-id ID --workflow-id ID [flags]",
-		ShortHelp:  "[experimental] List workflow environment variables.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "List workflow environment variables.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 List environment variables for an Xcode Cloud workflow.
 Plaintext variables show their values; secret variables show "(redacted)".
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud env-vars list --product-id "UUID" --workflow-id "WF-UUID" --apple-id "user@example.com"
@@ -170,14 +170,14 @@ func webXcodeCloudEnvVarsSetCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "set",
 		ShortUsage: "asc web xcode-cloud env-vars set --product-id ID --workflow-id ID --name NAME --value VALUE [--secret] [flags]",
-		ShortHelp:  "[experimental] Set a workflow environment variable.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Set a workflow environment variable.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Set (create or update) an environment variable on an Xcode Cloud workflow.
 Use --secret to encrypt the value using ECIES (the same scheme as the ASC web UI).
 If a variable with the same name already exists, it will be updated.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud env-vars set --product-id "UUID" --workflow-id "WF-UUID" --name MY_VAR --value hello --apple-id "user@example.com"
@@ -314,12 +314,12 @@ func webXcodeCloudEnvVarsDeleteCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "delete",
 		ShortUsage: "asc web xcode-cloud env-vars delete --product-id ID --workflow-id ID --name NAME --confirm [flags]",
-		ShortHelp:  "[experimental] Delete a workflow environment variable.",
-		LongHelp: `EXPERIMENTAL / UNOFFICIAL / DISCOURAGED
+		ShortHelp:  "Delete a workflow environment variable.",
+		LongHelp: `WEB SESSION WORKFLOWS
 
 Delete an environment variable from an Xcode Cloud workflow by name.
 
-` + webWarningText + `
+
 
 Examples:
   asc web xcode-cloud env-vars delete --product-id "UUID" --workflow-id "WF-UUID" --name MY_VAR --confirm --apple-id "user@example.com"`,

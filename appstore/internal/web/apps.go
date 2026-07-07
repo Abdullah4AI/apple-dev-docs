@@ -60,6 +60,16 @@ type appCreateRequest struct {
 	Included []any `json:"included"`
 }
 
+type appDeleteRequest struct {
+	Data struct {
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		Attributes struct {
+			Removed bool `json:"removed"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
 func normalizeCreateAttrs(attrs AppCreateAttributes) (AppCreateAttributes, error) {
 	attrs.Name = strings.TrimSpace(attrs.Name)
 	attrs.SKU = strings.TrimSpace(attrs.SKU)
@@ -203,6 +213,53 @@ func (c *Client) CreateApp(ctx context.Context, attrs AppCreateAttributes) (*App
 	var result AppResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse app response: %w", err)
+	}
+	return &result, nil
+}
+
+// GetApp retrieves an app by ID using the internal web API.
+func (c *Client) GetApp(ctx context.Context, appID string) (*AppResponse, error) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil, fmt.Errorf("app id is required")
+	}
+
+	respBody, err := c.doRequest(ctx, "GET", fmt.Sprintf("/apps/%s", url.PathEscape(appID)), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result AppResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse app response: %w", err)
+	}
+	return &result, nil
+}
+
+// DeleteApp marks an app as removed with the internal App Store Connect web API.
+func (c *Client) DeleteApp(ctx context.Context, appID string) (*AppResponse, error) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil, fmt.Errorf("app id is required")
+	}
+
+	req := &appDeleteRequest{}
+	req.Data.Type = "apps"
+	req.Data.ID = appID
+	req.Data.Attributes.Removed = true
+
+	respBody, err := c.doRequest(ctx, "PATCH", fmt.Sprintf("/apps/%s", url.PathEscape(appID)), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result AppResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse app response: %w", err)
+	}
+	if strings.TrimSpace(result.Data.ID) == "" {
+		result.Data.ID = appID
+		result.Data.Type = "apps"
 	}
 	return &result, nil
 }
