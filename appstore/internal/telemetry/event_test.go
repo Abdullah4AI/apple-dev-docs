@@ -65,20 +65,24 @@ func TestBuildEventWithContextEmitsOnlyLowCardinalityClassifications(t *testing.
 		0,
 		2,
 		EventContext{
-			InvocationShape: InvocationShapeLeaf,
-			ErrorKind:       ErrorKindUnknownFlag,
-			FailureStage:    FailureStageParse,
+			InvocationShape:  InvocationShapeLeaf,
+			ErrorKind:        ErrorKindUnknownFlag,
+			FailureStage:     FailureStageParse,
+			FailureParameter: "--build-id=BUILD_ID",
 		},
 	)
 	if !ok {
 		t.Fatal("expected event")
 	}
-	if ev.SchemaVersion != 2 {
-		t.Fatalf("SchemaVersion = %d, want 2", ev.SchemaVersion)
+	if ev.SchemaVersion != 3 {
+		t.Fatalf("SchemaVersion = %d, want 3", ev.SchemaVersion)
 	}
 	if ev.InvocationShape != InvocationShapeLeaf || ev.ErrorKind == nil || *ev.ErrorKind != ErrorKindUnknownFlag ||
 		ev.FailureStage == nil || *ev.FailureStage != FailureStageParse {
 		t.Fatalf("unexpected classifications: %+v", ev)
+	}
+	if ev.FailureParameter == nil || *ev.FailureParameter != "--build-id" {
+		t.Fatalf("FailureParameter = %v, want --build-id", ev.FailureParameter)
 	}
 
 	data, err := json.Marshal(ev)
@@ -89,6 +93,34 @@ func TestBuildEventWithContextEmitsOnlyLowCardinalityClassifications(t *testing.
 		if strings.Contains(string(data), forbidden) {
 			t.Fatalf("payload contains forbidden field %q: %s", forbidden, data)
 		}
+	}
+}
+
+func TestBuildEventWithContextAllowsKnownFailureParameters(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	for _, parameter := range []string{"--id", "--app", "--app-id"} {
+		t.Run(parameter, func(t *testing.T) {
+			ev, ok := BuildEventWithContext(
+				"asc apps view",
+				"1.2.3",
+				0,
+				2,
+				EventContext{
+					InvocationShape:  InvocationShapeLeaf,
+					ErrorKind:        ErrorKindUnknownFlag,
+					FailureStage:     FailureStageParse,
+					FailureParameter: parameter,
+				},
+			)
+			if !ok {
+				t.Fatal("expected event")
+			}
+			if ev.FailureParameter == nil || *ev.FailureParameter != parameter {
+				t.Fatalf("FailureParameter = %v, want %q", ev.FailureParameter, parameter)
+			}
+		})
 	}
 }
 
@@ -125,15 +157,17 @@ func TestBuildEventWithContextRejectsUnboundedContextValues(t *testing.T) {
 		0,
 		2,
 		EventContext{
-			InvocationShape: InvocationShape("unknown_child:private-app-name"),
-			ErrorKind:       ErrorKind("unknown_flag:--private-value"),
-			FailureStage:    FailureStage("stderr:private-error"),
+			InvocationShape:  InvocationShape("unknown_child:private-app-name"),
+			ErrorKind:        ErrorKind("unknown_flag:--private-value"),
+			FailureStage:     FailureStage("stderr:private-error"),
+			FailureParameter: "--private_value=SECRET",
 		},
 	)
 	if !ok || ev.ErrorKind == nil || ev.FailureStage == nil {
 		t.Fatal("expected canonicalized event")
 	}
-	if ev.InvocationShape != InvocationShapeLeaf || *ev.ErrorKind != ErrorKindOther || *ev.FailureStage != FailureStageExecution {
+	if ev.InvocationShape != InvocationShapeLeaf || *ev.ErrorKind != ErrorKindOther || *ev.FailureStage != FailureStageExecution ||
+		ev.FailureParameter != nil {
 		t.Fatalf("unexpected canonicalized context: %+v", ev)
 	}
 
@@ -141,10 +175,74 @@ func TestBuildEventWithContextRejectsUnboundedContextValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	for _, privateValue := range []string{"private-app-name", "private-value", "private-error"} {
+	for _, privateValue := range []string{"private-app-name", "private-value", "private-error", "SECRET"} {
 		if strings.Contains(string(data), privateValue) {
 			t.Fatalf("payload leaked unbounded context %q: %s", privateValue, data)
 		}
+	}
+}
+
+func TestBuildEventWithContextRejectsIdentifierShapedFailureParameters(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	for _, parameter := range []string{
+		"--6759231657",
+		"--123e4567-e89b-12d3-a456-426614174000",
+		"--a1b2c3d4-e5f6-47a8-9012-3456789abcde",
+	} {
+		t.Run(parameter, func(t *testing.T) {
+			ev, ok := BuildEventWithContext(
+				"asc builds",
+				"1.2.3",
+				0,
+				2,
+				EventContext{
+					InvocationShape:  InvocationShapeLeaf,
+					ErrorKind:        ErrorKindUnknownFlag,
+					FailureStage:     FailureStageParse,
+					FailureParameter: parameter,
+				},
+			)
+			if !ok {
+				t.Fatal("expected event")
+			}
+			if ev.FailureParameter != nil {
+				t.Fatalf("FailureParameter for %q = %q, want nil", parameter, *ev.FailureParameter)
+			}
+
+			data, err := json.Marshal(ev)
+			if err != nil {
+				t.Fatalf("marshal event: %v", err)
+			}
+			if strings.Contains(string(data), strings.TrimPrefix(parameter, "--")) {
+				t.Fatalf("payload leaked identifier-shaped parameter %q: %s", parameter, data)
+			}
+		})
+	}
+}
+
+func TestBuildEventWithContextRejectsUnknownFailureParameterNames(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	ev, ok := BuildEventWithContext(
+		"asc builds",
+		"1.2.3",
+		0,
+		2,
+		EventContext{
+			InvocationShape:  InvocationShapeLeaf,
+			ErrorKind:        ErrorKindUnknownFlag,
+			FailureStage:     FailureStageParse,
+			FailureParameter: "--my-secret-project",
+		},
+	)
+	if !ok {
+		t.Fatal("expected event")
+	}
+	if ev.FailureParameter != nil {
+		t.Fatalf("FailureParameter = %q, want nil", *ev.FailureParameter)
 	}
 }
 

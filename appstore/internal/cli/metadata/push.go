@@ -145,8 +145,17 @@ func newMetadataMutationCommand(cfg metadataMutationCommandConfig) *ffcli.Comman
 	include := fs.String("include", includeLocalizations, "Included metadata scopes (comma-separated)")
 	dryRun := fs.Bool("dry-run", false, "Preview changes without mutating App Store Connect")
 	allowDeletes := fs.Bool("allow-deletes", false, "Allow destructive delete operations when applying changes (disables default locale fallback for missing locales)")
-	confirm := fs.Bool("confirm", false, "Confirm destructive operations (required with --allow-deletes)")
+	confirm := fs.Bool("confirm", false, "Confirm destructive operations (required with --allow-deletes or --review-dir)")
+	var reviewDir *string
+	if cfg.name == "apply" {
+		reviewDir = fs.String("review-dir", "", "Apply only after verifying metadata review artifacts in this directory")
+	}
 	output := shared.BindOutputFlags(fs)
+	reviewExample := ""
+	if cfg.name == "apply" {
+		reviewExample = fmt.Sprintf(`
+  asc metadata %s --app "APP_ID" --version "1.2.3" --dir "./metadata" --review-dir ".asc/metadata/review" --confirm`, cfg.name)
+	}
 
 	return &ffcli.Command{
 		Name:       cfg.name,
@@ -160,7 +169,7 @@ Examples:
   asc metadata %s --app "APP_ID" --version "1.2.3" --platform IOS --dir "./metadata" --dry-run
   asc metadata %s --app "APP_ID" --app-info "APP_INFO_ID" --version "1.2.3" --platform IOS --dir "./metadata" --dry-run
   asc metadata %s --app "APP_ID" --version "1.2.3" --dir "./metadata"
-  asc metadata %s --app "APP_ID" --version "1.2.3" --dir "./metadata" --allow-deletes --confirm
+  asc metadata %s --app "APP_ID" --version "1.2.3" --dir "./metadata" --allow-deletes --confirm%s
 
 Notes:
   - default.json fallback is applied only when --allow-deletes is not set.
@@ -172,6 +181,7 @@ Notes:
 			cfg.name,
 			cfg.name,
 			cfg.name,
+			reviewExample,
 		),
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -179,7 +189,7 @@ Notes:
 			if len(args) > 0 {
 				return shared.UsageError(fmt.Sprintf("metadata %s does not accept positional arguments", cfg.name))
 			}
-			result, warnings, err := ExecutePushWithWarnings(ctx, PushExecutionOptions{
+			opts := PushExecutionOptions{
 				CommandName:  cfg.name,
 				AppID:        *appID,
 				AppInfoID:    *appInfoID,
@@ -190,7 +200,11 @@ Notes:
 				DryRun:       *dryRun,
 				AllowDeletes: *allowDeletes,
 				Confirm:      *confirm,
-			})
+			}
+			if cfg.name == "apply" && reviewDir != nil && strings.TrimSpace(*reviewDir) != "" {
+				opts.ReviewDir = *reviewDir
+			}
+			result, warnings, err := ExecutePushWithWarnings(ctx, opts)
 			if err != nil && len(result.Actions) == 0 {
 				return err
 			}

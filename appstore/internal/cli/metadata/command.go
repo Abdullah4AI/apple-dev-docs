@@ -37,13 +37,19 @@ Examples:
   asc metadata init --dir "./metadata" --version "1.2.3" --locale "en-US"
   asc metadata pull --app "APP_ID" --version "1.2.3" --dir "./metadata"
   asc metadata pull --app "APP_ID" --version "1.2.3" --platform IOS --dir "./metadata"
+  asc metadata plan --app "APP_ID" --version "1.2.3" --dir "./metadata"
+  asc metadata approve --review-dir ".asc/metadata/review" --all
+  asc metadata apply --app "APP_ID" --version "1.2.3" --dir "./metadata" --review-dir ".asc/metadata/review" --confirm
   asc metadata keywords import --dir "./metadata" --version "1.2.3" --locale "en-US" --input "./keywords.csv"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			MetadataInitCommand(),
 			MetadataPullCommand(),
+			MetadataPlanCommand(),
+			MetadataApproveCommand(),
 			MetadataApplyCommand(),
+			MetadataStatusCommand(),
 			MetadataKeywordsCommand(),
 			MetadataPushCommand(),
 			MetadataValidateCommand(),
