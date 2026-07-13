@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -248,19 +249,56 @@ func resolveVersionID(ctx context.Context, client *asc.Client, appID, version, p
 }
 
 func fetchScreenshotSets(ctx context.Context, client *asc.Client, localizations []asc.Resource[asc.AppStoreVersionLocalizationAttributes]) ([]validation.ScreenshotSet, error) {
-	var sets []validation.ScreenshotSet
-	for _, loc := range localizations {
-		resp, err := client.GetAppStoreVersionLocalizationScreenshotSets(ctx, loc.ID)
-		if err != nil {
-			return nil, fmt.Errorf("validate: failed to fetch screenshot sets for %s: %w", loc.ID, err)
-		}
-		for _, set := range resp.Data {
-			screenshotsResp, err := client.GetAppScreenshots(ctx, set.ID)
+	ctx = withReadinessRequestGate(ctx)
+	setsByLocalization := make([][]asc.Resource[asc.AppScreenshotSetAttributes], len(localizations))
+	setTasks := make([]readinessTask, 0, len(localizations))
+	for index := range localizations {
+		index := index
+		setTasks = append(setTasks, func(taskCtx context.Context) error {
+			localization := localizations[index]
+			response, err := doReadinessRequest(taskCtx, func(requestCtx context.Context) (*asc.AppScreenshotSetsResponse, error) {
+				return client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, localization.ID)
+			})
 			if err != nil {
-				return nil, fmt.Errorf("validate: failed to fetch screenshots for %s: %w", set.ID, err)
+				return fmt.Errorf("validate: failed to fetch screenshot sets for %s: %w", localization.ID, err)
 			}
-			screenshots := make([]validation.Screenshot, 0, len(screenshotsResp.Data))
-			for _, shot := range screenshotsResp.Data {
+			setsByLocalization[index] = response.Data
+			return nil
+		})
+	}
+	if err := runReadinessTasks(ctx, setTasks...); err != nil {
+		return nil, err
+	}
+
+	type screenshotSetRef struct {
+		localization asc.Resource[asc.AppStoreVersionLocalizationAttributes]
+		set          asc.Resource[asc.AppScreenshotSetAttributes]
+	}
+	setRefs := make([]screenshotSetRef, 0)
+	for localizationIndex, localizationSets := range setsByLocalization {
+		for _, set := range localizationSets {
+			setRefs = append(setRefs, screenshotSetRef{
+				localization: localizations[localizationIndex],
+				set:          set,
+			})
+		}
+	}
+
+	screenshotsBySet := make([][]validation.Screenshot, len(setRefs))
+	screenshotTasks := make([]readinessTask, 0, len(setRefs))
+	for index := range setRefs {
+		index := index
+		screenshotTasks = append(screenshotTasks, func(taskCtx context.Context) error {
+			set := setRefs[index].set
+			response, err := doReadinessRequest(taskCtx, func(requestCtx context.Context) (*asc.AppScreenshotsResponse, error) {
+				return client.GetAppScreenshots(requestCtx, set.ID)
+			})
+			if err != nil {
+				return fmt.Errorf("validate: failed to fetch screenshots for %s: %w", set.ID, err)
+			}
+
+			screenshots := make([]validation.Screenshot, 0, len(response.Data))
+			for _, shot := range response.Data {
 				width := 0
 				height := 0
 				if shot.Attributes.ImageAsset != nil {
@@ -274,15 +312,42 @@ func fetchScreenshotSets(ctx context.Context, client *asc.Client, localizations 
 					Height:   height,
 				})
 			}
-			sets = append(sets, validation.ScreenshotSet{
-				ID:             set.ID,
-				DisplayType:    set.Attributes.ScreenshotDisplayType,
-				Locale:         loc.Attributes.Locale,
-				LocalizationID: loc.ID,
-				Screenshots:    screenshots,
+			sort.SliceStable(screenshots, func(i, j int) bool {
+				if screenshots[i].FileName != screenshots[j].FileName {
+					return screenshots[i].FileName < screenshots[j].FileName
+				}
+				return screenshots[i].ID < screenshots[j].ID
 			})
-		}
+			screenshotsBySet[index] = screenshots
+			return nil
+		})
 	}
+	if err := runReadinessTasks(ctx, screenshotTasks...); err != nil {
+		return nil, err
+	}
+
+	sets := make([]validation.ScreenshotSet, 0, len(setRefs))
+	for index, ref := range setRefs {
+		sets = append(sets, validation.ScreenshotSet{
+			ID:             ref.set.ID,
+			DisplayType:    ref.set.Attributes.ScreenshotDisplayType,
+			Locale:         ref.localization.Attributes.Locale,
+			LocalizationID: ref.localization.ID,
+			Screenshots:    screenshotsBySet[index],
+		})
+	}
+	sort.SliceStable(sets, func(i, j int) bool {
+		if sets[i].Locale != sets[j].Locale {
+			return sets[i].Locale < sets[j].Locale
+		}
+		if sets[i].LocalizationID != sets[j].LocalizationID {
+			return sets[i].LocalizationID < sets[j].LocalizationID
+		}
+		if sets[i].DisplayType != sets[j].DisplayType {
+			return sets[i].DisplayType < sets[j].DisplayType
+		}
+		return sets[i].ID < sets[j].ID
+	})
 	return sets, nil
 }
 

@@ -17,10 +17,8 @@ import (
 const (
 	DefaultEndpoint = "https://rork.com/cf-api/asc/v1/events"
 	endpointEnvVar  = "ASC_TELEMETRY_ENDPOINT"
-	maxSendDuration = 250 * time.Millisecond
+	maxSendDuration = 3 * time.Second
 )
-
-var sendHTTP = sendHTTPEvent
 
 func Emit(commandName, version string, duration time.Duration, exitCode int) {
 	EmitWithContext(commandName, version, duration, exitCode, EventContext{InvocationShape: InvocationShapeLeaf})
@@ -33,12 +31,14 @@ func EmitWithContext(
 	eventContext EventContext,
 ) {
 	commandPath := sanitizeCommandName(commandName)
-	if shouldSkipCommand(commandPath) {
+	if reason := environmentOptOutReason(); reason != "" {
+		if err := purgeDefaultSpool(); err != nil {
+			debugf("telemetry spool purge failed after %s: %v", reason, err)
+		}
+		debugf("telemetry disabled by %s", reason)
 		return
 	}
-
-	if reason := environmentOptOutReason(); reason != "" {
-		debugf("telemetry disabled by %s", reason)
+	if shouldSkipCommand(commandPath) {
 		return
 	}
 
@@ -49,6 +49,9 @@ func EmitWithContext(
 	}
 	enabled, reason := enabledFromState(st)
 	if !enabled {
+		if err := purgeDefaultSpool(); err != nil {
+			debugf("telemetry spool purge failed after %s: %v", reason, err)
+		}
 		debugf("telemetry disabled by %s", reason)
 		return
 	}
@@ -57,9 +60,23 @@ func EmitWithContext(
 	if !ok {
 		return
 	}
-
-	if err := sendHTTP(ev); err != nil {
+	endpointURL := endpoint()
+	if err := validateEndpoint(endpointURL); err != nil {
 		debugf("telemetry send failed: %v", err)
+		return
+	}
+
+	store, err := defaultSpoolStore()
+	if err != nil {
+		debugf("telemetry spool unavailable: %v", err)
+		return
+	}
+	if err := store.append(spoolRecord{Event: ev, Endpoint: endpointURL}); err != nil {
+		debugf("telemetry spool append failed: %v", err)
+		return
+	}
+	if err := startMaintenanceWorker(); err != nil {
+		debugf("telemetry worker start failed: %v", err)
 	}
 }
 
@@ -71,14 +88,12 @@ func loadCurrentState() (State, error) {
 	return loadState(path)
 }
 
-func sendHTTPEvent(ev Event) error {
-	endpoint := endpoint()
-	if endpoint == "" {
-		return nil
+func sendHTTPEventToEndpoint(ev Event, endpointURL string) error {
+	if err := validateEndpoint(endpointURL); err != nil {
+		return err
 	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
-		return fmt.Errorf("invalid telemetry endpoint")
+	if endpointURL == "" {
+		return nil
 	}
 
 	body, err := json.Marshal(ev)
@@ -91,7 +106,7 @@ func sendHTTPEvent(ev Event) error {
 	ctx, cancel := context.WithTimeout(configuredCtx, maxSendDuration)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -119,6 +134,17 @@ func sendHTTPEvent(ev Event) error {
 	return nil
 }
 
+func validateEndpoint(endpointURL string) error {
+	if endpointURL == "" {
+		return nil
+	}
+	parsed, err := url.Parse(endpointURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("invalid telemetry endpoint")
+	}
+	return nil
+}
+
 func endpoint() string {
 	if raw := strings.TrimSpace(os.Getenv(endpointEnvVar)); raw != "" {
 		return raw
@@ -127,9 +153,13 @@ func endpoint() string {
 }
 
 func debugf(format string, args ...any) {
-	debug := strings.ToLower(strings.TrimSpace(os.Getenv("ASC_DEBUG")))
-	if debug == "" || debug == "0" || debug == "false" || debug == "off" {
+	if !debugEnabled() {
 		return
 	}
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
+func debugEnabled() bool {
+	debug := strings.ToLower(strings.TrimSpace(os.Getenv("ASC_DEBUG")))
+	return debug != "" && debug != "0" && debug != "false" && debug != "off"
 }

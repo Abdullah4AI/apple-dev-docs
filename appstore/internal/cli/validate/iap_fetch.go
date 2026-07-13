@@ -3,28 +3,28 @@ package validate
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
 var fetchIAPsFn = fetchIAPs
 
 func fetchIAPs(ctx context.Context, client *asc.Client, appID string) ([]validation.IAP, error) {
-	firstCtx, firstCancel := shared.ContextWithTimeout(ctx)
-	defer firstCancel()
-
-	firstPage, err := client.GetInAppPurchasesV2(firstCtx, strings.TrimSpace(appID), asc.WithIAPLimit(200))
+	ctx = withReadinessRequestGate(ctx)
+	firstPage, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.InAppPurchasesV2Response, error) {
+		return client.GetInAppPurchasesV2(requestCtx, strings.TrimSpace(appID), asc.WithIAPLimit(200))
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	paginated, err := asc.PaginateAll(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		pageCtx, pageCancel := shared.ContextWithTimeout(ctx)
-		defer pageCancel()
-		return client.GetInAppPurchasesV2(pageCtx, strings.TrimSpace(appID), asc.WithIAPNextURL(nextURL))
+		return doReadinessRequest(ctx, func(requestCtx context.Context) (asc.PaginatedResponse, error) {
+			return client.GetInAppPurchasesV2(requestCtx, strings.TrimSpace(appID), asc.WithIAPNextURL(nextURL))
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -54,6 +54,12 @@ func mapIAPsResponse(paginated asc.PaginatedResponse) ([]validation.IAP, error) 
 			State:     attrs.State,
 		})
 	}
+	sort.SliceStable(iaps, func(i, j int) bool {
+		if iaps[i].ProductID != iaps[j].ProductID {
+			return iaps[i].ProductID < iaps[j].ProductID
+		}
+		return iaps[i].ID < iaps[j].ID
+	})
 
 	return iaps, nil
 }

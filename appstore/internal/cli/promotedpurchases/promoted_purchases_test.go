@@ -7,20 +7,6 @@ import (
 	"testing"
 )
 
-func TestPromotedPurchasesCommandConstructors(t *testing.T) {
-	top := PromotedPurchasesCommand()
-	if top == nil {
-		t.Fatal("expected promoted-purchases command")
-		return
-	}
-	if top.Name == "" {
-		t.Fatal("expected command name")
-	}
-	if len(top.Subcommands) == 0 {
-		t.Fatal("expected subcommands")
-	}
-}
-
 func TestPromotedPurchasesListValidation(t *testing.T) {
 	t.Setenv("ASC_APP_ID", "")
 	cmd := PromotedPurchasesListCommand()

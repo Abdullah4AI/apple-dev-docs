@@ -51,6 +51,7 @@ func SetFetchIAPsFunc(fn func(context.Context, *asc.Client, string) ([]validatio
 }
 
 // SetFetchAvailableTerritoriesFunc replaces the availability fetcher for tests.
+// The legacy hook models one outbound probe and receives a fresh request context.
 // It returns a restore function to reset the previous handler.
 func SetFetchAvailableTerritoriesFunc(fn func(context.Context, *asc.Client, string) (string, int, error)) func() {
 	previousDetails := fetchAvailableTerritoryDetailsFn
@@ -58,8 +59,15 @@ func SetFetchAvailableTerritoriesFunc(fn func(context.Context, *asc.Client, stri
 		fetchAvailableTerritoryDetailsFn = fetchAvailableTerritoryDetails
 	} else {
 		fetchAvailableTerritoryDetailsFn = func(ctx context.Context, client *asc.Client, appID string) (string, []string, int, error) {
-			availabilityID, availableTerritories, err := fn(ctx, client, appID)
-			return availabilityID, nil, availableTerritories, err
+			type result struct {
+				availabilityID       string
+				availableTerritories int
+			}
+			value, err := doReadinessRequest(ctx, func(requestCtx context.Context) (result, error) {
+				availabilityID, availableTerritories, requestErr := fn(requestCtx, client, appID)
+				return result{availabilityID: availabilityID, availableTerritories: availableTerritories}, requestErr
+			})
+			return value.availabilityID, nil, value.availableTerritories, err
 		}
 	}
 	return func() {
@@ -68,6 +76,7 @@ func SetFetchAvailableTerritoriesFunc(fn func(context.Context, *asc.Client, stri
 }
 
 // SetFetchAppBuildCountFunc replaces the app build-count fetcher for tests.
+// The hook models one outbound probe and receives a fresh request context.
 // It returns a restore function to reset the previous handler.
 func SetFetchAppBuildCountFunc(fn func(context.Context, *asc.Client, string) (int, bool, string, error)) func() {
 	previous := fetchAppBuildCountFn
@@ -75,8 +84,16 @@ func SetFetchAppBuildCountFunc(fn func(context.Context, *asc.Client, string) (in
 		fetchAppBuildCountFn = fetchAppBuildCount
 	} else {
 		fetchAppBuildCountFn = func(ctx context.Context, client *asc.Client, appID string) (int, metadataCheckStatus, error) {
-			count, verified, skipReason, err := fn(ctx, client, appID)
-			return count, metadataCheckStatus{Verified: verified, SkipReason: skipReason}, err
+			type result struct {
+				count      int
+				verified   bool
+				skipReason string
+			}
+			value, err := doReadinessRequest(ctx, func(requestCtx context.Context) (result, error) {
+				count, verified, skipReason, requestErr := fn(requestCtx, client, appID)
+				return result{count: count, verified: verified, skipReason: skipReason}, requestErr
+			})
+			return value.count, metadataCheckStatus{Verified: value.verified, SkipReason: value.skipReason}, err
 		}
 	}
 	return func() {

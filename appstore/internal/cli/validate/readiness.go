@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -29,181 +30,148 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 	if err != nil {
 		return validation.Report{}, err
 	}
-
-	requestCtx, cancel := shared.ContextWithTimeout(ctx)
-	defer func() {
-		if cancel != nil {
-			cancel()
-		}
-	}()
-
-	refreshRequestCtx := func() {
-		if cancel != nil {
-			cancel()
-		}
-		requestCtx, cancel = shared.ContextWithTimeout(ctx)
-	}
+	ctx = withReadinessRequestGate(ctx)
 
 	resolvedVersionID := strings.TrimSpace(opts.VersionID)
 	if resolvedVersionID == "" {
-		resolvedVersionID, err = resolveVersionID(requestCtx, client, strings.TrimSpace(opts.AppID), strings.TrimSpace(opts.Version), strings.TrimSpace(opts.Platform))
+		resolvedVersionID, err = doReadinessRequest(ctx, func(requestCtx context.Context) (string, error) {
+			return resolveVersionID(requestCtx, client, strings.TrimSpace(opts.AppID), strings.TrimSpace(opts.Version), strings.TrimSpace(opts.Platform))
+		})
 		if err != nil {
 			return validation.Report{}, err
 		}
 	}
 
-	versionResp, err := client.GetAppStoreVersion(requestCtx, resolvedVersionID)
-	if err != nil {
-		return validation.Report{}, fmt.Errorf("failed to fetch app store version: %w", err)
-	}
-
-	appResp, err := client.GetApp(requestCtx, opts.AppID)
-	if err != nil {
-		return validation.Report{}, fmt.Errorf("failed to fetch app: %w", err)
-	}
-
-	var contentRightsDeclaration *string
-	if appResp.Data.Attributes.ContentRightsDeclaration != nil {
-		value := strings.TrimSpace(string(*appResp.Data.Attributes.ContentRightsDeclaration))
-		contentRightsDeclaration = &value
-	}
-
-	versionLocsResp, err := client.GetAppStoreVersionLocalizations(requestCtx, resolvedVersionID)
-	if err != nil {
-		return validation.Report{}, fmt.Errorf("failed to fetch version localizations: %w", err)
-	}
-
-	appInfosResp, err := client.GetAppInfos(requestCtx, opts.AppID)
-	if err != nil {
-		return validation.Report{}, fmt.Errorf("failed to fetch app info: %w", err)
-	}
-
-	appInfoID := shared.SelectBestAppInfoID(appInfosResp)
-	if strings.TrimSpace(appInfoID) == "" {
-		return validation.Report{}, fmt.Errorf("failed to select app info for app")
-	}
-
-	appInfoLocsResp, err := client.GetAppInfoLocalizations(requestCtx, appInfoID)
-	if err != nil {
-		return validation.Report{}, fmt.Errorf("failed to fetch app info localizations: %w", err)
-	}
-
-	primaryCategoryID := ""
-	primaryCategoryResp, err := client.GetAppInfoPrimaryCategoryRelationship(requestCtx, appInfoID)
-	if err != nil {
-		if !asc.IsNotFound(err) {
-			return validation.Report{}, fmt.Errorf("failed to fetch app primary category: %w", err)
-		}
-	} else {
-		primaryCategoryID = primaryCategoryResp.Data.ID
-	}
-
-	var ageRatingDecl *validation.AgeRatingDeclaration
-	ageRatingResp, err := client.GetAgeRatingDeclarationForAppStoreVersion(requestCtx, resolvedVersionID)
-	if err != nil {
-		if !asc.IsNotFound(err) {
-			return validation.Report{}, fmt.Errorf("failed to fetch age rating declaration: %w", err)
-		}
-	} else {
-		ageRatingDecl = mapAgeRatingDeclaration(ageRatingResp.Data.Attributes)
-	}
-
-	var reviewDetails *validation.ReviewDetails
-	reviewDetailsResp, err := client.GetAppStoreReviewDetailForVersion(requestCtx, resolvedVersionID)
-	if err != nil {
-		if !asc.IsNotFound(err) {
-			return validation.Report{}, fmt.Errorf("failed to fetch review details: %w", err)
-		}
-	} else {
-		attrs := reviewDetailsResp.Data.Attributes
-		reviewDetails = &validation.ReviewDetails{
-			ID:                  reviewDetailsResp.Data.ID,
-			ContactFirstName:    attrs.ContactFirstName,
-			ContactLastName:     attrs.ContactLastName,
-			ContactEmail:        attrs.ContactEmail,
-			ContactPhone:        attrs.ContactPhone,
-			DemoAccountName:     attrs.DemoAccountName,
-			DemoAccountPassword: attrs.DemoAccountPassword,
-			DemoAccountRequired: attrs.DemoAccountRequired,
-			Notes:               attrs.Notes,
-		}
-	}
-
-	var attachedBuild *validation.Build
-	if opts.Build != nil {
-		attachedBuild = &validation.Build{
-			ID:                            strings.TrimSpace(opts.Build.ID),
-			Version:                       opts.Build.Version,
-			ProcessingState:               opts.Build.ProcessingState,
-			Expired:                       opts.Build.Expired,
-			UsesNonExemptEncryption:       opts.Build.UsesNonExemptEncryption,
-			AppEncryptionDeclarationID:    strings.TrimSpace(opts.Build.AppEncryptionDeclarationID),
-			AppEncryptionDeclarationState: strings.TrimSpace(opts.Build.AppEncryptionDeclarationState),
-		}
-	} else {
-		buildResp, err := client.GetAppStoreVersionBuild(requestCtx, resolvedVersionID)
-		if err != nil {
-			if !asc.IsNotFound(err) {
-				return validation.Report{}, fmt.Errorf("failed to fetch attached build: %w", err)
-			}
-		} else if strings.TrimSpace(buildResp.Data.ID) != "" {
-			attrs := buildResp.Data.Attributes
-			attachedBuild = &validation.Build{
-				ID:                      buildResp.Data.ID,
-				Version:                 attrs.Version,
-				ProcessingState:         attrs.ProcessingState,
-				Expired:                 attrs.Expired,
-				UsesNonExemptEncryption: attrs.UsesNonExemptEncryption,
-			}
-		}
-	}
-	if err := populateBuildEncryptionDeclaration(requestCtx, client, attachedBuild); err != nil {
+	var versionData versionReadinessData
+	var appInfoData appInfoReadinessData
+	if err := runReadinessTasks(
+		ctx,
+		func(taskCtx context.Context) error {
+			var fetchErr error
+			versionData, fetchErr = fetchVersionReadinessData(taskCtx, client, resolvedVersionID, opts.Build)
+			return fetchErr
+		},
+		func(taskCtx context.Context) error {
+			var fetchErr error
+			appInfoData, fetchErr = fetchAppInfoReadinessData(taskCtx, client, strings.TrimSpace(opts.AppID))
+			return fetchErr
+		},
+	); err != nil {
 		return validation.Report{}, err
 	}
 
-	priceScheduleID := ""
-	pricingFetchSkipReason := ""
-	priceScheduleResp, err := client.GetAppPriceSchedule(requestCtx, opts.AppID)
-	if err != nil {
-		if asc.IsNotFound(err) {
-			// Leave priceScheduleID empty so validation reports a missing schedule.
-		} else if reason, ok := readinessPricingSkipReason(err); ok {
-			pricingFetchSkipReason = reason
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				refreshRequestCtx()
-			}
-		} else {
-			return validation.Report{}, fmt.Errorf("failed to fetch app price schedule: %w", err)
-		}
-	} else {
-		priceScheduleID = priceScheduleResp.Data.ID
+	var contentRightsDeclaration *string
+	if appInfoData.app.Attributes.ContentRightsDeclaration != nil {
+		value := strings.TrimSpace(string(*appInfoData.app.Attributes.ContentRightsDeclaration))
+		contentRightsDeclaration = &value
 	}
 
+	attachedBuild := versionData.build
+	priceScheduleID := ""
+	pricingFetchSkipReason := ""
 	availabilityID := ""
 	appAvailableTerritories := []string(nil)
 	availableTerritories := 0
 	availabilityFetchSkipReason := ""
 	pricingCoverageSkipReason := ""
-	availabilityID, appAvailableTerritories, availableTerritories, err = fetchAvailableTerritoryDetailsFn(requestCtx, client, opts.AppID)
-	if err != nil {
-		if reason, ok := readinessAvailabilitySkipReason(err); ok {
-			availabilityFetchSkipReason = reason
-			availabilityID = ""
-			appAvailableTerritories = nil
-			availableTerritories = 0
-			if coverageReason, coverageOK := availabilityCheckSkipReason(err); coverageOK {
-				pricingCoverageSkipReason = coverageReason
+	var screenshotSets []validation.ScreenshotSet
+	var subscriptions []validation.Subscription
+	subscriptionFetchSkipReason := ""
+	var iaps []validation.IAP
+	iapFetchSkipReason := ""
+
+	if err := runReadinessTasks(
+		ctx,
+		func(taskCtx context.Context) error {
+			return resolveMultipleAppInfoAgeRating(
+				taskCtx,
+				client,
+				&appInfoData,
+				opts.AppID,
+				shared.ResolveAppStoreVersionState(versionData.response.Data.Attributes),
+			)
+		},
+		func(taskCtx context.Context) error {
+			return populateBuildEncryptionDeclaration(taskCtx, client, attachedBuild)
+		},
+		func(taskCtx context.Context) error {
+			priceScheduleResp, fetchErr := doReadinessRequest(taskCtx, func(requestCtx context.Context) (*asc.AppPriceScheduleResponse, error) {
+				return client.GetAppPriceSchedule(requestCtx, opts.AppID)
+			})
+			if fetchErr != nil {
+				if asc.IsNotFound(fetchErr) {
+					return nil
+				}
+				if reason, ok := readinessPricingSkipReason(fetchErr); ok {
+					pricingFetchSkipReason = reason
+					return nil
+				}
+				return fmt.Errorf("failed to fetch app price schedule: %w", fetchErr)
 			}
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				refreshRequestCtx()
+			priceScheduleID = priceScheduleResp.Data.ID
+			return nil
+		},
+		func(taskCtx context.Context) error {
+			var fetchErr error
+			availabilityID, appAvailableTerritories, availableTerritories, fetchErr = fetchAvailableTerritoryDetailsFn(taskCtx, client, opts.AppID)
+			if fetchErr == nil {
+				return nil
 			}
-		} else {
-			return validation.Report{}, err
-		}
+			if reason, ok := readinessAvailabilitySkipReason(fetchErr); ok {
+				availabilityFetchSkipReason = reason
+				availabilityID = ""
+				appAvailableTerritories = nil
+				availableTerritories = 0
+				if coverageReason, coverageOK := availabilityCheckSkipReason(fetchErr); coverageOK {
+					pricingCoverageSkipReason = coverageReason
+				}
+				return nil
+			}
+			return fetchErr
+		},
+		func(taskCtx context.Context) error {
+			var fetchErr error
+			screenshotSets, fetchErr = fetchScreenshotSetsFn(taskCtx, client, versionData.localizations)
+			return fetchErr
+		},
+		func(taskCtx context.Context) error {
+			fetchedSubscriptions, fetchErr := fetchSubscriptionsFn(taskCtx, client, opts.AppID)
+			if fetchErr != nil {
+				switch {
+				case errors.Is(fetchErr, asc.ErrForbidden) || asc.IsUnauthorized(fetchErr):
+					subscriptionFetchSkipReason = "Subscription readiness checks were skipped because this App Store Connect account cannot read subscription resources"
+				case asc.IsRetryable(fetchErr):
+					subscriptionFetchSkipReason = "Subscription readiness checks were skipped because the App Store Connect subscription endpoints were temporarily unavailable or rate limited"
+				default:
+					return fmt.Errorf("failed to fetch subscriptions: %w", fetchErr)
+				}
+				return nil
+			}
+			subscriptions = fetchedSubscriptions
+			return nil
+		},
+		func(taskCtx context.Context) error {
+			fetchedIAPs, fetchErr := fetchIAPsFn(taskCtx, client, opts.AppID)
+			if fetchErr != nil {
+				switch {
+				case errors.Is(fetchErr, asc.ErrForbidden) || asc.IsUnauthorized(fetchErr):
+					iapFetchSkipReason = "IAP readiness checks were skipped because this App Store Connect account cannot read in-app purchase resources"
+				case asc.IsRetryable(fetchErr):
+					iapFetchSkipReason = "IAP readiness checks were skipped because the App Store Connect IAP endpoints were temporarily unavailable or rate limited"
+				default:
+					return fmt.Errorf("failed to fetch in-app purchases: %w", fetchErr)
+				}
+				return nil
+			}
+			iaps = fetchedIAPs
+			return nil
+		},
+	); err != nil {
+		return validation.Report{}, err
 	}
 
-	versionLocalizations := make([]validation.VersionLocalization, 0, len(versionLocsResp.Data))
-	for _, loc := range versionLocsResp.Data {
+	versionLocalizations := make([]validation.VersionLocalization, 0, len(versionData.localizations))
+	for _, loc := range versionData.localizations {
 		attrs := loc.Attributes
 		versionLocalizations = append(versionLocalizations, validation.VersionLocalization{
 			ID:              loc.ID,
@@ -216,9 +184,15 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 			MarketingURL:    attrs.MarketingURL,
 		})
 	}
+	sort.SliceStable(versionLocalizations, func(i, j int) bool {
+		if versionLocalizations[i].Locale != versionLocalizations[j].Locale {
+			return versionLocalizations[i].Locale < versionLocalizations[j].Locale
+		}
+		return versionLocalizations[i].ID < versionLocalizations[j].ID
+	})
 
-	appInfoLocalizations := make([]validation.AppInfoLocalization, 0, len(appInfoLocsResp.Data))
-	for _, loc := range appInfoLocsResp.Data {
+	appInfoLocalizations := make([]validation.AppInfoLocalization, 0, len(appInfoData.localizations))
+	for _, loc := range appInfoData.localizations {
 		attrs := loc.Attributes
 		appInfoLocalizations = append(appInfoLocalizations, validation.AppInfoLocalization{
 			ID:                loc.ID,
@@ -229,61 +203,30 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 			PrivacyChoicesURL: attrs.PrivacyChoicesURL,
 		})
 	}
-
-	screenshotSets, err := fetchScreenshotSetsFn(requestCtx, client, versionLocsResp.Data)
-	if err != nil {
-		return validation.Report{}, err
-	}
-
-	subscriptions := make([]validation.Subscription, 0)
-	subscriptionFetchSkipReason := ""
-	fetchedSubscriptions, err := fetchSubscriptionsFn(ctx, client, opts.AppID)
-	if err != nil {
-		switch {
-		case errors.Is(err, asc.ErrForbidden) || asc.IsUnauthorized(err):
-			subscriptionFetchSkipReason = "Subscription readiness checks were skipped because this App Store Connect account cannot read subscription resources"
-		case asc.IsRetryable(err):
-			subscriptionFetchSkipReason = "Subscription readiness checks were skipped because the App Store Connect subscription endpoints were temporarily unavailable or rate limited"
-		default:
-			return validation.Report{}, fmt.Errorf("failed to fetch subscriptions: %w", err)
+	sort.SliceStable(appInfoLocalizations, func(i, j int) bool {
+		if appInfoLocalizations[i].Locale != appInfoLocalizations[j].Locale {
+			return appInfoLocalizations[i].Locale < appInfoLocalizations[j].Locale
 		}
-	} else {
-		subscriptions = fetchedSubscriptions
-	}
-
-	iaps := make([]validation.IAP, 0)
-	iapFetchSkipReason := ""
-	fetchedIAPs, err := fetchIAPsFn(ctx, client, opts.AppID)
-	if err != nil {
-		switch {
-		case errors.Is(err, asc.ErrForbidden) || asc.IsUnauthorized(err):
-			iapFetchSkipReason = "IAP readiness checks were skipped because this App Store Connect account cannot read in-app purchase resources"
-		case asc.IsRetryable(err):
-			iapFetchSkipReason = "IAP readiness checks were skipped because the App Store Connect IAP endpoints were temporarily unavailable or rate limited"
-		default:
-			return validation.Report{}, fmt.Errorf("failed to fetch in-app purchases: %w", err)
-		}
-	} else {
-		iaps = fetchedIAPs
-	}
+		return appInfoLocalizations[i].ID < appInfoLocalizations[j].ID
+	})
 
 	platform := strings.TrimSpace(opts.Platform)
 	if platform == "" {
-		platform = string(versionResp.Data.Attributes.Platform)
+		platform = string(versionData.response.Data.Attributes.Platform)
 	}
 
 	report := validation.Validate(validation.Input{
 		AppID:                       opts.AppID,
-		AppInfoID:                   appInfoID,
+		AppInfoID:                   appInfoData.appInfoID,
 		VersionID:                   resolvedVersionID,
-		VersionString:               versionResp.Data.Attributes.VersionString,
-		VersionState:                shared.ResolveAppStoreVersionState(versionResp.Data.Attributes),
+		VersionString:               versionData.response.Data.Attributes.VersionString,
+		VersionState:                shared.ResolveAppStoreVersionState(versionData.response.Data.Attributes),
 		Platform:                    platform,
-		PrimaryLocale:               appResp.Data.Attributes.PrimaryLocale,
+		PrimaryLocale:               appInfoData.app.Attributes.PrimaryLocale,
 		VersionLocalizations:        versionLocalizations,
 		AppInfoLocalizations:        appInfoLocalizations,
-		ReviewDetails:               reviewDetails,
-		PrimaryCategoryID:           primaryCategoryID,
+		ReviewDetails:               versionData.reviewDetails,
+		PrimaryCategoryID:           appInfoData.primaryCategoryID,
 		ContentRightsDeclaration:    contentRightsDeclaration,
 		Build:                       attachedBuild,
 		PriceScheduleID:             priceScheduleID,
@@ -298,10 +241,10 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 		SubscriptionFetchSkipReason: subscriptionFetchSkipReason,
 		IAPs:                        iaps,
 		IAPFetchSkipReason:          iapFetchSkipReason,
-		AgeRatingDeclaration:        ageRatingDecl,
-		ReleaseType:                 versionResp.Data.Attributes.ReleaseType,
-		EarliestReleaseDate:         versionResp.Data.Attributes.EarliestReleaseDate,
-		Copyright:                   versionResp.Data.Attributes.Copyright,
+		AgeRatingDeclaration:        appInfoData.ageRatingDeclaration,
+		ReleaseType:                 versionData.response.Data.Attributes.ReleaseType,
+		EarliestReleaseDate:         versionData.response.Data.Attributes.EarliestReleaseDate,
+		Copyright:                   versionData.response.Data.Attributes.Copyright,
 	}, opts.Strict)
 
 	return report, nil
@@ -318,7 +261,9 @@ func populateBuildEncryptionDeclaration(ctx context.Context, client *asc.Client,
 		return nil
 	}
 
-	declarationResp, err := client.GetBuildAppEncryptionDeclaration(ctx, strings.TrimSpace(build.ID))
+	declarationResp, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.AppEncryptionDeclarationResponse, error) {
+		return client.GetBuildAppEncryptionDeclaration(requestCtx, strings.TrimSpace(build.ID))
+	})
 	if err != nil {
 		if asc.IsNotFound(err) {
 			return nil

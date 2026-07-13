@@ -1612,6 +1612,31 @@ func TestGetAppStoreVersion(t *testing.T) {
 	}
 }
 
+func TestGetAppStoreVersion_WithCompoundReadOptions(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"1"},"included":[]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/1" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		if got := req.URL.Query().Get("include"); got != "appStoreVersionLocalizations,build,appStoreReviewDetail" {
+			t.Fatalf("include = %q", got)
+		}
+		if got := req.URL.Query().Get("limit[appStoreVersionLocalizations]"); got != "50" {
+			t.Fatalf("localization include limit = %q", got)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.GetAppStoreVersion(
+		context.Background(),
+		"1",
+		WithAppStoreVersionInclude([]string{"appStoreVersionLocalizations", "build", "appStoreReviewDetail"}),
+		WithAppStoreVersionLocalizationsIncludeLimit(50),
+	); err != nil {
+		t.Fatalf("GetAppStoreVersion() error: %v", err)
+	}
+}
+
 func TestCreateAppStoreVersion(t *testing.T) {
 	response := jsonResponse(http.StatusCreated, `{"data":{"type":"appStoreVersions","id":"VERSION_123","attributes":{"versionString":"1.0.0","platform":"IOS"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -3678,6 +3703,31 @@ func TestGetAppInfos(t *testing.T) {
 	}
 }
 
+func TestGetAppInfos_WithCompoundReadOptions(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"appInfos","id":"info-1"}],"included":[]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/appInfos" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		if got := req.URL.Query().Get("include"); got != "app,ageRatingDeclaration,appInfoLocalizations,primaryCategory" {
+			t.Fatalf("include = %q", got)
+		}
+		if got := req.URL.Query().Get("limit[appInfoLocalizations]"); got != "50" {
+			t.Fatalf("localization include limit = %q", got)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.GetAppInfos(
+		context.Background(),
+		"app-1",
+		WithAppInfoInclude([]string{"app", "ageRatingDeclaration", "appInfoLocalizations", "primaryCategory"}),
+		WithAppInfoLocalizationsIncludeLimit(50),
+	); err != nil {
+		t.Fatalf("GetAppInfos() error: %v", err)
+	}
+}
+
 func TestGetAgeRatingDeclarationForAppInfo(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":{"type":"ageRatingDeclarations","id":"age-1","attributes":{"gambling":false}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -5399,7 +5449,37 @@ func TestDeleteCiProduct(t *testing.T) {
 }
 
 func TestGetCiWorkflow(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"ciWorkflows","id":"wf-1"}}`)
+	response := jsonResponse(http.StatusOK, `{
+		"data": {
+			"type": "ciWorkflows",
+			"id": "wf-1",
+			"attributes": {
+				"actions": [{
+					"name": "Archive - iOS",
+					"actionType": "ARCHIVE",
+					"destination": "ANY_IOS_DEVICE",
+					"buildDistributionAudience": "APP_STORE_ELIGIBLE",
+					"scheme": "Example",
+					"platform": "IOS",
+					"isRequiredToPass": true
+				}]
+			},
+			"relationships": {
+				"repository": {
+					"links": {
+						"self": "https://api.appstoreconnect.apple.com/v1/ciWorkflows/wf-1/relationships/repository",
+						"related": "https://api.appstoreconnect.apple.com/v1/ciWorkflows/wf-1/repository"
+					}
+				},
+				"buildRuns": {
+					"links": {
+						"self": "https://api.appstoreconnect.apple.com/v1/ciWorkflows/wf-1/relationships/buildRuns",
+						"related": "https://api.appstoreconnect.apple.com/v1/ciWorkflows/wf-1/buildRuns"
+					}
+				}
+			}
+		}
+	}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -5410,8 +5490,29 @@ func TestGetCiWorkflow(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetCiWorkflow(context.Background(), "wf-1"); err != nil {
+	got, err := client.GetCiWorkflow(context.Background(), "wf-1")
+	if err != nil {
 		t.Fatalf("GetCiWorkflow() error: %v", err)
+	}
+	if len(got.Data.Attributes.Actions) != 1 || got.Data.Attributes.Actions[0].Scheme != "Example" {
+		t.Fatalf("unexpected actions: %#v", got.Data.Attributes.Actions)
+	}
+	if got.Data.Relationships == nil || got.Data.Relationships.Repository == nil {
+		t.Fatal("expected repository relationship")
+	}
+	if got.Data.Relationships.Repository.Links.Related != "https://api.appstoreconnect.apple.com/v1/ciWorkflows/wf-1/repository" {
+		t.Fatalf("unexpected repository links: %#v", got.Data.Relationships.Repository.Links)
+	}
+	if got.Data.Relationships.BuildRuns == nil || got.Data.Relationships.BuildRuns.Links.Related == "" {
+		t.Fatalf("unexpected build runs relationship: %#v", got.Data.Relationships.BuildRuns)
+	}
+
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if strings.Contains(string(encoded), `"data":{"type":"","id":""}`) {
+		t.Fatalf("workflow response invented empty relationship data: %s", encoded)
 	}
 }
 
@@ -5573,7 +5674,7 @@ func TestGetScmRepository(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetScmRepository(context.Background(), "repo-1"); err != nil {
+	if _, err := client.GetScmRepository(context.Background(), "  repo-1  "); err != nil {
 		t.Fatalf("GetScmRepository() error: %v", err)
 	}
 }
@@ -5688,7 +5789,7 @@ func TestGetScmGitReferences_WithLimit(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetScmGitReferences(context.Background(), "repo-1", WithScmGitReferencesLimit(100)); err != nil {
+	if _, err := client.GetScmGitReferences(context.Background(), "  repo-1  ", WithScmGitReferencesLimit(100)); err != nil {
 		t.Fatalf("GetScmGitReferences() error: %v", err)
 	}
 }

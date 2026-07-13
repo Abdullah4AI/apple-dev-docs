@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -796,6 +798,151 @@ func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 
 	if strings.Contains(output.String(), "skills updates may be available") {
 		t.Fatalf("expected no skills update notice after interrupt, got %q", output.String())
+	}
+}
+
+func TestSkillsAutoCheckDoesNotDelayForegroundCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY timing regression requires a Unix shell")
+	}
+
+	tmpDir := t.TempDir()
+	binaryPath := buildASCBlackboxBinary(t)
+	configPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"skills_checked_at":"2000-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	scriptDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("failed to create fake skills dir: %v", err)
+	}
+	markerPath := filepath.Join(tmpDir, "skills-check-ran")
+	sleepPIDPath := filepath.Join(tmpDir, "skills-check-sleep-pid")
+	t.Cleanup(func() {
+		pidBytes, err := os.ReadFile(sleepPIDPath)
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+		if err != nil {
+			return
+		}
+		if process, err := os.FindProcess(pid); err == nil {
+			_ = process.Kill()
+		}
+	})
+	scriptPath := filepath.Join(scriptDir, "skills")
+	script := "#!/bin/sh\n" +
+		"printf 'ran' > \"$SKILLS_MARKER\"\n" +
+		"sleep 10 &\n" +
+		"printf '%s' \"$!\" > \"$SKILLS_SLEEP_PID\"\n" +
+		"printf '2 updates available\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake skills command: %v", err)
+	}
+
+	runCmd := exec.Command(binaryPath, "completion", "--shell", "bash")
+	runCmd.Env = append(
+		isolatedCLITestEnv(configPath),
+		"ASC_SKILLS_AUTO_CHECK=1",
+		"CI=",
+		"SKILLS_MARKER="+markerPath,
+		"SKILLS_SLEEP_PID="+sleepPIDPath,
+		"PATH="+scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+
+	startedAt := time.Now()
+	ptmx, err := pty.Start(runCmd)
+	if err != nil {
+		t.Fatalf("failed to start PTY command: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+	output, _, readDone := startPTYCapture(ptmx, "")
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- runCmd.Wait()
+	}()
+
+	select {
+	case err = <-waitDone:
+	case <-time.After(2 * time.Second):
+		_ = runCmd.Process.Kill()
+		_ = ptmx.Close()
+		<-waitDone
+		t.Fatalf("foreground command waited for 10-second checker descendant\noutput:\n%s", output.String())
+	}
+	if err != nil {
+		t.Fatalf("foreground command failed: %v\noutput:\n%s", err, output.String())
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
+		t.Fatalf("foreground command took %s, want under 2s", elapsed)
+	}
+
+	select {
+	case <-readDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("PTY stayed open after foreground exit\noutput:\n%s", output.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(markerPath); statErr == nil {
+			break
+		} else if !os.IsNotExist(statErr) {
+			t.Fatalf("failed to stat skills marker: %v", statErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached skills checker did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cachePath := filepath.Join(tmpDir, "skills-check.json")
+	lockPath := filepath.Join(tmpDir, "skills-check.lock")
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		_, cacheErr := os.Stat(cachePath)
+		_, lockErr := os.Stat(lockPath)
+		if cacheErr == nil && os.IsNotExist(lockErr) {
+			break
+		}
+		if cacheErr != nil && !os.IsNotExist(cacheErr) {
+			t.Fatalf("stat skills cache: %v", cacheErr)
+		}
+		if lockErr != nil && !os.IsNotExist(lockErr) {
+			t.Fatalf("stat skills worker lock: %v", lockErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("detached worker did not finish cache publication (cache: %v, lock: %v)", cacheErr, lockErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		pidBytes, readErr := os.ReadFile(sleepPIDPath)
+		if readErr == nil {
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+			if parseErr != nil {
+				t.Fatalf("parse checker sleep PID: %v", parseErr)
+			}
+			process, findErr := os.FindProcess(pid)
+			if findErr != nil {
+				t.Fatalf("find checker sleep process: %v", findErr)
+			}
+			_ = process.Kill()
+			_ = os.Remove(sleepPIDPath)
+			break
+		}
+		if !os.IsNotExist(readErr) {
+			t.Fatalf("read checker sleep PID: %v", readErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("checker did not record descendant PID")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -7,8 +7,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,323 +83,665 @@ func TestSkillsOutputHasUpdates(t *testing.T) {
 	}
 }
 
-func TestMaybeCheckForSkillUpdates_NotifiesAndPersistsTimestamp(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origPersist := persistSkillsCheckedAtForCheck
-	origNow := nowForSkillsCheck
-	origRun := runSkillsCheckCommand
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		persistSkillsCheckedAtForCheck = origPersist
-		nowForSkillsCheck = origNow
-		runSkillsCheckCommand = origRun
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "true")
-	t.Setenv("CI", "")
-
-	cfg := &config.Config{}
-	loadConfigForSkillsCheck = func() (*config.Config, error) { return cfg, nil }
-
-	savedAt := ""
-	persistSkillsCheckedAtForCheck = func(value string) error {
-		savedAt = strings.TrimSpace(value)
-		return nil
+func TestSkillsCheckSchedulerSchedulesOnlyWhenDue(t *testing.T) {
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name          string
+		legacyChecked string
+		cache         skillsCheckCache
+		cacheErr      error
+		wantStarted   bool
+	}{
+		{
+			name:        "missing cache and empty legacy timestamp is due",
+			cacheErr:    os.ErrNotExist,
+			wantStarted: true,
+		},
+		{
+			name:          "missing cache honors recent legacy timestamp",
+			legacyChecked: now.Add(-time.Hour).Format(skillsCheckedAtLayout),
+			cacheErr:      os.ErrNotExist,
+		},
+		{
+			name: "old cache is due",
+			cache: skillsCheckCache{
+				CheckedAt: now.Add(-25 * time.Hour).Format(skillsCheckedAtLayout),
+			},
+			wantStarted: true,
+		},
+		{
+			name: "recent cache is not due",
+			cache: skillsCheckCache{
+				CheckedAt: now.Add(-time.Hour).Format(skillsCheckedAtLayout),
+			},
+		},
 	}
 
-	fixedNow := time.Date(2026, 3, 5, 12, 30, 0, 0, time.UTC)
-	nowForSkillsCheck = func() time.Time { return fixedNow }
-	runSkillsCheckCommand = func(ctx context.Context) (string, error) {
-		return "2 updates available", nil
-	}
-	progressEnabledForCheck = func() bool { return true }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			startCalls := 0
+			claimCalls := 0
+			scheduler := skillsCheckScheduler{
+				getenv: func(key string) string {
+					if key == skillsAutoCheckEnvVar {
+						return "true"
+					}
+					return ""
+				},
+				progressEnabled: func() bool { return true },
+				loadConfig: func() (*config.Config, error) {
+					return &config.Config{SkillsCheckedAt: tt.legacyChecked}, nil
+				},
+				statePaths: func() (skillsCheckStatePaths, error) {
+					return skillsCheckStatePaths{
+						cache: filepath.Join(tmpDir, skillsCheckCacheFilename),
+						lock:  filepath.Join(tmpDir, skillsCheckLockFilename),
+					}, nil
+				},
+				loadCache: func(string) (skillsCheckCache, error) {
+					return tt.cache, tt.cacheErr
+				},
+				storeCache: func(string, skillsCheckCache) error {
+					t.Fatal("storeCache should not run without a cached notice")
+					return nil
+				},
+				claimWorker: func(string, time.Time) (string, bool, error) {
+					claimCalls++
+					return "worker-token", true, nil
+				},
+				releaseWorker: func(string, string) error { return nil },
+				startWorker: func(spec skillsCheckWorkerSpec) error {
+					startCalls++
+					if spec.token != "worker-token" {
+						t.Fatalf("worker token = %q, want worker-token", spec.token)
+					}
+					return nil
+				},
+				now:    func() time.Time { return now },
+				stderr: io.Discard,
+			}
 
-	stderr := captureStderr(t, func() {
-		MaybeCheckForSkillUpdates(context.Background())
-	})
-
-	if savedAt != fixedNow.Format(skillsCheckedAtLayout) {
-		t.Fatalf("SkillsCheckedAt = %q, want %q", savedAt, fixedNow.Format(skillsCheckedAtLayout))
-	}
-	if !strings.Contains(stderr, "npx skills update") {
-		t.Fatalf("expected notification in stderr, got %q", stderr)
-	}
-}
-
-func TestMaybeCheckForSkillUpdates_SkipsWhenCheckedRecently(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origPersist := persistSkillsCheckedAtForCheck
-	origNow := nowForSkillsCheck
-	origRun := runSkillsCheckCommand
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		persistSkillsCheckedAtForCheck = origPersist
-		nowForSkillsCheck = origNow
-		runSkillsCheckCommand = origRun
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "true")
-	t.Setenv("CI", "")
-
-	fixedNow := time.Date(2026, 3, 5, 15, 0, 0, 0, time.UTC)
-	nowForSkillsCheck = func() time.Time { return fixedNow }
-	loadConfigForSkillsCheck = func() (*config.Config, error) {
-		return &config.Config{SkillsCheckedAt: fixedNow.Add(-1 * time.Hour).Format(skillsCheckedAtLayout)}, nil
-	}
-	persistSkillsCheckedAtForCheck = func(value string) error {
-		t.Fatal("persist should not be called for recent checks")
-		return nil
-	}
-
-	called := false
-	runSkillsCheckCommand = func(ctx context.Context) (string, error) {
-		called = true
-		return "", nil
-	}
-	progressEnabledForCheck = func() bool { return true }
-
-	MaybeCheckForSkillUpdates(context.Background())
-	if called {
-		t.Fatal("expected skills check command to be skipped")
-	}
-}
-
-func TestMaybeCheckForSkillUpdates_DoesNotPersistWhenCheckCanceled(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origPersist := persistSkillsCheckedAtForCheck
-	origNow := nowForSkillsCheck
-	origRun := runSkillsCheckCommand
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		persistSkillsCheckedAtForCheck = origPersist
-		nowForSkillsCheck = origNow
-		runSkillsCheckCommand = origRun
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "true")
-	t.Setenv("CI", "")
-	loadConfigForSkillsCheck = func() (*config.Config, error) { return &config.Config{}, nil }
-	nowForSkillsCheck = func() time.Time { return time.Date(2026, 3, 5, 16, 0, 0, 0, time.UTC) }
-	progressEnabledForCheck = func() bool { return true }
-	runSkillsCheckCommand = func(ctx context.Context) (string, error) {
-		return "", context.Canceled
-	}
-
-	persistCalled := false
-	persistSkillsCheckedAtForCheck = func(value string) error {
-		persistCalled = true
-		return nil
-	}
-
-	MaybeCheckForSkillUpdates(context.Background())
-	if persistCalled {
-		t.Fatal("expected canceled check not to persist timestamp")
+			scheduler.run()
+			if got := startCalls == 1; got != tt.wantStarted {
+				t.Fatalf("worker started = %v, want %v", got, tt.wantStarted)
+			}
+			if tt.wantStarted && claimCalls != 1 {
+				t.Fatalf("claim calls = %d, want 1", claimCalls)
+			}
+			if !tt.wantStarted && claimCalls != 0 {
+				t.Fatalf("claim calls = %d, want 0", claimCalls)
+			}
+		})
 	}
 }
 
-func TestMaybeCheckForSkillUpdates_DoesNotPersistWhenCheckerUnavailable(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origPersist := persistSkillsCheckedAtForCheck
-	origNow := nowForSkillsCheck
-	origRun := runSkillsCheckCommand
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		persistSkillsCheckedAtForCheck = origPersist
-		nowForSkillsCheck = origNow
-		runSkillsCheckCommand = origRun
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "true")
-	t.Setenv("CI", "")
-	loadConfigForSkillsCheck = func() (*config.Config, error) { return &config.Config{}, nil }
-	nowForSkillsCheck = func() time.Time { return time.Date(2026, 3, 5, 16, 30, 0, 0, time.UTC) }
-	progressEnabledForCheck = func() bool { return true }
-	runSkillsCheckCommand = func(ctx context.Context) (string, error) {
-		return "", errSkillsCheckUnavailable
+func TestSkillsCheckSchedulerSkipsDisabledCIAndNonTTY(t *testing.T) {
+	tests := []struct {
+		name     string
+		auto     string
+		ci       string
+		progress bool
+	}{
+		{name: "disabled", auto: "false", progress: true},
+		{name: "CI", auto: "true", ci: "1", progress: true},
+		{name: "non TTY", auto: "true", progress: false},
 	}
 
-	persistCalled := false
-	persistSkillsCheckedAtForCheck = func(value string) error {
-		persistCalled = true
-		return nil
-	}
-
-	MaybeCheckForSkillUpdates(context.Background())
-	if persistCalled {
-		t.Fatal("expected unavailable checker not to persist timestamp")
-	}
-}
-
-func TestMaybeCheckForSkillUpdates_PersistsOnNonContextFailure(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origPersist := persistSkillsCheckedAtForCheck
-	origNow := nowForSkillsCheck
-	origRun := runSkillsCheckCommand
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		persistSkillsCheckedAtForCheck = origPersist
-		nowForSkillsCheck = origNow
-		runSkillsCheckCommand = origRun
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "true")
-	t.Setenv("CI", "")
-	loadConfigForSkillsCheck = func() (*config.Config, error) { return &config.Config{}, nil }
-	fixedNow := time.Date(2026, 3, 5, 17, 0, 0, 0, time.UTC)
-	nowForSkillsCheck = func() time.Time { return fixedNow }
-	progressEnabledForCheck = func() bool { return true }
-	runSkillsCheckCommand = func(ctx context.Context) (string, error) {
-		return "", errors.New("exec failure")
-	}
-
-	savedAt := ""
-	persistSkillsCheckedAtForCheck = func(value string) error {
-		savedAt = strings.TrimSpace(value)
-		return nil
-	}
-
-	MaybeCheckForSkillUpdates(context.Background())
-	if savedAt != fixedNow.Format(skillsCheckedAtLayout) {
-		t.Fatalf("expected persistence on non-context failure, got %q", savedAt)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loadCalled := false
+			scheduler := skillsCheckScheduler{
+				getenv: func(key string) string {
+					switch key {
+					case skillsAutoCheckEnvVar:
+						return tt.auto
+					case "CI":
+						return tt.ci
+					default:
+						return ""
+					}
+				},
+				progressEnabled: func() bool { return tt.progress },
+				loadConfig: func() (*config.Config, error) {
+					loadCalled = true
+					return &config.Config{}, nil
+				},
+				claimWorker: func(string, time.Time) (string, bool, error) {
+					t.Fatal("skipped scheduler must not claim a worker")
+					return "", false, nil
+				},
+				startWorker: func(skillsCheckWorkerSpec) error {
+					t.Fatal("skipped scheduler must not start a worker")
+					return nil
+				},
+			}
+			scheduler.run()
+			if loadCalled {
+				t.Fatal("config should not be loaded for skipped scheduler")
+			}
+		})
 	}
 }
 
-func TestMaybeCheckForSkillUpdates_SkipsWhenDisabled(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "false")
-	progressEnabledForCheck = func() bool { return true }
-	loadCalled := false
-	loadConfigForSkillsCheck = func() (*config.Config, error) {
-		loadCalled = true
-		return nil, errors.New("should not load")
+func TestSkillsCheckSchedulerDisplaysAndConsumesCachedNotice(t *testing.T) {
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	cache := skillsCheckCache{
+		CheckedAt:       now.Add(-time.Hour).Format(skillsCheckedAtLayout),
+		UpdateAvailable: true,
+	}
+	var stderr bytes.Buffer
+	stored := skillsCheckCache{}
+	storeCalls := 0
+	scheduler := skillsCheckScheduler{
+		getenv:          func(string) string { return "" },
+		progressEnabled: func() bool { return true },
+		loadConfig:      func() (*config.Config, error) { return &config.Config{}, nil },
+		statePaths: func() (skillsCheckStatePaths, error) {
+			return skillsCheckStatePaths{cache: "/tmp/cache", lock: "/tmp/lock"}, nil
+		},
+		loadCache: func(string) (skillsCheckCache, error) { return cache, nil },
+		storeCache: func(_ string, value skillsCheckCache) error {
+			storeCalls++
+			stored = value
+			return nil
+		},
+		claimWorker: func(string, time.Time) (string, bool, error) {
+			t.Fatal("recent cache should not claim a worker")
+			return "", false, nil
+		},
+		now:    func() time.Time { return now },
+		stderr: &stderr,
 	}
 
-	MaybeCheckForSkillUpdates(context.Background())
-	if loadCalled {
-		t.Fatal("expected config load to be skipped when disabled")
+	scheduler.run()
+	if storeCalls != 1 {
+		t.Fatalf("store calls = %d, want 1", storeCalls)
+	}
+	if stored.UpdateAvailable {
+		t.Fatal("cached update notice should be consumed atomically")
+	}
+	if stored.CheckedAt != cache.CheckedAt {
+		t.Fatalf("checked_at = %q, want %q", stored.CheckedAt, cache.CheckedAt)
+	}
+	if !strings.Contains(stderr.String(), "npx skills update") {
+		t.Fatalf("expected stderr notice, got %q", stderr.String())
 	}
 }
 
-func TestMaybeCheckForSkillUpdates_RunsByDefaultWhenUnset(t *testing.T) {
-	origLoad := loadConfigForSkillsCheck
-	origProgress := progressEnabledForCheck
-	t.Cleanup(func() {
-		loadConfigForSkillsCheck = origLoad
-		progressEnabledForCheck = origProgress
-	})
-
-	t.Setenv(skillsAutoCheckEnvVar, "")
-	t.Setenv("CI", "")
-	progressEnabledForCheck = func() bool { return true }
-	loadCalled := false
-	loadConfigForSkillsCheck = func() (*config.Config, error) {
-		loadCalled = true
-		return nil, errors.New("load called as expected")
+func TestSkillsCheckSchedulerCacheFailuresAreSilent(t *testing.T) {
+	tests := []struct {
+		name       string
+		loadCache  func(string) (skillsCheckCache, error)
+		storeCache func(string, skillsCheckCache) error
+	}{
+		{
+			name: "malformed cache",
+			loadCache: func(string) (skillsCheckCache, error) {
+				return skillsCheckCache{}, errors.New("malformed cache")
+			},
+			storeCache: func(string, skillsCheckCache) error { return nil },
+		},
+		{
+			name: "cached notice write failure",
+			loadCache: func(string) (skillsCheckCache, error) {
+				return skillsCheckCache{
+					CheckedAt:       time.Now().UTC().Format(skillsCheckedAtLayout),
+					UpdateAvailable: true,
+				}, nil
+			},
+			storeCache: func(string, skillsCheckCache) error {
+				return errors.New("read-only cache")
+			},
+		},
 	}
 
-	MaybeCheckForSkillUpdates(context.Background())
-	if !loadCalled {
-		t.Fatal("expected config load to run when auto-check env var is unset")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			started := false
+			scheduler := skillsCheckScheduler{
+				getenv:          func(string) string { return "" },
+				progressEnabled: func() bool { return true },
+				loadConfig:      func() (*config.Config, error) { return &config.Config{}, nil },
+				statePaths: func() (skillsCheckStatePaths, error) {
+					return skillsCheckStatePaths{cache: "/tmp/cache", lock: "/tmp/lock"}, nil
+				},
+				loadCache:  tt.loadCache,
+				storeCache: tt.storeCache,
+				claimWorker: func(string, time.Time) (string, bool, error) {
+					started = true
+					return "token", true, nil
+				},
+				startWorker: func(skillsCheckWorkerSpec) error {
+					started = true
+					return nil
+				},
+				now:    time.Now,
+				stderr: &stderr,
+			}
+
+			scheduler.run()
+			if started {
+				t.Fatal("cache failure should not schedule a worker")
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("cache failure should stay silent, got %q", stderr.String())
+			}
+		})
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_UsesSkillsBinaryCheckCommand(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	origLookupNpx := lookupNpx
+func TestSkillsCheckSchedulerReleasesLeaseWhenStartFails(t *testing.T) {
+	releasedToken := ""
+	scheduler := skillsCheckScheduler{
+		getenv:          func(string) string { return "" },
+		progressEnabled: func() bool { return true },
+		loadConfig:      func() (*config.Config, error) { return &config.Config{}, nil },
+		statePaths: func() (skillsCheckStatePaths, error) {
+			return skillsCheckStatePaths{cache: "/tmp/cache", lock: "/tmp/lock"}, nil
+		},
+		loadCache: func(string) (skillsCheckCache, error) {
+			return skillsCheckCache{}, os.ErrNotExist
+		},
+		storeCache: func(string, skillsCheckCache) error { return nil },
+		claimWorker: func(string, time.Time) (string, bool, error) {
+			return "claimed-token", true, nil
+		},
+		releaseWorker: func(_ string, token string) error {
+			releasedToken = token
+			return nil
+		},
+		startWorker: func(skillsCheckWorkerSpec) error {
+			return errors.New("start failed")
+		},
+		now:    time.Now,
+		stderr: io.Discard,
+	}
+
+	scheduler.run()
+	if releasedToken != "claimed-token" {
+		t.Fatalf("released token = %q, want claimed-token", releasedToken)
+	}
+}
+
+func TestDefaultClaimSkillsCheckWorkerAllowsOnlyOneConcurrentWorker(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), skillsCheckLockFilename)
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	const contenders = 16
+	start := make(chan struct{})
+	var winners atomic.Int32
+	var winnerToken string
+	var winnerMu sync.Mutex
+	var wg sync.WaitGroup
+
+	for range contenders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			token, claimed, err := defaultClaimSkillsCheckWorker(lockPath, now)
+			if err != nil {
+				t.Errorf("defaultClaimSkillsCheckWorker() error: %v", err)
+				return
+			}
+			if claimed {
+				winners.Add(1)
+				winnerMu.Lock()
+				winnerToken = token
+				winnerMu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := winners.Load(); got != 1 {
+		t.Fatalf("worker claims = %d, want 1", got)
+	}
+	if err := defaultReleaseSkillsCheckWorker(lockPath, "not-the-owner"); err != nil {
+		t.Fatalf("mismatched release error: %v", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("mismatched release removed lock: %v", err)
+	}
+	if err := defaultReleaseSkillsCheckWorker(lockPath, winnerToken); err != nil {
+		t.Fatalf("owner release error: %v", err)
+	}
+}
+
+func TestDefaultClaimSkillsCheckWorkerKeepsClaimWhenGuardReleaseReportsError(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), skillsCheckLockFilename)
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	originalRelease := releaseSkillsCheckClaimGuardFn
 	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-		lookupNpx = origLookupNpx
+		releaseSkillsCheckClaimGuardFn = originalRelease
 	})
-
-	mockSkills := filepath.Join(t.TempDir(), "skills-mock.sh")
-	if err := os.WriteFile(mockSkills, []byte("#!/bin/sh\necho \"$@\"\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
-	}
-	if err := os.Chmod(mockSkills, 0o755); err != nil {
-		t.Fatalf("Chmod() error: %v", err)
+	releaseSkillsCheckClaimGuardFn = func(file *os.File) error {
+		if err := originalRelease(file); err != nil {
+			return err
+		}
+		return errors.New("simulated guard release failure")
 	}
 
+	token, claimed, err := defaultClaimSkillsCheckWorker(lockPath, now)
+	if err != nil {
+		t.Fatalf("defaultClaimSkillsCheckWorker() error: %v", err)
+	}
+	if !claimed || token == "" {
+		t.Fatalf("claim after guard release error = (%q, %v), want owner", token, claimed)
+	}
+	if err := defaultReleaseSkillsCheckWorker(lockPath, token); err != nil {
+		t.Fatalf("release claimed worker: %v", err)
+	}
+}
+
+func TestDefaultClaimSkillsCheckWorkerReclaimsStaleLease(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), skillsCheckLockFilename)
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	if err := createSkillsCheckLock(lockPath, "stale-token", now.Add(-skillsWorkerRetryDelay-time.Second)); err != nil {
+		t.Fatalf("createSkillsCheckLock() error: %v", err)
+	}
+
+	token, claimed, err := defaultClaimSkillsCheckWorker(lockPath, now)
+	if err != nil {
+		t.Fatalf("defaultClaimSkillsCheckWorker() error: %v", err)
+	}
+	if !claimed || token == "" || token == "stale-token" {
+		t.Fatalf("stale lease claim = (%q, %v), want new owner", token, claimed)
+	}
+	quarantines, err := filepath.Glob(lockPath + ".stale-*")
+	if err != nil {
+		t.Fatalf("glob stale lock quarantines: %v", err)
+	}
+	if len(quarantines) != 0 {
+		t.Fatalf("stale reclaim left quarantines: %v", quarantines)
+	}
+}
+
+func TestDefaultClaimSkillsCheckWorkerConcurrentStaleReclaimKeepsWinner(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), skillsCheckLockFilename)
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	const contenders = 32
+
+	for round := 0; round < 20; round++ {
+		if err := createSkillsCheckLock(lockPath, "stale-token", now.Add(-skillsWorkerRetryDelay-time.Second)); err != nil {
+			t.Fatalf("round %d: create stale lock: %v", round, err)
+		}
+
+		start := make(chan struct{})
+		var winnersMu sync.Mutex
+		winners := make([]string, 0, 1)
+		errorsSeen := make(chan error, contenders)
+		var wg sync.WaitGroup
+		for range contenders {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				token, claimed, err := defaultClaimSkillsCheckWorker(lockPath, now)
+				if err != nil {
+					errorsSeen <- err
+					return
+				}
+				if claimed {
+					winnersMu.Lock()
+					winners = append(winners, token)
+					winnersMu.Unlock()
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errorsSeen)
+
+		for err := range errorsSeen {
+			t.Fatalf("round %d: stale contender error: %v", round, err)
+		}
+		if len(winners) != 1 {
+			t.Fatalf("round %d: worker claims = %d, want 1", round, len(winners))
+		}
+
+		data, err := os.ReadFile(lockPath)
+		if err != nil {
+			t.Fatalf("round %d: read winner lock: %v", round, err)
+		}
+		var lock skillsCheckLock
+		if err := json.Unmarshal(data, &lock); err != nil {
+			t.Fatalf("round %d: decode winner lock: %v", round, err)
+		}
+		if lock.Token != winners[0] {
+			t.Fatalf("round %d: canonical token = %q, winner = %q", round, lock.Token, winners[0])
+		}
+		if err := defaultReleaseSkillsCheckWorker(lockPath, winners[0]); err != nil {
+			t.Fatalf("round %d: release winner: %v", round, err)
+		}
+	}
+}
+
+func TestDefaultStoreSkillsCheckCacheWritesTimestampAndResultTogether(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), skillsCheckCacheFilename)
+	want := skillsCheckCache{
+		CheckedAt:       "2026-03-05T12:00:00Z",
+		UpdateAvailable: true,
+	}
+	if err := defaultStoreSkillsCheckCache(cachePath, want); err != nil {
+		t.Fatalf("defaultStoreSkillsCheckCache() error: %v", err)
+	}
+
+	got, err := defaultLoadSkillsCheckCache(cachePath)
+	if err != nil {
+		t.Fatalf("defaultLoadSkillsCheckCache() error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("cache = %#v, want %#v", got, want)
+	}
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatalf("stat cache: %v", err)
+	}
+	if gotPerm := info.Mode().Perm(); gotPerm != 0o600 {
+		t.Fatalf("cache mode = %o, want 600", gotPerm)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(cachePath), ".skills-check-*"))
+	if err != nil {
+		t.Fatalf("glob cache temporary files: %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("atomic cache write left temporary files: %v", leftovers)
+	}
+}
+
+func TestDefaultStoreSkillsCheckCacheFailurePreservesSymlinkTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "target.json")
+	cachePath := filepath.Join(tmpDir, skillsCheckCacheFilename)
+	wantTarget := []byte("do not replace")
+	if err := os.WriteFile(targetPath, wantTarget, 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(targetPath, cachePath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	err := defaultStoreSkillsCheckCache(cachePath, skillsCheckCache{
+		CheckedAt:       "2026-03-05T12:00:00Z",
+		UpdateAvailable: true,
+	})
+	if err == nil {
+		t.Fatal("expected symlink cache write to fail")
+	}
+	gotTarget, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if !bytes.Equal(gotTarget, wantTarget) {
+		t.Fatalf("target changed to %q", gotTarget)
+	}
+}
+
+func TestSkillsCheckWorkerCachesResultAndReleasesLease(t *testing.T) {
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	stored := skillsCheckCache{}
+	released := false
+	worker := skillsCheckWorker{
+		runCheck: func(context.Context) (string, error) {
+			return "2 updates available", nil
+		},
+		storeCache: func(path string, cache skillsCheckCache) error {
+			if path != "/tmp/cache" {
+				t.Fatalf("cache path = %q", path)
+			}
+			stored = cache
+			return nil
+		},
+		releaseWorker: func(path, token string) error {
+			released = path == "/tmp/lock" && token == "token"
+			return nil
+		},
+		now:     func() time.Time { return now },
+		timeout: time.Second,
+	}
+	spec := skillsCheckWorkerSpec{cachePath: "/tmp/cache", lockPath: "/tmp/lock", token: "token"}
+
+	if err := worker.run(context.Background(), spec); err != nil {
+		t.Fatalf("worker.run() error: %v", err)
+	}
+	if stored.CheckedAt != now.Format(skillsCheckedAtLayout) || !stored.UpdateAvailable {
+		t.Fatalf("stored cache = %#v", stored)
+	}
+	if !released {
+		t.Fatal("worker did not release successful lease")
+	}
+}
+
+func TestSkillsCheckWorkerPersistsGenericFailureButKeepsLeaseOnMaintenanceFailure(t *testing.T) {
+	errRun := errors.New("checker failed")
+	tests := []struct {
+		name        string
+		runErr      error
+		storeErr    error
+		wantStored  bool
+		wantRelease bool
+	}{
+		{
+			name:        "generic checker failure records attempt",
+			runErr:      errRun,
+			wantStored:  true,
+			wantRelease: true,
+		},
+		{
+			name:   "unavailable checker keeps cooldown lease",
+			runErr: errSkillsCheckUnavailable,
+		},
+		{
+			name:       "cache failure keeps cooldown lease",
+			storeErr:   errors.New("cache failed"),
+			wantStored: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := false
+			released := false
+			worker := skillsCheckWorker{
+				runCheck: func(context.Context) (string, error) {
+					return "", tt.runErr
+				},
+				storeCache: func(_ string, cache skillsCheckCache) error {
+					stored = true
+					if cache.UpdateAvailable {
+						t.Fatal("failed checker must not cache an update")
+					}
+					return tt.storeErr
+				},
+				releaseWorker: func(string, string) error {
+					released = true
+					return nil
+				},
+				now:     time.Now,
+				timeout: time.Second,
+			}
+			spec := skillsCheckWorkerSpec{cachePath: "/tmp/cache", lockPath: "/tmp/lock", token: "token"}
+			_ = worker.run(context.Background(), spec)
+			if stored != tt.wantStored {
+				t.Fatalf("cache stored = %v, want %v", stored, tt.wantStored)
+			}
+			if released != tt.wantRelease {
+				t.Fatalf("lease released = %v, want %v", released, tt.wantRelease)
+			}
+		})
+	}
+}
+
+func TestRunSkillsCheckWorkerIfRequestedRequiresPrivateMarker(t *testing.T) {
+	t.Setenv(skillsWorkerEnvVar, "")
+	if RunSkillsCheckWorkerIfRequested() {
+		t.Fatal("ordinary process should not enter worker mode")
+	}
+
+	t.Setenv(skillsWorkerEnvVar, "1")
+	t.Setenv(skillsWorkerCacheEnvVar, "")
+	t.Setenv(skillsWorkerLockEnvVar, "")
+	t.Setenv(skillsWorkerTokenEnvVar, "")
+	if !RunSkillsCheckWorkerIfRequested() {
+		t.Fatal("private marker should consume the worker process")
+	}
+}
+
+func TestDefaultRunSkillsCheckCommandUsesSkillsBinaryCheckCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	restoreSkillsCheckLookups(t)
+	mockSkills := writeExecutable(t, "#!/bin/sh\necho \"$@\"\n")
 	lookupSkillsCheckCLI = func(file string) (string, error) {
 		if file != "skills" {
 			t.Fatalf("lookupSkillsCheckCLI called with %q, want skills", file)
 		}
 		return mockSkills, nil
 	}
-	lookupNpx = func(file string) (string, error) {
-		t.Fatalf("lookupNpx should not be called when skills binary is available")
-		return "", errors.New("unexpected call")
+	lookupNpx = func(string) (string, error) {
+		t.Fatal("lookupNpx should not run when skills is available")
+		return "", errors.New("unexpected")
 	}
 
 	output, err := defaultRunSkillsCheckCommand(context.Background())
 	if err != nil {
 		t.Fatalf("defaultRunSkillsCheckCommand() error: %v", err)
 	}
-	if !strings.Contains(output, "check") {
-		t.Fatalf("expected check invocation, got %q", output)
-	}
-	if strings.Contains(output, "--no") {
-		t.Fatalf("expected no npx flags in invocation, got %q", output)
+	if strings.TrimSpace(output) != "check" {
+		t.Fatalf("checker args = %q, want check", output)
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_MissingSkillsCLIIsNoop(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	origLookupNpx := lookupNpx
-	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-		lookupNpx = origLookupNpx
-	})
-
-	lookupSkillsCheckCLI = func(file string) (string, error) {
-		return "", errors.New("not found")
+func TestDefaultRunSkillsCheckCommandMissingCLIsIsUnavailable(t *testing.T) {
+	restoreSkillsCheckLookups(t)
+	lookupSkillsCheckCLI = func(string) (string, error) {
+		return "", exec.ErrNotFound
 	}
-	lookupNpx = func(file string) (string, error) {
-		return "", errors.New("npx not found")
+	lookupNpx = func(string) (string, error) {
+		return "", exec.ErrNotFound
 	}
 
 	output, err := defaultRunSkillsCheckCommand(context.Background())
 	if !errors.Is(err, errSkillsCheckUnavailable) {
-		t.Fatalf("expected errSkillsCheckUnavailable when check command is unavailable, got %v", err)
+		t.Fatalf("error = %v, want errSkillsCheckUnavailable", err)
 	}
 	if output != "" {
-		t.Fatalf("expected empty output when skills is unavailable, got %q", output)
+		t.Fatalf("output = %q, want empty", output)
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_FallsBackToNpxOffline(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	origLookupNpx := lookupNpx
-	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-		lookupNpx = origLookupNpx
-	})
-
-	mockNpx := filepath.Join(t.TempDir(), "npx-mock.sh")
-	if err := os.WriteFile(mockNpx, []byte("#!/bin/sh\necho \"$@\"\necho \"$npm_config_offline\"\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+func TestDefaultRunSkillsCheckCommandFallsBackToNpxOffline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
 	}
-	if err := os.Chmod(mockNpx, 0o755); err != nil {
-		t.Fatalf("Chmod() error: %v", err)
-	}
-
-	lookupSkillsCheckCLI = func(file string) (string, error) {
-		return "", errors.New("not found")
+	restoreSkillsCheckLookups(t)
+	mockNpx := writeExecutable(t, "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"$npm_config_offline\"\n")
+	lookupSkillsCheckCLI = func(string) (string, error) {
+		return "", exec.ErrNotFound
 	}
 	lookupNpx = func(file string) (string, error) {
 		if file != "npx" {
@@ -408,78 +754,108 @@ func TestDefaultRunSkillsCheckCommand_FallsBackToNpxOffline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultRunSkillsCheckCommand() error: %v", err)
 	}
-	if !strings.Contains(output, "--offline --yes skills check") {
-		t.Fatalf("expected --offline --yes skills check invocation, got %q", output)
-	}
-	if !strings.Contains(output, "\ntrue\n") && !strings.HasSuffix(output, "\ntrue") {
-		t.Fatalf("expected npm_config_offline=true in fallback environment, got %q", output)
+	if !strings.Contains(output, "--offline --yes skills check|true") {
+		t.Fatalf("offline npx invocation = %q", output)
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_OfflineCacheMissIsUnavailable(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	origLookupNpx := lookupNpx
-	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-		lookupNpx = origLookupNpx
-	})
-
-	mockNpx := filepath.Join(t.TempDir(), "npx-mock.sh")
-	script := "#!/bin/sh\necho \"npm ERR! code ENOTCACHED\" 1>&2\nexit 1\n"
-	if err := os.WriteFile(mockNpx, []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+func TestDefaultRunSkillsCheckCommandOfflineCacheMissIsUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
 	}
-	if err := os.Chmod(mockNpx, 0o755); err != nil {
-		t.Fatalf("Chmod() error: %v", err)
+	restoreSkillsCheckLookups(t)
+	mockNpx := writeExecutable(t, "#!/bin/sh\necho ENOTCACHED >&2\nexit 1\n")
+	lookupSkillsCheckCLI = func(string) (string, error) {
+		return "", exec.ErrNotFound
 	}
-
-	lookupSkillsCheckCLI = func(file string) (string, error) {
-		return "", errors.New("not found")
-	}
-	lookupNpx = func(file string) (string, error) {
+	lookupNpx = func(string) (string, error) {
 		return mockNpx, nil
 	}
 
 	output, err := defaultRunSkillsCheckCommand(context.Background())
 	if !errors.Is(err, errSkillsCheckUnavailable) {
-		t.Fatalf("expected errSkillsCheckUnavailable for ENOTCACHED fallback, got %v", err)
+		t.Fatalf("error = %v, want errSkillsCheckUnavailable", err)
 	}
-	if !strings.Contains(strings.ToLower(output), "enotcached") {
-		t.Fatalf("expected ENOTCACHED output, got %q", output)
+	if !strings.Contains(output, "ENOTCACHED") {
+		t.Fatalf("output = %q, want ENOTCACHED", output)
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_UsesNonProjectWorkingDirectory(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-	})
+func TestDefaultRunSkillsCheckCommandDoesNotWaitForDescendantPipes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	restoreSkillsCheckLookups(t)
+	mockSkills := writeExecutable(t, "#!/bin/sh\nsleep 10 &\nprintf '2 updates available\\n'\n")
+	lookupSkillsCheckCLI = func(string) (string, error) {
+		return mockSkills, nil
+	}
+	lookupNpx = func(string) (string, error) {
+		t.Fatal("lookupNpx should not run")
+		return "", errors.New("unexpected")
+	}
 
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	t.Setenv("USERPROFILE", homeDir)
-
-	projectDir := t.TempDir()
-	originalWD, err := os.Getwd()
+	startedAt := time.Now()
+	output, err := defaultRunSkillsCheckCommand(context.Background())
 	if err != nil {
-		t.Fatalf("Getwd() error: %v", err)
+		t.Fatalf("defaultRunSkillsCheckCommand() error: %v", err)
 	}
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatalf("Chdir(projectDir) error: %v", err)
+	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
+		t.Fatalf("checker waited %s for 10-second descendant", elapsed)
 	}
-	t.Cleanup(func() {
-		_ = os.Chdir(originalWD)
-	})
+	if !strings.Contains(output, "2 updates available") {
+		t.Fatalf("output = %q, want update result", output)
+	}
+}
 
-	mockSkills := filepath.Join(t.TempDir(), "skills-mock.sh")
-	if err := os.WriteFile(mockSkills, []byte("#!/bin/sh\nprintf \"%s\\n\" \"$PWD\"\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+func TestCappedSkillsCheckOutputRetainsLimitWhileDraining(t *testing.T) {
+	var output cappedSkillsCheckOutput
+	payload := bytes.Repeat([]byte("x"), maxSkillsCheckOutputBytes+4096)
+
+	written, err := output.Write(payload)
+	if err != nil {
+		t.Fatalf("Write() error: %v", err)
 	}
-	if err := os.Chmod(mockSkills, 0o755); err != nil {
-		t.Fatalf("Chmod() error: %v", err)
+	if written != len(payload) {
+		t.Fatalf("Write() = %d, want %d", written, len(payload))
+	}
+	if got := len(output.String()); got != maxSkillsCheckOutputBytes {
+		t.Fatalf("retained output = %d bytes, want %d", got, maxSkillsCheckOutputBytes)
 	}
 
-	lookupSkillsCheckCLI = func(file string) (string, error) {
+	written, err = output.Write([]byte("still drained"))
+	if err != nil {
+		t.Fatalf("second Write() error: %v", err)
+	}
+	if written != len("still drained") {
+		t.Fatalf("second Write() = %d, want %d", written, len("still drained"))
+	}
+	if got := len(output.String()); got != maxSkillsCheckOutputBytes {
+		t.Fatalf("retained output after cap = %d bytes, want %d", got, maxSkillsCheckOutputBytes)
+	}
+}
+
+func TestRunSkillsCheckProcessReturnsContextDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	mockSkills := writeExecutable(t, "#!/bin/sh\nsleep 10\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := runSkillsCheckProcess(ctx, mockSkills, nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runSkillsCheckProcess() error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestDefaultRunSkillsCheckCommandUsesNonProjectWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	restoreSkillsCheckLookups(t)
+	mockSkills := writeExecutable(t, "#!/bin/sh\nprintf '%s\\n' \"$PWD\"\n")
+	lookupSkillsCheckCLI = func(string) (string, error) {
 		return mockSkills, nil
 	}
 
@@ -487,242 +863,76 @@ func TestDefaultRunSkillsCheckCommand_UsesNonProjectWorkingDirectory(t *testing.
 	if err != nil {
 		t.Fatalf("defaultRunSkillsCheckCommand() error: %v", err)
 	}
-	workingDir := strings.TrimSpace(output)
-	normalizedWorkingDir := workingDir
-	if resolved, resolveErr := filepath.EvalSymlinks(workingDir); resolveErr == nil {
-		normalizedWorkingDir = resolved
-	}
-	normalizedHomeDir := homeDir
-	if resolved, resolveErr := filepath.EvalSymlinks(homeDir); resolveErr == nil {
-		normalizedHomeDir = resolved
-	}
-	if normalizedWorkingDir != normalizedHomeDir {
-		t.Fatalf("expected command working directory %q, got %q", normalizedHomeDir, normalizedWorkingDir)
-	}
-	normalizedProjectDir := projectDir
-	if resolved, resolveErr := filepath.EvalSymlinks(projectDir); resolveErr == nil {
-		normalizedProjectDir = resolved
-	}
-	if normalizedWorkingDir == normalizedProjectDir {
-		t.Fatalf("expected command not to run in project directory %q", normalizedProjectDir)
+	want := skillsCheckWorkingDirectory()
+	if strings.TrimSpace(output) != want {
+		t.Fatalf("working directory = %q, want %q", strings.TrimSpace(output), want)
 	}
 }
 
-func TestDefaultRunSkillsCheckCommand_SkipsProjectLocalSkillsBinary(t *testing.T) {
-	origLookup := lookupSkillsCheckCLI
-	origLookupNpx := lookupNpx
-	t.Cleanup(func() {
-		lookupSkillsCheckCLI = origLookup
-		lookupNpx = origLookupNpx
-	})
-
+func TestShouldSkipProjectLocalSkillsBinary(t *testing.T) {
 	repoRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repoRoot, ".git"), []byte("gitdir"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
 	}
-	workingDir := filepath.Join(repoRoot, "subdir")
-	if err := os.MkdirAll(workingDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error: %v", err)
+	projectDir := filepath.Join(repoRoot, "subdir")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
 	}
-	originalWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error: %v", err)
-	}
-	if err := os.Chdir(workingDir); err != nil {
-		t.Fatalf("Chdir() error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(originalWD)
-	})
+	t.Chdir(projectDir)
 
-	localSkills := filepath.Join(repoRoot, "node_modules", ".bin", "skills")
-	if err := os.MkdirAll(filepath.Dir(localSkills), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error: %v", err)
+	localBinary := filepath.Join(repoRoot, "node_modules", ".bin", "skills")
+	if err := os.MkdirAll(filepath.Dir(localBinary), 0o755); err != nil {
+		t.Fatalf("mkdir local binary dir: %v", err)
 	}
-	if err := os.WriteFile(localSkills, []byte("#!/bin/sh\necho should-not-run\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+	if err := os.WriteFile(localBinary, []byte("fixture"), 0o755); err != nil {
+		t.Fatalf("write local binary: %v", err)
 	}
-	if err := os.Chmod(localSkills, 0o755); err != nil {
-		t.Fatalf("Chmod() error: %v", err)
+	if !shouldSkipProjectLocalSkillsBinary(localBinary) {
+		t.Fatal("expected project-local skills binary to be skipped")
 	}
-
-	lookupSkillsCheckCLI = func(file string) (string, error) {
-		return localSkills, nil
-	}
-	lookupNpx = func(file string) (string, error) {
-		return "", errors.New("npx unavailable")
-	}
-
-	output, err := defaultRunSkillsCheckCommand(context.Background())
-	if !errors.Is(err, errSkillsCheckUnavailable) {
-		t.Fatalf("expected errSkillsCheckUnavailable for skipped local binary fallback failure, got %v", err)
-	}
-	if output != "" {
-		t.Fatalf("expected project-local skills binary to be skipped, got %q", output)
+	externalBinary := filepath.Join(t.TempDir(), "skills")
+	if shouldSkipProjectLocalSkillsBinary(externalBinary) {
+		t.Fatal("expected external skills binary to be allowed")
 	}
 }
 
-func TestShouldSkipProjectLocalSkillsBinary_NoRepoRootDoesNotSkip(t *testing.T) {
-	originalWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error: %v", err)
+func TestValidateSkillsCheckWorkerSpec(t *testing.T) {
+	valid := skillsCheckWorkerSpec{
+		cachePath: filepath.Join(t.TempDir(), "cache"),
+		lockPath:  filepath.Join(t.TempDir(), "lock"),
+		token:     "token",
 	}
-	workingDir := t.TempDir()
-	if err := os.Chdir(workingDir); err != nil {
-		t.Fatalf("Chdir() error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(originalWD)
-	})
-
-	binaryPath := filepath.Join(workingDir, "bin", "skills")
-	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error: %v", err)
-	}
-	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
+	if err := validateSkillsCheckWorkerSpec(valid); err != nil {
+		t.Fatalf("valid spec error: %v", err)
 	}
 
-	if shouldSkipProjectLocalSkillsBinary(binaryPath) {
-		t.Fatal("expected no-repo-root working directory not to skip binary path")
+	invalid := []skillsCheckWorkerSpec{
+		{cachePath: "relative", lockPath: valid.lockPath, token: valid.token},
+		{cachePath: valid.cachePath, lockPath: "relative", token: valid.token},
+		{cachePath: valid.cachePath, lockPath: valid.lockPath},
+	}
+	for _, spec := range invalid {
+		if err := validateSkillsCheckWorkerSpec(spec); err == nil {
+			t.Fatalf("expected invalid spec error for %#v", spec)
+		}
 	}
 }
 
-func TestDefaultPersistSkillsCheckedAt_PreservesUnknownFields(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	t.Setenv("ASC_CONFIG_PATH", cfgPath)
-
-	initial := `{
-  "key_id": "ABC123",
-  "custom_future_key": "keep-me",
-  "custom_nested": {"enabled": true},
-  "skills_checked_at": "2026-03-01T00:00:00Z"
-}`
-	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
-	}
-
-	want := "2026-03-05T14:00:00Z"
-	if err := defaultPersistSkillsCheckedAt(want); err != nil {
-		t.Fatalf("defaultPersistSkillsCheckedAt() error: %v", err)
-	}
-
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("ReadFile() error: %v", err)
-	}
-
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-
-	var got string
-	if err := json.Unmarshal(doc["skills_checked_at"], &got); err != nil {
-		t.Fatalf("unmarshal skills_checked_at error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("skills_checked_at = %q, want %q", got, want)
-	}
-
-	if _, ok := doc["custom_future_key"]; !ok {
-		t.Fatal("expected custom_future_key to be preserved")
-	}
-	if _, ok := doc["custom_nested"]; !ok {
-		t.Fatal("expected custom_nested to be preserved")
-	}
-}
-
-func TestDefaultPersistSkillsCheckedAt_PreservesTopLevelKeyOrder(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	t.Setenv("ASC_CONFIG_PATH", cfgPath)
-
-	initial := `{
-  "z_key": "z",
-  "skills_checked_at": "2026-03-01T00:00:00Z",
-  "a_key": "a"
-}`
-	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
-	}
-
-	if err := defaultPersistSkillsCheckedAt("2026-03-05T18:00:00Z"); err != nil {
-		t.Fatalf("defaultPersistSkillsCheckedAt() error: %v", err)
-	}
-
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("ReadFile() error: %v", err)
-	}
-
-	content := string(data)
-	zIndex := strings.Index(content, `"z_key"`)
-	skillsIndex := strings.Index(content, `"skills_checked_at"`)
-	aIndex := strings.Index(content, `"a_key"`)
-	if zIndex == -1 || skillsIndex == -1 || aIndex == -1 {
-		t.Fatalf("expected keys in output, got %q", content)
-	}
-	if zIndex >= skillsIndex || skillsIndex >= aIndex {
-		t.Fatalf("expected top-level key order to be preserved, got %q", content)
-	}
-}
-
-func TestDefaultPersistSkillsCheckedAt_NullJSONCreatesObject(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	t.Setenv("ASC_CONFIG_PATH", cfgPath)
-
-	if err := os.WriteFile(cfgPath, []byte("null"), 0o600); err != nil {
-		t.Fatalf("WriteFile() error: %v", err)
-	}
-
-	want := "2026-03-05T15:00:00Z"
-	if err := defaultPersistSkillsCheckedAt(want); err != nil {
-		t.Fatalf("defaultPersistSkillsCheckedAt() error: %v", err)
-	}
-
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("ReadFile() error: %v", err)
-	}
-
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-
-	var got string
-	if err := json.Unmarshal(doc["skills_checked_at"], &got); err != nil {
-		t.Fatalf("unmarshal skills_checked_at error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("skills_checked_at = %q, want %q", got, want)
-	}
-}
-
-func captureStderr(t *testing.T, fn func()) string {
+func restoreSkillsCheckLookups(t *testing.T) {
 	t.Helper()
+	origSkills := lookupSkillsCheckCLI
+	origNpx := lookupNpx
+	t.Cleanup(func() {
+		lookupSkillsCheckCLI = origSkills
+		lookupNpx = origNpx
+	})
+}
 
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() error: %v", err)
+func writeExecutable(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "skills-check-fixture")
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
 	}
-	os.Stderr = w
-
-	done := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, r)
-		_ = r.Close()
-		done <- buf.String()
-	}()
-
-	defer func() {
-		os.Stderr = oldStderr
-		_ = w.Close()
-	}()
-
-	fn()
-	_ = w.Close()
-	return <-done
+	return path
 }

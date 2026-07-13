@@ -16,12 +16,15 @@ import (
 var fetchAvailableTerritoryDetailsFn = fetchAvailableTerritoryDetails
 
 func fetchAvailableTerritoryDetails(ctx context.Context, client *asc.Client, appID string) (string, []string, int, error) {
+	ctx = withReadinessRequestGate(ctx)
 	availabilityID := ""
 	availableTerritories := 0
 	decodedAvailableTerritories := 0
 	territoryIDs := make(map[string]struct{})
 
-	availabilityResp, err := client.GetAppAvailabilityV2(ctx, appID)
+	availabilityResp, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.AppAvailabilityV2Response, error) {
+		return client.GetAppAvailabilityV2(requestCtx, appID)
+	})
 	if err != nil {
 		if shared.IsAppAvailabilityMissing(err) {
 			return "", nil, 0, nil
@@ -36,12 +39,13 @@ func fetchAvailableTerritoryDetails(ctx context.Context, client *asc.Client, app
 
 	nextURL := ""
 	for {
-		var territoryResp *asc.TerritoryAvailabilitiesResponse
-		if strings.TrimSpace(nextURL) != "" {
-			territoryResp, err = client.GetTerritoryAvailabilities(ctx, availabilityID, asc.WithTerritoryAvailabilitiesNextURL(nextURL))
-		} else {
-			territoryResp, err = client.GetTerritoryAvailabilities(ctx, availabilityID, asc.WithTerritoryAvailabilitiesLimit(200))
-		}
+		territoryResp, requestErr := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.TerritoryAvailabilitiesResponse, error) {
+			if strings.TrimSpace(nextURL) != "" {
+				return client.GetTerritoryAvailabilities(requestCtx, availabilityID, asc.WithTerritoryAvailabilitiesNextURL(nextURL))
+			}
+			return client.GetTerritoryAvailabilities(requestCtx, availabilityID, asc.WithTerritoryAvailabilitiesLimit(200))
+		})
+		err = requestErr
 		if err != nil {
 			return availabilityID, nil, availableTerritories, fmt.Errorf("failed to fetch territory availabilities: %w", err)
 		}

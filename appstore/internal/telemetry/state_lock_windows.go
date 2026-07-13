@@ -35,6 +35,10 @@ func unlockStateFile(file *os.File) error {
 }
 
 func openStateFileForRead(path string) (*os.File, error) {
+	return openTelemetryFileForRead(path)
+}
+
+func openTelemetryFileForRead(path string) (*os.File, error) {
 	pathPointer, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
@@ -85,6 +89,10 @@ func openStateLockForStat(path string) (*os.File, error) {
 }
 
 func replaceStateFile(oldPath, newPath string, wait time.Duration) error {
+	return replaceTelemetryFile(oldPath, newPath, wait)
+}
+
+func replaceTelemetryFile(oldPath, newPath string, wait time.Duration) error {
 	deadline := time.Now().Add(wait)
 	for {
 		err := os.Rename(oldPath, newPath)
@@ -98,6 +106,10 @@ func replaceStateFile(oldPath, newPath string, wait time.Duration) error {
 			return err
 		}
 	}
+}
+
+func syncTelemetryDirectory(string) error {
+	return nil
 }
 
 func isRetryableStateReplaceError(err error) bool {

@@ -11,6 +11,15 @@ func TestMapIAPsResponse_MapsItems(t *testing.T) {
 	iaps, err := mapIAPsResponse(&asc.InAppPurchasesV2Response{
 		Data: []asc.Resource[asc.InAppPurchaseV2Attributes]{
 			{
+				ID: "iap-2",
+				Attributes: asc.InAppPurchaseV2Attributes{
+					Name:              "Gems",
+					ProductID:         "com.example.gems",
+					InAppPurchaseType: "CONSUMABLE",
+					State:             "READY_TO_SUBMIT",
+				},
+			},
+			{
 				ID: "iap-1",
 				Attributes: asc.InAppPurchaseV2Attributes{
 					Name:              "Coins",
@@ -24,11 +33,14 @@ func TestMapIAPsResponse_MapsItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(iaps) != 1 {
-		t.Fatalf("expected 1 IAP, got %d", len(iaps))
+	if len(iaps) != 2 {
+		t.Fatalf("expected 2 IAPs, got %d", len(iaps))
 	}
 	if iaps[0].ID != "iap-1" || iaps[0].Name != "Coins" || iaps[0].ProductID != "com.example.coins" || iaps[0].Type != "CONSUMABLE" || iaps[0].State != "MISSING_METADATA" {
 		t.Fatalf("unexpected mapped IAP: %+v", iaps[0])
+	}
+	if iaps[1].ID != "iap-2" || iaps[1].ProductID != "com.example.gems" {
+		t.Fatalf("IAPs are not stably sorted: %+v", iaps)
 	}
 }
 

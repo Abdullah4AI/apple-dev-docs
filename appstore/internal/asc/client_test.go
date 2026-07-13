@@ -977,9 +977,46 @@ func TestBuildAppSearchKeywordsQuery(t *testing.T) {
 	}
 }
 
+func TestBuildAppClipDefaultExperiencesQuery(t *testing.T) {
+	query := &appClipDefaultExperiencesQuery{}
+	WithAppClipDefaultExperiencesReleaseWithVersionExists(true)(query)
+
+	values, err := url.ParseQuery(buildAppClipDefaultExperiencesQuery(query))
+	if err != nil {
+		t.Fatalf("ParseQuery() error: %v", err)
+	}
+	if got := values.Get("exists[releaseWithAppStoreVersion]"); got != "true" {
+		t.Fatalf("exists[releaseWithAppStoreVersion] = %q, want true", got)
+	}
+}
+
+func TestAppStoreVersionStateOptionsPreserveExistingComposition(t *testing.T) {
+	query := &appStoreVersionsQuery{}
+	WithAppStoreVersionsStates([]string{"READY_FOR_SALE", "READY_FOR_DISTRIBUTION"})(query)
+	WithAppStoreVersionsStates([]string{"PREPARE_FOR_SUBMISSION"})(query)
+
+	if got := strings.Join(query.states, ","); got != "READY_FOR_SALE,PREPARE_FOR_SUBMISSION" {
+		t.Fatalf("app store states = %q, want READY_FOR_SALE,PREPARE_FOR_SUBMISSION", got)
+	}
+	if got := strings.Join(query.appVersionStates, ","); got != "READY_FOR_DISTRIBUTION" {
+		t.Fatalf("app version states = %q, want READY_FOR_DISTRIBUTION", got)
+	}
+
+	WithAppStoreVersionsVersionStates([]string{"WAITING_FOR_REVIEW"})(query)
+	if got := strings.Join(query.appVersionStates, ","); got != "WAITING_FOR_REVIEW" {
+		t.Fatalf("app version states = %q, want explicit value to replace inferred states", got)
+	}
+
+	WithAppStoreVersionsVersionStates([]string{"PROCESSING_FOR_DISTRIBUTION"})(query)
+	if got := strings.Join(query.appVersionStates, ","); got != "PROCESSING_FOR_DISTRIBUTION" {
+		t.Fatalf("app version states = %q, want last explicit value", got)
+	}
+}
+
 func TestBuildAppStoreVersionQuery(t *testing.T) {
 	query := &appStoreVersionQuery{}
 	WithAppStoreVersionInclude([]string{"appStoreReviewDetail", "ageRatingDeclaration"})(query)
+	WithAppStoreVersionLocalizationsIncludeLimit(50)(query)
 
 	values, err := url.ParseQuery(buildAppStoreVersionQuery(query))
 	if err != nil {
@@ -988,11 +1025,15 @@ func TestBuildAppStoreVersionQuery(t *testing.T) {
 	if got := values.Get("include"); got != "appStoreReviewDetail,ageRatingDeclaration" {
 		t.Fatalf("expected include=appStoreReviewDetail,ageRatingDeclaration, got %q", got)
 	}
+	if got := values.Get("limit[appStoreVersionLocalizations]"); got != "50" {
+		t.Fatalf("expected localization include limit 50, got %q", got)
+	}
 }
 
 func TestBuildAppInfoQuery(t *testing.T) {
 	query := &appInfoQuery{}
 	WithAppInfoInclude([]string{"ageRatingDeclaration", "territoryAgeRatings"})(query)
+	WithAppInfoLocalizationsIncludeLimit(50)(query)
 
 	values, err := url.ParseQuery(buildAppInfoQuery(query))
 	if err != nil {
@@ -1000,6 +1041,9 @@ func TestBuildAppInfoQuery(t *testing.T) {
 	}
 	if got := values.Get("include"); got != "ageRatingDeclaration,territoryAgeRatings" {
 		t.Fatalf("expected include=ageRatingDeclaration,territoryAgeRatings, got %q", got)
+	}
+	if got := values.Get("limit[appInfoLocalizations]"); got != "50" {
+		t.Fatalf("expected localization include limit 50, got %q", got)
 	}
 }
 
@@ -2012,10 +2056,9 @@ func TestBuildAndroidToIosAppMappingDetailsQuery(t *testing.T) {
 }
 
 func TestBuildAlternativeDistributionDomainsQuery(t *testing.T) {
-	query := &alternativeDistributionDomainsQuery{
-		listQuery: listQuery{limit: 20},
-		fields:    []string{"domain", "referenceName"},
-	}
+	query := &alternativeDistributionDomainsQuery{}
+	WithAlternativeDistributionDomainsLimit(20)(query)
+	WithAlternativeDistributionDomainsFields([]string{"domain", "referenceName"})(query)
 	values, err := url.ParseQuery(buildAlternativeDistributionDomainsQuery(query))
 	if err != nil {
 		t.Fatalf("ParseQuery() error: %v", err)
@@ -2029,12 +2072,10 @@ func TestBuildAlternativeDistributionDomainsQuery(t *testing.T) {
 }
 
 func TestBuildAlternativeDistributionKeysQuery(t *testing.T) {
-	existsApp := true
-	query := &alternativeDistributionKeysQuery{
-		listQuery: listQuery{limit: 15},
-		fields:    []string{"publicKey"},
-		existsApp: &existsApp,
-	}
+	query := &alternativeDistributionKeysQuery{}
+	WithAlternativeDistributionKeysLimit(15)(query)
+	WithAlternativeDistributionKeysFields([]string{"publicKey"})(query)
+	WithAlternativeDistributionKeysExistsApp(true)(query)
 	values, err := url.ParseQuery(buildAlternativeDistributionKeysQuery(query))
 	if err != nil {
 		t.Fatalf("ParseQuery() error: %v", err)
@@ -2064,10 +2105,9 @@ func TestBuildAlternativeDistributionPackageVersionsQuery(t *testing.T) {
 }
 
 func TestBuildAlternativeDistributionPackageVariantsQuery(t *testing.T) {
-	query := &alternativeDistributionPackageVariantsQuery{
-		listQuery: listQuery{limit: 9},
-		fields:    []string{"url", "fileChecksum"},
-	}
+	query := &alternativeDistributionPackageVariantsQuery{}
+	WithAlternativeDistributionPackageVariantsLimit(9)(query)
+	WithAlternativeDistributionPackageVariantsFields([]string{"url", "fileChecksum"})(query)
 	values, err := url.ParseQuery(buildAlternativeDistributionPackageVariantsQuery(query))
 	if err != nil {
 		t.Fatalf("ParseQuery() error: %v", err)
@@ -2081,10 +2121,9 @@ func TestBuildAlternativeDistributionPackageVariantsQuery(t *testing.T) {
 }
 
 func TestBuildAlternativeDistributionPackageDeltasQuery(t *testing.T) {
-	query := &alternativeDistributionPackageDeltasQuery{
-		listQuery: listQuery{limit: 11},
-		fields:    []string{"url", "fileChecksum"},
-	}
+	query := &alternativeDistributionPackageDeltasQuery{}
+	WithAlternativeDistributionPackageDeltasLimit(11)(query)
+	WithAlternativeDistributionPackageDeltasFields([]string{"url", "fileChecksum"})(query)
 	values, err := url.ParseQuery(buildAlternativeDistributionPackageDeltasQuery(query))
 	if err != nil {
 		t.Fatalf("ParseQuery() error: %v", err)

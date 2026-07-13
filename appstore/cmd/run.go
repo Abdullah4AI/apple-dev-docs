@@ -21,13 +21,16 @@ import (
 )
 
 var (
-	maybeCheckForSkillUpdates = install.MaybeCheckForSkillUpdates
-	emitTelemetry             = telemetry.EmitWithContext
+	maybeScheduleSkillsUpdateCheck = install.MaybeScheduleSkillsUpdateCheck
+	emitTelemetry                  = telemetry.EmitWithContext
 )
 
 // Run executes the CLI using the provided args (not including argv[0]) and version string.
 // It returns the intended process exit code.
 func Run(args []string, versionInfo string) int {
+	if install.RunSkillsCheckWorkerIfRequested() {
+		return ExitSuccess
+	}
 	defer shared.CleanupTempPrivateKeys()
 
 	// Fast path for the most common version check invocation. This avoids
@@ -51,18 +54,14 @@ func Run(args []string, versionInfo string) int {
 			fmt.Fprint(os.Stderr, parseOutput.String())
 		}
 		if errors.Is(parseErr, flag.ErrHelp) {
-			emitImmediateTelemetry(args, root, versionInfo, ExitSuccess, telemetry.EventContext{
-				InvocationShape: analysis.shape,
-			})
 			return ExitSuccess
 		}
 		if parseOutput.Len() == 0 {
 			fmt.Fprint(os.Stderr, errfmt.FormatStderr(parseErr))
 		}
-		exitCode := ExitCodeFromError(parseErr)
-		if parseOutput.Len() > 0 {
-			exitCode = ExitUsage
-		}
+		// Every non-help error returned by command-tree parsing is invalid usage,
+		// including NoExecError cases that do not write flag output.
+		exitCode := ExitUsage
 		printUnknownFlagSuggestion(analysis)
 		emitImmediateTelemetry(args, root, versionInfo, exitCode, parseFailureContext(analysis))
 		return exitCode
@@ -120,7 +119,7 @@ func Run(args []string, versionInfo string) int {
 	}
 
 	if !renderGroupHelp && shouldRunSkillsUpdateCheck(commandName, runCtx, runErr) {
-		maybeCheckForSkillUpdates(runCtx)
+		maybeScheduleSkillsUpdateCheck()
 	}
 
 	// Write JUnit report if requested
@@ -145,9 +144,6 @@ func Run(args []string, versionInfo string) int {
 	}
 
 	if renderGroupHelp {
-		emitTelemetry(commandName, versionInfo, elapsed, ExitSuccess, telemetry.EventContext{
-			InvocationShape: analysis.shape,
-		})
 		return ExitSuccess
 	}
 
@@ -247,7 +243,7 @@ func shouldCancelRunContextAfterError(err error) bool {
 }
 
 func shouldRunSkillsUpdateCheck(commandName string, runCtx context.Context, runErr error) bool {
-	if commandName == "asc" || commandName == "asc install-skills" {
+	if commandName == "asc" || commandName == "asc install-skills" || commandName == "asc version" {
 		return false
 	}
 	if runCtx != nil && runCtx.Err() != nil {

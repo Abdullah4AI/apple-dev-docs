@@ -1649,8 +1649,16 @@ func (c *Client) DeleteAppInfoLocalization(ctx context.Context, localizationID s
 }
 
 // GetAppInfos retrieves app info records for an app.
-func (c *Client) GetAppInfos(ctx context.Context, appID string) (*AppInfosResponse, error) {
+func (c *Client) GetAppInfos(ctx context.Context, appID string, opts ...AppInfoOption) (*AppInfosResponse, error) {
+	query := &appInfoQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	path := fmt.Sprintf("/v1/apps/%s/appInfos", appID)
+	if queryString := buildAppInfoQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err

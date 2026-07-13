@@ -2,7 +2,6 @@ package validate
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -69,30 +68,36 @@ func runValidateSubscriptions(ctx context.Context, opts validateSubscriptionsOpt
 		return fmt.Errorf("validate subscriptions: %w", err)
 	}
 
-	requestCtx, cancel := shared.ContextWithTimeout(ctx)
-	defer func() { cancel() }()
-
-	refreshRequestCtx := func() {
-		cancel()
-		requestCtx, cancel = shared.ContextWithTimeout(ctx)
-	}
-
+	ctx = withReadinessRequestGate(ctx)
 	pricingCoverageSkipReason := ""
-	_, appAvailableTerritories, availableTerritories, err := fetchAvailableTerritoryDetailsFn(requestCtx, client, opts.AppID)
-	if err != nil {
-		if reason, ok := availabilityCheckSkipReason(err); ok {
-			pricingCoverageSkipReason = reason
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				refreshRequestCtx()
+	var appAvailableTerritories []string
+	availableTerritories := 0
+	var subs []validation.Subscription
+	if err := runReadinessTasks(
+		ctx,
+		func(taskCtx context.Context) error {
+			_, territories, count, fetchErr := fetchAvailableTerritoryDetailsFn(taskCtx, client, opts.AppID)
+			if fetchErr != nil {
+				if reason, ok := availabilityCheckSkipReason(fetchErr); ok {
+					pricingCoverageSkipReason = reason
+					return nil
+				}
+				return fmt.Errorf("validate subscriptions: %w", fetchErr)
 			}
-		} else {
-			return fmt.Errorf("validate subscriptions: %w", err)
-		}
-	}
-
-	subs, err := fetchSubscriptionsFn(ctx, client, opts.AppID)
-	if err != nil {
-		return fmt.Errorf("validate subscriptions: %w", err)
+			appAvailableTerritories = territories
+			availableTerritories = count
+			return nil
+		},
+		func(taskCtx context.Context) error {
+			var fetchErr error
+			subs, fetchErr = fetchSubscriptionsFn(taskCtx, client, opts.AppID)
+			if fetchErr != nil {
+				return fmt.Errorf("validate subscriptions: %w", fetchErr)
+			}
+			return nil
+		},
+	); err != nil {
+		return err
 	}
 
 	buildCount := 0
@@ -101,8 +106,7 @@ func runValidateSubscriptions(ctx context.Context, opts validateSubscriptionsOpt
 	var buildStatus metadataCheckStatus
 	for _, sub := range subs {
 		if strings.EqualFold(strings.TrimSpace(sub.State), "MISSING_METADATA") {
-			refreshRequestCtx()
-			buildCount, buildStatus, err = fetchAppBuildCountFn(requestCtx, client, opts.AppID)
+			buildCount, buildStatus, err = fetchAppBuildCountFn(ctx, client, opts.AppID)
 			if err != nil {
 				return fmt.Errorf("validate subscriptions: %w", err)
 			}
@@ -111,11 +115,6 @@ func runValidateSubscriptions(ctx context.Context, opts validateSubscriptionsOpt
 			break
 		}
 	}
-
-	// No further network calls use the request-scoped timeout context beyond this point.
-	// Cancel it eagerly so slow report rendering cannot race the refreshed context into
-	// DeadlineExceeded after the build probe already succeeded.
-	cancel()
 
 	report := validation.ValidateSubscriptions(validation.SubscriptionsInput{
 		AppID:                     opts.AppID,

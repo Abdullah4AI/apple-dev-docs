@@ -22,6 +22,8 @@ const (
 	maxStateFileBytes  = 64 * 1024
 )
 
+var errTelemetryLockBusy = errors.New("telemetry lock busy")
+
 type State struct {
 	InstallID string `json:"install_id,omitempty"`
 	Disabled  bool   `json:"disabled,omitempty"`
@@ -91,10 +93,18 @@ func SetEnabled(enabled bool) error {
 	if err != nil {
 		return err
 	}
-	return updateState(path, func(st *State) error {
+	if err := updateState(path, func(st *State) error {
 		st.Disabled = !enabled
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if !enabled {
+		if err := purgeDefaultSpool(); err != nil {
+			debugf("telemetry spool purge failed after state opt-out: %v", err)
+		}
+	}
+	return nil
 }
 
 func ResetInstallID() (string, error) {
@@ -174,9 +184,13 @@ func updateStateWithLockTimeout(path string, wait time.Duration, mutate func(*St
 }
 
 func lockState(path string, wait time.Duration) (func(), error) {
+	return lockTelemetryFile(path, wait, "state")
+}
+
+func lockTelemetryFile(path string, wait time.Duration, purpose string) (func(), error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("telemetry: failed to create state directory: %w", err)
+	if err := ensureSecureTelemetryDirectory(dir); err != nil {
+		return nil, fmt.Errorf("telemetry: failed to create %s directory: %w", purpose, err)
 	}
 	lockPath := path + ".lock"
 	deadline := time.Now().Add(wait)
@@ -186,39 +200,43 @@ func lockState(path string, wait time.Duration) (func(), error) {
 			info, statErr := statStateLock(lockPath)
 			if errors.Is(statErr, os.ErrNotExist) {
 				if !waitForStateLockRetry(wait, deadline) {
-					return nil, fmt.Errorf("telemetry: timed out locking state")
+					return nil, telemetryLockBusyError(purpose)
 				}
 				continue
 			}
 			if statErr != nil || !info.IsDir() {
-				return nil, fmt.Errorf("telemetry: failed to open state lock: %w", err)
+				return nil, fmt.Errorf("telemetry: failed to open %s lock: %w", purpose, err)
 			}
 			if time.Since(info.ModTime()) > legacyLockStaleAge {
 				migrated, migrateErr := migrateLegacyStateLockDirectory(lockPath, info)
 				if migrateErr != nil {
-					return nil, fmt.Errorf("telemetry: failed to migrate legacy state lock: %w", migrateErr)
+					return nil, fmt.Errorf("telemetry: failed to migrate legacy %s lock: %w", purpose, migrateErr)
 				}
 				if migrated {
 					continue
 				}
 			}
 			if wait <= 0 || time.Now().After(deadline) {
-				return nil, fmt.Errorf("telemetry: timed out locking state")
+				return nil, telemetryLockBusyError(purpose)
 			}
 			if !waitForStateLockRetry(wait, deadline) {
-				return nil, fmt.Errorf("telemetry: timed out locking state")
+				return nil, telemetryLockBusyError(purpose)
 			}
 			continue
 		}
+		if err := lockFile.Chmod(0o600); err != nil {
+			_ = lockFile.Close()
+			return nil, fmt.Errorf("telemetry: failed to secure %s lock: %w", purpose, err)
+		}
 		if wait > 0 && time.Until(deadline) <= 0 {
 			_ = lockFile.Close()
-			return nil, fmt.Errorf("telemetry: timed out locking state")
+			return nil, telemetryLockBusyError(purpose)
 		}
 
 		locked, lockErr := tryLockStateFile(lockFile)
 		if lockErr != nil {
 			_ = lockFile.Close()
-			return nil, fmt.Errorf("telemetry: failed to lock state: %w", lockErr)
+			return nil, fmt.Errorf("telemetry: failed to lock %s: %w", purpose, lockErr)
 		}
 		if locked {
 			return func() {
@@ -228,14 +246,25 @@ func lockState(path string, wait time.Duration) (func(), error) {
 		}
 		if wait <= 0 || time.Now().After(deadline) {
 			_ = lockFile.Close()
-			return nil, fmt.Errorf("telemetry: timed out locking state")
+			return nil, telemetryLockBusyError(purpose)
 		}
 		if !waitForStateLockRetry(wait, deadline) {
 			_ = lockFile.Close()
-			return nil, fmt.Errorf("telemetry: timed out locking state")
+			return nil, telemetryLockBusyError(purpose)
 		}
 		_ = lockFile.Close()
 	}
+}
+
+func telemetryLockBusyError(purpose string) error {
+	return fmt.Errorf("telemetry: timed out locking %s: %w", purpose, errTelemetryLockBusy)
+}
+
+func ensureSecureTelemetryDirectory(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
 }
 
 func migrateLegacyStateLockDirectory(lockPath string, expected os.FileInfo) (bool, error) {
@@ -326,7 +355,7 @@ func waitForStateLockRetry(wait time.Duration, deadline time.Time) bool {
 
 func saveState(path string, st State, wait time.Duration) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := ensureSecureTelemetryDirectory(dir); err != nil {
 		return fmt.Errorf("telemetry: failed to create state directory: %w", err)
 	}
 	st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)

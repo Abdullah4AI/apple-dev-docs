@@ -6,15 +6,15 @@ import (
 	"fmt"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 var fetchAppBuildCountFn = fetchAppBuildCount
 
 func fetchAppBuildCount(ctx context.Context, client *asc.Client, appID string) (int, metadataCheckStatus, error) {
-	reqCtx, cancel := shared.ContextWithTimeout(ctx)
-	resp, err := client.GetBuilds(reqCtx, appID)
-	cancel()
+	ctx = withReadinessRequestGate(ctx)
+	resp, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.BuildsResponse, error) {
+		return client.GetBuilds(requestCtx, appID)
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return 0, metadataCheckStatus{}, err

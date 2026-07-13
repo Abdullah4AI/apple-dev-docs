@@ -5,7 +5,66 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestFetchSubscriptions_BoundsGroupAndMetadataFanOutAndSortsDeterministically(t *testing.T) {
+	const delay = 50 * time.Millisecond
+	tracker := &requestConcurrencyTracker{}
+	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/v1/apps/app-1/subscriptionGroups" {
+			return buildsJSONResponse(http.StatusOK, `{"data":[
+				{"type":"subscriptionGroups","id":"group-z","attributes":{"referenceName":"Group Z"}},
+				{"type":"subscriptionGroups","id":"group-a","attributes":{"referenceName":"Group A"}}
+			]}`)
+		}
+		if err := tracker.wait(req.Context(), delay); err != nil {
+			return nil, err
+		}
+
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/v1/subscriptionGroups/") && strings.HasSuffix(req.URL.Path, "/subscriptions"):
+			groupID := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/v1/subscriptionGroups/"), "/subscriptions")
+			subscriptionID := strings.TrimPrefix(groupID, "group-")
+			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-`+subscriptionID+`","attributes":{"name":"Subscription `+subscriptionID+`","productId":"product.`+subscriptionID+`","state":"MISSING_METADATA"}}]}`)
+		case strings.HasPrefix(req.URL.Path, "/v1/subscriptionGroups/") && strings.HasSuffix(req.URL.Path, "/subscriptionGroupLocalizations"):
+			return buildsJSONResponse(http.StatusOK, `{"data":[]}`)
+		case strings.HasSuffix(req.URL.Path, "/appStoreReviewScreenshot"), strings.HasSuffix(req.URL.Path, "/subscriptionAvailability"):
+			return buildsJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND"}]}`)
+		case strings.HasSuffix(req.URL.Path, "/images"),
+			strings.HasSuffix(req.URL.Path, "/prices"),
+			strings.HasSuffix(req.URL.Path, "/subscriptionLocalizations"),
+			strings.HasSuffix(req.URL.Path, "/introductoryOffers"),
+			strings.HasSuffix(req.URL.Path, "/promotionalOffers"),
+			strings.HasSuffix(req.URL.Path, "/winBackOffers"):
+			return buildsJSONResponse(http.StatusOK, `{"data":[]}`)
+		default:
+			return buildsJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"UNEXPECTED_REQUEST"}]}`)
+		}
+	}))
+
+	started := time.Now()
+	subscriptions, err := fetchSubscriptions(context.Background(), client, "app-1")
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("fetchSubscriptions() error = %v", err)
+	}
+	if got := tracker.max.Load(); got != readinessConcurrencyLimit {
+		t.Fatalf("maximum in-flight requests = %d, want exactly %d", got, readinessConcurrencyLimit)
+	}
+	if elapsed >= 800*time.Millisecond {
+		t.Fatalf("bounded subscription fan-out took %s; serial delayed fixture time is %s", elapsed, 20*delay)
+	}
+	if len(subscriptions) != 2 {
+		t.Fatalf("got %d subscriptions, want 2", len(subscriptions))
+	}
+	if subscriptions[0].ID != "sub-a" || subscriptions[0].GroupID != "group-a" {
+		t.Fatalf("first subscription is not stably sorted: %+v", subscriptions[0])
+	}
+	if subscriptions[1].ID != "sub-z" || subscriptions[1].GroupID != "group-z" {
+		t.Fatalf("second subscription is not stably sorted: %+v", subscriptions[1])
+	}
+}
 
 func TestFetchSubscriptionPriceTerritories_DeduplicatesAndSortsTerritories(t *testing.T) {
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
