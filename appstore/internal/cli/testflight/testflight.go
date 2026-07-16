@@ -5,6 +5,8 @@ import (
 	"flag"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 // TestFlightCommand returns the testflight command with subcommands.
@@ -33,7 +35,7 @@ Examples:
   asc testflight app-localizations list --app "APP_ID"
   asc testflight pre-release list --app "APP_ID"`,
 		FlagSet:   fs,
-		UsageFunc: testflightVisibleUsageFunc,
+		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			TestFlightGroupsCommand(),
 			TestFlightTestersCommand(),

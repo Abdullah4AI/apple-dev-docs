@@ -78,7 +78,7 @@ func SubscriptionsGroupsCommand() *ffcli.Command {
 Examples:
   asc subscriptions groups list --app "APP_ID"
   asc subscriptions groups create --app "APP_ID" --reference-name "Premium"
-  asc subscriptions groups get --id "GROUP_ID"
+  asc subscriptions groups view --id "GROUP_ID"
   asc subscriptions groups delete --id "GROUP_ID" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -226,19 +226,19 @@ Examples:
 
 // SubscriptionsGroupsGetCommand returns the groups get subcommand.
 func SubscriptionsGroupsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("groups get", flag.ExitOnError)
+	fs := flag.NewFlagSet("groups view", flag.ExitOnError)
 
 	groupID := fs.String("id", "", "Subscription group ID")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc subscriptions groups get --id \"GROUP_ID\"",
-		ShortHelp:  "Get a subscription group by ID.",
-		LongHelp: `Get a subscription group by ID.
+		Name:       "view",
+		ShortUsage: "asc subscriptions groups view --id \"GROUP_ID\"",
+		ShortHelp:  "View a subscription group by ID.",
+		LongHelp: `View a subscription group by ID.
 
 Examples:
-  asc subscriptions groups get --id "GROUP_ID"`,
+  asc subscriptions groups view --id "GROUP_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -250,7 +250,7 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("subscriptions groups get: %w", err)
+				return fmt.Errorf("subscriptions groups view: %w", err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -258,7 +258,7 @@ Examples:
 
 			resp, err := client.GetSubscriptionGroup(requestCtx, id)
 			if err != nil {
-				return fmt.Errorf("subscriptions groups get: failed to fetch: %w", err)
+				return fmt.Errorf("subscriptions groups view: failed to fetch: %w", err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -595,21 +595,21 @@ Examples:
 	}
 }
 
-// SubscriptionsGetCommand returns the subscriptions get subcommand.
+// SubscriptionsGetCommand returns the subscriptions view subcommand.
 func SubscriptionsGetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("get", flag.ExitOnError)
+	fs := flag.NewFlagSet("view", flag.ExitOnError)
 
 	subID := fs.String("id", "", "Subscription ID")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
-		Name:       "get",
-		ShortUsage: "asc subscriptions get --id \"SUB_ID\"",
-		ShortHelp:  "Get a subscription by ID.",
-		LongHelp: `Get a subscription by ID.
+		Name:       "view",
+		ShortUsage: "asc subscriptions view --id \"SUB_ID\"",
+		ShortHelp:  "View a subscription by ID.",
+		LongHelp: `View a subscription by ID.
 
 Examples:
-  asc subscriptions get --id "SUB_ID"`,
+  asc subscriptions view --id "SUB_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -621,7 +621,7 @@ Examples:
 
 			client, err := shared.GetASCClient()
 			if err != nil {
-				return fmt.Errorf("subscriptions get: %w", err)
+				return fmt.Errorf("subscriptions view: %w", err)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -629,7 +629,7 @@ Examples:
 
 			resp, err := client.GetSubscription(requestCtx, id)
 			if err != nil {
-				return fmt.Errorf("subscriptions get: failed to fetch: %w", err)
+				return fmt.Errorf("subscriptions view: failed to fetch: %w", err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
@@ -1150,6 +1150,7 @@ func SubscriptionsPricesAddCommand() *ffcli.Command {
 	territory := fs.String("territory", "", "Territory input (accepts alpha-2, alpha-3, or exact English country name; e.g., US, USA, United States)")
 	startDate := fs.String("start-date", "", "Start date (YYYY-MM-DD)")
 	preserved := fs.Bool("preserved", false, "Preserve existing prices")
+	force := fs.Bool("force", false, "Re-save the complete equalized price matrix even when the selected price is unchanged")
 	refresh := fs.Bool("refresh", false, "Force refresh of tier cache")
 	output := shared.BindOutputFlags(fs)
 
@@ -1163,7 +1164,12 @@ Examples:
   asc subscriptions prices add --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID"
   asc subscriptions prices add --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID" --territory "United States"
   asc subscriptions prices add --subscription-id "SUB_ID" --tier 5 --territory "US"
-  asc subscriptions prices add --subscription-id "SUB_ID" --price "4.99" --territory "France"`,
+  asc subscriptions prices add --subscription-id "SUB_ID" --price "4.99" --territory "France"
+  asc subscriptions prices add --subscription-id "SUB_ID" --price "4.99" --territory "France" --force
+
+By default, an identical existing price is returned without sending another
+write. Use --force with --territory to rebuild and atomically re-save the full
+equalized price matrix when repairing Apple's MISSING_METADATA state.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -1199,6 +1205,10 @@ Examples:
 					fmt.Fprintln(os.Stderr, "Error: --territory is required when using --tier or --price")
 					return shared.MissingRequiredUsageError()
 				}
+			}
+			if *force && territoryID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --territory is required with --force")
+				return shared.MissingRequiredUsageError()
 			}
 
 			client, err := shared.GetASCClient()
@@ -1262,8 +1272,28 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("subscriptions prices add: failed to check matching price: %w", err)
 			}
-			if matchingPrice != nil {
+			if matchingPrice != nil && !*force {
 				return shared.PrintOutput(matchingPrice, *output.Output, *output.Pretty)
+			}
+			if matchingPrice != nil && *force {
+				equalizations, equalizationsErr := fetchEqualizations(requestCtx, client, pricePoint, territoryID)
+				if equalizationsErr != nil {
+					return fmt.Errorf("subscriptions prices add: build repair matrix: %w", equalizationsErr)
+				}
+				matrixAttrs := attrs
+				matrixAttrs.PlanType = matchingPrice.Data.Attributes.PlanType
+				if matrixAttrs.PlanType == "" {
+					matrixAttrs.PlanType = asc.SubscriptionPlanTypeUpfront
+				}
+				matrix, matrixErr := buildSubscriptionSetupPriceMatrix(pricePoint, territoryID, matrixAttrs, equalizations)
+				if matrixErr != nil {
+					return fmt.Errorf("subscriptions prices add: build repair matrix: %w", matrixErr)
+				}
+				resp, matrixErr := client.SetSubscriptionPriceMatrix(requestCtx, id, matrix)
+				if matrixErr != nil {
+					return fmt.Errorf("subscriptions prices add: failed to re-save price matrix: %w", matrixErr)
+				}
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
 			// Existing prices: use POST /v1/subscriptionPrices for a price change
