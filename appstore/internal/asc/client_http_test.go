@@ -400,6 +400,55 @@ func TestGetApps_RateLimitedIncludesRetryAfter(t *testing.T) {
 	}
 }
 
+func TestGetApps_RetryExhaustedExposesHTTPStatus(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+	resetConfigCacheForTest()
+	t.Cleanup(resetConfigCacheForTest)
+
+	body := `{"errors":[{"code":"UNEXPECTED_ERROR","title":"Service Unavailable","detail":"try again later"}]}`
+	client := newTestClient(
+		t, nil,
+		jsonResponse(http.StatusServiceUnavailable, body),
+		jsonResponse(http.StatusServiceUnavailable, body),
+	)
+
+	_, err := client.GetApps(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !IsRetryable(err) {
+		t.Fatalf("expected retryable error, got %v", err)
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError in chain after retries exhausted, got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, apiErr.StatusCode)
+	}
+	var statusErr interface{ HTTPStatusCode() int }
+	if !errors.As(err, &statusErr) || statusErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTPStatusCode() to report %d, got %v", http.StatusServiceUnavailable, err)
+	}
+}
+
+func TestBuildRetryableError_CarriesStatusWithoutBody(t *testing.T) {
+	err := buildRetryableError(http.StatusServiceUnavailable, 0, nil)
+
+	if got, want := err.Error(), "App Store Connect service unavailable (status 503)"; got != want {
+		t.Fatalf("unexpected message: got %q, want %q", got, want)
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError in chain, got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, apiErr.StatusCode)
+	}
+}
+
 func TestGetApps_RetriesTransientServerErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -3816,11 +3865,19 @@ func TestUpdateAgeRatingDeclaration(t *testing.T) {
 		if payload.Data.Attributes.Gambling == nil || !*payload.Data.Attributes.Gambling {
 			t.Fatalf("expected gambling=true in request")
 		}
+		if payload.Data.Attributes.SocialMedia == nil || payload.Data.Attributes.SocialMedia.Value == nil || !*payload.Data.Attributes.SocialMedia.Value {
+			t.Fatalf("expected socialMedia=true in request")
+		}
+		if payload.Data.Attributes.SocialMediaAgeRestricted == nil || payload.Data.Attributes.SocialMediaAgeRestricted.Value == nil || *payload.Data.Attributes.SocialMediaAgeRestricted.Value {
+			t.Fatalf("expected socialMediaAgeRestricted=false in request")
+		}
 		assertAuthorized(t, req)
 	}, response)
 
 	attrs := AgeRatingDeclarationAttributes{
-		Gambling: func() *bool { value := true; return &value }(),
+		Gambling:                 func() *bool { value := true; return &value }(),
+		SocialMedia:              &NullableBool{Value: func() *bool { value := true; return &value }()},
+		SocialMediaAgeRestricted: &NullableBool{Value: func() *bool { value := false; return &value }()},
 	}
 	if _, err := client.UpdateAgeRatingDeclaration(context.Background(), "age-3", attrs); err != nil {
 		t.Fatalf("UpdateAgeRatingDeclaration() error: %v", err)
@@ -6449,6 +6506,46 @@ func TestResolveCiWorkflowByName_NoMatch(t *testing.T) {
 
 	if _, err := client.ResolveCiWorkflowByName(context.Background(), "prod-1", "ci"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestResolveCiWorkflowByName_FollowsPagination(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/workflows?cursor=abc"
+	client := newTestClient(
+		t, func(req *http.Request) {
+			assertAuthorized(t, req)
+		},
+		jsonResponse(http.StatusOK, `{"data":[{"type":"ciWorkflows","id":"wf-1","attributes":{"name":"Deploy"}}],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"ciWorkflows","id":"wf-2","attributes":{"name":"CI Build"}}]}`),
+	)
+
+	workflow, err := client.ResolveCiWorkflowByName(context.Background(), "prod-1", "ci build")
+	if err != nil {
+		t.Fatalf("ResolveCiWorkflowByName() error: %v", err)
+	}
+	if workflow.ID != "wf-2" {
+		t.Fatalf("expected workflow ID wf-2, got %q", workflow.ID)
+	}
+}
+
+func TestResolveCiWorkflowByName_RejectsRepeatedNextURL(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/workflows?cursor=repeat"
+	requests := 0
+	client := newTestClient(
+		t, func(req *http.Request) {
+			requests++
+			assertAuthorized(t, req)
+		},
+		jsonResponse(http.StatusOK, `{"data":[{"type":"ciWorkflows","id":"wf-1","attributes":{"name":"Deploy"}}],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"ciWorkflows","id":"wf-2","attributes":{"name":"Release"}}],"links":{"next":"`+next+`"}}`),
+	)
+
+	_, err := client.ResolveCiWorkflowByName(context.Background(), "prod-1", "ci build")
+	if !errors.Is(err, ErrRepeatedPaginationURL) {
+		t.Fatalf("expected ErrRepeatedPaginationURL, got %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected repeated next URL to stop after two requests, got %d", requests)
 	}
 }
 

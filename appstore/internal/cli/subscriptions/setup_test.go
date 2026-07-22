@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -174,6 +175,9 @@ func TestValidateExistingSubscriptionSetupLocalizationComparesEmptyDescription(t
 	if err == nil || !strings.Contains(err.Error(), "different description") {
 		t.Fatalf("expected different description error, got %v", err)
 	}
+	if !errors.Is(err, asc.ErrConflict) {
+		t.Fatalf("expected conflict classification, got %v", err)
+	}
 }
 
 func TestValidateExistingSubscriptionSetupGroupLocalizationIgnoresUnspecifiedCustomAppName(t *testing.T) {
@@ -213,5 +217,8 @@ func TestValidateExistingSubscriptionSetupGroupLocalizationComparesSpecifiedCust
 	err := validateExistingSubscriptionSetupGroupLocalization(localization, opts)
 	if err == nil || !strings.Contains(err.Error(), "different custom app name") {
 		t.Fatalf("expected different custom app name error, got %v", err)
+	}
+	if !errors.Is(err, asc.ErrConflict) {
+		t.Fatalf("expected conflict classification, got %v", err)
 	}
 }

@@ -57,9 +57,11 @@ func LocalizationsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	versionID := fs.String("version", "", "App Store version ID")
+	legacyVersionID := shared.BindDeprecatedStringFlagAlias(fs, "version-id", "version")
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	appInfoID := fs.String("app-info", "", "App Info ID (optional override)")
 	locType := fs.String("type", shared.LocalizationTypeVersion, "Localization type: version (default) or app-info")
+	appInfoFields := fs.String("app-info-fields", "", "Sparse app info fields for app-info localizations: kidsAgeBand (deprecated; prefer age-rating data)")
 	locale := fs.String("locale", "", "Filter by locale(s), comma-separated")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
@@ -74,12 +76,15 @@ func LocalizationsListCommand() *ffcli.Command {
 
 Examples:
   asc localizations list --version "VERSION_ID"
-  asc localizations list --app "APP_ID" --type app-info
+  asc localizations list --app "APP_ID" --type app-info --app-info-fields kidsAgeBand
   asc localizations list --version "VERSION_ID" --locale "en-US,ja"
   asc localizations list --version "VERSION_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyVersionID.Apply(versionID); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("localizations list: --limit must be between 1 and 200")
 			}
@@ -90,6 +95,21 @@ Examples:
 			normalizedType, err := shared.NormalizeLocalizationType(*locType)
 			if err != nil {
 				return fmt.Errorf("localizations list: %w", err)
+			}
+			appInfoFieldsProvided := false
+			fs.Visit(func(f *flag.Flag) { appInfoFieldsProvided = appInfoFieldsProvided || f.Name == "app-info-fields" })
+			if strings.TrimSpace(*next) != "" && appInfoFieldsProvided {
+				return shared.UsageError("--next cannot be combined with --app-info-fields")
+			}
+			appInfoFieldValues, err := shared.NormalizeSelection(*appInfoFields, []string{"kidsAgeBand"}, "--app-info-fields")
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if appInfoFieldsProvided && len(appInfoFieldValues) == 0 {
+				return shared.UsageError("--app-info-fields must not be empty")
+			}
+			if appInfoFieldsProvided && normalizedType != shared.LocalizationTypeAppInfo {
+				return shared.UsageError("--app-info-fields requires --type app-info")
 			}
 
 			locales := shared.SplitCSV(*locale)
@@ -162,6 +182,13 @@ Examples:
 				opts := []asc.AppInfoLocalizationsOption{
 					asc.WithAppInfoLocalizationsLimit(*limit),
 					asc.WithAppInfoLocalizationsNextURL(*next),
+				}
+				if len(appInfoFieldValues) > 0 {
+					opts = append(
+						opts,
+						asc.WithAppInfoLocalizationsAppInfoFields(appInfoFieldValues),
+						asc.WithAppInfoLocalizationsInclude([]string{"appInfo"}),
+					)
 				}
 				if len(locales) > 0 {
 					opts = append(opts, asc.WithAppInfoLocalizationLocales(locales))

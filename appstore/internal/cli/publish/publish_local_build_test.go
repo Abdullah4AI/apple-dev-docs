@@ -820,13 +820,17 @@ func TestPublishTestFlightIPAUploadResolvesAppIDBeforeGroupLookupAndUpload(t *te
 	}
 }
 
-func TestPublishAppStoreLocalBuildRequiresExportOptionsWhenDefaultMissing(t *testing.T) {
+func TestPublishAppStoreLocalBuildDefersMissingExportOptionsUntilAfterArchive(t *testing.T) {
 	restore := overridePublishCommandTestHooks(t)
 	defer restore()
+	t.Chdir(t.TempDir())
 
 	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
 	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
 		return "app-123", nil
+	}
+	runPublishArchiveFn = func(context.Context, localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+		return nil, errors.New("archive sentinel")
 	}
 
 	cmd := PublishAppStoreCommand()
@@ -846,11 +850,14 @@ func TestPublishAppStoreLocalBuildRequiresExportOptionsWhenDefaultMissing(t *tes
 		runErr = cmd.Exec(context.Background(), nil)
 		return runErr
 	})
-	if !errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+	if runErr == nil || errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected archive error after deferred generation, got %v", runErr)
 	}
-	if !strings.Contains(stderr, "--export-options is required in local-build mode when .asc/export-options-app-store.plist is missing") {
-		t.Fatalf("expected missing export-options error, got %q", stderr)
+	if !strings.Contains(runErr.Error(), "archive sentinel") {
+		t.Fatalf("expected archive sentinel error, got %v", runErr)
+	}
+	if strings.Contains(stderr, "--export-options is required") {
+		t.Fatalf("missing export options should be generated after archive, got %q", stderr)
 	}
 }
 
@@ -1514,6 +1521,8 @@ func overridePublishCommandTestHooks(t *testing.T) func() {
 
 	originalArchive := runPublishArchiveFn
 	originalExport := runPublishExportFn
+	originalPreflightXcode := preflightPublishXcodeFn
+	originalGenerateExportOptions := generatePublishExportOptionsFn
 	originalGetClient := getPublishASCClientFn
 	originalResolveNextBuildNumber := resolvePublishNextBuildNumberFn
 	originalValidateIPAPath := validatePublishIPAPathFn
@@ -1521,10 +1530,13 @@ func overridePublishCommandTestHooks(t *testing.T) func() {
 	originalResolveAppID := resolvePublishAppIDWithLookupFn
 	originalWaitForProcessing := waitForPublishBuildProcessingFn
 	originalMetadataApply := applyPublishVersionMetadataFn
+	preflightPublishXcodeFn = func(context.Context) error { return nil }
 
 	return func() {
 		runPublishArchiveFn = originalArchive
 		runPublishExportFn = originalExport
+		preflightPublishXcodeFn = originalPreflightXcode
+		generatePublishExportOptionsFn = originalGenerateExportOptions
 		getPublishASCClientFn = originalGetClient
 		resolvePublishNextBuildNumberFn = originalResolveNextBuildNumber
 		validatePublishIPAPathFn = originalValidateIPAPath

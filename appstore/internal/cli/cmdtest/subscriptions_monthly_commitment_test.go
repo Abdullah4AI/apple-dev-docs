@@ -127,7 +127,7 @@ func TestSubscriptionsPricingMonthlyCommitmentUsageExitCodes(t *testing.T) {
 		{
 			name:    "subcommand flag before subcommand returns usage",
 			args:    []string{"subscriptions", "pricing", "monthly-commitment", "--subscription-id", "sub-1", "enable", "--price", "9.99", "--price-territory", "Norway", "--territories", "Norway"},
-			wantErr: "flag provided but not defined: -subscription-id",
+			wantErr: "Unknown flag: --subscription-id",
 		},
 		{
 			name:    "mixed flag order invalid price territory returns usage",

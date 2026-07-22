@@ -310,6 +310,7 @@ func BetaGroupsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("view", flag.ExitOnError)
 
 	id := fs.String("id", "", "Beta group ID")
+	legacyGroupID := shared.BindDeprecatedStringFlagAlias(fs, "group-id", "id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -323,6 +324,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyGroupID.Apply(id); err != nil {
+				return err
+			}
 			if strings.TrimSpace(*id) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()

@@ -591,7 +591,7 @@ func buildSuggestedCommands(signals migrationSignals, resolver MigrationSuggesti
 			if !hasResolvedVersionID {
 				add(fmt.Sprintf(`asc versions create --app %q --version %q`, values.appID, values.versionString))
 			}
-			add(fmt.Sprintf(`asc versions attach-build --version-id %q --build %q`, values.versionID, uploadedBuildIDPlaceholder))
+			add(fmt.Sprintf(`asc versions attach-build --version-id %q --build-id %q`, values.versionID, uploadedBuildIDPlaceholder))
 			add(fmt.Sprintf(`asc validate --app %q --version-id %q`, values.appID, values.versionID))
 			add(fmt.Sprintf(`asc review submit --app %q --version-id %q --build %q --platform %q --confirm`, values.appID, values.versionID, uploadedBuildIDPlaceholder, reviewSubmissionPlatformPlaceholder))
 		}

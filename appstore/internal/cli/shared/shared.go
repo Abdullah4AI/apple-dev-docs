@@ -47,6 +47,11 @@ const (
 
 var ErrMissingAuth = errors.New("missing authentication")
 
+var (
+	ascClientFactoryMu sync.RWMutex
+	ascClientFactory   = getASCClient
+)
+
 type missingAuthError struct {
 	msg string
 }
@@ -422,7 +427,33 @@ func resolveCredentialsForProfile(profileOverride string) (resolvedCredentials, 
 		profile = resolveProfileName()
 	}
 	var envCreds envCredentials
+	envResolved := false
 	sources := credentialSource{}
+
+	// Fast path: complete environment credentials skip the keychain lookup
+	// entirely. Enumerating stored credentials costs several
+	// Security-framework round trips per command on macOS and can trigger
+	// keychain prompts in env-credentialed CI runs. Explicit profile
+	// selection (--profile/ASC_PROFILE) still resolves stored credentials,
+	// and ASC_BYPASS_KEYCHAIN keeps preferring config-file credentials.
+	// Environment resolution errors are surfaced below, only when stored
+	// credentials leave gaps, matching the previous behavior.
+	if profile == "" && !auth.ShouldBypassKeychain() {
+		if _, complete := resolveCompleteEnvCredentialMetadata(); complete {
+			if resolved, envErr := resolveEnvCredentials(); envErr == nil {
+				issuerID := resolved.issuerID
+				if config.IsIndividualCredentialKeyType(resolved.keyType) {
+					issuerID = ""
+				}
+				return resolvedCredentials{
+					keyID:    resolved.keyID,
+					issuerID: issuerID,
+					keyPath:  resolved.keyPath,
+					keyType:  normalizedResolvedKeyType(resolved.keyType),
+				}, nil
+			}
+		}
+	}
 
 	// Priority 1: Stored credentials (keychain/config)
 	cfg, storedSource, err := getCredentialsWithSourceFn(profile)
@@ -456,11 +487,13 @@ func resolveCredentialsForProfile(profileOverride string) (resolvedCredentials, 
 	if actualKeyID == "" ||
 		(actualIssuerID == "" && !config.IsIndividualCredentialKeyType(actualKeyType)) ||
 		(actualKeyPath == "" && actualKeyPEM == "") {
-		resolved, err := resolveEnvCredentials()
-		if err != nil {
-			return resolvedCredentials{}, fmt.Errorf("invalid private key environment: %w", err)
+		if !envResolved {
+			resolved, err := resolveEnvCredentials()
+			if err != nil {
+				return resolvedCredentials{}, fmt.Errorf("invalid private key environment: %w", err)
+			}
+			envCreds = resolved
 		}
-		envCreds = resolved
 		if actualKeyID == "" && envCreds.keyID != "" {
 			actualKeyID = envCreds.keyID
 			sources.keyID = "env"
@@ -524,6 +557,11 @@ func resolveCredentialsMetadataForProfile(profileOverride string) (ResolvedAuthC
 	if profile == "" {
 		profile = resolveProfileName()
 	}
+	if profile == "" && !auth.ShouldBypassKeychain() {
+		if envMetadata, ok := resolveCompleteEnvCredentialMetadata(); ok {
+			return envMetadata, nil
+		}
+	}
 
 	resolved, err := resolveStoredCredentialMetadata(profile)
 	if err == nil {
@@ -548,6 +586,37 @@ func resolveCredentialsMetadataForProfile(profileOverride string) (ResolvedAuthC
 		return ResolvedAuthCredentials{}, missingAuthError{msg: fmt.Sprintf("missing authentication. Run 'asc auth login' or create %s (see 'asc auth init')", path)}
 	}
 	return ResolvedAuthCredentials{}, missingAuthError{msg: "missing authentication. Run 'asc auth login' or 'asc auth init'"}
+}
+
+func resolveCompleteEnvCredentialMetadata() (ResolvedAuthCredentials, bool) {
+	keyID := strings.TrimSpace(os.Getenv("ASC_KEY_ID"))
+	issuerID := strings.TrimSpace(os.Getenv("ASC_ISSUER_ID"))
+	keyType := config.NormalizeCredentialKeyType(os.Getenv(keyTypeEnvVar))
+	if !config.IsValidCredentialKeyType(keyType) {
+		return ResolvedAuthCredentials{}, false
+	}
+
+	hasValidKeyMaterial := false
+	switch {
+	case strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "":
+		hasValidKeyMaterial = true
+	case strings.TrimSpace(os.Getenv(privateKeyBase64EnvVar)) != "":
+		_, err := decodeBase64Secret(os.Getenv(privateKeyBase64EnvVar))
+		hasValidKeyMaterial = err == nil
+	case strings.TrimSpace(os.Getenv(privateKeyEnvVar)) != "":
+		hasValidKeyMaterial = true
+	}
+	if keyID == "" || !hasValidKeyMaterial || (issuerID == "" && !config.IsIndividualCredentialKeyType(keyType)) {
+		return ResolvedAuthCredentials{}, false
+	}
+	if config.IsIndividualCredentialKeyType(keyType) {
+		issuerID = ""
+	}
+	return ResolvedAuthCredentials{
+		KeyID:    keyID,
+		IssuerID: issuerID,
+		KeyType:  normalizedResolvedKeyType(keyType),
+	}, true
 }
 
 func resolveStoredCredentialsMetadataFallback(profile string) (ResolvedAuthCredentials, error) {
@@ -955,19 +1024,33 @@ func writeTempPrivateKey(data []byte, cacheKey string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return "", err
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return "", err
-	}
-	if err := file.Close(); err != nil {
+	if err := finalizeTempPrivateKey(file, data); err != nil {
 		return "", err
 	}
 	registerTempPrivateKey(file.Name(), cacheKey)
 	return file.Name(), nil
+}
+
+// finalizeTempPrivateKey restricts permissions, writes the key material, and
+// closes the temp file. On any failure it removes the file so partial private
+// key material never lingers on disk.
+func finalizeTempPrivateKey(file *os.File, data []byte) error {
+	fail := func(err error) error {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		return fail(err)
+	}
+	if _, err := file.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return err
+	}
+	return nil
 }
 
 func registerTempPrivateKey(path, cacheKey string) {
@@ -1565,7 +1648,10 @@ func GetASCClient() (*asc.Client, error) {
 	var client *asc.Client
 	err := WithSpinnerDelayed("", authSpinnerDelay, func() error {
 		var innerErr error
-		client, innerErr = getASCClient()
+		ascClientFactoryMu.RLock()
+		factory := ascClientFactory
+		ascClientFactoryMu.RUnlock()
+		client, innerErr = factory()
 		return innerErr
 	})
 	return client, err

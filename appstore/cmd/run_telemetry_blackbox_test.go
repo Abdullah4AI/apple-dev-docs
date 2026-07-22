@@ -22,7 +22,7 @@ func TestRun_BuiltBinaryEmitsSchemaV4Payload(t *testing.T) {
 		"attach-build",
 		"--version-id",
 		"VERSION_ID",
-		"--build-id",
+		"--app-id",
 		"BUILD_ID",
 	)
 	command.Env = telemetryBlackboxEnv(home, false, "https://127.0.0.1:1/events")
@@ -49,8 +49,8 @@ func TestRun_BuiltBinaryEmitsSchemaV4Payload(t *testing.T) {
 	if event.SchemaVersion != 4 || event.OutcomeKind != telemetry.OutcomeUsageError {
 		t.Fatalf("unexpected schema-v4 payload: %+v", event)
 	}
-	if event.FailureParameter == nil || *event.FailureParameter != "--build-id" {
-		t.Fatalf("FailureParameter = %v, want --build-id", event.FailureParameter)
+	if event.FailureParameter == nil || *event.FailureParameter != "--app-id" {
+		t.Fatalf("FailureParameter = %v, want --app-id", event.FailureParameter)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(record.Event, &payload); err != nil {

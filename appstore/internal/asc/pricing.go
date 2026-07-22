@@ -88,7 +88,6 @@ type AppPriceRelationships struct {
 }
 
 // AppAvailabilityV2CreateAttributes defines inputs for POST /v2/appAvailabilities.
-// Apple documents this endpoint as app pre-order creation, not generic app-availability bootstrap.
 type AppAvailabilityV2CreateAttributes struct {
 	AvailableInNewTerritories *bool                         `json:"availableInNewTerritories,omitempty"`
 	TerritoryAvailabilityIDs  []string                      `json:"-"`

@@ -19,6 +19,7 @@ func LocalizationsUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 
 	versionID := fs.String("version", "", "App Store version ID (for version localizations)")
+	legacyVersionID := shared.BindDeprecatedStringFlagAlias(fs, "version-id", "version")
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID, for app-info localizations)")
 	appInfoID := fs.String("app-info", "", "App Info ID (optional override)")
 	locType := fs.String("type", shared.LocalizationTypeVersion, "Localization type: version (default) or app-info")
@@ -72,6 +73,9 @@ At least one field flag must be provided.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyVersionID.Apply(versionID); err != nil {
+				return err
+			}
 			normalizedType, err := shared.NormalizeLocalizationType(*locType)
 			if err != nil {
 				return fmt.Errorf("localizations update: %w", err)

@@ -14,6 +14,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+var iapQueryClientFactory = shared.GetASCClient
+
 // IAPCommand returns the in-app purchases command group.
 func IAPCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("iap", flag.ExitOnError)
@@ -29,18 +31,20 @@ Examples:
   asc iap pricing summary --app "APP_ID"
   asc iap view --id "IAP_ID"
   asc iap create --app "APP_ID" --type CONSUMABLE --ref-name "Pro" --product-id "com.example.pro"
-  asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime" --locale "en-US" --display-name "Pro Lifetime" --price "3.99" --base-territory "United States"
+  asc iap setup --app "APP_ID" --type NON_CONSUMABLE --reference-name "Pro Lifetime" --product-id "com.example.lifetime" --price "3.99" --base-territory "United States"
   asc iap update --id "IAP_ID" --ref-name "New Name"
   asc iap delete --id "IAP_ID" --confirm
-  asc iap localizations list --iap-id "IAP_ID"
-  asc iap images create --iap-id "IAP_ID" --file "./image.png"
+  asc iap versions list --iap-id "IAP_ID"
+  asc iap versions localizations list --version-id "IAP_VERSION_ID"
+  asc iap versions images create --version-id "IAP_VERSION_ID" --file "./image.png"
   asc iap pricing availability set --iap-id "IAP_ID" --territories "US,Canada"
   asc iap offer-codes create --iap-id "IAP_ID" --name "SPRING" --prices "USA:PRICE_POINT_ID"
   asc iap promoted-purchases create --app "APP_ID" --product-id "IAP_ID" --visible-for-all-users true`,
 		FlagSet:   fs,
-		UsageFunc: shared.VisibleUsageFunc,
+		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			IAPListCommand(),
+			IAPVersionsCommand(),
 			IAPPricingCommand(),
 			IAPGetCommand(),
 			IAPCreateCommand(),
@@ -70,6 +74,10 @@ func IAPListCommand() *ffcli.Command {
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
 	legacy := fs.Bool("legacy", false, "Use legacy v1 in-app purchases endpoint")
+	includeVersions := fs.Bool("include-versions", false, "Include related in-app purchase versions (v2 only)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50, v2 only)")
+	fields := fs.String("fields", "", "fields[inAppPurchases] (comma-separated, v2 only)")
+	versionFields := fs.String("version-fields", "", "fields[inAppPurchaseVersions] (comma-separated, v2 only)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -82,15 +90,40 @@ Examples:
   asc iap list --app "APP_ID"
   asc iap list --app "APP_ID" --limit 50
   asc iap list --app "APP_ID" --paginate
+  asc iap list --app "APP_ID" --include-versions --versions-limit 10
+  asc iap list --app "APP_ID" --fields name,versions
   asc iap list --app "APP_ID" --legacy`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap list: --limit must be between 1 and 200")
+			if err := rejectIAPVersionArgs(args); err != nil {
+				return err
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("iap list: %w", err)
+			}
+			if err := rejectIAPVersionNextFlagConflicts(fs, *next, "iap list", "app", "limit", "include-versions", "versions-limit", "fields", "version-fields"); err != nil {
+				return err
+			}
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return fmt.Errorf("iap list: --limit must be between 1 and 200")
+			}
+			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
+				return shared.UsageError("iap list: --versions-limit must be between 1 and 50")
+			}
+			if *legacy && strings.TrimSpace(*fields) != "" {
+				return shared.UsageError("iap list: --fields requires the v2 endpoint")
+			}
+			if *legacy && (*includeVersions || *versionsLimit != 0 || strings.TrimSpace(*versionFields) != "") {
+				return shared.UsageError("iap list: --include-versions, --versions-limit, and --version-fields require the v2 endpoint")
+			}
+			fieldValues, err := shared.NormalizeSelection(*fields, iapVersionIAPFields, "--fields")
+			if err != nil {
+				return shared.UsageError("iap list: " + err.Error())
+			}
+			versionFieldValues, err := shared.NormalizeSelection(*versionFields, iapVersionFields, "--version-fields")
+			if err != nil {
+				return shared.UsageError("iap list: " + err.Error())
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -98,8 +131,7 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
 				return shared.MissingRequiredUsageError()
 			}
-
-			client, err := shared.GetASCClient()
+			client, err := iapQueryClientFactory()
 			if err != nil {
 				return fmt.Errorf("iap list: %w", err)
 			}
@@ -110,6 +142,12 @@ Examples:
 			opts := []asc.IAPOption{
 				asc.WithIAPLimit(*limit),
 				asc.WithIAPNextURL(*next),
+				asc.WithIAPFields(fieldValues),
+				asc.WithIAPNestedVersionsLimit(*versionsLimit),
+				asc.WithIAPVersionFields(versionFieldValues),
+			}
+			if *includeVersions {
+				opts = append(opts, asc.WithIAPInclude([]string{"versions"}))
 			}
 
 			if *paginate {
@@ -170,6 +208,10 @@ func IAPGetCommand() *ffcli.Command {
 
 	iapID := fs.String("id", "", "In-app purchase ID")
 	legacy := fs.Bool("legacy", false, "Use legacy v1 in-app purchase endpoint")
+	includeVersions := fs.Bool("include-versions", false, "Include related in-app purchase versions (v2 only)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50, v2 only)")
+	fields := fs.String("fields", "", "fields[inAppPurchases] (comma-separated, v2 only)")
+	versionFields := fs.String("version-fields", "", "fields[inAppPurchaseVersions] (comma-separated, v2 only)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -180,17 +222,39 @@ func IAPGetCommand() *ffcli.Command {
 
 Examples:
   asc iap view --id "IAP_ID"
+  asc iap view --id "IAP_ID" --include-versions --versions-limit 10
+  asc iap view --id "IAP_ID" --fields name,versions
   asc iap view --id "IAP_ID" --legacy`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectIAPVersionArgs(args); err != nil {
+				return err
+			}
 			id := strings.TrimSpace(*iapID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()
 			}
+			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
+				return shared.UsageError("iap view: --versions-limit must be between 1 and 50")
+			}
+			if *legacy && strings.TrimSpace(*fields) != "" {
+				return shared.UsageError("iap view: --fields requires the v2 endpoint")
+			}
+			if *legacy && (*includeVersions || *versionsLimit != 0 || strings.TrimSpace(*versionFields) != "") {
+				return shared.UsageError("iap view: --include-versions, --versions-limit, and --version-fields require the v2 endpoint")
+			}
+			fieldValues, err := shared.NormalizeSelection(*fields, iapVersionIAPFields, "--fields")
+			if err != nil {
+				return shared.UsageError("iap view: " + err.Error())
+			}
+			versionFieldValues, err := shared.NormalizeSelection(*versionFields, iapVersionFields, "--version-fields")
+			if err != nil {
+				return shared.UsageError("iap view: " + err.Error())
+			}
 
-			client, err := shared.GetASCClient()
+			client, err := iapQueryClientFactory()
 			if err != nil {
 				return fmt.Errorf("iap view: %w", err)
 			}
@@ -207,7 +271,15 @@ Examples:
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
-			resp, err := client.GetInAppPurchaseV2(requestCtx, id)
+			opts := []asc.IAPGetOption{
+				asc.WithIAPGetFields(fieldValues),
+				asc.WithIAPGetNestedVersionsLimit(*versionsLimit),
+				asc.WithIAPGetVersionFields(versionFieldValues),
+			}
+			if *includeVersions {
+				opts = append(opts, asc.WithIAPGetInclude([]string{"versions"}))
+			}
+			resp, err := client.GetInAppPurchaseV2(requestCtx, id, opts...)
 			if err != nil {
 				return fmt.Errorf("iap view: failed to fetch: %w", err)
 			}
@@ -409,11 +481,13 @@ func IAPLocalizationsCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "localizations",
 		ShortUsage: "asc iap localizations <subcommand> [flags]",
-		ShortHelp:  "Manage in-app purchase localizations.",
-		LongHelp: `Manage in-app purchase localizations.
+		ShortHelp:  "Manage deprecated product-scoped IAP localizations.",
+		LongHelp: `Manage deprecated product-scoped in-app purchase localizations.
+
+Use version-scoped localizations for new workflows.
 
 Examples:
-  asc iap localizations list --iap-id "IAP_ID"`,
+  asc iap versions localizations list --version-id "IAP_VERSION_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -438,9 +512,10 @@ func IAPLocalizationsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	iapFields := fs.String("iap-fields", "", "fields[inAppPurchases] for included in-app purchases (comma-separated)")
 	output := shared.BindOutputFlags(fs)
 
-	return &ffcli.Command{
+	return shared.DeprecatedCommand(&ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc iap localizations list [flags]",
 		ShortHelp:  "List in-app purchase localizations.",
@@ -452,6 +527,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectIAPVersionNextFlagConflicts(fs, *next, "iap localizations list", "iap-fields"); err != nil {
+				return err
+			}
 			resolvedID := strings.TrimSpace(*iapID)
 			if resolvedID == "" {
 				resolvedID = strings.TrimSpace(*legacyID)
@@ -465,6 +543,10 @@ Examples:
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("iap localizations list: %w", err)
+			}
+			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
+			if err != nil {
+				return shared.UsageError("iap localizations list: " + err.Error())
 			}
 
 			client, err := shared.GetASCClient()
@@ -485,17 +567,18 @@ Examples:
 			opts := []asc.IAPLocalizationsOption{
 				asc.WithIAPLocalizationsLimit(*limit),
 				asc.WithIAPLocalizationsNextURL(*next),
+				asc.WithIAPLocalizationsIAPFields(fieldValues),
 			}
 
 			if *paginate {
 				paginateOpts := append(opts, asc.WithIAPLocalizationsLimit(200))
-				firstPage, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, paginateOpts...)
+				firstPage, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, paginateOpts...) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
 				if err != nil {
 					return fmt.Errorf("iap localizations list: failed to fetch: %w", err)
 				}
 
 				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetInAppPurchaseLocalizations(ctx, resolvedID, asc.WithIAPLocalizationsNextURL(nextURL))
+					return client.GetInAppPurchaseLocalizations(ctx, resolvedID, asc.WithIAPLocalizationsNextURL(nextURL)) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
 				})
 				if err != nil {
 					return fmt.Errorf("iap localizations list: %w", err)
@@ -504,14 +587,14 @@ Examples:
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
-			resp, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, opts...)
+			resp, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, opts...) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
 			if err != nil {
 				return fmt.Errorf("iap localizations list: failed to fetch: %w", err)
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
-	}
+	}, "asc iap localizations list", `asc iap versions localizations list --version-id "IAP_VERSION_ID"`)
 }
 
 func normalizeIAPType(value string) (string, error) {

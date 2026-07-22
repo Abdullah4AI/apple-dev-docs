@@ -1298,9 +1298,7 @@ func TestIAPImagesListRejectsInvalidNextURL(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
+	assertOnlyDeprecatedCommandWarnings(t, stderr)
 }
 
 func TestUsersValidationErrors(t *testing.T) {
@@ -1445,9 +1443,9 @@ func TestPricingValidationErrors(t *testing.T) {
 			wantErr: "Error: --available-in-new-territories is required",
 		},
 		{
-			name:    "pricing availability create removed",
+			name:    "pricing availability create missing app",
 			args:    []string{"pricing", "availability", "create"},
-			wantErr: "Pricing availability commands operate on existing availability records.",
+			wantErr: "Error: --app is required",
 		},
 	}
 
@@ -4161,7 +4159,7 @@ func TestVersionsValidationErrors(t *testing.T) {
 		{
 			name:    "attach missing build",
 			args:    []string{"versions", "attach-build", "--version-id", "VERSION_123"},
-			wantErr: "Error: --build is required",
+			wantErr: "Error: --build-id is required",
 		},
 		{
 			name:    "release missing version id",

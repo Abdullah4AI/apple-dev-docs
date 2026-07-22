@@ -3,6 +3,7 @@ package asc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -662,6 +663,30 @@ func TestCreateAppAvailabilityV2(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateAppAvailabilityV2() error: %v", err)
+	}
+}
+
+func TestCreateAppAvailabilityV2_APIError(t *testing.T) {
+	client := newTestClient(t, func(req *http.Request) {
+		assertAuthorized(t, req)
+		if req.Method != http.MethodPost || req.URL.Path != "/v2/appAvailabilities" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+	}, jsonResponse(http.StatusConflict, `{"errors":[{"status":"409","code":"ENTITY_ERROR.RELATIONSHIP.INVALID","title":"invalid relationship","detail":"availability already exists"}]}`))
+
+	availableInNewTerritories := true
+	_, err := client.CreateAppAvailabilityV2(context.Background(), "app-1", AppAvailabilityV2CreateAttributes{
+		AvailableInNewTerritories: &availableInNewTerritories,
+		TerritoryAvailabilities: []TerritoryAvailabilityCreate{
+			{TerritoryID: "USA", Available: true},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+		t.Fatalf("expected wrapped 409 API error, got %v", err)
 	}
 }
 

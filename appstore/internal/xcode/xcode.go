@@ -104,6 +104,83 @@ type bundleInfo struct {
 	Platform    string
 }
 
+type exportDestinationUsageError struct {
+	message string
+}
+
+func (e exportDestinationUsageError) Error() string {
+	return e.message
+}
+
+// IsExportDestinationUsageError reports whether destination preflight failed
+// because of deterministic CLI input rather than a filesystem access error.
+func IsExportDestinationUsageError(err error) bool {
+	var usageErr exportDestinationUsageError
+	return errors.As(err, &usageErr)
+}
+
+// PreflightExport verifies that local Xcode export tooling is available before
+// callers perform any preparatory filesystem mutation.
+func PreflightExport(ctx context.Context) error {
+	return ensureXcodeAvailable(ctx)
+}
+
+// ValidateExportDestination checks an IPA destination without mutating the
+// filesystem.
+func ValidateExportDestination(ipaPath string, overwrite, directUpload bool) error {
+	ipaPath = strings.TrimSpace(ipaPath)
+	if ipaPath == "" {
+		return exportDestinationUsageError{message: "--ipa-path is required"}
+	}
+	if !strings.EqualFold(filepath.Ext(ipaPath), ".ipa") {
+		return exportDestinationUsageError{message: "--ipa-path must end with .ipa"}
+	}
+	if directUpload {
+		return nil
+	}
+	info, err := os.Lstat(ipaPath)
+	switch {
+	case err == nil && info.IsDir():
+		return exportDestinationUsageError{message: fmt.Sprintf("--ipa-path must not be a directory: %s", ipaPath)}
+	case err == nil && !overwrite:
+		return exportDestinationUsageError{message: fmt.Sprintf("--ipa-path already exists: %s (use --overwrite to replace it)", ipaPath)}
+	case err == nil && overwrite:
+		return nil
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	default:
+		return fmt.Errorf("lstat ipa path: %w", err)
+	}
+}
+
+// PreflightExportDestination validates an IPA destination and proves its
+// parent writable with a transient probe. Export repeats the check before the
+// final mutation.
+func PreflightExportDestination(ipaPath string, overwrite, directUpload bool) error {
+	if err := ValidateExportDestination(ipaPath, overwrite, directUpload); err != nil {
+		return err
+	}
+	return preflightWritableParent(strings.TrimSpace(ipaPath), "ipa output")
+}
+
+func preflightWritableParent(path, description string) error {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create %s parent directory: %w", description, err)
+	}
+	probe, err := os.CreateTemp(parent, ".asc-output-preflight-*")
+	if err != nil {
+		return fmt.Errorf("preflight %s parent: %w", description, err)
+	}
+	probePath := probe.Name()
+	closeErr := probe.Close()
+	removeErr := os.Remove(probePath)
+	if err := errors.Join(closeErr, removeErr); err != nil {
+		return fmt.Errorf("clean up %s parent preflight: %w", description, err)
+	}
+	return nil
+}
+
 func Archive(ctx context.Context, opts ArchiveOptions) (*ArchiveResult, error) {
 	opts = normalizeArchiveOptions(opts)
 	if err := validateArchiveOptions(opts); err != nil {
@@ -1245,15 +1322,50 @@ func readBundleInfoFromZip(file *zip.File) (bundleInfo, error) {
 }
 
 func inferArchivePlatformFromAppBundle(archivePath string, appProps map[string]any) (string, error) {
+	payload, err := readArchivedAppInfoPlist(archivePath, appProps)
+	if err != nil {
+		return "", err
+	}
+	platform := inferAppStorePlatformFromPlist(payload)
+	if platform == "" {
+		return "", fmt.Errorf("archived app Info.plist did not contain a supported platform marker")
+	}
+	return platform, nil
+}
+
+func readArchivedAppInfoPlist(archivePath string, appProps map[string]any) (map[string]any, error) {
+	archiveRoot, err := os.OpenRoot(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("open archive: %w", err)
+	}
+	defer func() { _ = archiveRoot.Close() }()
+	return readArchivedAppInfoPlistFromRoot(archiveRoot, appProps)
+}
+
+func readArchivedAppInfoPlistFromRoot(archiveRoot *os.Root, appProps map[string]any) (map[string]any, error) {
 	applicationPath := coercePlistValueToString(appProps["ApplicationPath"])
 	if strings.TrimSpace(applicationPath) == "" {
-		return "", fmt.Errorf("archive Info.plist missing ApplicationPath")
+		return nil, fmt.Errorf("archive Info.plist missing ApplicationPath")
 	}
 
-	appBundlePath := filepath.Join(archivePath, "Products", filepath.FromSlash(applicationPath))
-	candidatePaths := []string{filepath.Join(appBundlePath, "Info.plist")}
-	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(appBundlePath)), ".app") {
-		candidatePaths = append(candidatePaths, filepath.Join(appBundlePath, "Contents", "Info.plist"))
+	relativeApplicationPath := filepath.Clean(filepath.FromSlash(applicationPath))
+	if filepath.IsAbs(relativeApplicationPath) || relativeApplicationPath == ".." || strings.HasPrefix(relativeApplicationPath, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("archive Info.plist contains unsafe ApplicationPath %q", applicationPath)
+	}
+	productsRoot, err := archiveRoot.OpenRoot("Products")
+	if err != nil {
+		return nil, fmt.Errorf("open archive Products directory: %w", err)
+	}
+	defer func() { _ = productsRoot.Close() }()
+	appRoot, err := productsRoot.OpenRoot(relativeApplicationPath)
+	if err != nil {
+		return nil, fmt.Errorf("open archived app bundle: %w", err)
+	}
+	defer func() { _ = appRoot.Close() }()
+
+	candidatePaths := []string{"Info.plist"}
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(relativeApplicationPath)), ".app") {
+		candidatePaths = append(candidatePaths, filepath.Join("Contents", "Info.plist"))
 	}
 
 	var (
@@ -1261,23 +1373,38 @@ func inferArchivePlatformFromAppBundle(archivePath string, appProps map[string]a
 		lastErr error
 	)
 	for _, candidatePath := range candidatePaths {
-		data, lastErr = os.ReadFile(candidatePath)
+		data, lastErr = readRegularFileFromRoot(appRoot, candidatePath)
 		if lastErr == nil {
 			break
 		}
+		if !errors.Is(lastErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("read archived app Info.plist: %w", lastErr)
+		}
 	}
 	if lastErr != nil {
-		return "", fmt.Errorf("read archived app Info.plist: %w", lastErr)
+		return nil, fmt.Errorf("read archived app Info.plist: %w", lastErr)
 	}
 	var payload map[string]any
 	if _, err := plist.Unmarshal(data, &payload); err != nil {
-		return "", fmt.Errorf("decode archived app Info.plist: %w", err)
+		return nil, fmt.Errorf("decode archived app Info.plist: %w", err)
 	}
-	platform := inferAppStorePlatformFromPlist(payload)
-	if platform == "" {
-		return "", fmt.Errorf("archived app Info.plist did not contain a supported platform marker")
+	return payload, nil
+}
+
+func readRegularFileFromRoot(root *os.Root, name string) ([]byte, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
 	}
-	return platform, nil
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("metadata path must be a regular file: %s", name)
+	}
+	return io.ReadAll(file)
 }
 
 func inferAppStorePlatformFromPlist(payload map[string]any) string {

@@ -69,8 +69,20 @@ func (c *Client) GetInAppPurchases(ctx context.Context, appID string, opts ...IA
 }
 
 // GetInAppPurchaseV2 retrieves an in-app purchase by ID.
-func (c *Client) GetInAppPurchaseV2(ctx context.Context, iapID string) (*InAppPurchaseV2Response, error) {
-	path := fmt.Sprintf("/v2/inAppPurchases/%s", strings.TrimSpace(iapID))
+func (c *Client) GetInAppPurchaseV2(ctx context.Context, iapID string, opts ...IAPGetOption) (*InAppPurchaseV2Response, error) {
+	iapID = strings.TrimSpace(iapID)
+	if iapID == "" {
+		return nil, fmt.Errorf("iapID is required")
+	}
+
+	query := &inAppPurchaseGetQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+	path := fmt.Sprintf("/v2/inAppPurchases/%s", iapID)
+	if queryString := buildInAppPurchaseGetQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -172,6 +184,8 @@ func (c *Client) DeleteInAppPurchaseV2(ctx context.Context, iapID string) error 
 }
 
 // GetInAppPurchaseLocalizations fetches localizations for an IAP.
+//
+// Deprecated: Use GetInAppPurchaseVersionLocalizations with an in-app purchase version ID.
 func (c *Client) GetInAppPurchaseLocalizations(ctx context.Context, iapID string, opts ...IAPLocalizationsOption) (*InAppPurchaseLocalizationsResponse, error) {
 	query := &iapLocalizationsQuery{}
 	for _, opt := range opts {

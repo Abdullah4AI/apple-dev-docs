@@ -127,6 +127,7 @@ const (
 	ResourceTypeAnalyticsReportInstances                        = types.ResourceTypeAnalyticsReportInstances
 	ResourceTypeAnalyticsReportSegments                         = types.ResourceTypeAnalyticsReportSegments
 	ResourceTypeInAppPurchases                                  = types.ResourceTypeInAppPurchases
+	ResourceTypeInAppPurchaseVersions                           = types.ResourceTypeInAppPurchaseVersions
 	ResourceTypeInAppPurchaseLocalizations                      = types.ResourceTypeInAppPurchaseLocalizations
 	ResourceTypeInAppPurchaseImages                             = types.ResourceTypeInAppPurchaseImages
 	ResourceTypeInAppPurchaseAppStoreReviewScreenshots          = types.ResourceTypeInAppPurchaseAppStoreReviewScreenshots
@@ -142,8 +143,10 @@ const (
 	ResourceTypeInAppPurchaseSubmissions                        = types.ResourceTypeInAppPurchaseSubmissions
 	ResourceTypeSubscriptionGroups                              = types.ResourceTypeSubscriptionGroups
 	ResourceTypeSubscriptionGroupLocalizations                  = types.ResourceTypeSubscriptionGroupLocalizations
+	ResourceTypeSubscriptionGroupVersions                       = types.ResourceTypeSubscriptionGroupVersions
 	ResourceTypeSubscriptionGroupSubmissions                    = types.ResourceTypeSubscriptionGroupSubmissions
 	ResourceTypeSubscriptions                                   = types.ResourceTypeSubscriptions
+	ResourceTypeSubscriptionVersions                            = types.ResourceTypeSubscriptionVersions
 	ResourceTypeSubscriptionLocalizations                       = types.ResourceTypeSubscriptionLocalizations
 	ResourceTypeSubscriptionImages                              = types.ResourceTypeSubscriptionImages
 	ResourceTypeSubscriptionIntroductoryOffers                  = types.ResourceTypeSubscriptionIntroductoryOffers

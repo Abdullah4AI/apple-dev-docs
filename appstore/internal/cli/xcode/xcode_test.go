@@ -1656,6 +1656,8 @@ func overrideXcodeCommandTestHooks(t *testing.T) func() {
 	originalRunArchive := runArchive
 	originalRunExport := runExport
 	originalRunValidate := runValidate
+	originalRunGenerateExportOptions := runGenerateExportOptions
+	originalRunXcodeExportPreflight := runXcodeExportPreflight
 	originalIsDirectUpload := isDirectUploadExportOptionsFn
 	originalInferArchivePlatform := inferArchivePlatformFn
 	originalGetASCClient := getASCClientFn
@@ -1664,11 +1666,14 @@ func overrideXcodeCommandTestHooks(t *testing.T) func() {
 	originalWaitForDiscovery := waitForBuildByNumberOrUploadFailureFn
 	originalWaitForProcessing := waitForBuildProcessingFn
 	originalWaitTimeout := resolveXcodeExportWaitTimeoutFn
+	runXcodeExportPreflight = func(context.Context) error { return nil }
 
 	return func() {
 		runArchive = originalRunArchive
 		runExport = originalRunExport
 		runValidate = originalRunValidate
+		runGenerateExportOptions = originalRunGenerateExportOptions
+		runXcodeExportPreflight = originalRunXcodeExportPreflight
 		isDirectUploadExportOptionsFn = originalIsDirectUpload
 		inferArchivePlatformFn = originalInferArchivePlatform
 		getASCClientFn = originalGetASCClient

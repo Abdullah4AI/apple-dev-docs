@@ -144,6 +144,7 @@ func VersionsViewCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("versions view", flag.ExitOnError)
 
 	versionID := fs.String("version-id", "", "App Store version ID (required)")
+	legacyID := shared.BindDeprecatedStringFlagAlias(fs, "id", "version-id")
 	includeBuild := fs.Bool("include-build", false, "Include attached build information")
 	includeSubmission := fs.Bool("include-submission", false, "Include submission information")
 	include := fs.String("include", "", "Include related resources: "+strings.Join(appStoreVersionIncludeList(), ", "))
@@ -162,6 +163,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyID.Apply(versionID); err != nil {
+				return err
+			}
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
@@ -375,6 +379,7 @@ func VersionsUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("versions update", flag.ExitOnError)
 
 	versionID := fs.String("version-id", "", "App Store version ID (required)")
+	legacyID := shared.BindDeprecatedStringFlagAlias(fs, "id", "version-id")
 	copyright := fs.String("copyright", "", "Copyright text (e.g., '2026 My Company')")
 	releaseType := fs.String("release-type", "", "Release type: MANUAL, AFTER_APPROVAL, SCHEDULED")
 	earliestReleaseDate := fs.String("earliest-release-date", "", "Earliest release date (ISO 8601, e.g., 2026-02-01T08:00:00+00:00)")
@@ -395,6 +400,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyID.Apply(versionID); err != nil {
+				return err
+			}
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
 				return shared.MissingRequiredUsageError()
@@ -501,7 +509,8 @@ func VersionsAttachBuildCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("versions attach-build", flag.ExitOnError)
 
 	versionID := fs.String("version-id", "", "App Store version ID (required)")
-	buildID := fs.String("build", "", "Build ID to attach (required)")
+	buildID := fs.String("build-id", "", "Build ID to attach (required)")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -511,16 +520,19 @@ func VersionsAttachBuildCommand() *ffcli.Command {
 		LongHelp: `Attach a build to an app store version.
 
 Examples:
-  asc versions attach-build --version-id "VERSION_ID" --build "BUILD_ID"`,
+  asc versions attach-build --version-id "VERSION_ID" --build-id "BUILD_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
 				return shared.MissingRequiredUsageError()
 			}
 			if strings.TrimSpace(*buildID) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
 				return shared.MissingRequiredUsageError()
 			}
 

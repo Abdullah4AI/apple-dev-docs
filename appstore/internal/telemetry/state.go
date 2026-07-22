@@ -228,11 +228,6 @@ func lockTelemetryFile(path string, wait time.Duration, purpose string) (func(),
 			_ = lockFile.Close()
 			return nil, fmt.Errorf("telemetry: failed to secure %s lock: %w", purpose, err)
 		}
-		if wait > 0 && time.Until(deadline) <= 0 {
-			_ = lockFile.Close()
-			return nil, telemetryLockBusyError(purpose)
-		}
-
 		locked, lockErr := tryLockStateFile(lockFile)
 		if lockErr != nil {
 			_ = lockFile.Close()

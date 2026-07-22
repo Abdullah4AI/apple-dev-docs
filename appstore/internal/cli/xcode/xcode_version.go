@@ -13,10 +13,59 @@ import (
 )
 
 var (
-	runGetVersion  = localxcode.GetVersion
-	runSetVersion  = localxcode.SetVersion
-	runBumpVersion = localxcode.BumpVersion
+	runGetVersion                    = localxcode.GetVersionScoped
+	runGetConsistentMarketingVersion = localxcode.GetConsistentMarketingVersion
+	runValidateSetVersion            = localxcode.ValidateSetVersion
+	runValidateBumpVersion           = localxcode.ValidateBumpVersion
+	runSetVersion                    = localxcode.SetVersion
+	runBumpVersion                   = localxcode.BumpVersion
+	runResolveXcodeNextBuildNumber   = resolveXcodeNextBuildNumber
 )
+
+type xcodeRemoteBuildNumberOptions struct {
+	AppID              string
+	Version            string
+	Platform           string
+	ProcessingState    string
+	ExcludeExpired     bool
+	InitialBuildNumber int
+}
+
+type xcodeRemoteBuildNumberFlags struct {
+	next               *bool
+	appID              *string
+	platform           *string
+	processingState    *string
+	excludeExpired     *bool
+	initialBuildNumber *int
+}
+
+func bindXcodeRemoteBuildNumberFlags(fs *flag.FlagSet) xcodeRemoteBuildNumberFlags {
+	return xcodeRemoteBuildNumberFlags{
+		next:               fs.Bool("next-build-number", false, "Set the remote-safe next build number from App Store Connect"),
+		appID:              fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (or ASC_APP_ID with --next-build-number)"),
+		platform:           fs.String("platform", "", "Optional remote build platform filter: IOS, MAC_OS, TV_OS, VISION_OS"),
+		processingState:    fs.String("processing-state", "", "Optional remote processing-state filter"),
+		excludeExpired:     fs.Bool("exclude-expired", false, "Exclude expired builds from remote selection"),
+		initialBuildNumber: fs.Int("initial-build-number", 1, "Initial build number when no remote build exists"),
+	}
+}
+
+func (flags xcodeRemoteBuildNumberFlags) options(version string) xcodeRemoteBuildNumberOptions {
+	return xcodeRemoteBuildNumberOptions{
+		AppID:              strings.TrimSpace(*flags.appID),
+		Version:            strings.TrimSpace(version),
+		Platform:           strings.TrimSpace(*flags.platform),
+		ProcessingState:    strings.TrimSpace(*flags.processingState),
+		ExcludeExpired:     *flags.excludeExpired,
+		InitialBuildNumber: *flags.initialBuildNumber,
+	}
+}
+
+func (flags xcodeRemoteBuildNumberFlags) hasRemoteOnlyValues() bool {
+	return strings.TrimSpace(*flags.appID) != "" || strings.TrimSpace(*flags.platform) != "" ||
+		strings.TrimSpace(*flags.processingState) != "" || *flags.excludeExpired || *flags.initialBuildNumber != 1
+}
 
 // XcodeVersionCommand returns the xcode version command group.
 func XcodeVersionCommand() *ffcli.Command {
@@ -26,22 +75,26 @@ func XcodeVersionCommand() *ffcli.Command {
 		Name:       "version",
 		ShortUsage: "asc xcode version <subcommand> [flags]",
 		ShortHelp:  "Read and modify Xcode project version numbers.",
-		LongHelp: `Read and modify Xcode project version and build numbers using agvtool.
+		LongHelp: `Read and modify Xcode project version and build numbers.
 
-Requires Apple Generic Versioning to be enabled in the Xcode project.
-macOS only.
+Modern project and xcconfig build settings are edited structurally without
+requiring Xcode. Legacy Info.plist-only projects use agvtool on macOS.
 
 Examples:
   asc xcode version view
   asc xcode version view --project-dir ./MyApp
   asc xcode version view --project ./MyApp/App.xcodeproj
+  asc xcode version view --target MyApp --configuration Release
   asc xcode version edit --version "1.3.0"
   asc xcode version edit --build-number "42"
   asc xcode version edit --version "1.3.0" --build-number "42"
+  asc xcode version edit --target Widget --configuration Release --build-number "42"
+  asc xcode version edit --next-build-number --app "com.example.app"
   asc xcode version bump --type patch
   asc xcode version bump --type minor
   asc xcode version bump --type major
-  asc xcode version bump --type build`,
+  asc xcode version bump --type build
+  asc xcode version bump --type build --next-build-number --app "com.example.app"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -72,11 +125,12 @@ func xcodeVersionViewCommand() *ffcli.Command {
 	projectDir := fs.String("project-dir", ".", "Path to directory containing .xcodeproj")
 	project := fs.String("project", "", "Path to a specific .xcodeproj (preferred when the directory contains multiple projects)")
 	target := fs.String("target", "", "Xcode target name (for multi-target projects)")
+	configuration := fs.String("configuration", "", "Xcode build configuration name")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "view",
-		ShortUsage: "asc xcode version view [--project XCODEPROJ] [--project-dir DIR] [--target NAME]",
+		ShortUsage: "asc xcode version view [--project XCODEPROJ] [--project-dir DIR] [--target NAME] [--configuration NAME]",
 		ShortHelp:  "View current version and build number.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
@@ -85,7 +139,11 @@ func xcodeVersionViewCommand() *ffcli.Command {
 				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
 			}
 
-			result, err := runGetVersion(ctx, selectedProjectInput(*projectDir, *project), strings.TrimSpace(*target))
+			result, err := runGetVersion(ctx, localxcode.GetVersionOptions{
+				ProjectDir:    selectedProjectInput(*projectDir, *project),
+				Target:        strings.TrimSpace(*target),
+				Configuration: strings.TrimSpace(*configuration),
+			})
 			if err != nil {
 				return fmt.Errorf("xcode version view: %w", err)
 			}
@@ -97,10 +155,12 @@ func xcodeVersionViewCommand() *ffcli.Command {
 				func() error {
 					fmt.Printf("Version: %s\n", result.Version)
 					fmt.Printf("Build:   %s\n", result.BuildNumber)
+					printVersionScopeAndSources(result, "")
 					return nil
 				},
 				func() error {
 					fmt.Printf("**Version:** %s\n\n**Build:** %s\n", result.Version, result.BuildNumber)
+					printVersionScopeAndSources(result, "**")
 					return nil
 				},
 			)
@@ -108,18 +168,38 @@ func xcodeVersionViewCommand() *ffcli.Command {
 	}
 }
 
+func printVersionScopeAndSources(result *localxcode.VersionInfo, markdownMarker string) {
+	printValue := func(label, value string) {
+		if value == "" {
+			return
+		}
+		if markdownMarker != "" {
+			fmt.Printf("\n**%s:** %s\n", label, value)
+			return
+		}
+		fmt.Printf("%-15s %s\n", label+":", value)
+	}
+	printValue("Target", result.Target)
+	printValue("Configuration", result.Configuration)
+	printValue("Version source", result.VersionSource)
+	printValue("Build source", result.BuildNumberSource)
+}
+
 func xcodeVersionEditCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("edit", flag.ExitOnError)
 
 	projectDir := fs.String("project-dir", ".", "Path to directory containing .xcodeproj")
 	project := fs.String("project", "", "Path to a specific .xcodeproj (preferred when the directory contains multiple projects)")
+	target := fs.String("target", "", "Xcode target name to edit")
+	configuration := fs.String("configuration", "", "Xcode build configuration name to edit")
 	version := fs.String("version", "", "Marketing version (CFBundleShortVersionString)")
 	buildNumber := fs.String("build-number", "", "Build number (CFBundleVersion)")
+	remote := bindXcodeRemoteBuildNumberFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "edit",
-		ShortUsage: "asc xcode version edit [--version VER] [--build-number NUM] [--project XCODEPROJ] [--project-dir DIR]",
+		ShortUsage: "asc xcode version edit [--version VER] [--build-number NUM | --next-build-number --app APP] [--target NAME] [--configuration NAME]",
 		ShortHelp:  "Edit version and/or build number.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
@@ -130,14 +210,55 @@ func xcodeVersionEditCommand() *ffcli.Command {
 
 			v := strings.TrimSpace(*version)
 			b := strings.TrimSpace(*buildNumber)
-			if v == "" && b == "" {
+			if b != "" && *remote.next {
+				return shared.UsageError("--build-number and --next-build-number are mutually exclusive")
+			}
+			if !*remote.next && remote.hasRemoteOnlyValues() {
+				return shared.UsageError("remote build-number flags require --next-build-number")
+			}
+			if v == "" && b == "" && !*remote.next {
 				return shared.UsageError("--version or --build-number is required")
 			}
 
+			projectInput := selectedProjectInput(*projectDir, *project)
+			if *remote.next {
+				if err := validateXcodeRemoteBuildNumberOptions(remote.options(v)); err != nil {
+					return err
+				}
+				if err := runValidateSetVersion(localxcode.SetVersionOptions{
+					ProjectDir:    projectInput,
+					Target:        strings.TrimSpace(*target),
+					Configuration: strings.TrimSpace(*configuration),
+					Version:       v,
+					BuildNumber:   "1",
+				}); err != nil {
+					return fmt.Errorf("xcode version edit: validate local mutation: %w", err)
+				}
+				versionFilter := v
+				if versionFilter == "" {
+					resolvedVersion, err := runGetConsistentMarketingVersion(ctx, localxcode.GetVersionOptions{
+						ProjectDir:    projectInput,
+						Target:        strings.TrimSpace(*target),
+						Configuration: strings.TrimSpace(*configuration),
+					})
+					if err != nil {
+						return fmt.Errorf("xcode version edit: resolve local version for remote build selection: %w", err)
+					}
+					versionFilter = resolvedVersion
+				}
+				var err error
+				b, err = runResolveXcodeNextBuildNumber(ctx, remote.options(versionFilter))
+				if err != nil {
+					return fmt.Errorf("xcode version edit: resolve next build number: %w", err)
+				}
+			}
+
 			result, err := runSetVersion(ctx, localxcode.SetVersionOptions{
-				ProjectDir:  selectedProjectInput(*projectDir, *project),
-				Version:     v,
-				BuildNumber: b,
+				ProjectDir:    projectInput,
+				Target:        strings.TrimSpace(*target),
+				Configuration: strings.TrimSpace(*configuration),
+				Version:       v,
+				BuildNumber:   b,
 			})
 			if err != nil {
 				return fmt.Errorf("xcode version edit: %w", err)
@@ -153,13 +274,15 @@ func xcodeVersionBumpCommand() *ffcli.Command {
 
 	projectDir := fs.String("project-dir", ".", "Path to directory containing .xcodeproj")
 	project := fs.String("project", "", "Path to a specific .xcodeproj (preferred when the directory contains multiple projects)")
-	target := fs.String("target", "", "Xcode target name to use when reading the current version/build in multi-target projects")
+	target := fs.String("target", "", "Xcode target name to bump")
+	configuration := fs.String("configuration", "", "Xcode build configuration name to bump")
 	bumpType := fs.String("type", "", "Bump type: major, minor, patch, or build (required)")
+	remote := bindXcodeRemoteBuildNumberFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "bump",
-		ShortUsage: "asc xcode version bump --type TYPE [--project XCODEPROJ] [--project-dir DIR] [--target NAME]",
+		ShortUsage: "asc xcode version bump --type TYPE [--target NAME] [--configuration NAME] [--next-build-number --app APP]",
 		ShortHelp:  "Increment version or build number.",
 		LongHelp: `Increment the version or build number in an Xcode project.
 
@@ -172,9 +295,8 @@ Bump types:
 Note:
   --project selects a specific .xcodeproj when the containing directory has
   multiple sibling projects.
-  --target is only used to choose which target's current version/build should be
-  read as the bump baseline in multi-target projects. The write still updates the
-  whole project, matching agvtool behavior.
+  --target and --configuration scope both the read and write.
+  --next-build-number is accepted with --type build and uses App Store Connect.
 
 Examples:
   asc xcode version bump --type patch
@@ -194,10 +316,47 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 
+			if *remote.next && parsed != localxcode.BumpBuild {
+				return shared.UsageError("--next-build-number requires --type build")
+			}
+			if !*remote.next && remote.hasRemoteOnlyValues() {
+				return shared.UsageError("remote build-number flags require --next-build-number")
+			}
+			projectInput := selectedProjectInput(*projectDir, *project)
+			remoteBuildNumber := ""
+			if *remote.next {
+				if err := validateXcodeRemoteBuildNumberOptions(remote.options("")); err != nil {
+					return err
+				}
+				if err := runValidateBumpVersion(ctx, localxcode.BumpVersionOptions{
+					ProjectDir:    projectInput,
+					Target:        strings.TrimSpace(*target),
+					Configuration: strings.TrimSpace(*configuration),
+					BumpType:      localxcode.BumpBuild,
+					BuildNumber:   "1",
+				}); err != nil {
+					return fmt.Errorf("xcode version bump: validate local mutation: %w", err)
+				}
+				versionFilter, err := runGetConsistentMarketingVersion(ctx, localxcode.GetVersionOptions{
+					ProjectDir:    projectInput,
+					Target:        strings.TrimSpace(*target),
+					Configuration: strings.TrimSpace(*configuration),
+				})
+				if err != nil {
+					return fmt.Errorf("xcode version bump: resolve local version for remote build selection: %w", err)
+				}
+				remoteBuildNumber, err = runResolveXcodeNextBuildNumber(ctx, remote.options(versionFilter))
+				if err != nil {
+					return fmt.Errorf("xcode version bump: resolve next build number: %w", err)
+				}
+			}
+
 			result, err := runBumpVersion(ctx, localxcode.BumpVersionOptions{
-				ProjectDir: selectedProjectInput(*projectDir, *project),
-				Target:     strings.TrimSpace(*target),
-				BumpType:   parsed,
+				ProjectDir:    projectInput,
+				Target:        strings.TrimSpace(*target),
+				Configuration: strings.TrimSpace(*configuration),
+				BumpType:      parsed,
+				BuildNumber:   remoteBuildNumber,
 			})
 			if err != nil {
 				return fmt.Errorf("xcode version bump: %w", err)
@@ -206,4 +365,50 @@ Examples:
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func resolveXcodeNextBuildNumber(ctx context.Context, opts xcodeRemoteBuildNumberOptions) (string, error) {
+	if err := validateXcodeRemoteBuildNumberOptions(opts); err != nil {
+		return "", err
+	}
+	selection, err := shared.NormalizeLatestBuildSelectionOptions(
+		opts.AppID,
+		opts.Version,
+		opts.Platform,
+		opts.ProcessingState,
+		opts.ExcludeExpired,
+	)
+	if err != nil {
+		return "", err
+	}
+	client, err := shared.GetASCClient()
+	if err != nil {
+		return "", err
+	}
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	defer cancel()
+	result, err := shared.ResolveNextBuildNumber(requestCtx, client, shared.NextBuildNumberOptions{
+		LatestBuildSelectionOptions: selection,
+		InitialBuildNumber:          opts.InitialBuildNumber,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.NextBuildNumber, nil
+}
+
+func validateXcodeRemoteBuildNumberOptions(opts xcodeRemoteBuildNumberOptions) error {
+	if _, err := shared.NormalizeLatestBuildSelectionOptions(
+		opts.AppID,
+		opts.Version,
+		opts.Platform,
+		opts.ProcessingState,
+		opts.ExcludeExpired,
+	); err != nil {
+		return err
+	}
+	if opts.InitialBuildNumber < 1 {
+		return shared.UsageError("--initial-build-number must be >= 1")
+	}
+	return nil
 }

@@ -17,6 +17,8 @@ import (
 
 const bulkAvailabilityTimeout = 5 * time.Minute
 
+var availabilityClientFactory = getASCClient
+
 // AvailabilitySetCommandConfig configures the availability set command.
 type AvailabilitySetCommandConfig struct {
 	FlagSetName                      string
@@ -84,7 +86,7 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 
 			availableValue := available.Value()
 
-			client, err := getASCClient()
+			client, err := availabilityClientFactory()
 			if err != nil {
 				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
 			}
@@ -95,10 +97,14 @@ func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Comma
 			resp, err := client.GetAppAvailabilityV2(requestCtx, resolvedAppID)
 			if err != nil {
 				if isAppAvailabilityMissing(err) {
-					return fmt.Errorf(
-						"%s: app availability not found for app %q; this command only updates existing app availability, so initialize availability in App Store Connect first or use the \"asc web apps availability create\" flow",
-						config.ErrorPrefix,
-						resolvedAppID,
+					return NewErrorWithCause(
+						fmt.Errorf(
+							"%s: app availability not found for app %q; this command only updates existing app availability, so use \"asc pricing availability create\" first: %w",
+							config.ErrorPrefix,
+							resolvedAppID,
+							asc.ErrNotFound,
+						),
+						err,
 					)
 				}
 				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)

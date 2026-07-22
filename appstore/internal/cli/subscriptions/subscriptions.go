@@ -18,6 +18,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+var subscriptionQueryClientFactory = shared.GetASCClient
+
 // SubscriptionsCommand returns the subscriptions command group.
 func SubscriptionsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("subscriptions", flag.ExitOnError)
@@ -32,14 +34,14 @@ Examples:
   asc subscriptions groups list --app "APP_ID"
   asc subscriptions list --group-id "GROUP_ID"
   asc subscriptions create --group-id "GROUP_ID" --reference-name "Monthly" --product-id "com.example.sub.monthly"
-  asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --subscription-period ONE_MONTH --locale "en-US" --display-name "Pro Monthly" --price "3.99" --price-territory "United States" --territories "US,Canada"
+  asc subscriptions setup --app "APP_ID" --group-reference-name "Pro" --reference-name "Pro Monthly" --product-id "com.example.pro.monthly" --subscription-period ONE_MONTH --price "3.99" --price-territory "United States" --territories "US,Canada"
   asc subscriptions pricing summary --app "APP_ID"
   asc subscriptions pricing prices set --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID"
   asc subscriptions pricing availability edit --subscription-id "SUB_ID" --territories "US,Canada"
   asc subscriptions offers offer-codes generate --offer-code-id "OFFER_CODE_ID" --quantity 10 --expiration-date "2026-02-01"
   asc subscriptions offers win-back list --subscription-id "SUB_ID"
   asc subscriptions review screenshots create --subscription-id "SUB_ID" --file "./review.png"
-  asc subscriptions review submit --subscription-id "SUB_ID" --confirm
+  asc review items add --submission "SUBMISSION_ID" --item-type subscriptionVersions --item-id "SUBSCRIPTION_VERSION_ID"
   asc subscriptions promoted-purchases create --app "APP_ID" --product-id "SUB_ID" --visible-for-all-users true`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -57,6 +59,7 @@ Examples:
 			SubscriptionsPromotedPurchasesCommand(),
 			SubscriptionsLocalizationsCommand(),
 			SubscriptionsImagesCommand(),
+			SubscriptionsVersionsCommand(),
 			SubscriptionsGracePeriodsCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -89,6 +92,7 @@ Examples:
 			SubscriptionsGroupsUpdateCommand(),
 			SubscriptionsGroupsDeleteCommand(),
 			SubscriptionsGroupsLocalizationsCommand(),
+			SubscriptionsGroupsVersionsCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -104,6 +108,10 @@ func SubscriptionsGroupsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	include := fs.String("include", "", "Include relationships: subscriptions,subscriptionGroupLocalizations,versions")
+	fields := fs.String("fields", "", "Group fields: referenceName,subscriptions,subscriptionGroupLocalizations,versions")
+	versionFields := fs.String("version-fields", "", "Included version fields (comma-separated)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -118,11 +126,35 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectUnexpectedArgs(args); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("subscriptions groups list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("subscriptions groups list: %w", err)
+			}
+			if strings.TrimSpace(*next) != "" && subscriptionGroupAnyFlagSet(fs, "app") {
+				return shared.UsageError("subscriptions groups list: --next cannot be combined with --app")
+			}
+			if strings.TrimSpace(*next) != "" && subscriptionGroupAnyFlagSet(fs, "limit", "include", "fields", "version-fields", "versions-limit") {
+				return shared.UsageError("subscriptions groups list: --next cannot be combined with query flags")
+			}
+			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
+				return shared.UsageError("subscriptions groups list: --versions-limit must be between 1 and 50")
+			}
+			includes, err := shared.NormalizeSelection(*include, []string{"subscriptions", "subscriptionGroupLocalizations", "versions"}, "--include")
+			if err != nil {
+				return shared.UsageError("subscriptions groups list: " + err.Error())
+			}
+			groupFields, err := shared.NormalizeSelection(*fields, subscriptionGroupVersionGroupFields, "--fields")
+			if err != nil {
+				return shared.UsageError("subscriptions groups list: " + err.Error())
+			}
+			includedVersionFields, err := shared.NormalizeSelection(*versionFields, subscriptionGroupVersionFields, "--version-fields")
+			if err != nil {
+				return shared.UsageError("subscriptions groups list: " + err.Error())
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -131,7 +163,7 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := subscriptionGroupVersionClientFactory()
 			if err != nil {
 				return fmt.Errorf("subscriptions groups list: %w", err)
 			}
@@ -142,6 +174,10 @@ Examples:
 			opts := []asc.SubscriptionGroupsOption{
 				asc.WithSubscriptionGroupsLimit(*limit),
 				asc.WithSubscriptionGroupsNextURL(*next),
+				asc.WithSubscriptionGroupsInclude(includes),
+				asc.WithSubscriptionGroupsFields(groupFields),
+				asc.WithSubscriptionGroupsVersionFields(includedVersionFields),
+				asc.WithSubscriptionGroupsVersionsLimit(*versionsLimit),
 			}
 
 			if *paginate {
@@ -229,6 +265,10 @@ func SubscriptionsGroupsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("groups view", flag.ExitOnError)
 
 	groupID := fs.String("id", "", "Subscription group ID")
+	include := fs.String("include", "", "Include relationships: subscriptions,subscriptionGroupLocalizations,versions")
+	fields := fs.String("fields", "", "Group fields: referenceName,subscriptions,subscriptionGroupLocalizations,versions")
+	versionFields := fs.String("version-fields", "", "Included version fields (comma-separated)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -242,13 +282,31 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectUnexpectedArgs(args); err != nil {
+				return err
+			}
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()
 			}
+			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
+				return shared.UsageError("subscriptions groups view: --versions-limit must be between 1 and 50")
+			}
+			includes, err := shared.NormalizeSelection(*include, []string{"subscriptions", "subscriptionGroupLocalizations", "versions"}, "--include")
+			if err != nil {
+				return shared.UsageError("subscriptions groups view: " + err.Error())
+			}
+			groupFields, err := shared.NormalizeSelection(*fields, subscriptionGroupVersionGroupFields, "--fields")
+			if err != nil {
+				return shared.UsageError("subscriptions groups view: " + err.Error())
+			}
+			includedVersionFields, err := shared.NormalizeSelection(*versionFields, subscriptionGroupVersionFields, "--version-fields")
+			if err != nil {
+				return shared.UsageError("subscriptions groups view: " + err.Error())
+			}
 
-			client, err := shared.GetASCClient()
+			client, err := subscriptionGroupVersionClientFactory()
 			if err != nil {
 				return fmt.Errorf("subscriptions groups view: %w", err)
 			}
@@ -256,7 +314,13 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetSubscriptionGroup(requestCtx, id)
+			resp, err := client.GetSubscriptionGroup(
+				requestCtx, id,
+				asc.WithSubscriptionGroupsInclude(includes),
+				asc.WithSubscriptionGroupsFields(groupFields),
+				asc.WithSubscriptionGroupsVersionFields(includedVersionFields),
+				asc.WithSubscriptionGroupsVersionsLimit(*versionsLimit),
+			)
 			if err != nil {
 				return fmt.Errorf("subscriptions groups view: failed to fetch: %w", err)
 			}
@@ -376,6 +440,11 @@ func SubscriptionsListCommand() *ffcli.Command {
 
 	groupID := fs.String("group-id", "", "Subscription group ID")
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env); lists subscriptions across all groups")
+	fields := fs.String("fields", "", "Sparse fields for subscriptions")
+	versionFields := fs.String("version-fields", "", "Sparse fields for included subscriptionVersions")
+	include := fs.String("include", "", "Include relationships (supports versions)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50)")
+	legacyVersionLimit := shared.BindDeprecatedIntFlagAlias(fs, "version-limit", "versions-limit")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -389,16 +458,26 @@ func SubscriptionsListCommand() *ffcli.Command {
 
 Examples:
   asc subscriptions list --group-id "GROUP_ID"
+  asc subscriptions list --group-id "GROUP_ID" --include versions --versions-limit 10
   asc subscriptions list --group-id "GROUP_ID" --paginate
   asc subscriptions list --app "APP_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyVersionLimit.Apply(versionsLimit); err != nil {
+				return err
+			}
+			if err := rejectUnexpectedArgs(args); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("subscriptions list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("subscriptions list: %w", err)
+			}
+			if err := validateRelationshipLimit("--versions-limit", *versionsLimit); err != nil {
+				return err
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -410,16 +489,43 @@ Examples:
 			if appFlag != "" && nextURL != "" {
 				return shared.UsageError("--next cannot be combined with --app; use --group-id with the group-scoped next URL")
 			}
+			if err := validateNextFlagConflicts(
+				nextURL,
+				flagConflict{"--app", flagWasProvided(fs, "app")},
+				flagConflict{"--group-id", flagWasProvided(fs, "group-id")},
+				flagConflict{"--fields", flagWasProvided(fs, "fields")},
+				flagConflict{"--version-fields", flagWasProvided(fs, "version-fields")},
+				flagConflict{"--include", flagWasProvided(fs, "include")},
+				flagConflict{"--versions-limit", flagWasProvided(fs, "versions-limit") || legacyVersionLimit.WasProvided()},
+				flagConflict{"--limit", flagWasProvided(fs, "limit")},
+			); err != nil {
+				return err
+			}
+			fieldValues, err := normalizeSelectionFlag(fs, *fields, "--fields", subscriptionFieldsList())
+			if err != nil {
+				return err
+			}
+			versionFieldValues, err := normalizeSelectionFlag(fs, *versionFields, "--version-fields", subscriptionVersionFieldsList())
+			if err != nil {
+				return err
+			}
+			includeValues, err := normalizeSelectionFlag(fs, *include, "--include", subscriptionIncludeList())
+			if err != nil {
+				return err
+			}
 			resolvedAppID := ""
 			if appFlag != "" || (id == "" && nextURL == "") {
 				resolvedAppID = shared.ResolveAppID(*appID)
+			}
+			if resolvedAppID != "" && (strings.TrimSpace(*fields) != "" || strings.TrimSpace(*versionFields) != "" || strings.TrimSpace(*include) != "" || *versionsLimit != 0) {
+				return shared.UsageError("--fields, --version-fields, --include, and --versions-limit require --group-id")
 			}
 			if id == "" && resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id or --app is required (or set ASC_APP_ID)")
 				return shared.MissingRequiredUsageError()
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := subscriptionQueryClientFactory()
 			if err != nil {
 				return fmt.Errorf("subscriptions list: %w", err)
 			}
@@ -438,6 +544,10 @@ Examples:
 			opts := []asc.SubscriptionsOption{
 				asc.WithSubscriptionsLimit(*limit),
 				asc.WithSubscriptionsNextURL(nextURL),
+				asc.WithSubscriptionsFields(fieldValues),
+				asc.WithSubscriptionsVersionFields(versionFieldValues),
+				asc.WithSubscriptionsInclude(includeValues),
+				asc.WithSubscriptionsVersionLimit(*versionsLimit),
 			}
 
 			if *paginate {
@@ -600,6 +710,12 @@ func SubscriptionsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("view", flag.ExitOnError)
 
 	subID := fs.String("id", "", "Subscription ID")
+	legacySubscriptionID := shared.BindDeprecatedStringFlagAlias(fs, "subscription-id", "id")
+	fields := fs.String("fields", "", "Sparse fields for subscriptions")
+	versionFields := fs.String("version-fields", "", "Sparse fields for included subscriptionVersions")
+	include := fs.String("include", "", "Include relationships (supports versions)")
+	versionsLimit := fs.Int("versions-limit", 0, "Maximum included versions (1-50)")
+	legacyVersionLimit := shared.BindDeprecatedIntFlagAlias(fs, "version-limit", "versions-limit")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -609,17 +725,42 @@ func SubscriptionsGetCommand() *ffcli.Command {
 		LongHelp: `View a subscription by ID.
 
 Examples:
-  asc subscriptions view --id "SUB_ID"`,
+  asc subscriptions view --id "SUB_ID"
+  asc subscriptions view --id "SUB_ID" --include versions --versions-limit 10`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyVersionLimit.Apply(versionsLimit); err != nil {
+				return err
+			}
+			if err := rejectUnexpectedArgs(args); err != nil {
+				return err
+			}
+			if err := legacySubscriptionID.Apply(subID); err != nil {
+				return err
+			}
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()
 			}
+			if err := validateRelationshipLimit("--versions-limit", *versionsLimit); err != nil {
+				return err
+			}
+			fieldValues, err := normalizeSelectionFlag(fs, *fields, "--fields", subscriptionFieldsList())
+			if err != nil {
+				return err
+			}
+			versionFieldValues, err := normalizeSelectionFlag(fs, *versionFields, "--version-fields", subscriptionVersionFieldsList())
+			if err != nil {
+				return err
+			}
+			includeValues, err := normalizeSelectionFlag(fs, *include, "--include", subscriptionIncludeList())
+			if err != nil {
+				return err
+			}
 
-			client, err := shared.GetASCClient()
+			client, err := subscriptionQueryClientFactory()
 			if err != nil {
 				return fmt.Errorf("subscriptions view: %w", err)
 			}
@@ -627,7 +768,13 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetSubscription(requestCtx, id)
+			resp, err := client.GetSubscription(
+				requestCtx, id,
+				asc.WithSubscriptionFields(fieldValues),
+				asc.WithSubscriptionIncludedVersionFields(versionFieldValues),
+				asc.WithSubscriptionInclude(includeValues),
+				asc.WithSubscriptionVersionLimit(*versionsLimit),
+			)
 			if err != nil {
 				return fmt.Errorf("subscriptions view: failed to fetch: %w", err)
 			}

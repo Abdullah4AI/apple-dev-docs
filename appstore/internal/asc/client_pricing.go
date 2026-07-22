@@ -575,8 +575,8 @@ func (c *Client) GetAppAvailabilityV2TerritoryAvailabilitiesRelationships(ctx co
 	return &response, nil
 }
 
-// CreateAppAvailabilityV2 calls POST /v2/appAvailabilities.
-// Apple documents this endpoint as app pre-order creation, not generic app-availability bootstrap.
+// CreateAppAvailabilityV2 creates an app availability and its inline territory availabilities.
+// It calls POST /v2/appAvailabilities.
 func (c *Client) CreateAppAvailabilityV2(ctx context.Context, appID string, attrs AppAvailabilityV2CreateAttributes) (*AppAvailabilityV2Response, error) {
 	appID = strings.TrimSpace(appID)
 	if appID == "" {

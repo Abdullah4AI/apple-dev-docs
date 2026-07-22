@@ -3,6 +3,7 @@ package asc
 import (
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // rowsFunc extracts headers and rows from a typed response value.
@@ -17,6 +18,20 @@ var outputRegistry = map[reflect.Type]rowsFunc{}
 
 // directRenderRegistry maps types that need direct render control (multi-table output).
 var directRenderRegistry = map[reflect.Type]directRenderFunc{}
+
+// outputRegistryOnce guards the lazy one-time population of the registries.
+var outputRegistryOnce sync.Once
+
+// ensureOutputRegistryPopulated populates both registries exactly once, on
+// first lookup. Deferring registration keeps the ~450-type registration cost
+// out of process start for commands that never render registry output.
+// sync.Once makes concurrent first lookups safe.
+func ensureOutputRegistryPopulated() {
+	outputRegistryOnce.Do(func() {
+		registerAllOutputRenderers()
+		registerValidationRenderers()
+	})
+}
 
 func typeForPtr[T any]() reflect.Type {
 	return reflect.TypeFor[*T]()
@@ -343,6 +358,8 @@ func registerDirect[T any](fn func(*T, func([]string, [][]string)) error) {
 // using the provided render function (RenderTable or RenderMarkdown).
 // Falls back to JSON output for unregistered types.
 func renderByRegistry(data any, render func([]string, [][]string)) error {
+	ensureOutputRegistryPopulated()
+
 	t := reflect.TypeOf(data)
 
 	// Check direct render registry first (multi-table types).

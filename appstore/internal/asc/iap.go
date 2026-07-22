@@ -2,6 +2,7 @@ package asc
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -116,17 +117,33 @@ type InAppPurchaseResponse = SingleResponse[InAppPurchaseAttributes]
 // IAPOption is a functional option for GetInAppPurchasesV2.
 type IAPOption func(*inAppPurchasesQuery)
 
+// IAPGetOption is a functional option for GetInAppPurchaseV2.
+type IAPGetOption func(*inAppPurchaseGetQuery)
+
 // IAPLocalizationsOption is a functional option for GetInAppPurchaseLocalizations.
 type IAPLocalizationsOption func(*iapLocalizationsQuery)
 
 type inAppPurchasesQuery struct {
 	listQuery
-	productIDs []string
-	names      []string
+	productIDs          []string
+	names               []string
+	fields              []string
+	include             []string
+	versionFields       []string
+	nestedVersionsLimit int
+}
+
+type inAppPurchaseGetQuery struct {
+	fields              []string
+	include             []string
+	versionFields       []string
+	nestedVersionsLimit int
 }
 
 type iapLocalizationsQuery struct {
 	listQuery
+	iapFields []string
+	include   []string
 }
 
 // WithIAPLimit sets the max number of IAPs to return.
@@ -161,6 +178,54 @@ func WithIAPNames(names []string) IAPOption {
 	}
 }
 
+// WithIAPFields sets fields for returned in-app purchases.
+func WithIAPFields(fields []string) IAPOption {
+	return func(q *inAppPurchasesQuery) { q.fields = normalizeUniqueList(fields) }
+}
+
+// WithIAPInclude sets related resources to include for IAP list requests.
+func WithIAPInclude(include []string) IAPOption {
+	return func(q *inAppPurchasesQuery) { q.include = normalizeUniqueList(include) }
+}
+
+// WithIAPVersionFields sets fields for included in-app purchase versions.
+func WithIAPVersionFields(fields []string) IAPOption {
+	return func(q *inAppPurchasesQuery) { q.versionFields = normalizeUniqueList(fields) }
+}
+
+// WithIAPNestedVersionsLimit limits included versions.
+func WithIAPNestedVersionsLimit(limit int) IAPOption {
+	return func(q *inAppPurchasesQuery) {
+		if limit > 0 {
+			q.nestedVersionsLimit = limit
+		}
+	}
+}
+
+// WithIAPGetFields sets fields for a returned in-app purchase.
+func WithIAPGetFields(fields []string) IAPGetOption {
+	return func(q *inAppPurchaseGetQuery) { q.fields = normalizeUniqueList(fields) }
+}
+
+// WithIAPGetInclude sets related resources to include for an IAP detail request.
+func WithIAPGetInclude(include []string) IAPGetOption {
+	return func(q *inAppPurchaseGetQuery) { q.include = normalizeUniqueList(include) }
+}
+
+// WithIAPGetVersionFields sets fields for included versions on an IAP detail request.
+func WithIAPGetVersionFields(fields []string) IAPGetOption {
+	return func(q *inAppPurchaseGetQuery) { q.versionFields = normalizeUniqueList(fields) }
+}
+
+// WithIAPGetNestedVersionsLimit limits included versions on an IAP detail request.
+func WithIAPGetNestedVersionsLimit(limit int) IAPGetOption {
+	return func(q *inAppPurchaseGetQuery) {
+		if limit > 0 {
+			q.nestedVersionsLimit = limit
+		}
+	}
+}
+
 // WithIAPLocalizationsLimit sets the max number of localizations to return.
 func WithIAPLocalizationsLimit(limit int) IAPLocalizationsOption {
 	return func(q *iapLocalizationsQuery) {
@@ -179,16 +244,45 @@ func WithIAPLocalizationsNextURL(next string) IAPLocalizationsOption {
 	}
 }
 
+// WithIAPLocalizationsIAPFields sets fields[inAppPurchases] for included IAPs.
+func WithIAPLocalizationsIAPFields(fields []string) IAPLocalizationsOption {
+	return func(q *iapLocalizationsQuery) { q.iapFields = normalizeUniqueList(fields) }
+}
+
+// WithIAPLocalizationsInclude sets the exact localization relationship include set.
+func WithIAPLocalizationsInclude(include []string) IAPLocalizationsOption {
+	return func(q *iapLocalizationsQuery) { q.include = normalizeUniqueList(include) }
+}
+
 func buildInAppPurchasesQuery(query *inAppPurchasesQuery) string {
 	values := url.Values{}
 	addLimit(values, query.limit)
 	addCSV(values, "filter[productId]", query.productIDs)
 	addCSV(values, "filter[name]", query.names)
+	addCSV(values, "fields[inAppPurchases]", query.fields)
+	addCSV(values, "include", query.include)
+	addCSV(values, "fields[inAppPurchaseVersions]", query.versionFields)
+	if query.nestedVersionsLimit > 0 {
+		values.Set("limit[versions]", strconv.Itoa(query.nestedVersionsLimit))
+	}
+	return values.Encode()
+}
+
+func buildInAppPurchaseGetQuery(query *inAppPurchaseGetQuery) string {
+	values := url.Values{}
+	addCSV(values, "fields[inAppPurchases]", query.fields)
+	addCSV(values, "include", query.include)
+	addCSV(values, "fields[inAppPurchaseVersions]", query.versionFields)
+	if query.nestedVersionsLimit > 0 {
+		values.Set("limit[versions]", strconv.Itoa(query.nestedVersionsLimit))
+	}
 	return values.Encode()
 }
 
 func buildIAPLocalizationsQuery(query *iapLocalizationsQuery) string {
 	values := url.Values{}
 	addLimit(values, query.limit)
+	addCSV(values, "fields[inAppPurchases]", query.iapFields)
+	addCSV(values, "include", includeWhenFieldsSelected(query.include, "inAppPurchaseV2", query.iapFields))
 	return values.Encode()
 }

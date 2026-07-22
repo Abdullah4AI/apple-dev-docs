@@ -98,7 +98,7 @@ Examples:
 			}
 
 			if result.ErrorCount > 0 {
-				return shared.NewReportedError(fmt.Errorf("metadata validate: found %d error(s)", result.ErrorCount))
+				return shared.NewValidationReportedError(fmt.Errorf("metadata validate: found %d error(s)", result.ErrorCount))
 			}
 			return nil
 		},

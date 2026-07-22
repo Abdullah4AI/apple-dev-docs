@@ -6,8 +6,63 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peterbourgon/ff/v3/ffcli"
+
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
+
+func TestSubscriptionPricePointEqualizationCommandsExpose441Filters(t *testing.T) {
+	for _, cmd := range []*ffcli.Command{
+		SubscriptionsPricePointsEqualizationsCommand(),
+		SubscriptionsPricePointsAdjustedEqualizationsCommand(),
+	} {
+		for _, name := range []string{
+			"territory",
+			"subscription-id",
+			"upfront-price-point-id",
+			"plan-type",
+			"fields",
+			"territory-fields",
+			"include",
+			"limit",
+			"next",
+			"paginate",
+		} {
+			if cmd.FlagSet.Lookup(name) == nil {
+				t.Fatalf("%s: expected --%s flag", cmd.Name, name)
+			}
+		}
+	}
+
+	adjusted := SubscriptionsPricePointsAdjustedEqualizationsCommand()
+	for _, required := range []string{"--upfront-price-point-id", "--plan-type MONTHLY"} {
+		if !strings.Contains(adjusted.ShortUsage, required) {
+			t.Fatalf("adjusted-equalizations usage must require %s, got %q", required, adjusted.ShortUsage)
+		}
+	}
+	if !strings.Contains(adjusted.LongHelp, "requires both --upfront-price-point-id and --plan-type") {
+		t.Fatalf("adjusted-equalizations help must explain the live filter requirements, got %q", adjusted.LongHelp)
+	}
+
+	parent := SubscriptionsPricePointsCommand()
+	found := false
+	for _, subcommand := range parent.Subcommands {
+		if subcommand.Name == "adjusted-equalizations" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected adjusted-equalizations under price-points")
+	}
+
+	list := SubscriptionsPricePointsListCommand()
+	for _, name := range []string{"upfront-price-point-id", "plan-type", "fields", "territory-fields", "include"} {
+		if list.FlagSet.Lookup(name) == nil {
+			t.Fatalf("list: expected --%s flag", name)
+		}
+	}
+}
 
 func TestSubscriptionsPricesListCommand_HasResolvedFlag(t *testing.T) {
 	cmd := SubscriptionsPricesListCommand()

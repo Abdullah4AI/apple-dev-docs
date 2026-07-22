@@ -346,7 +346,8 @@ func buildGroupLocalizationsDiagnosticRow(sub Subscription) SubscriptionDiagnost
 	if len(sub.GroupLocalizations) == 0 {
 		row.Status = DiagnosticStatusNo
 		row.Evidence = "none"
-		row.Remediation = "Create at least one subscription group localization with a display name via `asc subscriptions groups localizations create`."
+		groupID := fallbackString(strings.TrimSpace(sub.GroupID), "GROUP_ID")
+		row.Remediation = fmt.Sprintf("Resolve the subscription group version with `asc subscriptions groups versions list --group-id %q` (or create one with `asc subscriptions groups versions create --group-id %q` if none exists), then create at least one localization with `asc subscriptions groups versions localizations create --version-id \"VERSION_ID\" --locale \"en-US\" --name \"GROUP_NAME\"`.", groupID, groupID)
 		return row
 	}
 
@@ -391,7 +392,8 @@ func buildSubscriptionLocalizationsDiagnosticRow(sub Subscription) SubscriptionD
 	if len(sub.Localizations) == 0 {
 		row.Status = DiagnosticStatusNo
 		row.Evidence = "none"
-		row.Remediation = "Create at least one subscription localization with a display name and description via `asc subscriptions localizations create`."
+		subscriptionID := fallbackString(strings.TrimSpace(sub.ID), "SUB_ID")
+		row.Remediation = fmt.Sprintf("Resolve the subscription version with `asc subscriptions versions list --subscription-id %q` (or create one with `asc subscriptions versions create --subscription-id %q` if none exists), then create at least one localization with `asc subscriptions versions localizations create --version-id \"VERSION_ID\" --locale \"en-US\" --name \"DISPLAY_NAME\" --description \"DESCRIPTION\"`.", subscriptionID, subscriptionID)
 		return row
 	}
 
@@ -501,7 +503,8 @@ func buildPromotionalImageDiagnosticRow(sub Subscription) SubscriptionDiagnostic
 	if !sub.HasImage {
 		row.Status = DiagnosticStatusNo
 		row.Evidence = "missing"
-		row.Remediation = fmt.Sprintf("Apple documents this image as optional unless you use offers or App Store promotion. For an otherwise-complete subscription stuck in MISSING_METADATA, uploading a 1024x1024 image with `asc subscriptions images create --subscription-id %q --file \"./image.png\"` can also serve as an undocumented recalculation attempt; re-run validation afterward.", fallbackString(strings.TrimSpace(sub.ID), "SUB_ID"))
+		subscriptionID := fallbackString(strings.TrimSpace(sub.ID), "SUB_ID")
+		row.Remediation = fmt.Sprintf("Apple documents this image as optional unless you use offers or App Store promotion. For an otherwise-complete subscription stuck in MISSING_METADATA, resolve its version with `asc subscriptions versions list --subscription-id %q` (or create one with `asc subscriptions versions create --subscription-id %q` if none exists), then upload a 1024x1024 image with `asc subscriptions versions images upload --version-id \"VERSION_ID\" --file \"./image.png\"`; this can also serve as an undocumented recalculation attempt, so re-run validation afterward.", subscriptionID, subscriptionID)
 		return row
 	}
 
@@ -528,7 +531,7 @@ func buildSubscriptionAvailabilityDiagnosticRow(sub Subscription) SubscriptionDi
 	if strings.TrimSpace(sub.AvailabilityID) == "" {
 		row.Status = DiagnosticStatusNo
 		row.Evidence = "none"
-		row.Remediation = fmt.Sprintf("Configure subscription availability with `asc subscriptions availability edit --subscription-id %q --territories \"USA\"`.", fallbackString(strings.TrimSpace(sub.ID), "SUB_ID"))
+		row.Remediation = fmt.Sprintf("Configure subscription availability with `asc subscriptions pricing availability edit --subscription-id %q --territories \"USA\"`.", fallbackString(strings.TrimSpace(sub.ID), "SUB_ID"))
 		return row
 	}
 
@@ -536,7 +539,7 @@ func buildSubscriptionAvailabilityDiagnosticRow(sub Subscription) SubscriptionDi
 	if len(territories) == 0 {
 		row.Status = DiagnosticStatusNo
 		row.Evidence = fmt.Sprintf("id=%s territories=none", strings.TrimSpace(sub.AvailabilityID))
-		row.Remediation = fmt.Sprintf("Add at least one available territory with `asc subscriptions availability edit --subscription-id %q --territories \"USA\"`.", fallbackString(strings.TrimSpace(sub.ID), "SUB_ID"))
+		row.Remediation = fmt.Sprintf("Add at least one available territory with `asc subscriptions pricing availability edit --subscription-id %q --territories \"USA\"`.", fallbackString(strings.TrimSpace(sub.ID), "SUB_ID"))
 		return row
 	}
 

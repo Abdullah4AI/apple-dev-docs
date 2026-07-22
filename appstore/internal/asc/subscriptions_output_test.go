@@ -127,3 +127,28 @@ func TestPrintMarkdown_SubscriptionGracePeriod(t *testing.T) {
 		t.Fatalf("expected grace period fields in output, got: %s", output)
 	}
 }
+
+func TestPrintTable_SubscriptionGroupVersions(t *testing.T) {
+	resp := &SubscriptionGroupVersionsResponse{Data: []Resource[SubscriptionGroupVersionAttributes]{
+		{ID: "version-1", Attributes: SubscriptionGroupVersionAttributes{Version: 2, State: "READY_FOR_REVIEW"}},
+	}}
+
+	output := captureStdout(t, func() error { return PrintTable(resp) })
+	if !strings.Contains(output, "Version") || !strings.Contains(output, "READY_FOR_REVIEW") || !strings.Contains(output, "version-1") {
+		t.Fatalf("expected version fields in output, got: %s", output)
+	}
+}
+
+func TestPrintMarkdown_SubscriptionGroupLocalizationV2(t *testing.T) {
+	resp := &SubscriptionGroupLocalizationV2Response{Data: Resource[SubscriptionGroupLocalizationV2Attributes]{
+		ID: "loc-1", Attributes: SubscriptionGroupLocalizationV2Attributes{Locale: "en-US", Name: "Premium", CustomAppName: "Example"},
+	}}
+
+	output := captureStdout(t, func() error { return PrintMarkdown(resp) })
+	if !strings.Contains(output, "Locale") || !strings.Contains(output, "en-US") || !strings.Contains(output, "Premium") {
+		t.Fatalf("expected localization fields in output, got: %s", output)
+	}
+	if strings.Contains(output, "State") {
+		t.Fatalf("v2 localization output exposed legacy-only state: %s", output)
+	}
+}

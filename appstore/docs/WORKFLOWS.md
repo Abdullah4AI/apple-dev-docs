@@ -23,24 +23,24 @@ This pattern was validated against a real app using:
 - `--submit --confirm` on `asc publish testflight` when the target is an
   external group that should trigger beta app review submission
 
-Create `.asc/export-options-app-store.plist`:
+`asc xcode export` generates archive-specific App Store Connect export options
+automatically when `--export-options` is omitted. It chooses a unique
+archive-adjacent path and never overwrites an existing file. The command result
+reports the exact path used. To persist a plist at a deterministic path for
+inspection or reuse, generate it after the archive:
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>app-store-connect</string>
-  <key>signingStyle</key>
-  <string>automatic</string>
-  <key>teamID</key>
-  <string>YOUR_TEAM_ID</string>
-  <key>uploadSymbols</key>
-  <true/>
-</dict>
-</plist>
+```bash
+asc xcode export-options generate \
+  --archive-path .asc/artifacts/App.xcarchive \
+  --output-path .asc/export-options-app-store.plist \
+  --overwrite
 ```
+
+The standalone command defaults to `.asc/export-options-app-store.plist` and
+requires `--overwrite` if that file already exists. Automatic generation is
+cross-platform and only reads archive metadata. Manual signing resolution is
+Darwin-only because it inspects local Xcode signing identities and provisioning
+profiles.
 
 Create `.asc/deployment.json`:
 
@@ -91,7 +91,6 @@ Create `.asc/workflow.json`:
     "PROJECT_PATH": "App.xcodeproj",
     "SCHEME": "App",
     "CONFIGURATION": "Release",
-    "EXPORT_OPTIONS": ".asc/export-options-app-store.plist",
     "TESTFLIGHT_GROUP": "Beta",
     "VERSION": ""
   },
@@ -128,7 +127,7 @@ Create `.asc/workflow.json`:
         },
         {
           "name": "export",
-          "run": "asc xcode export --archive-path ${steps.archive.ARCHIVE_PATH} --export-options \"$EXPORT_OPTIONS\" --ipa-path \".asc/artifacts/App-$VERSION-${steps.archive.BUILD_NUMBER}.ipa\" --overwrite --timeout 10m --xcodebuild-flag=-allowProvisioningUpdates --output json",
+          "run": "asc xcode export --archive-path ${steps.archive.ARCHIVE_PATH} --ipa-path \".asc/artifacts/App-$VERSION-${steps.archive.BUILD_NUMBER}.ipa\" --overwrite --timeout 10m --xcodebuild-flag=-allowProvisioningUpdates --output json",
           "outputs": {
             "IPA_PATH": "$.ipa_path",
             "VERSION": "$.version",

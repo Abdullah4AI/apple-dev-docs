@@ -75,9 +75,33 @@ Finance reports use Apple fiscal months (`YYYY-MM`), not calendar months.
   - https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-availability-for-an-auto-renewable-subscription/
 - The App Store Connect help docs describe this as a billing option on a regular 1-year subscription, with separate `1 Year Upfront` and `Monthly with 12-Month Commitment` availability sections for the same product.
 - App Store Connect API 4.4 exposes `subscriptionPlanAvailabilities` with a `planType` attribute and `/v1/subscriptions/{id}/planAvailabilities` for reading the upfront/monthly plan availability set. Use `planType=MONTHLY` for Monthly with 12-Month Commitment, and keep `subscriptionAvailability` for the default/upfront availability.
+- App Store Connect API 4.4.1 adds `/v1/subscriptionPricePoints/{id}/adjustedEqualizations`. Although OpenAPI models `filter[planType]` as an unconstrained string array, the live endpoint rejects `UPFRONT` and reports `MONTHLY` as the only supported value.
 - Monthly commitment remains unavailable in the United States and Singapore; the CLI removes `USA` and `SGP` from requested monthly-commitment territories before writing plan availability.
 
 ## Pass Type IDs
 
 - Live API rejects `include=passTypeId` and `fields[passTypeIds]` on `/v1/passTypeIds/{id}/certificates` despite the OpenAPI spec allowing them.
 - The CLI does not expose those parameters for `pass-type-ids certificates list` to avoid API errors.
+
+## App Store Connect API 4.4.1
+
+- Apple added discrete versions for in-app purchases, subscriptions, and subscription groups. Their v2 localizations and images are version-scoped; pass a version ID rather than the legacy product, subscription, or group ID.
+- Review submissions accept `inAppPurchaseVersions`, `subscriptionVersions`, and `subscriptionGroupVersions` through `reviewSubmissionItems`. The CLI preserves both relationship data and `included` resources in JSON output.
+- API 4.4.1 has no item-detail GET operation. `asc review items view` and `asc review items-get` are deprecated and return migration guidance; list the parent submission's items instead.
+- Review-item updates accept only nullable `resolved` and `removed` attributes. The response-only `state` attribute cannot be patched; use `--resolved`, `--removed`, or their matching `--clear-*` flags. Setting `removed=true` requires `--confirm`.
+- Review-submission updates expose nullable `platform`, `submitted`, and `canceled` values plus matching `--clear-*` flags. Setting `submitted=true` or `canceled=true` requires `--confirm`; false, null, and platform-only updates do not.
+- The create schema names its second experiment relationship `appStoreVersionExperimentV2`, but its linked resource type remains `appStoreVersionExperiments`. The CLI selector is `appStoreVersionExperimentsV2` (with singular `appStoreVersionExperimentV2` as an alias). Experiment treatments are not valid review-item create relationships.
+- Review items require `appCustomProductPageVersions`; a legacy `appCustomProductPages` ID cannot be silently converted to a version ID and is rejected with migration guidance.
+- The v1 localization/image commands and submission shortcuts remain available during their deprecation window. Each direct invocation warns on stderr and preserves the existing endpoint, flags, stdout, and exit behavior. The two localization `sync` leaves are experimental; the other 27 direct leaves are stable. No legacy command is removed in this release.
+- `asc iap setup` and `asc subscriptions setup` remain supported, but warn when localization flags request their legacy v1 localization steps. Setup calls without those flags do not warn.
+- Migration mapping:
+  - IAP localizations/images → create or resolve an IAP version, then use `asc iap versions localizations ...` / `asc iap versions images ...`.
+  - Subscription localizations/images → create or resolve a subscription version, then use `asc subscriptions versions localizations ...` / `asc subscriptions versions images ...`.
+  - Subscription group localizations → create or resolve a group version, then use `asc subscriptions groups versions localizations ...`.
+  - IAP submissions → `asc review items add --submission "SUBMISSION_ID" --item-type inAppPurchaseVersions --item-id "IAP_VERSION_ID"`.
+  - Subscription submissions → `asc review items add --submission "SUBMISSION_ID" --item-type subscriptionVersions --item-id "SUBSCRIPTION_VERSION_ID"`.
+  - Subscription group submissions → `asc review items add --submission "SUBMISSION_ID" --item-type subscriptionGroupVersions --item-id "GROUP_VERSION_ID"`.
+- There is no one-command version-scoped replacement for the two experimental legacy localization `sync` leaves. Reconcile entries through the matching version-localization list/create/update/delete commands.
+- A legacy IAP image file re-upload has no one-to-one v2 update. Create the replacement version image, then delete the old version image if needed. Subscription v2 image updates do not expose the legacy checksum flag; use the version image upload workflow for a new file.
+- The 33 exported `internal/asc.Client` methods that target these legacy resources remain callable and are marked with Go `Deprecated:` documentation naming their version-scoped or review-item replacement.
+- Nullable v2 localization updates distinguish omitted, value, and JSON `null`; use the corresponding `--clear-*` flag for explicit clears.

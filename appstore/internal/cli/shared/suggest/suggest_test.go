@@ -1,6 +1,9 @@
 package suggest
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestCommandsPrefixSuggestion(t *testing.T) {
 	got := Commands("buil", []string{"builds", "reviews", "apps"})
@@ -29,6 +32,73 @@ func TestCommandsAdjacentTransposition(t *testing.T) {
 	got := Commands("lsit", []string{"list", "view", "update"})
 	if len(got) == 0 || got[0] != "list" {
 		t.Fatalf("expected adjacent transposition suggestion, got %v", got)
+	}
+}
+
+func TestFlagsMatchesIdentifierShorthand(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		candidates []string
+		want       string
+	}{
+		{
+			name:       "generic ID expands to resource ID",
+			input:      "id",
+			candidates: []string{"include", "version-id", "output"},
+			want:       "version-id",
+		},
+		{
+			name:       "resource ID contracts to generic ID",
+			input:      "subscription-id",
+			candidates: []string{"id", "output", "pretty"},
+			want:       "id",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := Flags(test.input, test.candidates)
+			if len(got) == 0 || got[0] != test.want {
+				t.Fatalf("Flags(%q) = %v, want first suggestion %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestFlagsCapsSuggestionsAcrossMatchingStrategies(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		candidates []string
+		want       []string
+	}{
+		{
+			name:       "direct matches return at cap",
+			input:      "app",
+			candidates: []string{"appstore", "application", "apple", "build-app"},
+			want:       []string{"apple", "application", "appstore"},
+		},
+		{
+			name:       "suffix matches top up to cap",
+			input:      "id",
+			candidates: []string{"ids", "version-id", "build-id", "app-id"},
+			want:       []string{"ids", "app-id", "build-id"},
+		},
+		{
+			name:       "no match remains empty",
+			input:      "zzzzzzzzzz",
+			candidates: []string{"output", "pretty"},
+			want:       nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := Flags(test.input, test.candidates); (got == nil) != (test.want == nil) || !slices.Equal(got, test.want) {
+				t.Fatalf("Flags(%q) = %v, want %v", test.input, got, test.want)
+			}
+		})
 	}
 }
 

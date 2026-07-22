@@ -75,8 +75,26 @@ func (c *Client) CreateSubscriptionGroup(ctx context.Context, appID string, attr
 }
 
 // GetSubscriptionGroup retrieves a subscription group by ID.
-func (c *Client) GetSubscriptionGroup(ctx context.Context, groupID string) (*SubscriptionGroupResponse, error) {
-	path := fmt.Sprintf("/v1/subscriptionGroups/%s", strings.TrimSpace(groupID))
+func (c *Client) GetSubscriptionGroup(ctx context.Context, groupID string, opts ...SubscriptionGroupsOption) (*SubscriptionGroupResponse, error) {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return nil, fmt.Errorf("groupID is required")
+	}
+	query := &subscriptionGroupsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+	if query.limit > 0 {
+		return nil, fmt.Errorf("limit is only supported when listing subscription groups")
+	}
+	if query.nextURL != "" {
+		return nil, fmt.Errorf("next URL is only supported when listing subscription groups")
+	}
+
+	path := fmt.Sprintf("/v1/subscriptionGroups/%s", groupID)
+	if queryString := buildSubscriptionGroupsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -192,8 +210,19 @@ func (c *Client) CreateSubscription(ctx context.Context, groupID string, attrs S
 }
 
 // GetSubscription retrieves a subscription by ID.
-func (c *Client) GetSubscription(ctx context.Context, subID string) (*SubscriptionResponse, error) {
-	path := fmt.Sprintf("/v1/subscriptions/%s", strings.TrimSpace(subID))
+func (c *Client) GetSubscription(ctx context.Context, subID string, opts ...SubscriptionOption) (*SubscriptionResponse, error) {
+	subID = strings.TrimSpace(subID)
+	if subID == "" {
+		return nil, fmt.Errorf("subscription ID is required")
+	}
+	query := &subscriptionQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+	path := fmt.Sprintf("/v1/subscriptions/%s", subID)
+	if queryString := buildSubscriptionQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -592,13 +621,20 @@ func (c *Client) GetSubscriptionAppStoreReviewScreenshotForSubscription(ctx cont
 }
 
 // GetSubscriptionPromotedPurchase retrieves the promoted purchase for a subscription.
-func (c *Client) GetSubscriptionPromotedPurchase(ctx context.Context, subID string) (*PromotedPurchaseResponse, error) {
+func (c *Client) GetSubscriptionPromotedPurchase(ctx context.Context, subID string, opts ...PromotedPurchaseGetOption) (*PromotedPurchaseResponse, error) {
 	subID = strings.TrimSpace(subID)
 	if subID == "" {
 		return nil, fmt.Errorf("subscription ID is required")
 	}
 
+	query := &promotedPurchaseGetQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/subscriptions/%s/promotedPurchase", subID)
+	if queryString := buildPromotedPurchaseGetQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -666,6 +702,8 @@ func (c *Client) GetSubscriptionAvailabilityAvailableTerritoriesRelationships(ct
 }
 
 // GetSubscriptionGroupSubscriptionGroupLocalizationsRelationships retrieves localization linkages for a subscription group.
+//
+// Deprecated: Use GetSubscriptionGroupVersionLocalizationsRelationships with a subscription group version ID.
 func (c *Client) GetSubscriptionGroupSubscriptionGroupLocalizationsRelationships(ctx context.Context, groupID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
 	for _, opt := range opts {
@@ -757,6 +795,8 @@ func (c *Client) GetSubscriptionAppStoreReviewScreenshotRelationship(ctx context
 }
 
 // GetSubscriptionImagesRelationships retrieves image linkages for a subscription.
+//
+// Deprecated: Use GetSubscriptionVersionImagesRelationships with a subscription version ID.
 func (c *Client) GetSubscriptionImagesRelationships(ctx context.Context, subID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
 	for _, opt := range opts {
@@ -1071,6 +1111,8 @@ func (c *Client) GetSubscriptionSubscriptionAvailabilityRelationship(ctx context
 }
 
 // GetSubscriptionSubscriptionLocalizationsRelationships retrieves subscription localization linkages for a subscription.
+//
+// Deprecated: Use GetSubscriptionVersionLocalizationsRelationships with a subscription version ID.
 func (c *Client) GetSubscriptionSubscriptionLocalizationsRelationships(ctx context.Context, subID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
 	for _, opt := range opts {

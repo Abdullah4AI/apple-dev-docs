@@ -69,6 +69,47 @@ func Commands(input string, candidates []string) []string {
 	return out
 }
 
+// Flags returns likely flag-name suggestions, including command-specific
+// identifier forms such as id/version-id and subscription-id/id.
+func Flags(input string, candidates []string) []string {
+	suggestions := Commands(input, candidates)
+	if len(suggestions) >= 3 {
+		return suggestions
+	}
+
+	in := strings.ToLower(strings.TrimSpace(input))
+	if in == "" {
+		return suggestions
+	}
+
+	seen := make(map[string]struct{}, len(suggestions))
+	for _, suggestion := range suggestions {
+		seen[suggestion] = struct{}{}
+	}
+
+	suffixMatches := make([]string, 0)
+	for _, raw := range candidates {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "" || name == in {
+			continue
+		}
+		if strings.HasSuffix(name, "-"+in) || strings.HasSuffix(in, "-"+name) {
+			if _, ok := seen[name]; !ok {
+				suffixMatches = append(suffixMatches, name)
+			}
+		}
+	}
+	sort.Strings(suffixMatches)
+
+	for _, match := range suffixMatches {
+		suggestions = append(suggestions, match)
+		if len(suggestions) == 3 {
+			break
+		}
+	}
+	return suggestions
+}
+
 func isAdjacentTransposition(a, b string) bool {
 	if len(a) != len(b) || len(a) < 2 {
 		return false

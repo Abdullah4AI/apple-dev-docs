@@ -9,15 +9,17 @@ import (
 // AgeRatingDeclarationAttributes describes the age rating declaration attributes.
 type AgeRatingDeclarationAttributes struct {
 	// Boolean content descriptors
-	Advertising            *bool `json:"advertising,omitempty"`
-	Gambling               *bool `json:"gambling,omitempty"`
-	HealthOrWellnessTopics *bool `json:"healthOrWellnessTopics,omitempty"`
-	LootBox                *bool `json:"lootBox,omitempty"`
-	MessagingAndChat       *bool `json:"messagingAndChat,omitempty"`
-	ParentalControls       *bool `json:"parentalControls,omitempty"`
-	AgeAssurance           *bool `json:"ageAssurance,omitempty"`
-	UnrestrictedWebAccess  *bool `json:"unrestrictedWebAccess,omitempty"`
-	UserGeneratedContent   *bool `json:"userGeneratedContent,omitempty"`
+	Advertising              *bool         `json:"advertising,omitempty"`
+	Gambling                 *bool         `json:"gambling,omitempty"`
+	HealthOrWellnessTopics   *bool         `json:"healthOrWellnessTopics,omitempty"`
+	LootBox                  *bool         `json:"lootBox,omitempty"`
+	MessagingAndChat         *bool         `json:"messagingAndChat,omitempty"`
+	ParentalControls         *bool         `json:"parentalControls,omitempty"`
+	AgeAssurance             *bool         `json:"ageAssurance,omitempty"`
+	SocialMedia              *NullableBool `json:"socialMedia,omitempty"`
+	SocialMediaAgeRestricted *NullableBool `json:"socialMediaAgeRestricted,omitempty"`
+	UnrestrictedWebAccess    *bool         `json:"unrestrictedWebAccess,omitempty"`
+	UserGeneratedContent     *bool         `json:"userGeneratedContent,omitempty"`
 
 	// Enum content descriptors (NONE, INFREQUENT_OR_MILD, FREQUENT_OR_INTENSE)
 	AlcoholTobaccoOrDrugUseOrReferences         *string `json:"alcoholTobaccoOrDrugUseOrReferences,omitempty"`
@@ -92,8 +94,16 @@ type AgeRatingDeclarationUpdateRequest struct {
 }
 
 // GetAgeRatingDeclarationForAppInfo retrieves the age rating declaration for an app info.
-func (c *Client) GetAgeRatingDeclarationForAppInfo(ctx context.Context, appInfoID string) (*AgeRatingDeclarationResponse, error) {
+func (c *Client) GetAgeRatingDeclarationForAppInfo(ctx context.Context, appInfoID string, opts ...AgeRatingDeclarationOption) (*AgeRatingDeclarationResponse, error) {
+	query := &ageRatingDeclarationQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	path := fmt.Sprintf("/v1/appInfos/%s/ageRatingDeclaration", appInfoID)
+	if queryString := buildAgeRatingDeclarationQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -111,12 +121,12 @@ func (c *Client) GetAgeRatingDeclarationForAppInfo(ctx context.Context, appInfoI
 //
 // Apple removed the version-scoped endpoint in API 4.3, so this now resolves the
 // backing app info and retrieves the declaration from the supported app-info path.
-func (c *Client) GetAgeRatingDeclarationForAppStoreVersion(ctx context.Context, versionID string) (*AgeRatingDeclarationResponse, error) {
+func (c *Client) GetAgeRatingDeclarationForAppStoreVersion(ctx context.Context, versionID string, opts ...AgeRatingDeclarationOption) (*AgeRatingDeclarationResponse, error) {
 	appInfoID, err := c.ResolveAppInfoIDForAppStoreVersion(ctx, versionID)
 	if err != nil {
 		return nil, err
 	}
-	return c.GetAgeRatingDeclarationForAppInfo(ctx, appInfoID)
+	return c.GetAgeRatingDeclarationForAppInfo(ctx, appInfoID, opts...)
 }
 
 // UpdateAgeRatingDeclaration updates an age rating declaration by ID.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -279,6 +281,67 @@ func TestPricingAvailabilitySetCommand_MissingFlags(t *testing.T) {
 	}
 }
 
+func capturePricingStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = writer
+	defer func() {
+		os.Stderr = originalStderr
+	}()
+
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	return string(output)
+}
+
+func TestPricingAvailabilityCreateCommand_MissingFlags(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{name: "missing app", args: []string{"--territory", "USA", "--available", "true", "--available-in-new-territories", "true"}, wantStderr: "--app is required"},
+		{name: "missing territory", args: []string{"--app", "APP", "--available", "true", "--available-in-new-territories", "true"}, wantStderr: "--territory must include at least one value"},
+		{name: "invalid territory csv", args: []string{"--app", "APP", "--territory", ",,,", "--available", "true", "--available-in-new-territories", "true"}, wantStderr: "--territory must include at least one value"},
+		{name: "missing available", args: []string{"--app", "APP", "--territory", "USA", "--available-in-new-territories", "true"}, wantStderr: "--available is required"},
+		{name: "missing available in new territories", args: []string{"--app", "APP", "--territory", "USA", "--available", "true"}, wantStderr: "--available-in-new-territories is required"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := PricingAvailabilityCreateCommand()
+			if err := cmd.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			stderr := capturePricingStderr(t, func() {
+				if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected flag.ErrHelp, got %v", err)
+				}
+			})
+			if !strings.Contains(stderr, test.wantStderr) {
+				t.Fatalf("expected stderr to contain %q, got %q", test.wantStderr, stderr)
+			}
+		})
+	}
+}
+
 func TestPricingAvailabilitySetCommand_HasAvailableInNewTerritoriesFlag(t *testing.T) {
 	cmd := PricingAvailabilitySetCommand()
 
@@ -287,18 +350,19 @@ func TestPricingAvailabilitySetCommand_HasAvailableInNewTerritoriesFlag(t *testi
 	}
 }
 
-func TestPricingAvailabilityCommand_UsesExistingAvailabilitySurface(t *testing.T) {
+func TestPricingAvailabilityCommand_RegistersCreate(t *testing.T) {
 	cmd := PricingAvailabilityCommand()
 
 	for _, subcommand := range cmd.Subcommands {
 		if subcommand.Name == "create" {
-			t.Fatal("did not expect pricing availability create to be registered")
+			if !strings.Contains(cmd.LongHelp, "pricing availability create") {
+				t.Fatalf("expected availability help to mention create, got %q", cmd.LongHelp)
+			}
+			return
 		}
 	}
 
-	if !strings.Contains(cmd.LongHelp, `"asc web apps availability create"`) {
-		t.Fatalf("expected pricing availability help to point at web bootstrap flow, got %q", cmd.LongHelp)
-	}
+	t.Fatal("expected pricing availability create to be registered")
 }
 
 func TestPricingAvailabilitySetCommand_HelpMentionsAllTerritories(t *testing.T) {
@@ -325,6 +389,7 @@ func TestPricingCommands_DefaultOutputJSON(t *testing.T) {
 		{"schedule manual-prices", PricingScheduleManualPricesCommand},
 		{"schedule automatic-prices", PricingScheduleAutomaticPricesCommand},
 		{"availability get", PricingAvailabilityGetCommand},
+		{"availability create", PricingAvailabilityCreateCommand},
 		{"availability territory-availabilities", PricingAvailabilityTerritoryAvailabilitiesCommand},
 		{"availability set", PricingAvailabilitySetCommand},
 	}

@@ -1,6 +1,7 @@
 package asc
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,41 @@ func TestAPIErrorError_SanitizesControlCharacters(t *testing.T) {
 	}
 	if !strings.Contains(message, "Associated detail") {
 		t.Fatalf("expected associated detail in message, got %q", message)
+	}
+}
+
+func TestAPIErrorIs_UnauthorizedByStatusCode(t *testing.T) {
+	// Apple returns 401 responses with code NOT_AUTHORIZED, not UNAUTHORIZED.
+	payload := `{"errors":[{"id":"7091e344-4b31-4b6b-9f04-16d61a1c8c9e","status":"401","code":"NOT_AUTHORIZED","title":"Authentication credentials are missing or invalid.","detail":"Provide a properly configured and signed bearer token, and make sure that it has not expired."}]}`
+	err := ParseErrorWithStatus([]byte(payload), 401)
+
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected 401 NOT_AUTHORIZED response to match ErrUnauthorized, got %v", err)
+	}
+	if errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected 401 response not to match ErrForbidden, got %v", err)
+	}
+}
+
+func TestAPIErrorIs_ForbiddenByStatusCode(t *testing.T) {
+	payload := `{"errors":[{"status":"403","code":"FORBIDDEN_ERROR","title":"The given operation is not allowed","detail":"This request is forbidden for security reasons"}]}`
+	err := ParseErrorWithStatus([]byte(payload), 403)
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected 403 response to match ErrForbidden, got %v", err)
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected 403 response not to match ErrUnauthorized, got %v", err)
+	}
+}
+
+func TestAPIErrorIs_AuthCodesWithoutStatusCode(t *testing.T) {
+	// Code-string matching must keep working when no HTTP status is known.
+	if !errors.Is(&APIError{Code: "UNAUTHORIZED"}, ErrUnauthorized) {
+		t.Fatal("expected UNAUTHORIZED code to match ErrUnauthorized")
+	}
+	if !errors.Is(&APIError{Code: "FORBIDDEN"}, ErrForbidden) {
+		t.Fatal("expected FORBIDDEN code to match ErrForbidden")
 	}
 }
 

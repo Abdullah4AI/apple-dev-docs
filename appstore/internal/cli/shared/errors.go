@@ -31,6 +31,11 @@ type validationError struct {
 	err error
 }
 
+type errorWithCause struct {
+	err   error
+	cause error
+}
+
 type UsageErrorKind string
 
 const (
@@ -76,6 +81,14 @@ func (e validationError) ValidationFailure() bool {
 	return true
 }
 
+func (e errorWithCause) Error() string {
+	return e.err.Error()
+}
+
+func (e errorWithCause) Unwrap() []error {
+	return []error{e.err, e.cause}
+}
+
 // NewReportedError wraps an error that has already been printed.
 func NewReportedError(err error) error {
 	if err == nil {
@@ -98,6 +111,18 @@ func NewValidationReportedError(err error) error {
 		return nil
 	}
 	return NewReportedError(NewValidationError(err))
+}
+
+// NewErrorWithCause preserves err's rendered message and classification while
+// retaining an additional cause for errors.Is/errors.As and telemetry.
+func NewErrorWithCause(err, cause error) error {
+	if err == nil {
+		return cause
+	}
+	if cause == nil {
+		return err
+	}
+	return errorWithCause{err: err, cause: cause}
 }
 
 func IsValidationError(err error) bool {

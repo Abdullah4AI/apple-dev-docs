@@ -33,16 +33,25 @@ type appStoreVersionQuery struct {
 
 type reviewSubmissionsQuery struct {
 	listQuery
-	platforms []string
-	states    []string
-	appIDs    []string
-	include   []string
+	platforms                  []string
+	states                     []string
+	appIDs                     []string
+	reviewSubmissionItemFields []string
+	include                    []string
+}
+
+type reviewSubmissionQuery struct {
+	reviewSubmissionItemFields []string
+	include                    []string
 }
 
 type reviewSubmissionItemsQuery struct {
 	listQuery
-	fields  []string
-	include []string
+	fields                         []string
+	inAppPurchaseVersionFields     []string
+	subscriptionVersionFields      []string
+	subscriptionGroupVersionFields []string
+	include                        []string
 }
 
 type appStoreVersionLocalizationsQuery struct {
@@ -52,12 +61,16 @@ type appStoreVersionLocalizationsQuery struct {
 
 type appInfoLocalizationsQuery struct {
 	listQuery
-	locales []string
+	locales       []string
+	appInfoFields []string
+	include       []string
 }
 
 type appInfoQuery struct {
-	include            []string
-	localizationsLimit int
+	fields                     []string
+	ageRatingDeclarationFields []string
+	include                    []string
+	localizationsLimit         int
 }
 
 type territoryAgeRatingsQuery struct {
@@ -199,14 +212,25 @@ func buildReviewSubmissionsQuery(query *reviewSubmissionsQuery) string {
 	addCSV(values, "filter[platform]", query.platforms)
 	addCSV(values, "filter[state]", query.states)
 	addCSV(values, "filter[app]", query.appIDs)
+	addCSV(values, "fields[reviewSubmissionItems]", query.reviewSubmissionItemFields)
 	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
+	return values.Encode()
+}
+
+func buildReviewSubmissionQuery(query *reviewSubmissionQuery) string {
+	values := url.Values{}
+	addCSV(values, "fields[reviewSubmissionItems]", query.reviewSubmissionItemFields)
+	addCSV(values, "include", query.include)
 	return values.Encode()
 }
 
 func buildReviewSubmissionItemsQuery(query *reviewSubmissionItemsQuery) string {
 	values := url.Values{}
 	addCSV(values, "fields[reviewSubmissionItems]", query.fields)
+	addCSV(values, "fields[inAppPurchaseVersions]", query.inAppPurchaseVersionFields)
+	addCSV(values, "fields[subscriptionVersions]", query.subscriptionVersionFields)
+	addCSV(values, "fields[subscriptionGroupVersions]", query.subscriptionGroupVersionFields)
 	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
 	return values.Encode()
@@ -222,13 +246,24 @@ func buildAppStoreVersionLocalizationsQuery(query *appStoreVersionLocalizationsQ
 func buildAppInfoLocalizationsQuery(query *appInfoLocalizationsQuery) string {
 	values := url.Values{}
 	addCSV(values, "filter[locale]", query.locales)
+	addCSV(values, "fields[appInfos]", query.appInfoFields)
+	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
 	return values.Encode()
 }
 
 func buildAppInfoQuery(query *appInfoQuery) string {
 	values := url.Values{}
-	addCSV(values, "include", query.include)
+	include := normalizeUniqueList(query.include)
+	fields := normalizeUniqueList(query.fields)
+	if len(fields) > 0 {
+		// A primary sparse fieldset must retain every included relationship or
+		// ASC can omit the linkage and included resource from the response.
+		fields = normalizeUniqueList(append(fields, include...))
+	}
+	addCSV(values, "fields[appInfos]", fields)
+	addCSV(values, "fields[ageRatingDeclarations]", query.ageRatingDeclarationFields)
+	addCSV(values, "include", include)
 	if query.localizationsLimit > 0 {
 		values.Set("limit[appInfoLocalizations]", strconv.Itoa(query.localizationsLimit))
 	}
@@ -351,6 +386,9 @@ type ReviewSubmissionsOption func(*reviewSubmissionsQuery)
 
 // ReviewSubmissionItemsOption is a functional option for GetReviewSubmissionItems.
 type ReviewSubmissionItemsOption func(*reviewSubmissionItemsQuery)
+
+// ReviewSubmissionOption is a functional option for GetReviewSubmission.
+type ReviewSubmissionOption func(*reviewSubmissionQuery)
 
 // AppStoreVersionLocalizationsOption is a functional option for version localizations.
 type AppStoreVersionLocalizationsOption func(*appStoreVersionLocalizationsQuery)
@@ -647,6 +685,27 @@ func WithReviewSubmissionsInclude(include []string) ReviewSubmissionsOption {
 	}
 }
 
+// WithReviewSubmissionsItemFields sets fields[reviewSubmissionItems] on list responses.
+func WithReviewSubmissionsItemFields(fields []string) ReviewSubmissionsOption {
+	return func(q *reviewSubmissionsQuery) {
+		q.reviewSubmissionItemFields = normalizeList(fields)
+	}
+}
+
+// WithReviewSubmissionItemFields sets fields[reviewSubmissionItems] on a detail response.
+func WithReviewSubmissionItemFields(fields []string) ReviewSubmissionOption {
+	return func(q *reviewSubmissionQuery) {
+		q.reviewSubmissionItemFields = normalizeList(fields)
+	}
+}
+
+// WithReviewSubmissionInclude includes related resources for a review submission response.
+func WithReviewSubmissionInclude(include []string) ReviewSubmissionOption {
+	return func(q *reviewSubmissionQuery) {
+		q.include = normalizeList(include)
+	}
+}
+
 // WithReviewSubmissionItemsLimit sets the max number of review submission items to return.
 func WithReviewSubmissionItemsLimit(limit int) ReviewSubmissionItemsOption {
 	return func(q *reviewSubmissionItemsQuery) {
@@ -660,6 +719,27 @@ func WithReviewSubmissionItemsLimit(limit int) ReviewSubmissionItemsOption {
 func WithReviewSubmissionItemsFields(fields []string) ReviewSubmissionItemsOption {
 	return func(q *reviewSubmissionItemsQuery) {
 		q.fields = normalizeList(fields)
+	}
+}
+
+// WithReviewSubmissionItemsInAppPurchaseVersionFields sets fields[inAppPurchaseVersions].
+func WithReviewSubmissionItemsInAppPurchaseVersionFields(fields []string) ReviewSubmissionItemsOption {
+	return func(q *reviewSubmissionItemsQuery) {
+		q.inAppPurchaseVersionFields = normalizeList(fields)
+	}
+}
+
+// WithReviewSubmissionItemsSubscriptionVersionFields sets fields[subscriptionVersions].
+func WithReviewSubmissionItemsSubscriptionVersionFields(fields []string) ReviewSubmissionItemsOption {
+	return func(q *reviewSubmissionItemsQuery) {
+		q.subscriptionVersionFields = normalizeList(fields)
+	}
+}
+
+// WithReviewSubmissionItemsSubscriptionGroupVersionFields sets fields[subscriptionGroupVersions].
+func WithReviewSubmissionItemsSubscriptionGroupVersionFields(fields []string) ReviewSubmissionItemsOption {
+	return func(q *reviewSubmissionItemsQuery) {
+		q.subscriptionGroupVersionFields = normalizeList(fields)
 	}
 }
 
@@ -726,6 +806,34 @@ func WithAppInfoLocalizationsNextURL(next string) AppInfoLocalizationsOption {
 func WithAppInfoLocalizationLocales(locales []string) AppInfoLocalizationsOption {
 	return func(q *appInfoLocalizationsQuery) {
 		q.locales = normalizeList(locales)
+	}
+}
+
+// WithAppInfoLocalizationsAppInfoFields sets fields[appInfos].
+func WithAppInfoLocalizationsAppInfoFields(fields []string) AppInfoLocalizationsOption {
+	return func(q *appInfoLocalizationsQuery) {
+		q.appInfoFields = normalizeList(fields)
+	}
+}
+
+// WithAppInfoLocalizationsInclude includes related resources.
+func WithAppInfoLocalizationsInclude(include []string) AppInfoLocalizationsOption {
+	return func(q *appInfoLocalizationsQuery) {
+		q.include = normalizeList(include)
+	}
+}
+
+// WithAppInfoFields sets fields[appInfos].
+func WithAppInfoFields(fields []string) AppInfoOption {
+	return func(q *appInfoQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithAppInfoAgeRatingDeclarationFields sets fields[ageRatingDeclarations].
+func WithAppInfoAgeRatingDeclarationFields(fields []string) AppInfoOption {
+	return func(q *appInfoQuery) {
+		q.ageRatingDeclarationFields = normalizeList(fields)
 	}
 }
 

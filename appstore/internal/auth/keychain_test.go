@@ -781,6 +781,24 @@ func TestValidateKeyFileSuccess(t *testing.T) {
 	}
 }
 
+func TestValidateKeyFileRejectsNonP256Curve(t *testing.T) {
+	for _, pkcs8 := range []bool{true, false} {
+		name := "sec1"
+		if pkcs8 {
+			name = "pkcs8"
+		}
+		t.Run(name, func(t *testing.T) {
+			keyPath := filepath.Join(t.TempDir(), "AuthKey.p8")
+			writeECDSAPEMWithCurve(t, keyPath, 0o600, pkcs8, elliptic.P384())
+
+			err := ValidateKeyFile(keyPath)
+			if err == nil || !strings.Contains(err.Error(), "P-256") {
+				t.Fatalf("ValidateKeyFile() error = %v, want P-256 requirement", err)
+			}
+		})
+	}
+}
+
 func TestValidateKeyFileDirectory(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -1860,9 +1878,13 @@ func TestRemoveCredentials_MissingReturnsErr(t *testing.T) {
 }
 
 func writeECDSAPEM(t *testing.T, path string, mode os.FileMode, pkcs8 bool) {
+	writeECDSAPEMWithCurve(t, path, mode, pkcs8, elliptic.P256())
+}
+
+func writeECDSAPEMWithCurve(t *testing.T, path string, mode os.FileMode, pkcs8 bool, curve elliptic.Curve) {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateKey() error: %v", err)
 	}

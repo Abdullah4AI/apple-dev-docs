@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -242,23 +243,26 @@ func validateKeyFileForOS(path, goos string) error {
 		return fmt.Errorf("failed to read key file: %w", err)
 	}
 
-	// Parse the PEM block
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return fmt.Errorf("invalid PEM data")
 	}
 
-	// Try to parse as PKCS8 (App Store Connect keys are ECDSA)
+	var privateKey *ecdsa.PrivateKey
 	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		if _, ok := key.(*ecdsa.PrivateKey); ok {
-			return nil
+		var ok bool
+		privateKey, ok = key.(*ecdsa.PrivateKey)
+		if !ok {
+			return fmt.Errorf("private key is not ECDSA")
 		}
-		return fmt.Errorf("private key is not ECDSA")
+	} else {
+		privateKey, err = x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("invalid private key format: %w", err)
+		}
 	}
-
-	// Try SEC1 EC private key as fallback
-	if _, err := x509.ParseECPrivateKey(block.Bytes); err != nil {
-		return fmt.Errorf("invalid private key format: %w", err)
+	if privateKey.Curve != elliptic.P256() {
+		return fmt.Errorf("private key must use the P-256 curve")
 	}
 
 	return nil

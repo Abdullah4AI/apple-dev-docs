@@ -229,13 +229,15 @@ func runOutputRegistryRenderByRegistryScenarios(t *testing.T) {
 }
 
 func runOutputRegistryHelperRegistrations(t *testing.T) {
+	ensureOutputRegistryPopulated()
+
 	t.Run("registry sanity", func(t *testing.T) {
 		t.Run("registries are non-empty", func(t *testing.T) {
 			if len(outputRegistry) == 0 {
-				t.Fatal("output registry is empty; init() may not have run")
+				t.Fatal("output registry is empty; lazy population may not have run")
 			}
 			if len(directRenderRegistry) == 0 {
-				t.Fatal("direct render registry is empty; init() may not have run")
+				t.Fatal("direct render registry is empty; lazy population may not have run")
 			}
 		})
 

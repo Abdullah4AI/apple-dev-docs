@@ -7,6 +7,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
 // Exit codes following the CI/CD specification.
@@ -20,10 +21,10 @@ const (
 
 	// HTTP 4xx range: 10 + (status - 400)
 	// Note: 404 and 409 are mapped to ExitNotFound and ExitConflict above.
-	ExitHTTPBadRequest    = 10 // 400
-	ExitHTTPUnauthorized  = 11 // 401
-	ExitHTTPForbidden     = 12 // 403
-	ExitHTTPUnprocessable = 22 // 422
+	ExitHTTPBadRequest    = 10       // 400
+	ExitHTTPUnauthorized  = ExitAuth // 401 (special case)
+	ExitHTTPForbidden     = ExitAuth // 403 (special case)
+	ExitHTTPUnprocessable = 22       // 422
 
 	// HTTP 5xx range: 60 + (status - 500)
 	ExitHTTPInternalServer     = 60 // 500
@@ -46,7 +47,8 @@ func ExitCodeFromError(err error) int {
 	// Well-known error types
 	if errors.Is(err, shared.ErrMissingAuth) ||
 		errors.Is(err, asc.ErrUnauthorized) ||
-		errors.Is(err, asc.ErrForbidden) {
+		errors.Is(err, asc.ErrForbidden) ||
+		errors.Is(err, webcore.ErrInvalidAppleAccountCredentials) {
 		return ExitAuth
 	}
 	if errors.Is(err, asc.ErrNotFound) {
@@ -64,6 +66,9 @@ func ExitCodeFromError(err error) int {
 		}
 		// Fall back to API error code mapping
 		return APIErrorCodeToExitCode(apiErr.Code)
+	}
+	if webErr, ok := errors.AsType[*webcore.APIError](err); ok {
+		return HTTPStatusToExitCode(webErr.HTTPStatusCode())
 	}
 
 	// Generic error
@@ -89,6 +94,8 @@ func APIErrorCodeToExitCode(code string) int {
 // HTTPStatusToExitCode maps an HTTP status code to the appropriate exit code.
 func HTTPStatusToExitCode(status int) int {
 	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return ExitAuth
 	case status == http.StatusNotFound:
 		return ExitNotFound
 	case status == http.StatusConflict:

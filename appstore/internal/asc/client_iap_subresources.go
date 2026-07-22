@@ -9,6 +9,8 @@ import (
 )
 
 // CreateInAppPurchaseLocalization creates a localization for an in-app purchase.
+//
+// Deprecated: Use CreateInAppPurchaseLocalizationV2 with an in-app purchase version ID.
 func (c *Client) CreateInAppPurchaseLocalization(ctx context.Context, iapID string, attrs InAppPurchaseLocalizationCreateAttributes) (*InAppPurchaseLocalizationResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	if iapID == "" {
@@ -62,6 +64,8 @@ func (c *Client) CreateInAppPurchaseLocalization(ctx context.Context, iapID stri
 }
 
 // UpdateInAppPurchaseLocalization updates an IAP localization by ID.
+//
+// Deprecated: Use UpdateInAppPurchaseLocalizationV2.
 func (c *Client) UpdateInAppPurchaseLocalization(ctx context.Context, localizationID string, attrs InAppPurchaseLocalizationUpdateAttributes) (*InAppPurchaseLocalizationResponse, error) {
 	localizationID = strings.TrimSpace(localizationID)
 	if localizationID == "" {
@@ -98,6 +102,8 @@ func (c *Client) UpdateInAppPurchaseLocalization(ctx context.Context, localizati
 }
 
 // DeleteInAppPurchaseLocalization deletes an IAP localization by ID.
+//
+// Deprecated: Use DeleteInAppPurchaseLocalizationV2.
 func (c *Client) DeleteInAppPurchaseLocalization(ctx context.Context, localizationID string) error {
 	localizationID = strings.TrimSpace(localizationID)
 	if localizationID == "" {
@@ -108,13 +114,22 @@ func (c *Client) DeleteInAppPurchaseLocalization(ctx context.Context, localizati
 }
 
 // GetInAppPurchaseLocalization retrieves an IAP localization by ID.
-func (c *Client) GetInAppPurchaseLocalization(ctx context.Context, localizationID string) (*InAppPurchaseLocalizationResponse, error) {
+//
+// Deprecated: Use GetInAppPurchaseLocalizationV2.
+func (c *Client) GetInAppPurchaseLocalization(ctx context.Context, localizationID string, opts ...IAPLocalizationOption) (*InAppPurchaseLocalizationResponse, error) {
 	localizationID = strings.TrimSpace(localizationID)
 	if localizationID == "" {
 		return nil, fmt.Errorf("localizationID is required")
 	}
 
+	query := &iapLocalizationQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/inAppPurchaseLocalizations/%s", localizationID)
+	if queryString := buildIAPLocalizationQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -129,6 +144,8 @@ func (c *Client) GetInAppPurchaseLocalization(ctx context.Context, localizationI
 }
 
 // GetInAppPurchaseImages retrieves images for an in-app purchase.
+//
+// Deprecated: Use GetInAppPurchaseVersionImages with an in-app purchase version ID.
 func (c *Client) GetInAppPurchaseImages(ctx context.Context, iapID string, opts ...IAPImagesOption) (*InAppPurchaseImagesResponse, error) {
 	query := &iapImagesQuery{}
 	for _, opt := range opts {
@@ -164,13 +181,22 @@ func (c *Client) GetInAppPurchaseImages(ctx context.Context, iapID string, opts 
 }
 
 // GetInAppPurchaseImage retrieves an in-app purchase image by ID.
-func (c *Client) GetInAppPurchaseImage(ctx context.Context, imageID string) (*InAppPurchaseImageResponse, error) {
+//
+// Deprecated: Use GetInAppPurchaseImageV2.
+func (c *Client) GetInAppPurchaseImage(ctx context.Context, imageID string, opts ...IAPImageOption) (*InAppPurchaseImageResponse, error) {
 	imageID = strings.TrimSpace(imageID)
 	if imageID == "" {
 		return nil, fmt.Errorf("imageID is required")
 	}
 
+	query := &iapImageQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/inAppPurchaseImages/%s", imageID)
+	if queryString := buildIAPImageQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -185,6 +211,8 @@ func (c *Client) GetInAppPurchaseImage(ctx context.Context, imageID string) (*In
 }
 
 // CreateInAppPurchaseImage creates an image upload reservation.
+//
+// Deprecated: Use CreateInAppPurchaseImageV2 with an in-app purchase version ID.
 func (c *Client) CreateInAppPurchaseImage(ctx context.Context, iapID, fileName string, fileSize int64) (*InAppPurchaseImageResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	fileName = strings.TrimSpace(fileName)
@@ -235,6 +263,8 @@ func (c *Client) CreateInAppPurchaseImage(ctx context.Context, iapID, fileName s
 }
 
 // UpdateInAppPurchaseImage updates an in-app purchase image.
+//
+// Deprecated: Create a replacement with CreateInAppPurchaseImageV2; UpdateInAppPurchaseImageV2 only commits upload state.
 func (c *Client) UpdateInAppPurchaseImage(ctx context.Context, imageID string, attrs InAppPurchaseImageUpdateAttributes) (*InAppPurchaseImageResponse, error) {
 	imageID = strings.TrimSpace(imageID)
 	if imageID == "" {
@@ -270,6 +300,8 @@ func (c *Client) UpdateInAppPurchaseImage(ctx context.Context, imageID string, a
 }
 
 // DeleteInAppPurchaseImage deletes an in-app purchase image by ID.
+//
+// Deprecated: Use DeleteInAppPurchaseImageV2.
 func (c *Client) DeleteInAppPurchaseImage(ctx context.Context, imageID string) error {
 	imageID = strings.TrimSpace(imageID)
 	if imageID == "" {
@@ -280,13 +312,20 @@ func (c *Client) DeleteInAppPurchaseImage(ctx context.Context, imageID string) e
 }
 
 // GetInAppPurchaseAppStoreReviewScreenshotForIAP retrieves the review screenshot for an IAP.
-func (c *Client) GetInAppPurchaseAppStoreReviewScreenshotForIAP(ctx context.Context, iapID string) (*InAppPurchaseAppStoreReviewScreenshotResponse, error) {
+func (c *Client) GetInAppPurchaseAppStoreReviewScreenshotForIAP(ctx context.Context, iapID string, opts ...IAPReviewScreenshotOption) (*InAppPurchaseAppStoreReviewScreenshotResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	if iapID == "" {
 		return nil, fmt.Errorf("iapID is required")
 	}
 
+	query := &iapReviewScreenshotQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v2/inAppPurchases/%s/appStoreReviewScreenshot", iapID)
+	if queryString := buildIAPReviewScreenshotQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -301,13 +340,20 @@ func (c *Client) GetInAppPurchaseAppStoreReviewScreenshotForIAP(ctx context.Cont
 }
 
 // GetInAppPurchaseAppStoreReviewScreenshot retrieves a review screenshot by ID.
-func (c *Client) GetInAppPurchaseAppStoreReviewScreenshot(ctx context.Context, screenshotID string) (*InAppPurchaseAppStoreReviewScreenshotResponse, error) {
+func (c *Client) GetInAppPurchaseAppStoreReviewScreenshot(ctx context.Context, screenshotID string, opts ...IAPReviewScreenshotOption) (*InAppPurchaseAppStoreReviewScreenshotResponse, error) {
 	screenshotID = strings.TrimSpace(screenshotID)
 	if screenshotID == "" {
 		return nil, fmt.Errorf("screenshotID is required")
 	}
 
+	query := &iapReviewScreenshotQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/inAppPurchaseAppStoreReviewScreenshots/%s", screenshotID)
+	if queryString := buildIAPReviewScreenshotQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -550,13 +596,20 @@ func (c *Client) CreateInAppPurchaseAvailability(ctx context.Context, iapID stri
 }
 
 // GetInAppPurchaseContent retrieves the content resource for an IAP.
-func (c *Client) GetInAppPurchaseContent(ctx context.Context, iapID string) (*InAppPurchaseContentResponse, error) {
+func (c *Client) GetInAppPurchaseContent(ctx context.Context, iapID string, opts ...IAPContentOption) (*InAppPurchaseContentResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	if iapID == "" {
 		return nil, fmt.Errorf("iapID is required")
 	}
 
+	query := &iapContentQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v2/inAppPurchases/%s/content", iapID)
+	if queryString := buildIAPContentQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -571,13 +624,20 @@ func (c *Client) GetInAppPurchaseContent(ctx context.Context, iapID string) (*In
 }
 
 // GetInAppPurchaseContentByID retrieves an in-app purchase content resource by ID.
-func (c *Client) GetInAppPurchaseContentByID(ctx context.Context, contentID string) (*InAppPurchaseContentResponse, error) {
+func (c *Client) GetInAppPurchaseContentByID(ctx context.Context, contentID string, opts ...IAPContentOption) (*InAppPurchaseContentResponse, error) {
 	contentID = strings.TrimSpace(contentID)
 	if contentID == "" {
 		return nil, fmt.Errorf("contentID is required")
 	}
 
+	query := &iapContentQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/inAppPurchaseContents/%s", contentID)
+	if queryString := buildIAPContentQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -720,13 +780,20 @@ func (c *Client) GetInAppPurchasePriceScheduleByID(ctx context.Context, schedule
 }
 
 // GetInAppPurchasePromotedPurchase retrieves the promoted purchase for an in-app purchase.
-func (c *Client) GetInAppPurchasePromotedPurchase(ctx context.Context, iapID string) (*PromotedPurchaseResponse, error) {
+func (c *Client) GetInAppPurchasePromotedPurchase(ctx context.Context, iapID string, opts ...PromotedPurchaseGetOption) (*PromotedPurchaseResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	if iapID == "" {
 		return nil, fmt.Errorf("iapID is required")
 	}
 
+	query := &promotedPurchaseGetQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v2/inAppPurchases/%s/promotedPurchase", iapID)
+	if queryString := buildPromotedPurchaseGetQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -1395,6 +1462,8 @@ func (c *Client) UpdateInAppPurchaseOfferCode(ctx context.Context, offerCodeID s
 }
 
 // CreateInAppPurchaseSubmission submits an IAP for review.
+//
+// Deprecated: Create an in-app purchase version and add it with CreateReviewSubmissionItem.
 func (c *Client) CreateInAppPurchaseSubmission(ctx context.Context, iapID string) (*InAppPurchaseSubmissionResponse, error) {
 	iapID = strings.TrimSpace(iapID)
 	if iapID == "" {
@@ -1799,6 +1868,8 @@ func (c *Client) GetInAppPurchaseIapPriceScheduleRelationship(ctx context.Contex
 }
 
 // GetInAppPurchaseImagesRelationships retrieves image linkages for an IAP.
+//
+// Deprecated: Use GetInAppPurchaseVersionImagesRelationships with an in-app purchase version ID.
 func (c *Client) GetInAppPurchaseImagesRelationships(ctx context.Context, iapID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
 	for _, opt := range opts {
@@ -1855,6 +1926,8 @@ func (c *Client) GetInAppPurchaseInAppPurchaseAvailabilityRelationship(ctx conte
 }
 
 // GetInAppPurchaseInAppPurchaseLocalizationsRelationships retrieves localization linkages for an IAP.
+//
+// Deprecated: Use GetInAppPurchaseVersionLocalizationsRelationships with an in-app purchase version ID.
 func (c *Client) GetInAppPurchaseInAppPurchaseLocalizationsRelationships(ctx context.Context, iapID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
 	for _, opt := range opts {

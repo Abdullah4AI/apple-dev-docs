@@ -243,6 +243,16 @@ func (e *RetryableError) Unwrap() error {
 	return e.Err
 }
 
+// HTTPStatusCode reports the HTTP status code carried by the wrapped error,
+// or 0 when no status is known (e.g., transport failures).
+func (e *RetryableError) HTTPStatusCode() int {
+	var statusErr interface{ HTTPStatusCode() int }
+	if errors.As(e.Err, &statusErr) {
+		return statusErr.HTTPStatusCode()
+	}
+	return 0
+}
+
 // IsRetryable checks if an error indicates the request can be retried.
 func IsRetryable(err error) bool {
 	_, ok := errors.AsType[*RetryableError](err)

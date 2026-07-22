@@ -66,7 +66,7 @@ func TestWebAppsCompatibilityInvalidBooleanExitCodes(t *testing.T) {
 				"web", "apps", "compatibility", "edit",
 				"--app", "app-1",
 			},
-			wantStderr: "flag provided but not defined: -ios-app-on-mac",
+			wantStderr: "Unknown flag: --ios-app-on-mac",
 		},
 	}
 

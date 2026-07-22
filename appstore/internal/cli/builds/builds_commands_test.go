@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -38,6 +39,29 @@ func TestBuildsListCommand_HelpMentionsCombinedFilters(t *testing.T) {
 	cmd := BuildsListCommand()
 	if !strings.Contains(cmd.LongHelp, `--version "1.2.3" --build-number "123"`) {
 		t.Fatalf("expected long help to include combined version/build-number example, got %q", cmd.LongHelp)
+	}
+}
+
+func TestBuildsUploadCommand_HelpShowsConcurrencyDefaultOnce(t *testing.T) {
+	cmd := BuildsUploadCommand()
+	usage := cmd.UsageFunc(cmd)
+
+	var concurrencyLine string
+	for line := range strings.SplitSeq(usage, "\n") {
+		if strings.Contains(line, "--concurrency") {
+			concurrencyLine = line
+			break
+		}
+	}
+	if concurrencyLine == "" {
+		t.Fatalf("expected rendered help to include --concurrency, got %q", usage)
+	}
+	if count := strings.Count(concurrencyLine, "default"); count != 1 {
+		t.Fatalf("expected one concurrency default annotation, got %q", concurrencyLine)
+	}
+	wantDefault := fmt.Sprintf("(default: %d)", asc.DefaultUploadConcurrency)
+	if !strings.Contains(concurrencyLine, wantDefault) {
+		t.Fatalf("expected concurrency default annotation %q, got %q", wantDefault, concurrencyLine)
 	}
 }
 

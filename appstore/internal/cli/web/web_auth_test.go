@@ -177,19 +177,17 @@ func TestReadPasswordFromTerminalPropagatesCtrlCAsInterrupt(t *testing.T) {
 		return nil
 	}
 
-	promptSeen := make(chan struct{})
-	readPromptDone := make(chan error, 1)
+	promptResult := make(chan error, 1)
 	go func() {
 		buf := make([]byte, 128)
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 && strings.Contains(string(buf[:n]), "Apple Account password:") {
-				close(promptSeen)
-				readPromptDone <- nil
+				promptResult <- nil
 				return
 			}
 			if err != nil {
-				readPromptDone <- err
+				promptResult <- err
 				return
 			}
 		}
@@ -202,9 +200,10 @@ func TestReadPasswordFromTerminalPropagatesCtrlCAsInterrupt(t *testing.T) {
 	}()
 
 	select {
-	case <-promptSeen:
-	case err := <-readPromptDone:
-		t.Fatalf("failed waiting for password prompt: %v", err)
+	case err := <-promptResult:
+		if err != nil {
+			t.Fatalf("failed waiting for password prompt: %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for password prompt")
 	}
@@ -245,19 +244,17 @@ func TestReadPasswordFromTerminalReturnsPromptInterruptAfterContextCancel(t *tes
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	promptSeen := make(chan struct{})
-	readPromptDone := make(chan error, 1)
+	promptResult := make(chan error, 1)
 	go func() {
 		buf := make([]byte, 128)
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 && strings.Contains(string(buf[:n]), "Apple Account password:") {
-				close(promptSeen)
-				readPromptDone <- nil
+				promptResult <- nil
 				return
 			}
 			if err != nil {
-				readPromptDone <- err
+				promptResult <- err
 				return
 			}
 		}
@@ -270,9 +267,10 @@ func TestReadPasswordFromTerminalReturnsPromptInterruptAfterContextCancel(t *tes
 	}()
 
 	select {
-	case <-promptSeen:
-	case err := <-readPromptDone:
-		t.Fatalf("failed waiting for password prompt: %v", err)
+	case err := <-promptResult:
+		if err != nil {
+			t.Fatalf("failed waiting for password prompt: %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for password prompt")
 	}

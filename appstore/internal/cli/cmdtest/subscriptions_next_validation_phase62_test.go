@@ -38,6 +38,7 @@ func TestSubscriptionsGroupsListRejectsInvalidNextURLPhase62(t *testing.T) {
 }
 
 func TestSubscriptionsGroupsListPaginateFromNextWithoutAppPhase62(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "ambient-app")
 	const firstURL = "https://api.appstoreconnect.apple.com/v1/apps/app-1/subscriptionGroups?cursor=AQ&limit=200"
 	const secondURL = "https://api.appstoreconnect.apple.com/v1/apps/app-1/subscriptionGroups?cursor=BQ&limit=200"
 
@@ -146,6 +147,8 @@ func TestSubscriptionsListRejectsInvalidNextURLPhase62(t *testing.T) {
 }
 
 func TestSubscriptionsListPaginateFromNextWithoutGroupPhase62(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "ambient-app")
+
 	const firstURL = "https://api.appstoreconnect.apple.com/v1/subscriptionGroups/group-1/subscriptions?cursor=AQ&limit=200"
 	const secondURL = "https://api.appstoreconnect.apple.com/v1/subscriptionGroups/group-1/subscriptions?cursor=BQ&limit=200"
 

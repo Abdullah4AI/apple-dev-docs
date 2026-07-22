@@ -7,7 +7,10 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
-func init() {
+// registerValidationRenderers registers direct renderers for validation
+// reports. It runs lazily on first registry lookup alongside
+// registerAllOutputRenderers (see ensureOutputRegistryPopulated).
+func registerValidationRenderers() {
 	registerDirect(func(v *validation.Report, render func([]string, [][]string)) error {
 		h, r := validationSummaryRows(v)
 		render(h, r)

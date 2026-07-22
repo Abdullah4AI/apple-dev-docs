@@ -270,11 +270,12 @@ func printUnknownFlagSuggestion(analysis invocationAnalysis) {
 		return
 	}
 	input := strings.TrimLeft(strings.SplitN(analysis.unknownToken, "=", 2)[0], "-")
-	candidates := make([]string, 0)
-	analysis.command.FlagSet.VisitAll(func(f *flag.Flag) {
+	visibleFlags := shared.VisibleHelpFlags(analysis.command.FlagSet)
+	candidates := make([]string, 0, len(visibleFlags))
+	for _, f := range visibleFlags {
 		candidates = append(candidates, f.Name)
-	})
-	printSuggestions(input, candidates, "--")
+	}
+	printFlagSuggestions(input, candidates)
 }
 
 func printUnknownSubcommandSuggestion(analysis invocationAnalysis) {
@@ -290,6 +291,14 @@ func printUnknownSubcommandSuggestion(analysis invocationAnalysis) {
 
 func printSuggestions(input string, candidates []string, prefix string) {
 	suggestions := suggest.Commands(input, candidates)
+	printSuggestionList(suggestions, prefix)
+}
+
+func printFlagSuggestions(input string, candidates []string) {
+	printSuggestionList(suggest.Flags(input, candidates), "--")
+}
+
+func printSuggestionList(suggestions []string, prefix string) {
 	if len(suggestions) == 0 {
 		return
 	}

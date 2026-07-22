@@ -24,6 +24,22 @@ type subscriptionReviewScreenshotTarget struct {
 	Checksum string
 }
 
+type subscriptionReviewScreenshotConflictError struct {
+	message string
+}
+
+func (e subscriptionReviewScreenshotConflictError) Error() string {
+	return e.message
+}
+
+func (e subscriptionReviewScreenshotConflictError) Unwrap() error {
+	return asc.ErrConflict
+}
+
+func newSubscriptionReviewScreenshotConflictError(format string, args ...any) error {
+	return subscriptionReviewScreenshotConflictError{message: fmt.Sprintf(format, args...)}
+}
+
 var subscriptionReviewScreenshotFields = []string{
 	"fileName",
 	"fileSize",
@@ -98,14 +114,14 @@ func createOrResumeSubscriptionReviewScreenshot(ctx context.Context, client *asc
 				return candidate, false, readErr
 			}
 			if strings.TrimSpace(candidate.Data.ID) != strings.TrimSpace(reservation.Data.ID) {
-				return candidate, false, fmt.Errorf("subscription now references screenshot %q instead of upload reservation %q", candidate.Data.ID, reservation.Data.ID)
+				return candidate, false, newSubscriptionReviewScreenshotConflictError("subscription now references screenshot %q instead of upload reservation %q", candidate.Data.ID, reservation.Data.ID)
 			}
 			remoteChecksum := strings.TrimSpace(candidate.Data.Attributes.SourceFileChecksum)
 			if remoteChecksum == "" {
 				return candidate, false, nil
 			}
 			if !strings.EqualFold(remoteChecksum, target.Checksum) {
-				return candidate, false, fmt.Errorf("subscription review screenshot checksum changed while committing upload")
+				return candidate, false, newSubscriptionReviewScreenshotConflictError("subscription review screenshot checksum changed while committing upload")
 			}
 			return candidate, true, nil
 		},
@@ -115,7 +131,7 @@ func createOrResumeSubscriptionReviewScreenshot(ctx context.Context, client *asc
 	}
 	if committed != nil && strings.TrimSpace(committed.Data.ID) != "" {
 		if strings.TrimSpace(committed.Data.ID) != strings.TrimSpace(reservation.Data.ID) {
-			return nil, fmt.Errorf("upload commit returned screenshot %q instead of upload reservation %q", committed.Data.ID, reservation.Data.ID)
+			return nil, newSubscriptionReviewScreenshotConflictError("upload commit returned screenshot %q instead of upload reservation %q", committed.Data.ID, reservation.Data.ID)
 		}
 		reservation = committed
 	}
@@ -156,12 +172,12 @@ func subscriptionReviewScreenshotReservationMatches(resp *asc.SubscriptionAppSto
 		if strings.EqualFold(remoteChecksum, target.Checksum) {
 			return true, nil
 		}
-		return false, fmt.Errorf("subscription already has a review screenshot with a different checksum")
+		return false, newSubscriptionReviewScreenshotConflictError("subscription already has a review screenshot with a different checksum")
 	}
 	if attrs.FileName == target.FileName && attrs.FileSize == target.FileSize {
 		return true, nil
 	}
-	return false, fmt.Errorf("subscription already has a different incomplete review screenshot reservation")
+	return false, newSubscriptionReviewScreenshotConflictError("subscription already has a different incomplete review screenshot reservation")
 }
 
 func classifySubscriptionReviewScreenshot(resp *asc.SubscriptionAppStoreReviewScreenshotResponse, target subscriptionReviewScreenshotTarget) (subscriptionReviewScreenshotAction, error) {
@@ -180,16 +196,16 @@ func classifySubscriptionReviewScreenshot(resp *asc.SubscriptionAppStoreReviewSc
 		if sameChecksum {
 			return subscriptionReviewScreenshotSkip, nil
 		}
-		return "", fmt.Errorf("subscription already has a complete review screenshot with a different checksum")
+		return "", newSubscriptionReviewScreenshotConflictError("subscription already has a complete review screenshot with a different checksum")
 	}
 	if remoteChecksum != "" {
 		if !sameChecksum {
-			return "", fmt.Errorf("subscription already has a review screenshot with a different checksum")
+			return "", newSubscriptionReviewScreenshotConflictError("subscription already has a review screenshot with a different checksum")
 		}
 		return subscriptionReviewScreenshotPoll, nil
 	}
 	if attrs.FileName != target.FileName || attrs.FileSize != target.FileSize {
-		return "", fmt.Errorf("subscription already has a different incomplete review screenshot reservation")
+		return "", newSubscriptionReviewScreenshotConflictError("subscription already has a different incomplete review screenshot reservation")
 	}
 	if len(attrs.UploadOperations) == 0 {
 		return "", fmt.Errorf("matching incomplete review screenshot has no upload operations")

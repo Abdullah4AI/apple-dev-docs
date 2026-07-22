@@ -42,6 +42,7 @@ type ReviewSubmissionResource struct {
 	ID            string                         `json:"id"`
 	Attributes    ReviewSubmissionAttributes     `json:"attributes"`
 	Relationships *ReviewSubmissionRelationships `json:"relationships,omitempty"`
+	Links         json.RawMessage                `json:"links,omitempty"`
 }
 
 // ReviewSubmissionsResponse is the response from review submissions list endpoints.
@@ -49,6 +50,7 @@ type ReviewSubmissionsResponse struct {
 	Data     []ReviewSubmissionResource `json:"data"`
 	Links    Links                      `json:"links"`
 	Included json.RawMessage            `json:"included,omitempty"`
+	Meta     json.RawMessage            `json:"meta,omitempty"`
 }
 
 // GetLinks returns the links field for pagination.
@@ -95,8 +97,9 @@ type ReviewSubmissionCreateRequest struct {
 
 // ReviewSubmissionUpdateAttributes describes attributes for updating a review submission.
 type ReviewSubmissionUpdateAttributes struct {
-	Submitted *bool `json:"submitted,omitempty"`
-	Canceled  *bool `json:"canceled,omitempty"`
+	Platform  *NullablePlatform `json:"platform,omitempty"`
+	Submitted *NullableBool     `json:"submitted,omitempty"`
+	Canceled  *NullableBool     `json:"canceled,omitempty"`
 }
 
 // ReviewSubmissionUpdateData is the data portion of a review submission update request.
@@ -180,13 +183,20 @@ func (c *Client) ListReviewSubmissions(ctx context.Context, opts ...ReviewSubmis
 }
 
 // GetReviewSubmission retrieves a review submission by ID.
-func (c *Client) GetReviewSubmission(ctx context.Context, submissionID string) (*ReviewSubmissionResponse, error) {
+func (c *Client) GetReviewSubmission(ctx context.Context, submissionID string, opts ...ReviewSubmissionOption) (*ReviewSubmissionResponse, error) {
 	submissionID = strings.TrimSpace(submissionID)
 	if submissionID == "" {
 		return nil, fmt.Errorf("submissionID is required")
 	}
 
+	query := &reviewSubmissionQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
 	path := fmt.Sprintf("/v1/reviewSubmissions/%s", submissionID)
+	if queryString := buildReviewSubmissionQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -316,11 +326,11 @@ func (c *Client) UpdateReviewSubmission(ctx context.Context, submissionID string
 // SubmitReviewSubmission submits a review submission by ID.
 func (c *Client) SubmitReviewSubmission(ctx context.Context, submissionID string) (*ReviewSubmissionResponse, error) {
 	submitted := true
-	return c.UpdateReviewSubmission(ctx, submissionID, ReviewSubmissionUpdateAttributes{Submitted: &submitted})
+	return c.UpdateReviewSubmission(ctx, submissionID, ReviewSubmissionUpdateAttributes{Submitted: &NullableBool{Value: &submitted}})
 }
 
 // CancelReviewSubmission cancels a review submission by ID.
 func (c *Client) CancelReviewSubmission(ctx context.Context, submissionID string) (*ReviewSubmissionResponse, error) {
 	canceled := true
-	return c.UpdateReviewSubmission(ctx, submissionID, ReviewSubmissionUpdateAttributes{Canceled: &canceled})
+	return c.UpdateReviewSubmission(ctx, submissionID, ReviewSubmissionUpdateAttributes{Canceled: &NullableBool{Value: &canceled}})
 }

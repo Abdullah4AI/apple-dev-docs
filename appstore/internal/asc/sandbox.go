@@ -3,6 +3,7 @@ package asc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -203,29 +204,39 @@ func (c *Client) GetSandboxTesters(ctx context.Context, opts ...SandboxTestersOp
 	return &response, nil
 }
 
+// errSandboxTesterFound signals early pagination exit once the tester is located.
+var errSandboxTesterFound = errors.New("sandbox tester found")
+
 // GetSandboxTester retrieves a sandbox tester by ID.
 func (c *Client) GetSandboxTester(ctx context.Context, testerID string) (*SandboxTesterResponse, error) {
-	next := ""
-	for {
-		resp, err := c.GetSandboxTesters(
-			ctx,
-			WithSandboxTestersLimit(200),
-			WithSandboxTestersNextURL(next),
-		)
-		if err != nil {
-			return nil, err
+	firstPage, err := c.GetSandboxTesters(ctx, WithSandboxTestersLimit(200))
+	if err != nil {
+		return nil, err
+	}
+
+	var found *SandboxTesterResponse
+	err = PaginateEach(ctx, firstPage, func(ctx context.Context, nextURL string) (PaginatedResponse, error) {
+		return c.GetSandboxTesters(ctx, WithSandboxTestersNextURL(nextURL))
+	}, func(page PaginatedResponse) error {
+		resp, ok := page.(*SandboxTestersResponse)
+		if !ok {
+			return fmt.Errorf("unexpected page type %T", page)
 		}
 		for _, item := range resp.Data {
 			if item.ID == testerID {
-				return &SandboxTesterResponse{Data: item, Links: resp.Links}, nil
+				found = &SandboxTesterResponse{Data: item, Links: resp.Links}
+				return errSandboxTesterFound
 			}
 		}
-		if strings.TrimSpace(resp.Links.Next) == "" {
-			break
-		}
-		next = resp.Links.Next
+		return nil
+	})
+	if err != nil && !errors.Is(err, errSandboxTesterFound) {
+		return nil, err
 	}
-	return nil, fmt.Errorf("sandbox tester not found: %s", testerID)
+	if found == nil {
+		return nil, fmt.Errorf("sandbox tester not found: %s", testerID)
+	}
+	return found, nil
 }
 
 // UpdateSandboxTester updates a sandbox tester by ID.

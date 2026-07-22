@@ -68,6 +68,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("review history: %w", shared.UsageError("unexpected positional arguments"))
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("--limit must be between 1 and 200")
 			}
@@ -348,6 +351,9 @@ func reviewSubmissionItemHistoryFields() []string {
 		"gameCenterChallengeVersion",
 		"gameCenterLeaderboardSetVersion",
 		"gameCenterLeaderboardVersion",
+		"inAppPurchaseVersion",
+		"subscriptionVersion",
+		"subscriptionGroupVersion",
 	}
 }
 
@@ -363,6 +369,9 @@ func reviewSubmissionItemHistoryIncludes() []string {
 		"gameCenterChallengeVersion",
 		"gameCenterLeaderboardSetVersion",
 		"gameCenterLeaderboardVersion",
+		"inAppPurchaseVersion",
+		"subscriptionVersion",
+		"subscriptionGroupVersion",
 	}
 }
 
@@ -372,15 +381,21 @@ func populateSubmissionHistoryItem(histItem *SubmissionHistoryItem, item asc.Rev
 	}
 
 	switch {
+	case item.Relationships.InAppPurchaseVersion != nil:
+		histItem.Type = "inAppPurchaseVersion"
+		histItem.ResourceID = item.Relationships.InAppPurchaseVersion.Data.ID
+	case item.Relationships.SubscriptionVersion != nil:
+		histItem.Type = "subscriptionVersion"
+		histItem.ResourceID = item.Relationships.SubscriptionVersion.Data.ID
+	case item.Relationships.SubscriptionGroupVersion != nil:
+		histItem.Type = "subscriptionGroupVersion"
+		histItem.ResourceID = item.Relationships.SubscriptionGroupVersion.Data.ID
 	case item.Relationships.AppStoreVersion != nil:
 		histItem.Type = "appStoreVersion"
 		histItem.ResourceID = item.Relationships.AppStoreVersion.Data.ID
 	case item.Relationships.AppCustomProductPageVersion != nil:
 		histItem.Type = "appCustomProductPageVersion"
 		histItem.ResourceID = item.Relationships.AppCustomProductPageVersion.Data.ID
-	case item.Relationships.AppCustomProductPage != nil:
-		histItem.Type = "appCustomProductPage"
-		histItem.ResourceID = item.Relationships.AppCustomProductPage.Data.ID
 	case item.Relationships.AppStoreVersionExperimentV2 != nil:
 		histItem.Type = "appStoreVersionExperimentV2"
 		histItem.ResourceID = item.Relationships.AppStoreVersionExperimentV2.Data.ID
@@ -408,9 +423,6 @@ func populateSubmissionHistoryItem(histItem *SubmissionHistoryItem, item asc.Rev
 	case item.Relationships.AppStoreVersionExperiment != nil:
 		histItem.Type = "appStoreVersionExperiment"
 		histItem.ResourceID = item.Relationships.AppStoreVersionExperiment.Data.ID
-	case item.Relationships.AppStoreVersionExperimentTreatment != nil:
-		histItem.Type = "appStoreVersionExperimentTreatment"
-		histItem.ResourceID = item.Relationships.AppStoreVersionExperimentTreatment.Data.ID
 	}
 }
 

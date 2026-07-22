@@ -505,9 +505,8 @@ so commands continue to work even if the original .p8 file is removed.`,
 				return shared.UsageError("--skip-validation and --network are mutually exclusive")
 			}
 
-			// Validate the key file exists and is parseable
 			if err := authsvc.ValidateKeyFile(*keyPath); err != nil {
-				return fmt.Errorf("auth login: invalid private key: %w", err)
+				return shared.UsageErrorf("auth login: invalid private key: %v", err)
 			}
 
 			if !*skipValidation {
@@ -980,7 +979,7 @@ Examples:
 			}
 
 			if *validate && validationFailures > 0 {
-				return shared.NewReportedError(fmt.Errorf("auth status: validation failed for %d credential(s)", validationFailures))
+				return shared.NewValidationReportedError(fmt.Errorf("auth status: validation failed for %d credential(s)", validationFailures))
 			}
 			return nil
 		},

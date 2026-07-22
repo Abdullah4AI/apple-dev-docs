@@ -3,6 +3,7 @@ package asc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"testing"
@@ -93,6 +94,46 @@ func TestGetSandboxTester_ByID(t *testing.T) {
 
 	if _, err := client.GetSandboxTester(context.Background(), "tester-1"); err != nil {
 		t.Fatalf("GetSandboxTester() error: %v", err)
+	}
+}
+
+func TestGetSandboxTester_FollowsPagination(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v2/sandboxTesters?cursor=abc"
+	client := newTestClient(
+		t, func(req *http.Request) {
+			assertAuthorized(t, req)
+		},
+		jsonResponse(http.StatusOK, `{"data":[{"type":"sandboxTesters","id":"tester-1","attributes":{"acAccountName":"one@example.com","territory":"USA"}}],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"sandboxTesters","id":"tester-2","attributes":{"acAccountName":"two@example.com","territory":"USA"}}]}`),
+	)
+
+	resp, err := client.GetSandboxTester(context.Background(), "tester-2")
+	if err != nil {
+		t.Fatalf("GetSandboxTester() error: %v", err)
+	}
+	if resp.Data.ID != "tester-2" {
+		t.Fatalf("expected tester-2, got %q", resp.Data.ID)
+	}
+}
+
+func TestGetSandboxTester_RejectsRepeatedNextURL(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v2/sandboxTesters?cursor=repeat"
+	requests := 0
+	client := newTestClient(
+		t, func(req *http.Request) {
+			requests++
+			assertAuthorized(t, req)
+		},
+		jsonResponse(http.StatusOK, `{"data":[{"type":"sandboxTesters","id":"tester-1","attributes":{"acAccountName":"one@example.com","territory":"USA"}}],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"sandboxTesters","id":"tester-2","attributes":{"acAccountName":"two@example.com","territory":"USA"}}],"links":{"next":"`+next+`"}}`),
+	)
+
+	_, err := client.GetSandboxTester(context.Background(), "missing-tester")
+	if !errors.Is(err, ErrRepeatedPaginationURL) {
+		t.Fatalf("expected ErrRepeatedPaginationURL, got %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected repeated next URL to stop after two requests, got %d", requests)
 	}
 }
 

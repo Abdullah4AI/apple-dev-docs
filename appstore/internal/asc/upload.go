@@ -17,6 +17,18 @@ import (
 	"sync/atomic"
 )
 
+const (
+	// DefaultUploadConcurrency is the number of upload workers used when no
+	// explicit concurrency is configured. App Store Connect upload operations
+	// carry explicit byte offsets, so chunks are safe to upload in parallel.
+	DefaultUploadConcurrency = 4
+
+	// uploadMaxIdleConnsPerHost keeps enough idle connections to the upload
+	// host so concurrent chunk uploads are not throttled by the Go transport
+	// default of 2 idle connections per host.
+	uploadMaxIdleConnsPerHost = 8
+)
+
 // UploadOptions configure how upload operations are executed.
 type UploadOptions struct {
 	Concurrency int
@@ -65,7 +77,11 @@ func WithUploadHTTPClient(client *http.Client) UploadOption {
 func newUploadClient() *http.Client {
 	transport := http.DefaultTransport
 	if base, ok := transport.(*http.Transport); ok {
-		transport = base.Clone()
+		cloned := base.Clone()
+		if cloned.MaxIdleConnsPerHost < uploadMaxIdleConnsPerHost {
+			cloned.MaxIdleConnsPerHost = uploadMaxIdleConnsPerHost
+		}
+		transport = cloned
 	}
 	return &http.Client{
 		Timeout:   ResolveUploadTimeout(),
@@ -83,7 +99,7 @@ func ExecuteUploadOperations(ctx context.Context, filePath string, operations []
 	}
 
 	uploadOpts := UploadOptions{
-		Concurrency: 1,
+		Concurrency: DefaultUploadConcurrency,
 		Client:      newUploadClient(),
 		RetryOpts:   ResolveRetryOptions(),
 	}

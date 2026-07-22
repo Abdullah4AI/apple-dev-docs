@@ -48,6 +48,7 @@ func BundleIDsCapabilitiesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	bundleID := fs.String("bundle", "", "Bundle ID")
+	legacyBundleID := shared.BindDeprecatedStringFlagAlias(fs, "bundle-id", "bundle")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
 	output := shared.BindOutputFlags(fs)
@@ -64,6 +65,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBundleID.Apply(bundleID); err != nil {
+				return err
+			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("bundle-ids capabilities list: %w", err)
 			}

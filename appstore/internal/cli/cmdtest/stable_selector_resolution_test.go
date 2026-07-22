@@ -271,8 +271,10 @@ func TestIAPLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T
 	if runErr != nil {
 		t.Fatalf("expected nil error, got %v", runErr)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
+	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	const wantWarning = "Warning: `asc iap localizations list` is deprecated by App Store Connect API 4.4.1. Use `asc iap versions localizations list --version-id \"IAP_VERSION_ID\"`."
+	if got := strings.TrimSpace(stderr); got != wantWarning {
+		t.Fatalf("expected only deprecation warning %q, got %q", wantWarning, stderr)
 	}
 	if requests != 2 {
 		t.Fatalf("expected lookup timeout followed by localizations fetch, got %d requests", requests)
@@ -388,6 +390,75 @@ func TestSubscriptionReviewScreenshotGetResolvesStableSelectorWithAppFlag(t *tes
 	}
 }
 
+func TestSubscriptionPromotedPurchaseViewResolvesStableSelectorWithAppFlag(t *testing.T) {
+	setupStableSelectorAuth(t)
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requests := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodGet {
+			t.Fatalf("request method = %s, want GET", req.Method)
+		}
+		switch req.URL.Path {
+		case "/v1/apps/app-1/subscriptionGroups":
+			query := req.URL.Query()
+			if len(query) != 1 || len(query["limit"]) != 1 || query["limit"][0] != "200" {
+				t.Fatalf("subscription-group query = %v, want exactly limit=200", query)
+			}
+			return selectorJSONResponse(`{"data":[{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Premium"}}]}`), nil
+		case "/v1/subscriptionGroups/group-1/subscriptions":
+			query := req.URL.Query()
+			if len(query) != 2 || len(query["limit"]) != 1 || query["limit"][0] != "200" {
+				t.Fatalf("subscription query = %v, want exactly product filter and limit=200", query)
+			}
+			if got := query["filter[productId]"]; len(got) != 1 || got[0] != "com.example.monthly" {
+				t.Fatalf("product filter = %v, want exactly [com.example.monthly]", got)
+			}
+			return selectorJSONResponse(`{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Monthly","productId":"com.example.monthly"}}]}`), nil
+		case "/v1/subscriptions/sub-1/promotedPurchase":
+			query := req.URL.Query()
+			want := map[string]string{
+				"fields[inAppPurchases]": "versions",
+				"fields[subscriptions]":  "versions",
+				"include":                "inAppPurchaseV2,subscription",
+			}
+			if len(query) != len(want) {
+				t.Fatalf("query = %v, want exactly %v", query, want)
+			}
+			for key, wantValue := range want {
+				if got := query[key]; len(got) != 1 || got[0] != wantValue {
+					t.Fatalf("query[%q] = %v, want exactly [%q]", key, got, wantValue)
+				}
+			}
+			return selectorJSONResponse(`{"data":{"type":"promotedPurchases","id":"promo-1"}}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	stdout, stderr, runErr := runRootCommand(t, []string{
+		"subscriptions", "promoted-purchases", "view",
+		"--app", "app-1",
+		"--subscription-id", "com.example.monthly",
+		"--iap-fields", "versions",
+		"--subscription-fields", "versions",
+	})
+	if runErr != nil {
+		t.Fatalf("expected nil error, got %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requests != 3 || !strings.Contains(stdout, `"id":"promo-1"`) {
+		t.Fatalf("requests=%d stdout=%q", requests, stdout)
+	}
+}
+
 func TestSubscriptionLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
 	setupStableSelectorAuth(t)
 	t.Setenv("ASC_APP_ID", "")
@@ -423,8 +494,10 @@ func TestSubscriptionLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *
 	if runErr != nil {
 		t.Fatalf("expected nil error, got %v", runErr)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
+	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	const wantWarning = "Warning: `asc subscriptions localizations list` is deprecated by App Store Connect API 4.4.1. Use `asc subscriptions versions localizations list --version-id \"SUBSCRIPTION_VERSION_ID\"`."
+	if got := strings.TrimSpace(stderr); got != wantWarning {
+		t.Fatalf("expected only deprecation warning %q, got %q", wantWarning, stderr)
 	}
 	if requests != 2 {
 		t.Fatalf("expected lookup timeout followed by localizations fetch, got %d requests", requests)

@@ -343,15 +343,41 @@ func buildRetryableError(statusCode int, retryAfter time.Duration, respBody []by
 	}
 
 	message := fmt.Sprintf("%s (status %d)", base, statusCode)
+	var apiErr *APIError
 	if len(respBody) > 0 {
-		if err := ParseErrorWithStatus(respBody, statusCode); err != nil {
-			message = fmt.Sprintf("%s: %s", message, err)
+		if parsed, ok := errors.AsType[*APIError](ParseErrorWithStatus(respBody, statusCode)); ok {
+			apiErr = parsed
+			message = fmt.Sprintf("%s: %s", message, parsed)
+		}
+	}
+	if apiErr == nil {
+		apiErr = &APIError{
+			Code:       apiErrorCodeFromStatus(statusCode),
+			Title:      base,
+			StatusCode: statusCode,
 		}
 	}
 	if retryAfter > 0 {
 		message = fmt.Sprintf("%s (retry after %s)", message, retryAfter)
 	}
-	return errors.New(message)
+	return &retryableStatusError{message: message, apiErr: apiErr}
+}
+
+// retryableStatusError keeps the human-readable retry message while exposing
+// the parsed *APIError (and its HTTP status code) through Unwrap, so that
+// errors.Is/errors.As and exit-code mapping still observe the underlying
+// HTTP status after retries are exhausted.
+type retryableStatusError struct {
+	message string
+	apiErr  *APIError
+}
+
+func (e *retryableStatusError) Error() string {
+	return e.message
+}
+
+func (e *retryableStatusError) Unwrap() error {
+	return e.apiErr
 }
 
 // parseRetryAfterHeader parses the Retry-After header value.

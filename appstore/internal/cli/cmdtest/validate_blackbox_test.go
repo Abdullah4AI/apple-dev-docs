@@ -11,12 +11,12 @@ func TestValidateRemovedRemediationFlagsReturnUsageExitCode(t *testing.T) {
 		{
 			name:    "next removed",
 			args:    []string{"validate", "--app", "app-1", "--version-id", "ver-1", "--next"},
-			wantErr: "flag provided but not defined",
+			wantErr: "Unknown flag: --next",
 		},
 		{
 			name:    "fix-plan removed",
 			args:    []string{"validate", "--app", "app-1", "--version-id", "ver-1", "--fix-plan"},
-			wantErr: "flag provided but not defined",
+			wantErr: "Unknown flag: --fix-plan",
 		},
 	}
 

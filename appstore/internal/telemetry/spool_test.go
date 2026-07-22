@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const spoolWriterHelperEnv = "ASC_TEST_TELEMETRY_SPOOL_WRITER"
@@ -56,6 +57,16 @@ func TestSpoolRejectsOversizedNewestWithoutEvictingQueue(t *testing.T) {
 		t.Fatalf("append oversized event error = %v, want %v", err, errSpoolRecordTooLarge)
 	}
 	assertSpoolEventIDs(t, store, "event-old")
+}
+
+func TestSpoolLockAlwaysAttemptsUncontendedLock(t *testing.T) {
+	store := testSpoolStore(filepath.Join(t.TempDir(), "telemetry-spool.jsonl"))
+	store.lockWait = time.Nanosecond
+
+	if err := store.append(testSpoolRecord("event-01")); err != nil {
+		t.Fatalf("append with uncontended lock error = %v", err)
+	}
+	assertSpoolEventIDs(t, store, "event-01")
 }
 
 func TestSpoolRecoversCorruptAndTruncatedRecords(t *testing.T) {

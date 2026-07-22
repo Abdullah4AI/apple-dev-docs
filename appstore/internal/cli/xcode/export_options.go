@@ -1,0 +1,159 @@
+package xcode
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	localxcode "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/xcode"
+)
+
+const defaultXcodeExportOptionsPath = ".asc/export-options-app-store.plist"
+
+// XcodeExportOptionsGroupCommand returns the export-options command group.
+func XcodeExportOptionsGroupCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("xcode export-options", flag.ExitOnError)
+
+	return &ffcli.Command{
+		Name:       "export-options",
+		ShortUsage: "asc xcode export-options <subcommand> [flags]",
+		ShortHelp:  "Generate Xcode ExportOptions.plist files.",
+		LongHelp: `Generate Xcode ExportOptions.plist files.
+
+Use generate to create App Store Connect export options from an existing
+.xcarchive. Automatic signing lets Xcode resolve signing for the app and any
+embedded targets; provide --signing-style manual to resolve local profiles.
+
+Examples:
+  asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive
+  asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive --destination upload --output-path .asc/UploadExportOptions.plist`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Subcommands: []*ffcli.Command{
+			XcodeExportOptionsCommand(),
+		},
+		Exec: func(context.Context, []string) error {
+			return flag.ErrHelp
+		},
+	}
+}
+
+// XcodeExportOptionsCommand returns the export-options generate command.
+//
+// It intentionally returns the leaf command so callers can exercise generate
+// directly without building the parent command tree.
+func XcodeExportOptionsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("xcode export-options generate", flag.ExitOnError)
+
+	archivePath := fs.String("archive-path", "", "Path to the .xcarchive input (required)")
+	outputPath := fs.String("output-path", defaultXcodeExportOptionsPath, "Destination path for the generated ExportOptions.plist")
+	destination := fs.String("destination", "export", "Xcode export destination: export or upload")
+	signingStyle := fs.String("signing-style", "automatic", "Signing style: automatic or manual")
+	teamID := fs.String("team-id", "", "Apple Developer team ID (overrides archive metadata)")
+	overwrite := fs.Bool("overwrite", false, "Replace an existing file at --output-path")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "generate",
+		ShortUsage: "asc xcode export-options generate [flags]",
+		ShortHelp:  "Generate an ExportOptions.plist from an Xcode archive.",
+		LongHelp: `Generate an App Store Connect ExportOptions.plist from an Xcode archive.
+
+The generated plist uses app-store-connect exports. By default it uses
+automatic signing and an export destination. Use --destination upload only for
+direct Xcode uploads, such as asc xcode export --wait.
+
+Examples:
+  asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive
+  asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive --destination upload --output-path .asc/UploadExportOptions.plist
+  asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive --signing-style manual --team-id TEAM_ID --overwrite --output json`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				fmt.Fprintln(os.Stderr, "Error: xcode export-options generate does not accept positional arguments")
+				return flag.ErrHelp
+			}
+
+			trimmedDestination := strings.TrimSpace(*destination)
+			if trimmedDestination != "export" && trimmedDestination != "upload" {
+				return shared.UsageError("--destination must be one of: export, upload")
+			}
+			trimmedSigningStyle := strings.TrimSpace(*signingStyle)
+			if trimmedSigningStyle != "automatic" && trimmedSigningStyle != "manual" {
+				return shared.UsageError("--signing-style must be one of: automatic, manual")
+			}
+
+			trimmedArchivePath := strings.TrimSpace(*archivePath)
+			if trimmedArchivePath == "" {
+				fmt.Fprintln(os.Stderr, "Error: --archive-path is required")
+				return shared.MissingRequiredUsageError()
+			}
+			trimmedOutputPath := strings.TrimSpace(*outputPath)
+			if trimmedOutputPath == "" {
+				fmt.Fprintln(os.Stderr, "Error: --output-path is required")
+				return shared.MissingRequiredUsageError()
+			}
+
+			result, err := runGenerateExportOptions(ctx, localxcode.ExportOptionsGenerateOptions{
+				ArchivePath:  trimmedArchivePath,
+				OutputPath:   trimmedOutputPath,
+				Destination:  trimmedDestination,
+				SigningStyle: trimmedSigningStyle,
+				TeamID:       strings.TrimSpace(*teamID),
+				Overwrite:    *overwrite,
+			})
+			if err != nil {
+				return fmt.Errorf("xcode export-options generate: %w", err)
+			}
+
+			return shared.PrintOutputWithRenderers(
+				result,
+				*output.Output,
+				*output.Pretty,
+				func() error {
+					asc.RenderTable([]string{"field", "value"}, exportOptionsResultRows(result))
+					return nil
+				},
+				func() error {
+					asc.RenderMarkdown([]string{"field", "value"}, exportOptionsResultRows(result))
+					return nil
+				},
+			)
+		},
+	}
+}
+
+func exportOptionsResultRows(result *localxcode.ExportOptionsGenerateResult) [][]string {
+	rows := [][]string{
+		{"path", result.Path},
+		{"archive_path", result.ArchivePath},
+		{"method", result.Method},
+		{"destination", result.Destination},
+		{"signing_style", result.SigningStyle},
+	}
+	if teamID := strings.TrimSpace(result.TeamID); teamID != "" {
+		rows = append(rows, []string{"team_id", teamID})
+	}
+	if signingCertificate := strings.TrimSpace(result.SigningCertificate); signingCertificate != "" {
+		rows = append(rows, []string{"signing_certificate", signingCertificate})
+	}
+
+	bundleIDs := make([]string, 0, len(result.ProvisioningProfiles))
+	for bundleID := range result.ProvisioningProfiles {
+		bundleIDs = append(bundleIDs, bundleID)
+	}
+	sort.Strings(bundleIDs)
+	for _, bundleID := range bundleIDs {
+		rows = append(rows, []string{"provisioning_profile." + bundleID, result.ProvisioningProfiles[bundleID]})
+	}
+	rows = append(rows, []string{"overwritten", fmt.Sprintf("%t", result.Overwritten)})
+	return rows
+}

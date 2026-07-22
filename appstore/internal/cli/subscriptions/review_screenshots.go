@@ -48,6 +48,7 @@ func SubscriptionsReviewScreenshotsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("review-screenshots view", flag.ExitOnError)
 
 	screenshotID := fs.String("screenshot-id", "", "Review screenshot ID")
+	subscriptionFields := fs.String("subscription-fields", "", "Included subscription fields (comma-separated)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -61,6 +62,10 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			selectedSubscriptionFields, err := normalizeSparseFieldsFlag(fs, "", "subscription-fields", *subscriptionFields, subscriptionFieldsList())
+			if err != nil {
+				return err
+			}
 			id := strings.TrimSpace(*screenshotID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
@@ -75,7 +80,11 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetSubscriptionAppStoreReviewScreenshot(requestCtx, id)
+			resp, err := client.GetSubscriptionAppStoreReviewScreenshot(
+				requestCtx, id,
+				asc.WithSubscriptionAppStoreReviewScreenshotSubscriptionFields(selectedSubscriptionFields),
+				asc.WithSubscriptionAppStoreReviewScreenshotInclude(includeRelationshipForFields(selectedSubscriptionFields, "subscription")),
+			)
 			if err != nil {
 				return fmt.Errorf("subscriptions review-screenshots view: failed to fetch: %w", err)
 			}
@@ -218,6 +227,7 @@ func SubscriptionsReviewScreenshotsDeleteCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("review-screenshots delete", flag.ExitOnError)
 
 	screenshotID := fs.String("screenshot-id", "", "Review screenshot ID")
+	legacyID := shared.BindDeprecatedStringFlagAlias(fs, "id", "screenshot-id")
 	confirm := fs.Bool("confirm", false, "Confirm deletion")
 	output := shared.BindOutputFlags(fs)
 
@@ -232,6 +242,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyID.Apply(screenshotID); err != nil {
+				return err
+			}
 			id := strings.TrimSpace(*screenshotID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
@@ -277,7 +290,7 @@ func waitForSubscriptionReviewScreenshotDelivery(ctx context.Context, client *as
 			case "COMPLETE":
 				actualChecksum := strings.TrimSpace(resp.Data.Attributes.SourceFileChecksum)
 				if !strings.EqualFold(actualChecksum, strings.TrimSpace(expectedChecksum)) {
-					return struct{}{}, false, fmt.Errorf("screenshot %s checksum changed while waiting for delivery", screenshotID)
+					return struct{}{}, false, newSubscriptionReviewScreenshotConflictError("screenshot %s checksum changed while waiting for delivery", screenshotID)
 				}
 				verifiedResp = resp
 				return struct{}{}, true, nil

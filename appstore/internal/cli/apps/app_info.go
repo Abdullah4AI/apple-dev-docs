@@ -67,6 +67,8 @@ func AppsInfoViewCommand() *ffcli.Command {
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
 	include := fs.String("include", "", "Include related resources: "+strings.Join(appInfoIncludeList(), ", "))
+	fields := fs.String("fields", "", "Sparse app info fields: kidsAgeBand (deprecated by Apple; prefer asc age-rating view)")
+	ageRatingFields := fs.String("age-rating-fields", "", "Sparse fields for included age rating declaration: socialMedia, socialMediaAgeRestricted")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -82,8 +84,10 @@ Examples:
   asc apps info view --app "APP_ID"
   asc apps info view --app "APP_ID" --version "1.2.3" --platform IOS
   asc apps info view --version-id "VERSION_ID"
+  asc apps info view --info-id "APP_INFO_ID" --fields kidsAgeBand
+  asc apps info view --info-id "APP_INFO_ID" --age-rating-fields socialMedia,socialMediaAgeRestricted
   asc apps info view --info-id "APP_INFO_ID" --include "ageRatingDeclaration"
-  asc apps info view --app "APP_ID" --include "ageRatingDeclaration,territoryAgeRatings"
+  asc apps info view --app "APP_ID" --include "appInfoLocalizations,primaryCategory"
   asc apps info view --app "APP_ID" --locale "en-US" --output table`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -97,6 +101,11 @@ Examples:
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return shared.UsageError(err.Error())
+			}
+			if strings.TrimSpace(*next) != "" {
+				if flagName, ok := appFlagWasProvided(fs, "fields", "age-rating-fields"); ok {
+					return shared.UsageErrorf("--next cannot be combined with %s", flagName)
+				}
 			}
 			if strings.TrimSpace(*version) != "" && strings.TrimSpace(*versionID) != "" {
 				return shared.UsageError("--version and --version-id are mutually exclusive")
@@ -112,8 +121,20 @@ Examples:
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
-			if infoIDValue != "" && len(includeValues) == 0 {
-				fmt.Fprintln(os.Stderr, "Error: --info-id requires --include")
+			fieldValues, err := normalizeSparseField(fs, *fields, appInfoSparseFields441, "--fields")
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			ageRatingFieldValues, err := normalizeSparseField(fs, *ageRatingFields, ageRatingSparseFields441, "--age-rating-fields")
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if len(ageRatingFieldValues) > 0 {
+				includeValues = addInclude(includeValues, "ageRatingDeclaration")
+			}
+			appInfoMode := len(includeValues) > 0 || len(fieldValues) > 0
+			if infoIDValue != "" && !appInfoMode {
+				fmt.Fprintln(os.Stderr, "Error: --info-id requires --include, --fields, or --age-rating-fields")
 				return flag.ErrHelp
 			}
 
@@ -133,7 +154,7 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			if len(includeValues) > 0 {
+			if appInfoMode {
 				if strings.TrimSpace(*versionID) != "" ||
 					strings.TrimSpace(*version) != "" ||
 					strings.TrimSpace(*platform) != "" ||
@@ -142,7 +163,13 @@ Examples:
 					*limit != 0 ||
 					strings.TrimSpace(*next) != "" ||
 					*paginate {
-					fmt.Fprintln(os.Stderr, "Error: --include cannot be used with version localization flags")
+					flagName := "--include"
+					if len(fieldValues) > 0 {
+						flagName = "--fields"
+					} else if len(ageRatingFieldValues) > 0 {
+						flagName = "--age-rating-fields"
+					}
+					fmt.Fprintf(os.Stderr, "Error: %s cannot be used with version localization flags\n", flagName)
 					return flag.ErrHelp
 				}
 			}
@@ -155,13 +182,18 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			if len(includeValues) > 0 {
+			if appInfoMode {
 				appInfoIDValue, err := shared.ResolveAppInfoID(requestCtx, client, resolvedAppID, infoIDValue)
 				if err != nil {
 					return fmt.Errorf("apps info view: %w", err)
 				}
 
-				resp, err := client.GetAppInfo(requestCtx, appInfoIDValue, asc.WithAppInfoInclude(includeValues))
+				resp, err := client.GetAppInfo(
+					requestCtx, appInfoIDValue,
+					asc.WithAppInfoFields(fieldValues),
+					asc.WithAppInfoAgeRatingDeclarationFields(ageRatingFieldValues),
+					asc.WithAppInfoInclude(includeValues),
+				)
 				if err != nil {
 					return fmt.Errorf("apps info view: %w", err)
 				}

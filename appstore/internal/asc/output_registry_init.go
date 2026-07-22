@@ -1,7 +1,11 @@
 package asc
 
-//nolint:gochecknoinits // registry init is the idiomatic way to populate a type map
-func init() {
+// registerAllOutputRenderers populates the output registries with every
+// renderable response type. It runs lazily on first registry lookup (see
+// ensureOutputRegistryPopulated) instead of in a package init function, so
+// commands that never render registry output (for example `asc --version`)
+// do not pay the ~450-type registration cost at process start.
+func registerAllOutputRenderers() {
 	registerRows(feedbackRows)
 	registerRows(crashesRows)
 	registerRowsWithSingleResourceAdapter(reviewsRows)
@@ -63,6 +67,7 @@ func init() {
 	registerSingleLinkageRows(func(v *BuildBuildBetaDetailLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *BuildPreReleaseVersionLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *PreReleaseVersionAppLinkageResponse) ResourceData { return v.Data })
+	registerSingleLinkageRows(func(v *SubscriptionVersionImageLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *AppInfoAgeRatingDeclarationLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *AppInfoPrimaryCategoryLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *AppInfoPrimarySubcategoryOneLinkageResponse) ResourceData { return v.Data })
@@ -77,8 +82,11 @@ func init() {
 	registerRowsWithSingleResourceAdapter(profilesRows)
 	registerRowsWithSingleResourceAdapter(legacyInAppPurchasesRows)
 	registerRowsWithSingleResourceAdapter(inAppPurchasesRows)
+	registerRowsWithSingleResourceAdapter(inAppPurchaseVersionsRows)
 	registerRowsWithSingleResourceAdapter(inAppPurchaseLocalizationsRows)
 	registerRowsWithSingleResourceAdapter(inAppPurchaseImagesRows)
+	registerRowsWithSingleResourceAdapter(inAppPurchaseImagesV2Rows)
+	registerSingleLinkageRows(func(v *InAppPurchaseVersionImageLinkageResponse) ResourceData { return v.Data })
 	registerRows(inAppPurchasePricePointsRows)
 	registerRowsErr(inAppPurchasePricesRows)
 	registerRowsErr(inAppPurchaseOfferCodePricesRows)
@@ -94,7 +102,12 @@ func init() {
 	registerRowsWithSingleResourceAdapter(appEventScreenshotsRows)
 	registerRowsWithSingleResourceAdapter(appEventVideoClipsRows)
 	registerRowsWithSingleResourceAdapter(subscriptionGroupsRows)
+	registerRowsWithSingleResourceAdapter(subscriptionGroupVersionsRows)
+	registerRowsWithSingleResourceAdapter(subscriptionGroupLocalizationsV2Rows)
 	registerRowsWithSingleResourceAdapter(subscriptionsRows)
+	registerRowsWithSingleResourceAdapter(subscriptionVersionsRows)
+	registerRowsWithSingleResourceAdapter(subscriptionLocalizationsV2Rows)
+	registerRowsWithSingleResourceAdapter(subscriptionImagesV2Rows)
 	registerRowsWithSingleResourceAdapter(promotedPurchasesRows)
 	registerRowsErr(subscriptionPricesRows)
 	registerRows(subscriptionPriceRows)

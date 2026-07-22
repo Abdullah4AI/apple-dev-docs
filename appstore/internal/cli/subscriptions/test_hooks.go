@@ -1,6 +1,10 @@
 package subscriptions
 
 import (
+	"context"
+	"os"
+	"sync"
+
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
@@ -16,5 +20,49 @@ func SetSetupClientFactory(fn func() (*asc.Client, error)) func() {
 	}
 	return func() {
 		subscriptionsSetupClientFactory = previous
+	}
+}
+
+// SetPricePointsClientFactory replaces the price-points ASC client factory for tests.
+// It returns a restore function to reset the previous factory.
+func SetPricePointsClientFactory(fn func() (*asc.Client, error)) func() {
+	previous := subscriptionPricePointsClientFactory
+	if fn == nil {
+		subscriptionPricePointsClientFactory = shared.GetASCClient
+	} else {
+		subscriptionPricePointsClientFactory = fn
+	}
+	return func() {
+		subscriptionPricePointsClientFactory = previous
+	}
+}
+
+var (
+	subscriptionVersionImageUploaderMu sync.RWMutex
+	subscriptionVersionImageUploader   = asc.UploadAssetFromFile
+)
+
+func uploadSubscriptionVersionImage(ctx context.Context, file *os.File, fileSize int64, operations []asc.UploadOperation) error {
+	subscriptionVersionImageUploaderMu.RLock()
+	uploader := subscriptionVersionImageUploader
+	subscriptionVersionImageUploaderMu.RUnlock()
+	return uploader(ctx, file, fileSize, operations)
+}
+
+// SetSubscriptionVersionImageUploaderForTesting replaces the version-image uploader.
+// It returns a restore function for test isolation.
+func SetSubscriptionVersionImageUploaderForTesting(fn func(context.Context, *os.File, int64, []asc.UploadOperation) error) func() {
+	subscriptionVersionImageUploaderMu.Lock()
+	previous := subscriptionVersionImageUploader
+	if fn == nil {
+		subscriptionVersionImageUploader = asc.UploadAssetFromFile
+	} else {
+		subscriptionVersionImageUploader = fn
+	}
+	subscriptionVersionImageUploaderMu.Unlock()
+	return func() {
+		subscriptionVersionImageUploaderMu.Lock()
+		subscriptionVersionImageUploader = previous
+		subscriptionVersionImageUploaderMu.Unlock()
 	}
 }

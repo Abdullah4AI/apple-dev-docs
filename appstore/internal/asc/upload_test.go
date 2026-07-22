@@ -94,6 +94,141 @@ func TestExecuteUploadOperations_UploadsSlices(t *testing.T) {
 	}
 }
 
+func TestExecuteUploadOperations_DefaultConcurrencyUploadsChunksInParallel(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "app.ipa")
+	content := []byte("abcdefgh")
+	if err := os.WriteFile(filePath, content, 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	arrived := make(chan struct{}, DefaultUploadConcurrency)
+	allArrived := make(chan struct{})
+	go func() {
+		for i := 0; i < DefaultUploadConcurrency; i++ {
+			<-arrived
+		}
+		close(allArrived)
+	}()
+
+	var mu sync.Mutex
+	received := map[string]string{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		arrived <- struct{}{}
+		// Block until every chunk is in flight simultaneously. This only
+		// completes when the default concurrency dispatches all chunks in
+		// parallel; a serial default would deadlock and hit the timeout.
+		select {
+		case <-allArrived:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for concurrent chunk uploads; default concurrency appears serial")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		mu.Lock()
+		received[r.URL.Path] = string(body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ops := make([]UploadOperation, 0, DefaultUploadConcurrency)
+	for i := 0; i < DefaultUploadConcurrency; i++ {
+		ops = append(ops, UploadOperation{
+			Method: "PUT",
+			URL:    fmt.Sprintf("%s/op%d", server.URL, i),
+			Length: 2,
+			Offset: int64(i * 2),
+		})
+	}
+
+	// No WithUploadConcurrency option: rely on the default.
+	err := ExecuteUploadOperations(
+		context.Background(), filePath, ops,
+		WithUploadHTTPClient(server.Client()),
+		withUploadRetryOptions(0),
+	)
+	if err != nil {
+		t.Fatalf("ExecuteUploadOperations() error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for i := 0; i < DefaultUploadConcurrency; i++ {
+		path := fmt.Sprintf("/op%d", i)
+		want := string(content[i*2 : i*2+2])
+		if received[path] != want {
+			t.Fatalf("expected %s body=%q, got %q", path, want, received[path])
+		}
+	}
+}
+
+func TestExecuteUploadOperations_ConcurrentUploadFailsOnErrorMidBatch(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "app.ipa")
+	if err := os.WriteFile(filePath, []byte("abcdefghijkl"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_, _ = io.Copy(io.Discard, r.Body)
+		if r.URL.Path == "/op3" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ops := make([]UploadOperation, 0, 6)
+	for i := 0; i < 6; i++ {
+		ops = append(ops, UploadOperation{
+			Method: "PUT",
+			URL:    fmt.Sprintf("%s/op%d", server.URL, i),
+			Length: 2,
+			Offset: int64(i * 2),
+		})
+	}
+
+	err := ExecuteUploadOperations(
+		context.Background(), filePath, ops,
+		WithUploadHTTPClient(server.Client()),
+		withUploadRetryOptions(0),
+	)
+	if err == nil {
+		t.Fatal("expected mid-batch upload failure to surface an error")
+	}
+	if !strings.Contains(err.Error(), "upload operation 3") {
+		t.Fatalf("expected error to identify failing operation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("expected error to include HTTP status, got %v", err)
+	}
+}
+
+func TestNewUploadClient_RaisesMaxIdleConnsPerHost(t *testing.T) {
+	client := newUploadClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost < uploadMaxIdleConnsPerHost {
+		t.Fatalf("expected MaxIdleConnsPerHost >= %d, got %d", uploadMaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
+	}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok && transport == base {
+		t.Fatal("expected upload client transport to be a clone, not http.DefaultTransport")
+	}
+}
+
 func TestExecuteUploadOperations_FailsOnHTTPError(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "app.ipa")

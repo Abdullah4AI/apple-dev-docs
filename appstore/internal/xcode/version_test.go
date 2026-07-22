@@ -10,39 +10,43 @@ import (
 )
 
 func TestGetVersion_NotMacOS(t *testing.T) {
+	projectDir := writeLegacyVersionProject(t)
 	prev := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = prev }()
 
-	_, err := GetVersion(context.Background(), ".", "")
+	_, err := GetVersion(context.Background(), projectDir, "")
 	if err == nil || !strings.Contains(err.Error(), "macOS") {
 		t.Fatalf("expected macOS error, got: %v", err)
 	}
 }
 
 func TestSetVersion_NotMacOS(t *testing.T) {
+	projectDir := writeLegacyVersionProject(t)
 	prev := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = prev }()
 
-	_, err := SetVersion(context.Background(), SetVersionOptions{ProjectDir: ".", Version: "1.0.0"})
+	_, err := SetVersion(context.Background(), SetVersionOptions{ProjectDir: projectDir, Version: "1.0.0"})
 	if err == nil || !strings.Contains(err.Error(), "macOS") {
 		t.Fatalf("expected macOS error, got: %v", err)
 	}
 }
 
 func TestBumpVersion_NotMacOS(t *testing.T) {
+	projectDir := writeLegacyVersionProject(t)
 	prev := runtimeGOOS
 	runtimeGOOS = "linux"
 	defer func() { runtimeGOOS = prev }()
 
-	_, err := BumpVersion(context.Background(), BumpVersionOptions{ProjectDir: ".", BumpType: BumpPatch})
+	_, err := BumpVersion(context.Background(), BumpVersionOptions{ProjectDir: projectDir, BumpType: BumpPatch})
 	if err == nil || !strings.Contains(err.Error(), "macOS") {
 		t.Fatalf("expected macOS error, got: %v", err)
 	}
 }
 
 func TestGetVersion_MissingAgvtool(t *testing.T) {
+	projectDir := writeLegacyVersionProject(t)
 	prev := lookPathFn
 	lookPathFn = func(file string) (string, error) {
 		return "", exec.ErrNotFound
@@ -53,7 +57,7 @@ func TestGetVersion_MissingAgvtool(t *testing.T) {
 	runtimeGOOS = "darwin"
 	defer func() { runtimeGOOS = prevOS }()
 
-	_, err := GetVersion(context.Background(), ".", "")
+	_, err := GetVersion(context.Background(), projectDir, "")
 	if err == nil || !strings.Contains(err.Error(), "agvtool") {
 		t.Fatalf("expected agvtool not found error, got: %v", err)
 	}
@@ -102,15 +106,6 @@ func TestIsVariableReference(t *testing.T) {
 	}
 }
 
-func TestIsModernAgvtoolOutput(t *testing.T) {
-	if !isModernAgvtoolOutput("App=$(MARKETING_VERSION)\nExtension=$(MARKETING_VERSION)\n") {
-		t.Fatal("expected MARKETING_VERSION references to be detected as modern")
-	}
-	if isModernAgvtoolOutput("App=1.2.3\nExtension=2.0.0\n") {
-		t.Fatal("expected literal target values to be treated as legacy")
-	}
-}
-
 func TestIncrementBuildString(t *testing.T) {
 	tests := []struct {
 		current string
@@ -143,6 +138,33 @@ func TestIncrementBuildString(t *testing.T) {
 	}
 }
 
+func TestParseAgvtoolVersionOutput_PreservesVariableAndLiteralValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   string
+		modern bool
+	}{
+		{name: "modern", output: "App=$(MARKETING_VERSION)\n", want: "$(MARKETING_VERSION)", modern: true},
+		{name: "literal", output: "App=1.2.3\n", want: "1.2.3", modern: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAgvtoolVersionOutput(tt.output, "")
+			if err != nil {
+				t.Fatalf("parseAgvtoolVersionOutput() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseAgvtoolVersionOutput() = %q, want %q", got, tt.want)
+			}
+			if modern := isVariableReference(got); modern != tt.modern {
+				t.Fatalf("isVariableReference(%q) = %t, want %t", got, modern, tt.modern)
+			}
+		})
+	}
+}
+
 func TestParseAgvtoolVersionOutput_TargetFilter(t *testing.T) {
 	multiTargetOutput := "App=1.2.3\nExtension=2.0.0\n"
 
@@ -166,6 +188,20 @@ func TestParseAgvtoolVersionOutput_MissingTargetErrors(t *testing.T) {
 	_, err := parseAgvtoolVersionOutput("App=1.2.3\nExtension=2.0.0\n", "Widget")
 	if err == nil || !strings.Contains(err.Error(), `target "Widget" not found`) {
 		t.Fatalf("expected missing target error, got %v", err)
+	}
+}
+
+func TestParseAgvtoolVersionOutput_RejectsDivergentConfigurationsForTarget(t *testing.T) {
+	_, err := parseAgvtoolVersionOutput("App=1.2.3\nApp=2.0.0\n", "App")
+	if err == nil || !strings.Contains(err.Error(), "differing values") {
+		t.Fatalf("expected divergent configuration error, got %v", err)
+	}
+}
+
+func TestParseAgvtoolVersionOutput_RejectsDivergentConfigurationsWithoutTarget(t *testing.T) {
+	_, err := parseAgvtoolVersionOutput("App=1.2.3\nApp=2.0.0\n", "")
+	if err == nil || !strings.Contains(err.Error(), "differing values") {
+		t.Fatalf("expected divergent configuration error, got %v", err)
 	}
 }
 
@@ -232,7 +268,28 @@ func TestFindXcodeprojMultipleProjectsSuggestsProjectFlag(t *testing.T) {
 	}
 }
 
-func TestSetVersionRejectsTargetedWrites(t *testing.T) {
+func TestGetVersionDiscoveryErrorDoesNotFallBackToAgvtool(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	runtimeGOOS = "darwin"
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Cleanup(restore)
+
+	_, err := GetVersionScoped(context.Background(), GetVersionOptions{ProjectDir: tempDir})
+	if err == nil || !strings.Contains(err.Error(), "no .xcodeproj found") {
+		t.Fatalf("expected project discovery error, got %v", err)
+	}
+	if logData, readErr := os.ReadFile(logPath); readErr == nil && strings.Contains(string(logData), "agvtool") {
+		t.Fatalf("project discovery error fell back to agvtool: %q", logData)
+	}
+}
+
+func TestSetVersionTargetedWritesRequireStructuredProject(t *testing.T) {
 	prevOS := runtimeGOOS
 	prevLookPath := lookPathFn
 	runtimeGOOS = "darwin"
@@ -245,21 +302,18 @@ func TestSetVersionRejectsTargetedWrites(t *testing.T) {
 	}()
 
 	_, err := SetVersion(context.Background(), SetVersionOptions{
-		ProjectDir: ".",
+		ProjectDir: writeLegacyVersionProject(t),
 		Target:     "App",
 		Version:    "1.2.3",
 	})
-	if err == nil || !strings.Contains(err.Error(), "--target is only supported by xcode version view") {
-		t.Fatalf("expected targeted write rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "scoped edits require structured Xcode build settings") {
+		t.Fatalf("expected structured-project requirement, got %v", err)
 	}
 }
 
 func TestSetVersionLegacyMultiTargetUsesProjectWideWrite(t *testing.T) {
 	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "Project")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("mkdir project dir: %v", err)
-	}
+	projectDir := writeLegacyVersionProject(t)
 	logPath := filepath.Join(tempDir, "commands.log")
 
 	restore := overrideTestEnvironment(t)
@@ -286,9 +340,6 @@ func TestSetVersionLegacyMultiTargetUsesProjectWideWrite(t *testing.T) {
 		t.Fatalf("read helper log: %v", err)
 	}
 	logText := string(logData)
-	if !strings.Contains(logText, "agvtool|what-marketing-version|-terse1") {
-		t.Fatalf("expected marketing version probe, got %q", logText)
-	}
 	if !strings.Contains(logText, "agvtool|new-marketing-version|1.3.0") {
 		t.Fatalf("expected project-wide marketing version update, got %q", logText)
 	}
@@ -297,12 +348,9 @@ func TestSetVersionLegacyMultiTargetUsesProjectWideWrite(t *testing.T) {
 	}
 }
 
-func TestBumpVersionLegacyMultiTargetUsesTargetForRead(t *testing.T) {
+func TestBumpVersionLegacyTargetScopeIsRejectedBeforeProjectWideWrite(t *testing.T) {
 	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "Project")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("mkdir project dir: %v", err)
-	}
+	projectDir := writeLegacyVersionProject(t)
 	logPath := filepath.Join(tempDir, "commands.log")
 
 	restore := overrideTestEnvironment(t)
@@ -313,16 +361,44 @@ func TestBumpVersionLegacyMultiTargetUsesTargetForRead(t *testing.T) {
 	commandContextFn = helperCommandContext(t, logPath)
 	t.Cleanup(restore)
 
-	result, err := BumpVersion(context.Background(), BumpVersionOptions{
+	_, err := BumpVersion(context.Background(), BumpVersionOptions{
 		ProjectDir: projectDir,
 		Target:     "Extension",
 		BumpType:   BumpPatch,
 	})
-	if err != nil {
-		t.Fatalf("expected targeted bump to succeed, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "scoped bumps require structured") {
+		t.Fatalf("expected structured-project requirement, got %v", err)
 	}
-	if result.OldVersion != "2.0.0" || result.NewVersion != "2.0.1" {
-		t.Fatalf("expected targeted bump to use Extension version, got %#v", result)
+
+	if logData, readErr := os.ReadFile(logPath); readErr == nil && strings.Contains(string(logData), "new-marketing-version") {
+		t.Fatalf("legacy target scope performed a project-wide write: %q", logData)
+	}
+}
+
+func TestBumpVersionLegacyRemoteBuildUsesRequestedNumber(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := writeLegacyVersionProject(t)
+	logPath := filepath.Join(tempDir, "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	runtimeGOOS = "darwin"
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Setenv("ASC_XCODE_HELPER_SINGLE_TARGET", "1")
+	t.Cleanup(restore)
+
+	result, err := BumpVersion(context.Background(), BumpVersionOptions{
+		ProjectDir:  projectDir,
+		BumpType:    BumpBuild,
+		BuildNumber: "108",
+	})
+	if err != nil {
+		t.Fatalf("BumpVersion() error = %v", err)
+	}
+	if result.OldBuild != "41" || result.NewBuild != "108" {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 
 	logData, err := os.ReadFile(logPath)
@@ -330,15 +406,46 @@ func TestBumpVersionLegacyMultiTargetUsesTargetForRead(t *testing.T) {
 		t.Fatalf("read helper log: %v", err)
 	}
 	logText := string(logData)
-	if !strings.Contains(logText, "agvtool|what-marketing-version|-terse1") {
-		t.Fatalf("expected marketing version probe, got %q", logText)
+	if !strings.Contains(logText, "agvtool|new-version|-all|108") {
+		t.Fatalf("expected requested legacy build update, got %q", logText)
 	}
-	if !strings.Contains(logText, "agvtool|what-version|-terse") {
-		t.Fatalf("expected build-number probe for current version read, got %q", logText)
+	if strings.Contains(logText, "agvtool|next-version|-all") {
+		t.Fatalf("remote build bump incremented locally: %q", logText)
 	}
-	if !strings.Contains(logText, "agvtool|new-marketing-version|2.0.1") {
-		t.Fatalf("expected targeted bump to write the Extension-derived version, got %q", logText)
+}
+
+func TestGetConsistentMarketingVersionLegacyRejectsDivergentConfigurations(t *testing.T) {
+	projectDir := writeLegacyVersionProject(t)
+	logPath := filepath.Join(t.TempDir(), "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	runtimeGOOS = "darwin"
+	lookPathFn = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Setenv("ASC_XCODE_HELPER_DIVERGENT_CONFIGURATIONS", "1")
+	t.Setenv("ASC_XCODE_HELPER_SINGLE_TARGET", "1")
+	t.Cleanup(restore)
+
+	_, err := GetConsistentMarketingVersion(context.Background(), GetVersionOptions{ProjectDir: projectDir})
+	if err == nil || !strings.Contains(err.Error(), "differing values") {
+		t.Fatalf("expected divergent legacy configuration error, got %v", err)
 	}
+}
+
+func writeLegacyVersionProject(t *testing.T) string {
+	t.Helper()
+	projectPath := writeStructuredVersionProject(t, false)
+	pbxprojPath := filepath.Join(projectPath, "project.pbxproj")
+	contents, err := os.ReadFile(pbxprojPath)
+	if err != nil {
+		t.Fatalf("read legacy project fixture: %v", err)
+	}
+	legacy := strings.ReplaceAll(string(contents), marketingVersionSetting, "LEGACY_MARKETING_VERSION")
+	legacy = strings.ReplaceAll(legacy, currentProjectSetting, "LEGACY_CURRENT_PROJECT_VERSION")
+	if err := os.WriteFile(pbxprojPath, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy project fixture: %v", err)
+	}
+	return filepath.Dir(projectPath)
 }
 
 func TestBumpVersionString(t *testing.T) {

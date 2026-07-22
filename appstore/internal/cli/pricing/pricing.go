@@ -16,6 +16,8 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+var pricingAvailabilityClientFactory = shared.GetASCClient
+
 // PricingCommand returns the pricing command group.
 func PricingCommand() *ffcli.Command {
 	return &ffcli.Command{
@@ -40,6 +42,7 @@ Examples:
   asc pricing schedule automatic-prices --schedule "SCHEDULE_ID"
   asc pricing availability view --app "123456789"
   asc pricing availability view --id "AVAILABILITY_ID"
+  asc pricing availability create --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
   asc pricing availability edit --app "123456789" --territory "US,France,DEU" --available true --available-in-new-territories true
   asc pricing availability edit --app "123456789" --all-territories --available true --available-in-new-territories true
   asc pricing availability territory-availabilities --availability "AVAILABILITY_ID"`,
@@ -596,17 +599,14 @@ func PricingAvailabilityCommand() *ffcli.Command {
 Examples:
   asc pricing availability view --app "123456789"
   asc pricing availability view --id "AVAILABILITY_ID"
+  asc pricing availability create --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
   asc pricing availability edit --app "123456789" --territory "US,France,DEU" --available true --available-in-new-territories true
   asc pricing availability edit --app "123456789" --all-territories --available true --available-in-new-territories true
-  asc pricing availability territory-availabilities --availability "AVAILABILITY_ID"
-
-Note:
-  Pricing availability commands operate on existing availability records.
-  For initial bootstrap, use App Store Connect or the
-  "asc web apps availability create" flow.`,
+  asc pricing availability territory-availabilities --availability "AVAILABILITY_ID"`,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			PricingAvailabilityGetCommand(),
+			PricingAvailabilityCreateCommand(),
 			PricingAvailabilityTerritoryAvailabilitiesCommand(),
 			PricingAvailabilitySetCommand(),
 		},
@@ -650,7 +650,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			client, err := shared.GetASCClient()
+			client, err := pricingAvailabilityClientFactory()
 			if err != nil {
 				return fmt.Errorf("pricing availability view: %w", err)
 			}
@@ -666,7 +666,10 @@ Examples:
 			}
 			if err != nil {
 				if idValue == "" && shared.IsAppAvailabilityMissing(err) {
-					return fmt.Errorf("pricing availability view: app availability not found for app %q", appValue)
+					return shared.NewErrorWithCause(
+						fmt.Errorf("pricing availability view: app availability not found for app %q: %w", appValue, asc.ErrNotFound),
+						err,
+					)
 				}
 				return fmt.Errorf("pricing availability view: %w", err)
 			}
@@ -727,6 +730,97 @@ func isPricingAvailabilityTerritoryAvailabilitiesUsageError(err error) bool {
 		strings.HasPrefix(message, "pricing availability territory-availabilities: --next ")
 }
 
+// PricingAvailabilityCreateCommand returns the availability create subcommand.
+func PricingAvailabilityCreateCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("pricing availability create", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
+	var availableInNewTerritories shared.OptionalBool
+	fs.Var(&availableInNewTerritories, "available-in-new-territories", "Automatically make app available in new territories: true or false (required)")
+	territory := fs.String("territory", "", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names, e.g., US,USA,France)")
+	var available shared.OptionalBool
+	fs.Var(&available, "available", "Set availability for specified territories: true or false (required)")
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "create",
+		ShortUsage: "asc pricing availability create --app \"APP_ID\" --territory \"USA,GBR\" --available true --available-in-new-territories true",
+		ShortHelp:  "Initialize app availability for territories.",
+		LongHelp: `Initialize app availability for territories.
+
+Creates the initial app availability record and its territory availability
+entries through the public App Store Connect API. Once created, use
+"asc pricing availability edit" to update the record.
+
+Examples:
+  asc pricing availability create --app "123456789" --territory "USA,GBR,DEU" --available true --available-in-new-territories true
+  asc pricing availability create --app "123456789" --territory "USA,GBR,DEU" --available false --available-in-new-territories false`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageError("pricing availability create does not accept positional arguments")
+			}
+
+			resolvedAppID := shared.ResolveAppID(*appID)
+			if resolvedAppID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
+				return shared.MissingRequiredUsageError()
+			}
+			if !availableInNewTerritories.IsSet() {
+				fmt.Fprintln(os.Stderr, "Error: --available-in-new-territories is required (true or false)")
+				return shared.MissingRequiredUsageError()
+			}
+
+			territories, err := shared.NormalizeASCTerritoryCSV(*territory)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if len(territories) == 0 {
+				fmt.Fprintln(os.Stderr, "Error: --territory must include at least one value")
+				return shared.MissingRequiredUsageError()
+			}
+			if !available.IsSet() {
+				fmt.Fprintln(os.Stderr, "Error: --available is required (true or false)")
+				return shared.MissingRequiredUsageError()
+			}
+
+			client, err := pricingAvailabilityClientFactory()
+			if err != nil {
+				return fmt.Errorf("pricing availability create: %w", err)
+			}
+
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+
+			availableInNewTerritoriesValue := availableInNewTerritories.Value()
+			availableValue := available.Value()
+			territoryAvailabilities := make([]asc.TerritoryAvailabilityCreate, 0, len(territories))
+			seenTerritories := make(map[string]struct{}, len(territories))
+			for _, territoryID := range territories {
+				if _, exists := seenTerritories[territoryID]; exists {
+					continue
+				}
+				seenTerritories[territoryID] = struct{}{}
+				territoryAvailabilities = append(territoryAvailabilities, asc.TerritoryAvailabilityCreate{
+					TerritoryID: territoryID,
+					Available:   availableValue,
+				})
+			}
+
+			resp, err := client.CreateAppAvailabilityV2(requestCtx, resolvedAppID, asc.AppAvailabilityV2CreateAttributes{
+				AvailableInNewTerritories: &availableInNewTerritoriesValue,
+				TerritoryAvailabilities:   territoryAvailabilities,
+			})
+			if err != nil {
+				return fmt.Errorf("pricing availability create: %w", err)
+			}
+
+			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+		},
+	}
+}
+
 // PricingAvailabilitySetCommand returns the availability edit subcommand.
 func PricingAvailabilitySetCommand() *ffcli.Command {
 	return shared.NewAvailabilitySetCommand(shared.AvailabilitySetCommandConfig{
@@ -742,8 +836,7 @@ Examples:
 
 Note:
   This command only updates an existing app availability. If the app has no
-  availability record yet, initialize availability in App Store Connect first,
-  or use the "asc web apps availability create" flow.`,
+  availability record yet, use "asc pricing availability create" first.`,
 		ErrorPrefix:                      "pricing availability edit",
 		IncludeAvailableInNewTerritories: true,
 	})
