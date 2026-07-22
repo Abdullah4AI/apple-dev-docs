@@ -20,6 +20,11 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+// RootCmd returns the Cobra command for embedding in appledev.
+func RootCmd() *cobra.Command {
+	return rootCmd
+}
+
 // Execute runs the root command.
 func Execute() error {
 	return rootCmd.Execute()

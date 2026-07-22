@@ -16,7 +16,10 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared/suggest"
 )
 
-const defaultLimit = 10
+const (
+	defaultLimit         = 10
+	canonicalIntentBoost = 300
+)
 
 var tokenPattern = regexp.MustCompile(`[a-z0-9][a-z0-9-]*`)
 
@@ -38,17 +41,41 @@ type SearchResult struct {
 }
 
 type commandDoc struct {
-	Command     string
-	Summary     string
-	Usage       string
-	LongHelp    string
-	Examples    []string
-	Flags       []string
-	PathTokens  []string
-	TextTokens  []string
-	FlagTokens  []string
-	AllTokens   []string
-	CommandRank int
+	Command       string
+	Summary       string
+	Usage         string
+	Examples      []string
+	PathTokens    []string
+	SummaryTokens []string
+	UsageTokens   []string
+	ExampleTokens []string
+	HelpTokens    []string
+	TextTokens    []string
+	FlagTokens    []string
+	AllTokens     []string
+	CommandRank   int
+}
+
+type canonicalIntentRule struct {
+	command  string
+	actions  []string
+	subjects []string
+	reason   string
+}
+
+var canonicalIntentRules = []canonicalIntentRule{
+	{
+		command:  "asc publish appstore",
+		actions:  []string{"ship", "shipping", "publish", "release", "submit", "submission", "upload"},
+		subjects: []string{"app", "appstore", "store"},
+		reason:   "canonical:appstore-publish",
+	},
+	{
+		command:  "asc publish testflight",
+		actions:  []string{"ship", "shipping", "publish", "release", "distribute", "distribution", "upload"},
+		subjects: []string{"beta", "testflight"},
+		reason:   "canonical:testflight-publish",
+	},
 }
 
 type scoredResult struct {
@@ -266,22 +293,31 @@ func collectCommandDoc(docs *[]commandDoc, cmd *ffcli.Command, parents []string)
 	examples := extractExamples(longHelp)
 	flags := commandFlags(cmd)
 	pathTokens := uniqueTokens(strings.Join(pathParts[1:], " "))
-	textTokens := uniqueTokens(strings.Join([]string{summary, usage, longHelp, strings.Join(examples, " ")}, " "))
+	summaryTokens := uniqueTokens(summary)
+	usageTokens := uniqueTokens(usage)
+	exampleTokens := uniqueTokens(strings.Join(examples, " "))
+	helpTokens := uniqueTokens(longHelp)
+	textTokens := append([]string{}, summaryTokens...)
+	textTokens = append(textTokens, usageTokens...)
+	textTokens = append(textTokens, exampleTokens...)
+	textTokens = uniqueStrings(append(textTokens, helpTokens...))
 	flagTokens := uniqueTokens(strings.Join(flags, " "))
 
 	all := append(append(append([]string{}, pathTokens...), textTokens...), flagTokens...)
 	*docs = append(*docs, commandDoc{
-		Command:     command,
-		Summary:     summary,
-		Usage:       usage,
-		LongHelp:    longHelp,
-		Examples:    examples,
-		Flags:       flags,
-		PathTokens:  pathTokens,
-		TextTokens:  textTokens,
-		FlagTokens:  flagTokens,
-		AllTokens:   uniqueStrings(all),
-		CommandRank: len(pathParts),
+		Command:       command,
+		Summary:       summary,
+		Usage:         usage,
+		Examples:      examples,
+		PathTokens:    pathTokens,
+		SummaryTokens: summaryTokens,
+		UsageTokens:   usageTokens,
+		ExampleTokens: exampleTokens,
+		HelpTokens:    helpTokens,
+		TextTokens:    textTokens,
+		FlagTokens:    flagTokens,
+		AllTokens:     uniqueStrings(all),
+		CommandRank:   len(pathParts),
 	})
 
 	nextParents := append(append([]string{}, parents...), cmd.Name)
@@ -347,7 +383,7 @@ func scoreCommandDoc(doc commandDoc, queryTokens []string) (int, []string) {
 		}
 
 		for _, alias := range aliasesFor(token) {
-			if alias == token {
+			if sameSearchStem(alias, token) {
 				continue
 			}
 			aliasScore, aliasReasons := scoreTerm(doc, alias, "alias:"+token)
@@ -360,6 +396,11 @@ func scoreCommandDoc(doc commandDoc, queryTokens []string) (int, []string) {
 				addReason(&reasons, seenReasons, reason)
 			}
 		}
+	}
+
+	if boost, reason := canonicalBoostFor(doc.Command, queryTokens); boost > 0 {
+		score += boost
+		addReason(&reasons, seenReasons, reason)
 	}
 
 	return score, reasons
@@ -382,15 +423,11 @@ func scoreTerm(doc commandDoc, term, reason string) (int, []string) {
 		score += 60
 		reasons = append(reasons, reason, "command:"+term)
 	}
-	if strings.Contains(strings.ToLower(doc.Command), term) && !tokenContains(doc.PathTokens, term) {
-		score += 40
-		reasons = append(reasons, reason, "command:"+term)
-	}
-	if strings.Contains(strings.ToLower(doc.Summary), term) {
+	if tokenContains(doc.SummaryTokens, term) {
 		score += 35
 		reasons = append(reasons, reason, "summary:"+term)
 	}
-	if strings.Contains(strings.ToLower(doc.Usage), term) {
+	if tokenContains(doc.UsageTokens, term) {
 		score += 25
 		reasons = append(reasons, reason, "usage:"+term)
 	}
@@ -398,11 +435,11 @@ func scoreTerm(doc commandDoc, term, reason string) (int, []string) {
 		score += 20
 		reasons = append(reasons, reason, "flag:"+term)
 	}
-	if strings.Contains(strings.ToLower(strings.Join(doc.Examples, "\n")), term) {
+	if tokenContains(doc.ExampleTokens, term) {
 		score += 18
 		reasons = append(reasons, reason, "example:"+term)
 	}
-	if strings.Contains(strings.ToLower(doc.LongHelp), term) {
+	if tokenContains(doc.HelpTokens, term) {
 		score += 10
 		reasons = append(reasons, reason, "help:"+term)
 	}
@@ -418,6 +455,31 @@ func scoreTerm(doc commandDoc, term, reason string) (int, []string) {
 	}
 
 	return score, uniqueStrings(reasons)
+}
+
+func canonicalBoostFor(command string, queryTokens []string) (int, string) {
+	if tokenContains(queryTokens, "upload") && tokenContains(queryTokens, "build") {
+		return 0, ""
+	}
+
+	for _, rule := range canonicalIntentRules {
+		if command != rule.command {
+			continue
+		}
+		if tokenContainsAny(queryTokens, rule.actions) && tokenContainsAny(queryTokens, rule.subjects) {
+			return canonicalIntentBoost, rule.reason
+		}
+	}
+	return 0, ""
+}
+
+func tokenContainsAny(tokens, terms []string) bool {
+	for _, term := range terms {
+		if tokenContains(tokens, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func aliasesFor(token string) []string {
@@ -529,11 +591,63 @@ func uniqueTokens(text string) []string {
 
 func tokenContains(tokens []string, term string) bool {
 	for _, token := range tokens {
-		if token == term {
+		if searchTokensMatch(token, term) {
 			return true
 		}
-		if len(term) >= 3 && strings.Contains(token, term) {
+	}
+	return false
+}
+
+func searchTokensMatch(token, term string) bool {
+	token = strings.ToLower(strings.TrimSpace(token))
+	term = strings.ToLower(strings.TrimSpace(term))
+	if token == "" || term == "" {
+		return false
+	}
+	if token == term {
+		return true
+	}
+
+	termForms := searchTokenForms(term)
+	tokenParts := strings.Split(token, "-")
+	for _, tokenPart := range tokenParts {
+		if searchTokenFormsOverlap(searchTokenForms(tokenPart), termForms) {
 			return true
+		}
+	}
+	return false
+}
+
+func sameSearchStem(left, right string) bool {
+	left = strings.ToLower(strings.TrimSpace(left))
+	right = strings.ToLower(strings.TrimSpace(right))
+	return left != "" && right != "" && searchTokenFormsOverlap(searchTokenForms(left), searchTokenForms(right))
+}
+
+func searchTokenForms(token string) []string {
+	forms := []string{token}
+	if len(token) > 4 && strings.HasSuffix(token, "ies") {
+		forms = append(forms, strings.TrimSuffix(token, "ies")+"y")
+		return uniqueStrings(forms)
+	}
+	if len(token) > 3 && strings.HasSuffix(token, "es") {
+		forms = append(forms, strings.TrimSuffix(token, "es"))
+	}
+	if len(token) > 3 && strings.HasSuffix(token, "s") &&
+		!strings.HasSuffix(token, "ss") &&
+		!strings.HasSuffix(token, "us") &&
+		!strings.HasSuffix(token, "is") {
+		forms = append(forms, strings.TrimSuffix(token, "s"))
+	}
+	return uniqueStrings(forms)
+}
+
+func searchTokenFormsOverlap(left, right []string) bool {
+	for _, leftForm := range left {
+		for _, rightForm := range right {
+			if leftForm == rightForm {
+				return true
+			}
 		}
 	}
 	return false

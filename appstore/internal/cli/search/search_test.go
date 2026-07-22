@@ -36,13 +36,16 @@ func TestScoreTermDoesNotStackExactCommandAndPathTokenScores(t *testing.T) {
 
 func TestScoreTermDoesNotStackExactCommandWithSelfReferentialHelpText(t *testing.T) {
 	doc := commandDoc{
-		Command:    "asc search",
-		Summary:    "Search asc commands and examples.",
-		Usage:      "asc search [flags] <query>",
-		LongHelp:   "Search asc commands and examples.\n\nExamples:\n  asc search \"external testers\"",
-		Examples:   []string{`asc search "external testers"`},
-		PathTokens: []string{"search"},
-		FlagTokens: []string{"search"},
+		Command:       "asc search",
+		Summary:       "Search asc commands and examples.",
+		Usage:         "asc search [flags] <query>",
+		Examples:      []string{`asc search "external testers"`},
+		PathTokens:    []string{"search"},
+		SummaryTokens: []string{"search"},
+		UsageTokens:   []string{"search"},
+		ExampleTokens: []string{"search"},
+		HelpTokens:    []string{"search"},
+		FlagTokens:    []string{"search"},
 	}
 
 	score, matched := scoreTerm(doc, "search", "query:search")
@@ -86,5 +89,37 @@ func TestScoreCommandDocsIgnoresLeadingASCToken(t *testing.T) {
 	}
 	if slices.Contains(results[0].result.Matched, "command:asc") {
 		t.Fatalf("expected leading asc token to be ignored, got matches %v", results[0].result.Matched)
+	}
+}
+
+func TestTokenContainsDoesNotMatchSubstringInsideToken(t *testing.T) {
+	if tokenContains([]string{"relationships"}, "ship") {
+		t.Fatal("expected ship not to match relationships")
+	}
+	if tokenContains([]string{"real"}, "zzzz-not-real") {
+		t.Fatal("expected a hyphenated query not to match one of its components")
+	}
+}
+
+func TestTokenContainsMatchesSingularPluralAndHyphenatedComponents(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens []string
+		term   string
+	}{
+		{name: "singular query", tokens: []string{"builds"}, term: "build"},
+		{name: "plural query", tokens: []string{"build"}, term: "builds"},
+		{name: "ies plural", tokens: []string{"categories"}, term: "category"},
+		{name: "es plural", tokens: []string{"classes"}, term: "class"},
+		{name: "singular ending s", tokens: []string{"statuses"}, term: "status"},
+		{name: "hyphenated component", tokens: []string{"app-store-releases"}, term: "app"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !tokenContains(test.tokens, test.term) {
+				t.Fatalf("expected %q to match tokens %v", test.term, test.tokens)
+			}
+		})
 	}
 }

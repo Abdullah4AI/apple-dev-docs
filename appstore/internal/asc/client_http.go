@@ -229,6 +229,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body io.Reader
 			"elapsed", elapsed.String(),
 			"content-type", resp.Header.Get("Content-Type"),
 			"content-length", resp.Header.Get("Content-Length"),
+			"x-rate-limit", resp.Header.Get("X-Rate-Limit"),
 		)
 	}
 

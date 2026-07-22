@@ -195,6 +195,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/fe/da/29/feda29cd-84dc-ad22-66f4-a276004811fc/appicon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Chronoid",
+    "link": "https://www.chronoid.app",
+    "icon": "https://www.chronoid.app/app-icon.png"
+  },
+  {
     "app": "Cinefuse: AI Movie Maker",
     "link": "https://apps.apple.com/us/app/cinefuse-ai-movie-maker/id6758482061?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/98/b8/9f/98b89fce-4ee9-3a15-45d5-4def0e3808e0/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
@@ -262,6 +267,11 @@
     "app": "Cubby",
     "link": "https://apps.apple.com/app/id6751732388",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/2b/cf/8b/2bcf8b94-8050-926d-bce1-b95266a061d0/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "cubby: stash & track",
+    "link": "https://apps.apple.com/us/app/cubby-stash-track/id6759426602?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/77/e6/29/77e6296a-282e-ba85-74d2-93f673233114/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "CUStats",
@@ -503,6 +513,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/a3/a3/19/a3a31917-1ef0-2d81-3150-65391212a1bd/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "FreeDive Ultra",
+    "link": "https://apps.apple.com/us/app/freedive-ultra/id6760556868?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/1d/90/b8/1d90b818-be35-fe3b-6dd1-81bd6ac99858/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Fuel: AI Nutrition",
     "link": "https://apps.apple.com/app/id6748624107",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/52/0e/ed/520eed9c-d3f0-5d0e-3e68-5b6e698e5efc/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -656,6 +671,11 @@
     "app": "Jurni: Trip Planner",
     "link": "https://apps.apple.com/us/app/jurni-trip-planner/id6759559463?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/67/19/a1/6719a179-73ef-1266-5682-bf1c944f98b9/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "kardfolio: Card Benefits",
+    "link": "https://apps.apple.com/us/app/kardfolio-card-benefits/id6759400652?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/89/51/81/8951816e-6e84-d3e2-dcce-e1c12a0fdd08/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Kavale - Sécurité Équestre",
@@ -1305,6 +1325,11 @@
     "app": "Smart Music Stations: Wavyy",
     "link": "https://apps.apple.com/us/app/smart-music-stations-wavyy/id6458877273?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/5a/c6/8d/5ac68df8-3d3f-4bf4-984c-06554678468d/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "SmoothCapture",
+    "link": "https://www.smoothcapture.app",
+    "icon": "https://www.smoothcapture.app/presskit/SmoothCapture-1024x1024@1x.png"
   },
   {
     "app": "SnaPOP: Screenshot Editor",

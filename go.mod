@@ -11,7 +11,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
-	github.com/modelcontextprotocol/go-sdk v1.5.0
+	github.com/modelcontextprotocol/go-sdk v1.3.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/peterbourgon/ff/v3 v3.4.0
 	github.com/rivo/uniseg v0.4.4
