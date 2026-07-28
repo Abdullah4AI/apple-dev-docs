@@ -3,6 +3,7 @@ package asc
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // InAppPurchaseDeleteResult represents CLI output for IAP deletions.
@@ -250,7 +251,14 @@ func inAppPurchaseOfferPriceRelationshipIDs(raw json.RawMessage) (string, string
 	if err := json.Unmarshal(raw, &relationships); err != nil {
 		return "", "", fmt.Errorf("decode in-app purchase offer price relationships: %w", err)
 	}
-	return relationships.Territory.Data.ID, relationships.PricePoint.Data.ID, nil
+	pricePointID := ""
+	if relationships.PricePoint != nil {
+		pricePointID = relationships.PricePoint.Data.ID
+		if strings.TrimSpace(pricePointID) == "" {
+			pricePointID = "FREE"
+		}
+	}
+	return relationships.Territory.Data.ID, pricePointID, nil
 }
 
 func inAppPurchaseReviewScreenshotRows(resp *InAppPurchaseAppStoreReviewScreenshotResponse) ([]string, [][]string) {

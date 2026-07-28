@@ -1,9 +1,13 @@
 package cmdtest
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +19,7 @@ type screenshotValidateOutput struct {
 	Path         string                          `json:"path"`
 	DisplayType  string                          `json:"displayType"`
 	TotalFiles   int                             `json:"totalFiles"`
+	ReadyFiles   int                             `json:"readyFiles"`
 	ErrorCount   int                             `json:"errorCount"`
 	WarningCount int                             `json:"warningCount"`
 	Files        []screenshotValidateFileOutput  `json:"files"`
@@ -26,13 +31,16 @@ type screenshotValidateFileOutput struct {
 	FileName string `json:"fileName"`
 	Width    int    `json:"width,omitempty"`
 	Height   int    `json:"height,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 type screenshotValidateIssueOutput struct {
-	Code     string `json:"code"`
-	Severity string `json:"severity"`
-	FileName string `json:"fileName,omitempty"`
-	Message  string `json:"message"`
+	Code        string `json:"code"`
+	Severity    string `json:"severity"`
+	FileName    string `json:"fileName,omitempty"`
+	DuplicateOf string `json:"duplicateOf,omitempty"`
+	Match       string `json:"match,omitempty"`
+	Message     string `json:"message"`
 }
 
 func TestScreenshotsHelpListsValidateSubcommand(t *testing.T) {
@@ -51,9 +59,9 @@ func TestScreenshotsHelpListsValidateSubcommand(t *testing.T) {
 
 func TestAssetsScreenshotsValidateOutputReportsOrderingHiddenFilesAndDimensionErrors(t *testing.T) {
 	dir := t.TempDir()
-	writePNG(t, filepath.Join(dir, "02-details.png"), 1242, 2688)
-	writePNG(t, filepath.Join(dir, "01-home.png"), 1242, 2688)
-	writePNG(t, filepath.Join(dir, ".hidden.png"), 1242, 2688)
+	writeScreenshotValidatePNG(t, filepath.Join(dir, "02-details.png"), 1242, 2688, color.RGBA{R: 20, A: 255}, png.DefaultCompression)
+	writeScreenshotValidatePNG(t, filepath.Join(dir, "01-home.png"), 1242, 2688, color.RGBA{R: 10, A: 255}, png.DefaultCompression)
+	writeScreenshotValidatePNG(t, filepath.Join(dir, ".hidden.png"), 1242, 2688, color.RGBA{R: 30, A: 255}, png.DefaultCompression)
 	writePNG(t, filepath.Join(dir, "03-bad.png"), 100, 100)
 
 	root := RootCommand("1.2.3")
@@ -124,6 +132,82 @@ func TestAssetsScreenshotsValidateOutputReportsOrderingHiddenFilesAndDimensionEr
 	}
 }
 
+func TestAssetsScreenshotsValidateReportsDecodedPixelDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "01-original.png")
+	duplicatePath := filepath.Join(dir, "02-duplicate.png")
+	distinctPath := filepath.Join(dir, "03-distinct.png")
+	marker := color.RGBA{R: 10, G: 20, B: 30, A: 255}
+
+	writeScreenshotValidatePNG(t, originalPath, 312, 390, marker, png.BestSpeed)
+	writeScreenshotValidatePNG(t, duplicatePath, 312, 390, marker, png.BestCompression)
+	writeScreenshotValidatePNG(t, distinctPath, 312, 390, color.RGBA{R: 11, G: 20, B: 30, A: 255}, png.DefaultCompression)
+
+	originalBytes, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	duplicateBytes, err := os.ReadFile(duplicatePath)
+	if err != nil {
+		t.Fatalf("read duplicate: %v", err)
+	}
+	if bytes.Equal(originalBytes, duplicateBytes) {
+		t.Fatal("expected differently encoded PNG files")
+	}
+
+	stdout, stderr, runErr := runRootCommand(t, []string{
+		"screenshots", "validate",
+		"--path", dir,
+		"--device-type", "APP_WATCH_SERIES_3",
+		"--output", "json",
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if runErr == nil {
+		t.Fatal("expected reported validation error, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "screenshots validate: found 1 error(s)") {
+		t.Fatalf("expected one duplicate-content error, got %v", runErr)
+	}
+
+	var result screenshotValidateOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.ErrorCount != 1 {
+		t.Fatalf("expected 1 error, got %d", result.ErrorCount)
+	}
+	if result.ReadyFiles != 2 {
+		t.Fatalf("expected 2 ready files, got %d", result.ReadyFiles)
+	}
+	if len(result.Files) != 3 || result.Files[1].Status != "error" {
+		t.Fatalf("expected sorted duplicate file to have error status, got %+v", result.Files)
+	}
+
+	var duplicateIssue *screenshotValidateIssueOutput
+	for i := range result.Issues {
+		issue := &result.Issues[i]
+		if issue.Code == "duplicate_content" && issue.FileName == "02-duplicate.png" {
+			duplicateIssue = issue
+			break
+		}
+	}
+	if duplicateIssue == nil {
+		t.Fatalf("expected duplicate-content issue, got %+v", result.Issues)
+	}
+	if duplicateIssue.Severity != "error" {
+		t.Fatalf("expected duplicate error severity, got %q", duplicateIssue.Severity)
+	}
+	if duplicateIssue.DuplicateOf != "01-original.png" {
+		t.Fatalf("expected duplicateOf 01-original.png, got %q", duplicateIssue.DuplicateOf)
+	}
+	if duplicateIssue.Match != "pixels" {
+		t.Fatalf("expected pixel match, got %q", duplicateIssue.Match)
+	}
+}
+
 func hasScreenshotValidateIssue(issues []screenshotValidateIssueOutput, code, severity, fileName string) bool {
 	for _, issue := range issues {
 		if issue.Code == code && issue.Severity == severity && issue.FileName == fileName {
@@ -137,6 +221,24 @@ func TestAssetsScreenshotsValidateHelpUsesCanonicalUsage(t *testing.T) {
 	usage := usageForCommand(t, "screenshots", "validate")
 	if !strings.Contains(usage, `asc screenshots validate --path "./screenshots" --device-type "IPHONE_65"`) {
 		t.Fatalf("expected canonical validate usage, got %q", usage)
+	}
+}
+
+func writeScreenshotValidatePNG(t *testing.T, path string, width, height int, marker color.RGBA, compression png.CompressionLevel) {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	img.SetRGBA(0, 0, marker)
+
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create image: %v", err)
+	}
+	defer file.Close()
+
+	encoder := png.Encoder{CompressionLevel: compression}
+	if err := encoder.Encode(file, img); err != nil {
+		t.Fatalf("encode png: %v", err)
 	}
 }
 

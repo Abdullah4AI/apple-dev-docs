@@ -1,6 +1,10 @@
 package assets
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,9 +13,9 @@ import (
 
 func TestValidateScreenshotAssetsSortsEntriesAndKeepsHiddenWarningsNonBlocking(t *testing.T) {
 	dir := t.TempDir()
-	writeAssetsTestPNGWithSize(t, dir, "02-details.png", 1242, 2688)
-	writeAssetsTestPNGWithSize(t, dir, "01-home.png", 1242, 2688)
-	writeAssetsTestPNGWithSize(t, dir, ".hidden.png", 1242, 2688)
+	writeAssetsScreenshotValidatePNG(t, dir, "02-details.png", 1242, 2688, color.RGBA{R: 20, A: 255}, png.DefaultCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, "01-home.png", 1242, 2688, color.RGBA{R: 10, A: 255}, png.DefaultCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, ".hidden.png", 1242, 2688, color.RGBA{R: 30, A: 255}, png.DefaultCompression)
 
 	result, err := validateScreenshotAssets(dir, "APP_IPHONE_65")
 	if err != nil {
@@ -45,9 +49,9 @@ func TestValidateScreenshotAssetsSortsEntriesAndKeepsHiddenWarningsNonBlocking(t
 
 func TestValidateScreenshotAssetsMatchesUploadOrdering(t *testing.T) {
 	dir := t.TempDir()
-	writeAssetsTestPNGWithSize(t, dir, "02-details.png", 1242, 2688)
-	writeAssetsTestPNGWithSize(t, dir, "01-home.png", 1242, 2688)
-	writeAssetsTestPNGWithSize(t, dir, ".hidden.png", 1242, 2688)
+	writeAssetsScreenshotValidatePNG(t, dir, "02-details.png", 1242, 2688, color.RGBA{R: 20, A: 255}, png.DefaultCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, "01-home.png", 1242, 2688, color.RGBA{R: 10, A: 255}, png.DefaultCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, ".hidden.png", 1242, 2688, color.RGBA{R: 30, A: 255}, png.DefaultCompression)
 
 	uploadFiles, err := collectAssetFiles(dir)
 	if err != nil {
@@ -103,6 +107,74 @@ func TestValidateScreenshotAssetsReportsUnreadableDotfilesAndDimensionMismatch(t
 	}
 	if !hasScreenshotValidateIssueWithSeverity(result.Issues, "dimension_mismatch", screenshotValidateSeverityError, "03-bad.png") {
 		t.Fatalf("expected dimension mismatch error, got %+v", result.Issues)
+	}
+}
+
+func TestValidateScreenshotAssetsReportsDecodedPixelDuplicatesDeterministically(t *testing.T) {
+	dir := t.TempDir()
+	marker := color.RGBA{R: 10, G: 20, B: 30, A: 255}
+	originalPath := writeAssetsScreenshotValidatePNG(t, dir, "01-original.png", 312, 390, marker, png.BestSpeed)
+	duplicatePath := writeAssetsScreenshotValidatePNG(t, dir, "02-duplicate.png", 312, 390, marker, png.BestCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, "03-another-duplicate.png", 312, 390, marker, png.DefaultCompression)
+	writeAssetsScreenshotValidatePNG(t, dir, "04-distinct.png", 312, 390, color.RGBA{R: 11, G: 20, B: 30, A: 255}, png.DefaultCompression)
+
+	originalBytes, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	duplicateBytes, err := os.ReadFile(duplicatePath)
+	if err != nil {
+		t.Fatalf("read duplicate: %v", err)
+	}
+	if bytes.Equal(originalBytes, duplicateBytes) {
+		t.Fatal("expected differently encoded PNG files")
+	}
+
+	result, err := validateScreenshotAssets(dir, "APP_WATCH_SERIES_3")
+	if err != nil {
+		t.Fatalf("validateScreenshotAssets() error: %v", err)
+	}
+
+	if result.ErrorCount != 2 {
+		t.Fatalf("expected 2 duplicate errors, got %d (%+v)", result.ErrorCount, result.Issues)
+	}
+	if result.ReadyFiles != 2 {
+		t.Fatalf("expected 2 ready files, got %d", result.ReadyFiles)
+	}
+	if len(result.Files) != 4 {
+		t.Fatalf("expected 4 files, got %d", len(result.Files))
+	}
+	if result.Files[0].Status != "ok" || result.Files[1].Status != "error" || result.Files[2].Status != "error" || result.Files[3].Status != "ok" {
+		t.Fatalf("unexpected file statuses: %+v", result.Files)
+	}
+
+	for _, fileName := range []string{"02-duplicate.png", "03-another-duplicate.png"} {
+		if !hasScreenshotValidateIssueWithSeverity(result.Issues, "duplicate_content", screenshotValidateSeverityError, fileName) {
+			t.Fatalf("expected duplicate-content issue for %s, got %+v", fileName, result.Issues)
+		}
+	}
+	for _, issue := range result.Issues {
+		if issue.Code == "duplicate_content" && !strings.Contains(issue.Message, `"01-original.png"`) {
+			t.Fatalf("expected deterministic original in duplicate message, got %q", issue.Message)
+		}
+	}
+}
+
+func TestValidateScreenshotAssetsPreserves16BitSamplesWhenDetectingDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	writeAssetsScreenshotValidatePNG64(t, dir, "01-first.png", 312, 390, color.NRGBA64{R: 0x1201, G: 0x3400, B: 0x5600, A: 0xffff})
+	writeAssetsScreenshotValidatePNG64(t, dir, "02-second.png", 312, 390, color.NRGBA64{R: 0x1202, G: 0x3400, B: 0x5600, A: 0xffff})
+
+	result, err := validateScreenshotAssets(dir, "APP_WATCH_SERIES_3")
+	if err != nil {
+		t.Fatalf("validateScreenshotAssets() error: %v", err)
+	}
+
+	if result.ErrorCount != 0 {
+		t.Fatalf("expected distinct 16-bit samples to pass, got %d error(s): %+v", result.ErrorCount, result.Issues)
+	}
+	if result.ReadyFiles != 2 {
+		t.Fatalf("expected 2 ready files, got %d", result.ReadyFiles)
 	}
 }
 
@@ -165,4 +237,42 @@ func hasScreenshotValidateIssueWithSeverity(issues []screenshotValidateIssue, co
 		}
 	}
 	return false
+}
+
+func writeAssetsScreenshotValidatePNG(t *testing.T, dir, name string, width, height int, marker color.RGBA, compression png.CompressionLevel) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	img.SetRGBA(0, 0, marker)
+
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create png: %v", err)
+	}
+	defer file.Close()
+
+	encoder := png.Encoder{CompressionLevel: compression}
+	if err := encoder.Encode(file, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return path
+}
+
+func writeAssetsScreenshotValidatePNG64(t *testing.T, dir, name string, width, height int, marker color.NRGBA64) {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	img := image.NewNRGBA64(image.Rect(0, 0, width, height))
+	img.SetNRGBA64(0, 0, marker)
+
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create png: %v", err)
+	}
+	defer file.Close()
+
+	if err := png.Encode(file, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
 }
