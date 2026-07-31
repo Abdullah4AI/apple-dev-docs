@@ -89,3 +89,63 @@ func verifyOpenedPath(path string, file *os.File, before os.FileInfo) error {
 	}
 	return nil
 }
+
+func openExistingNoFollowInRootBestEffort(root *os.Root, name string, opener func() (*os.File, error)) (*os.File, error) {
+	before, err := rootLstatNoSymlink(root, name)
+	if err != nil {
+		return nil, err
+	}
+	file, err := opener()
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyRootOpenedPath(root, name, file, before); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func openNewFileNoFollowInRootBestEffort(root *os.Root, name string, opener func() (*os.File, error)) (*os.File, error) {
+	if _, err := rootLstatNoSymlink(root, name); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	file, err := opener()
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyRootOpenedPath(root, name, file, nil); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func rootLstatNoSymlink(root *os.Root, name string) (os.FileInfo, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("refusing to follow symlink %q", name)
+	}
+	return info, nil
+}
+
+func verifyRootOpenedPath(root *os.Root, name string, file *os.File, before os.FileInfo) error {
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	after, err := rootLstatNoSymlink(root, name)
+	if err != nil {
+		return err
+	}
+	if before != nil && !os.SameFile(before, after) {
+		return fmt.Errorf("file changed during open %q", name)
+	}
+	if !os.SameFile(after, openedInfo) {
+		return fmt.Errorf("file changed during open %q", name)
+	}
+	return nil
+}

@@ -65,6 +65,17 @@ func TestBuildsUploadCommand_HelpShowsConcurrencyDefaultOnce(t *testing.T) {
 	}
 }
 
+func TestBuildsUploadCommandHasExplicitSensitiveOutputOptIn(t *testing.T) {
+	cmd := BuildsUploadCommand()
+	flag := cmd.FlagSet.Lookup("include-sensitive")
+	if flag == nil {
+		t.Fatal("expected --include-sensitive to be registered")
+	}
+	if !strings.Contains(flag.Usage, "secret") {
+		t.Fatalf("expected sensitive-output warning in flag usage, got %q", flag.Usage)
+	}
+}
+
 func TestBuildsListCommand_ProcessingStateFlagDescription(t *testing.T) {
 	cmd := BuildsListCommand()
 

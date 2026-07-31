@@ -4,12 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"strings"
 
 	"howett.net/plist"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist"
 )
 
 type IPABundleInfo struct {
@@ -68,15 +69,22 @@ func isTopLevelAppInfoPlist(name string) bool {
 }
 
 func readBundleInfoFromInfoPlist(file *zip.File) (IPABundleInfo, error) {
+	if err := infoplist.CheckDeclaredSize(file.UncompressedSize64); err != nil {
+		return IPABundleInfo{}, fmt.Errorf("read Info.plist: %w", err)
+	}
+
 	reader, err := file.Open()
 	if err != nil {
 		return IPABundleInfo{}, fmt.Errorf("open Info.plist: %w", err)
 	}
 	defer reader.Close()
 
-	data, err := io.ReadAll(reader)
+	data, err := infoplist.ReadBounded(reader)
 	if err != nil {
 		return IPABundleInfo{}, fmt.Errorf("read Info.plist: %w", err)
+	}
+	if err := infoplist.ValidateStructure(data); err != nil {
+		return IPABundleInfo{}, fmt.Errorf("decode Info.plist: %w", err)
 	}
 
 	var info map[string]any

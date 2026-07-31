@@ -1,10 +1,15 @@
 package migrate
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestReadFastlaneReviewInformation_ParsesFiles(t *testing.T) {
@@ -60,6 +65,53 @@ func TestReadFastlaneReviewInformation_ParsesFiles(t *testing.T) {
 	}
 	if info.DemoAccountRequired == nil || !*info.DemoAccountRequired {
 		t.Fatalf("expected demo account required true, got %#v", info.DemoAccountRequired)
+	}
+}
+
+func TestMigrateImportRejectsRedactionPlaceholderBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "dry run",
+			args: []string{"--app", "app-1", "--version-id", "version-1", "--dry-run", "--skip-screenshots"},
+		},
+		{
+			name: "real import",
+			args: []string{"--app", "app-1", "--version-id", "version-1", "--confirm", "--skip-screenshots"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fastlaneDir := t.TempDir()
+			reviewDir := filepath.Join(fastlaneDir, "metadata", "review_information")
+			if err := os.MkdirAll(reviewDir, 0o755); err != nil {
+				t.Fatalf("MkdirAll() error = %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(reviewDir, "demo_password.txt"), []byte(asc.RedactedValuePlaceholder), 0o600); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+
+			originalTransport := http.DefaultTransport
+			requests := 0
+			http.DefaultTransport = migrateUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests++
+				t.Fatalf("unexpected HTTP mutation or lookup: %s %s", req.Method, req.URL)
+				return nil, nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+			command := MigrateImportCommand()
+			command.FlagSet.SetOutput(io.Discard)
+			args := append(append([]string{}, test.args...), "--fastlane-dir", fastlaneDir)
+			err := command.ParseAndRun(context.Background(), args)
+			if err == nil {
+				t.Fatal("ParseAndRun() error = nil, want redaction placeholder rejection")
+			}
+			if requests != 0 {
+				t.Fatalf("HTTP requests = %d, want zero", requests)
+			}
+		})
 	}
 }
 

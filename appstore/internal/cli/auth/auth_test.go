@@ -710,38 +710,6 @@ func TestAuthExportToConfigCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("blank private key dir", func(t *testing.T) {
-		cmd := AuthExportToConfigCommand()
-		if err := cmd.FlagSet.Parse([]string{"--confirm", "--private-key-dir", "   "}); err != nil {
-			t.Fatalf("Parse() error: %v", err)
-		}
-		_, stderr := captureAuthOutput(t, func() {
-			err := cmd.Exec(context.Background(), []string{})
-			if !errors.Is(err, flag.ErrHelp) {
-				t.Fatalf("expected flag.ErrHelp, got %v", err)
-			}
-		})
-		if !strings.Contains(stderr, "--private-key-dir cannot be blank") {
-			t.Fatalf("expected blank private-key-dir error, got %q", stderr)
-		}
-	})
-
-	t.Run("blank config path", func(t *testing.T) {
-		cmd := AuthExportToConfigCommand()
-		if err := cmd.FlagSet.Parse([]string{"--confirm", "--config", "   "}); err != nil {
-			t.Fatalf("Parse() error: %v", err)
-		}
-		_, stderr := captureAuthOutput(t, func() {
-			err := cmd.Exec(context.Background(), []string{})
-			if !errors.Is(err, flag.ErrHelp) {
-				t.Fatalf("expected flag.ErrHelp, got %v", err)
-			}
-		})
-		if !strings.Contains(stderr, "--config cannot be blank") {
-			t.Fatalf("expected blank config error, got %q", stderr)
-		}
-	})
-
 	t.Run("local and config are mutually exclusive", func(t *testing.T) {
 		cmd := AuthExportToConfigCommand()
 		if err := cmd.FlagSet.Parse([]string{"--confirm", "--local", "--config", filepath.Join(t.TempDir(), "config.json")}); err != nil {

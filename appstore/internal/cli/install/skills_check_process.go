@@ -3,7 +3,6 @@ package install
 import (
 	"os"
 	"os/exec"
-	"strings"
 )
 
 func defaultStartSkillsCheckWorker(spec skillsCheckWorkerSpec) error {
@@ -39,27 +38,4 @@ func startDetachedSkillsCheckProcess(executable string, args, env []string) erro
 	// process from retaining a wait obligation or zombie bookkeeping.
 	_ = cmd.Process.Release()
 	return nil
-}
-
-func skillsCheckWorkerEnvironment(base []string, spec skillsCheckWorkerSpec) []string {
-	workerKeys := map[string]struct{}{
-		skillsWorkerEnvVar:      {},
-		skillsWorkerCacheEnvVar: {},
-		skillsWorkerLockEnvVar:  {},
-		skillsWorkerTokenEnvVar: {},
-	}
-	env := make([]string, 0, len(base)+len(workerKeys))
-	for _, entry := range base {
-		key, _, _ := strings.Cut(entry, "=")
-		if _, isWorkerKey := workerKeys[key]; !isWorkerKey {
-			env = append(env, entry)
-		}
-	}
-	return append(
-		env,
-		skillsWorkerEnvVar+"=1",
-		skillsWorkerCacheEnvVar+"="+spec.cachePath,
-		skillsWorkerLockEnvVar+"="+spec.lockPath,
-		skillsWorkerTokenEnvVar+"="+spec.token,
-	)
 }

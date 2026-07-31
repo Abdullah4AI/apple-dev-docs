@@ -347,6 +347,9 @@ func TestReviewSubmitUsesModernReviewSubmissionFlow(t *testing.T) {
 	requests := newRequestLog(20)
 	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requests.Add(req.Method + " " + req.URL.Path)
+		if resp, err, ok := respondToFinalReviewSubmissionValidation(req); ok {
+			return resp, err
+		}
 
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/appStoreVersions":

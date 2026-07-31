@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 func TestStructuredVersion_TargetAndConfigurationScopedEditIsCrossPlatform(t *testing.T) {
@@ -70,6 +72,32 @@ func TestStructuredVersion_TargetAndConfigurationScopedEditIsCrossPlatform(t *te
 	}
 	if widget.Version != "1.2.3" || widget.BuildNumber != "42" {
 		t.Fatalf("Widget should remain unchanged, got %#v", widget)
+	}
+}
+
+func TestStructuredVersion_ProjectDirectoryWhitespaceIsPreservedDuringMutation(t *testing.T) {
+	project := writeStructuredVersionProject(t, false)
+	originalRoot := filepath.Dir(project)
+	whitespaceRoot := filepath.Join(filepath.Dir(originalRoot), " Project Root ")
+	if err := os.Rename(originalRoot, whitespaceRoot); err != nil {
+		t.Fatalf("Rename(project root) error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(whitespaceRoot) })
+
+	projectPath := filepath.Join(whitespaceRoot, filepath.Base(project))
+	result, err := SetVersion(context.Background(), SetVersionOptions{
+		ProjectDir: whitespaceRoot,
+		Version:    "2.0.0",
+	})
+	if err != nil {
+		t.Fatalf("SetVersion() error = %v", err)
+	}
+	if result.ProjectDir != whitespaceRoot {
+		t.Fatalf("result project directory = %q, want %q", result.ProjectDir, whitespaceRoot)
+	}
+	updated := mustReadVersionTestFile(t, filepath.Join(projectPath, "project.pbxproj"))
+	if strings.Contains(updated, "MARKETING_VERSION = 1.2.3;") {
+		t.Fatalf("version was not updated in exact whitespace directory: %s", updated)
 	}
 }
 
@@ -1301,17 +1329,21 @@ func TestStructuredVersion_CommitFailureRollsBackEarlierFiles(t *testing.T) {
 
 	injectedErr := errors.New("injected write failure")
 	originalWriter := atomicWriteVersionFileFn
-	atomicWriteVersionFileFn = func(path string, data []byte, mode os.FileMode) error {
-		if path == secondPath {
+	atomicWriteVersionFileFn = func(write preparedVersionWrite, data []byte) error {
+		if write.path == secondPath {
 			return injectedErr
 		}
-		return atomicWriteVersionFile(path, data, mode)
+		return atomicWritePreparedVersionFile(write, data)
 	}
 	t.Cleanup(func() { atomicWriteVersionFileFn = originalWriter })
 
-	err := commitVersionWrites([]preparedVersionWrite{
-		{path: secondPath, original: []byte("old-b"), updated: []byte("new-b"), mode: 0o644},
-		{path: firstPath, original: []byte("old-a"), updated: []byte("new-a"), mode: 0o644},
+	fileRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = commitVersionWrites([]preparedVersionWrite{
+		{path: secondPath, root: fileRoot, name: secondPath, original: []byte("old-b"), updated: []byte("new-b"), mode: 0o644},
+		{path: firstPath, root: fileRoot, name: firstPath, original: []byte("old-a"), updated: []byte("new-a"), mode: 0o644},
 	})
 	if !errors.Is(err, injectedErr) {
 		t.Fatalf("expected injected failure, got %v", err)

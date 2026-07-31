@@ -646,7 +646,7 @@ func (c *Client) DownloadAnalyticsReport(ctx context.Context, downloadURL string
 		return nil, fmt.Errorf("analytics download: %w", err)
 	}
 
-	resp, err := c.doStreamNoAuth(ctx, "GET", downloadURL, "application/a-gzip")
+	resp, err := c.doStreamNoAuth(ctx, downloadURL, "application/a-gzip")
 	if err != nil {
 		return nil, err
 	}

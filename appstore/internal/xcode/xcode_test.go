@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"howett.net/plist"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist"
 )
 
 func TestArchiveUnsupportedPlatform(t *testing.T) {
@@ -417,6 +419,35 @@ func TestValidateRunsAltoolWithTVOSPlatform(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsOversizedInfoPlistBeforeAltool(t *testing.T) {
+	tempDir := t.TempDir()
+	ipaPath := writeIPAWithRawInfoPlist(t, buildSizedAppInfoPlist(t, infoplist.MaxBytes+1))
+	logPath := filepath.Join(tempDir, "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	runtimeGOOS = "darwin"
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Cleanup(restore)
+
+	_, err := Validate(context.Background(), ValidateOptions{IPAPath: ipaPath})
+	if err == nil {
+		t.Fatal("expected oversized Info.plist rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "Info.plist limit") {
+		t.Fatalf("expected Info.plist limit error, got %v", err)
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error: %v", readErr)
+	}
+	if strings.Contains(string(logData), "--validate-app") {
+		t.Fatalf("altool must not run after metadata rejection, got %q", string(logData))
+	}
+}
+
 func TestBuildStatusRunsAltoolWithLookupFlags(t *testing.T) {
 	tempDir := t.TempDir()
 	keyPath := filepath.Join(tempDir, "AuthKey_TEST12345.p8")
@@ -667,6 +698,75 @@ func TestExportWritesIPAAtExactPathAndReturnsMetadata(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "|-allowProvisioningUpdates") {
 		t.Fatalf("expected custom xcodebuild arg, got %q", lines[1])
+	}
+}
+
+func TestExportValidatesGeneratedIPABeforeReplacingDestination(t *testing.T) {
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "Demo.xcarchive")
+	if err := os.MkdirAll(archivePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	exportOptionsPath := filepath.Join(tempDir, "ExportOptions.plist")
+	if err := os.WriteFile(exportOptionsPath, []byte(`<?xml version="1.0" encoding="UTF-8"?>`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	logPath := filepath.Join(tempDir, "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	runtimeGOOS = "darwin"
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/xcodebuild", nil
+	}
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Cleanup(restore)
+	t.Setenv("ASC_XCODE_HELPER_INVALID_IPA", "1")
+
+	ipaPath := filepath.Join(tempDir, "Demo.ipa")
+	if err := os.WriteFile(ipaPath, []byte("existing ipa"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	_, err := Export(context.Background(), ExportOptions{
+		ArchivePath:   archivePath,
+		ExportOptions: exportOptionsPath,
+		IPAPath:       ipaPath,
+		Overwrite:     true,
+	})
+	if err == nil {
+		t.Fatal("expected generated IPA metadata rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "inspect exported IPA before installation") {
+		t.Fatalf("expected pre-install metadata error, got %v", err)
+	}
+	data, readErr := os.ReadFile(ipaPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error: %v", readErr)
+	}
+	if string(data) != "existing ipa" {
+		t.Fatalf("expected existing IPA to survive failed export, got %q", data)
+	}
+}
+
+func TestMoveExportedIPAAtomicallyReplacesExistingDestination(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "generated.ipa")
+	destination := filepath.Join(directory, "release.ipa")
+	if err := os.WriteFile(source, []byte("new ipa"), 0o644); err != nil {
+		t.Fatalf("WriteFile(source) error: %v", err)
+	}
+	if err := os.WriteFile(destination, []byte("old ipa"), 0o644); err != nil {
+		t.Fatalf("WriteFile(destination) error: %v", err)
+	}
+
+	if err := moveExportedIPA(source, destination, true); err != nil {
+		t.Fatalf("moveExportedIPA() error: %v", err)
+	}
+	data, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	if string(data) != "new ipa" {
+		t.Fatalf("expected replacement IPA, got %q", data)
 	}
 }
 
@@ -1217,6 +1317,13 @@ func TestXcodeHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		if isDirectUploadMode(exportOptionsPath) {
+			os.Exit(0)
+		}
+		if os.Getenv("ASC_XCODE_HELPER_INVALID_IPA") == "1" {
+			if err := os.WriteFile(filepath.Join(exportPath, "Exported.ipa"), []byte("not an ipa"), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
 			os.Exit(0)
 		}
 		if err := writeTestIPA(filepath.Join(exportPath, "Exported.ipa")); err != nil {

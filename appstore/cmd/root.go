@@ -26,7 +26,10 @@ func RootCommand(version string) *ffcli.Command {
 func rootCommandForArgs(version string, args []string) *ffcli.Command {
 	catalog := registry.NewCatalog(version)
 	root := newRootCommand(version, catalog.MetadataCommands())
-	commandName := getCommandName(root, args)
+	// Command discovery must understand the same liberal `--bool false` form
+	// as final parsing. Otherwise the separated value looks positional and the
+	// lazy catalog can materialize the wrong command tree.
+	commandName := getCommandName(root, normalizeSpacedBooleanFlags(root, args))
 	parts := strings.Fields(commandName)
 	if len(parts) < 2 {
 		return root

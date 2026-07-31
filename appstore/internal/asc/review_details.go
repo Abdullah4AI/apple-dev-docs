@@ -158,6 +158,11 @@ func (c *Client) CreateAppStoreReviewDetail(ctx context.Context, versionID strin
 	if versionID == "" {
 		return nil, fmt.Errorf("versionID is required")
 	}
+	if attrs != nil {
+		if err := validateSecretMutationValue(attrs.DemoAccountPassword); err != nil {
+			return nil, err
+		}
+	}
 
 	payload := AppStoreReviewDetailCreateRequest{
 		Data: AppStoreReviewDetailCreateData{
@@ -181,7 +186,11 @@ func (c *Client) CreateAppStoreReviewDetail(ctx context.Context, versionID strin
 
 	data, err := c.do(ctx, "POST", "/v1/appStoreReviewDetails", body)
 	if err != nil {
-		return nil, err
+		var password *string
+		if attrs != nil {
+			password = attrs.DemoAccountPassword
+		}
+		return nil, redactSubmittedSecretFromError(err, password)
 	}
 
 	var response AppStoreReviewDetailResponse
@@ -197,6 +206,9 @@ func (c *Client) UpdateAppStoreReviewDetail(ctx context.Context, detailID string
 	detailID = strings.TrimSpace(detailID)
 	if detailID == "" {
 		return nil, fmt.Errorf("detailID is required")
+	}
+	if err := validateSecretMutationValue(attrs.DemoAccountPassword); err != nil {
+		return nil, err
 	}
 
 	payload := AppStoreReviewDetailUpdateRequest{
@@ -214,7 +226,7 @@ func (c *Client) UpdateAppStoreReviewDetail(ctx context.Context, detailID string
 
 	data, err := c.do(ctx, "PATCH", fmt.Sprintf("/v1/appStoreReviewDetails/%s", detailID), body)
 	if err != nil {
-		return nil, err
+		return nil, redactSubmittedSecretFromError(err, attrs.DemoAccountPassword)
 	}
 
 	var response AppStoreReviewDetailResponse

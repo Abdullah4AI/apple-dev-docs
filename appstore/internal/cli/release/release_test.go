@@ -160,14 +160,28 @@ func TestExecuteRun_ResumesCompletedCheckpoint(t *testing.T) {
 		readinessReportBuilder = origReadinessBuilder
 	})
 
-	releaseClientFactory = func() (*asc.Client, error) { return nil, nil }
+	client := newCheckpointBindingClient(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/VERSION_123":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"VERSION_123","attributes":{"versionString":"2.4.0","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"APP_123"}}}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/VERSION_123/build":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"builds","id":"BUILD_123","attributes":{"version":"42"}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/SUBMISSION_123":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"SUBMISSION_123","attributes":{"state":"WAITING_FOR_REVIEW","platform":"IOS"},"relationships":{"appStoreVersionForReview":{"data":{"type":"appStoreVersions","id":"VERSION_123"}}}}}`)
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+	})
+	releaseClientFactory = func() (*asc.Client, error) { return client, nil }
+	metadataRuns := 0
+	readinessRuns := 0
 	metadataPushExecutor = func(context.Context, metadata.PushExecutionOptions) (metadata.PushPlanResult, error) {
-		t.Fatal("metadata executor should not be called for completed checkpoint")
-		return metadata.PushPlanResult{}, nil
+		metadataRuns++
+		return metadata.PushPlanResult{VersionID: "VERSION_123"}, nil
 	}
 	readinessReportBuilder = func(context.Context, validatecli.ReadinessOptions) (validation.Report, error) {
-		t.Fatal("readiness builder should not be called for completed checkpoint")
-		return validation.Report{}, nil
+		readinessRuns++
+		return validation.Report{Summary: validation.Summary{}}, nil
 	}
 
 	dir := t.TempDir()
@@ -222,9 +236,17 @@ func TestExecuteRun_ResumesCompletedCheckpoint(t *testing.T) {
 	if len(result.Steps) != 5 {
 		t.Fatalf("expected 5 skipped steps, got %d", len(result.Steps))
 	}
-	for i, step := range result.Steps {
-		if step.Status != "skipped" {
-			t.Fatalf("expected step %d skipped, got %q", i, step.Status)
+	if metadataRuns != 1 || readinessRuns != 1 {
+		t.Fatalf("expected unprovable local steps to rerun once, got metadata=%d readiness=%d", metadataRuns, readinessRuns)
+	}
+	for _, index := range []int{0, 2, 4} {
+		if result.Steps[index].Status != "skipped" {
+			t.Fatalf("expected remotely verified step %d skipped, got %q", index, result.Steps[index].Status)
+		}
+	}
+	for _, index := range []int{1, 3} {
+		if result.Steps[index].Status == "skipped" {
+			t.Fatalf("expected unprovable local step %d to rerun", index)
 		}
 	}
 }
@@ -287,6 +309,10 @@ func TestExecuteRun_SuccessPath(t *testing.T) {
 			return releaseJSONResponse(http.StatusCreated, `{"data":{"type":"reviewSubmissions","id":"REV_SUB_123","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/reviewSubmissionItems":
 			return releaseJSONResponse(http.StatusCreated, `{"data":{"type":"reviewSubmissionItems","id":"ITEM_123"}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/REV_SUB_123":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"REV_SUB_123","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"APP_123"}}}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/REV_SUB_123/items":
+			return releaseJSONResponse(http.StatusOK, `{"data":[{"type":"reviewSubmissionItems","id":"ITEM_123","relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"VERSION_123"}}}}]}`)
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/REV_SUB_123":
 			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"REV_SUB_123","attributes":{"state":"SUBMITTED","platform":"IOS","submittedDate":"2026-03-02T00:00:00Z"}}}`)
 		default:
@@ -593,6 +619,7 @@ func TestExecuteRun_EmitsSubmitProgressMessagesToStderr(t *testing.T) {
 		}, nil
 	}
 
+	itemReads := 0
 	http.DefaultTransport = releaseRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/APP_123/appStoreVersions":
@@ -603,14 +630,18 @@ func TestExecuteRun_EmitsSubmitProgressMessagesToStderr(t *testing.T) {
 			return releaseJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/APP_123/reviewSubmissions":
 			return releaseJSONResponse(http.StatusOK, `{"data":[{"type":"reviewSubmissions","id":"STALE_123","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"}}]}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/STALE_123":
-			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"STALE_123","attributes":{"state":"CANCELED","platform":"IOS"}}}`)
-		case req.Method == http.MethodPost && req.URL.Path == "/v1/reviewSubmissions":
-			return releaseJSONResponse(http.StatusCreated, `{"data":{"type":"reviewSubmissions","id":"REV_SUB_123","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/STALE_123/items":
+			itemReads++
+			if itemReads == 1 {
+				return releaseJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
+			}
+			return releaseJSONResponse(http.StatusOK, `{"data":[{"type":"reviewSubmissionItems","id":"ITEM_123","relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"VERSION_123"}}}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/STALE_123":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"STALE_123","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"APP_123"}}}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/reviewSubmissionItems":
 			return releaseJSONResponse(http.StatusCreated, `{"data":{"type":"reviewSubmissionItems","id":"ITEM_123"}}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/REV_SUB_123":
-			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"REV_SUB_123","attributes":{"state":"SUBMITTED","platform":"IOS","submittedDate":"2026-03-16T00:00:00Z"}}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/STALE_123":
+			return releaseJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"STALE_123","attributes":{"state":"SUBMITTED","platform":"IOS","submittedDate":"2026-03-16T00:00:00Z"}}}`)
 		default:
 			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 		}
@@ -635,13 +666,13 @@ func TestExecuteRun_EmitsSubmitProgressMessagesToStderr(t *testing.T) {
 		if err != nil {
 			t.Fatalf("executeRun error: %v", err)
 		}
-		if result.SubmissionID != "REV_SUB_123" {
-			t.Fatalf("expected submissionID REV_SUB_123, got %q", result.SubmissionID)
+		if result.SubmissionID != "STALE_123" {
+			t.Fatalf("expected submissionID STALE_123, got %q", result.SubmissionID)
 		}
 	})
 
-	if !strings.Contains(stderr, "Canceled stale review submission STALE_123") {
-		t.Fatalf("expected stale submission progress on stderr, got %q", stderr)
+	if !strings.Contains(stderr, "Reusing existing review submission STALE_123") {
+		t.Fatalf("expected safe reuse progress on stderr, got %q", stderr)
 	}
 }
 

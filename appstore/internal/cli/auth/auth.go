@@ -593,17 +593,11 @@ Examples:
 			if !*confirm {
 				return shared.UsageError("--confirm is required")
 			}
-			if strings.TrimSpace(*privateKeyDir) == "" && *privateKeyDir != "" {
-				return shared.UsageError("--private-key-dir cannot be blank")
-			}
-			if strings.TrimSpace(*configPath) == "" && *configPath != "" {
-				return shared.UsageError("--config cannot be blank")
-			}
-			if *local && strings.TrimSpace(*configPath) != "" {
+			if *local && *configPath != "" {
 				return shared.UsageError("--local and --config are mutually exclusive")
 			}
 
-			targetConfigPath := strings.TrimSpace(*configPath)
+			targetConfigPath := *configPath
 			if targetConfigPath == "" {
 				if *local {
 					targetConfigPath, err = config.LocalPath()
@@ -622,7 +616,7 @@ Examples:
 
 			result, err := migrateKeychainToConfig(authsvc.MigrateKeychainToConfigOptions{
 				ConfigPath:     targetConfigPath,
-				PrivateKeyDir:  strings.TrimSpace(*privateKeyDir),
+				PrivateKeyDir:  *privateKeyDir,
 				RemoveKeychain: *removeKeychain,
 			})
 			if err != nil {
@@ -640,7 +634,7 @@ Examples:
 
 func printMigrateToConfigResult(result authsvc.MigrateKeychainToConfigResult) {
 	fmt.Printf("Migrated %d credential(s) to %s\n", len(result.Migrated), result.ConfigPath)
-	if strings.TrimSpace(result.PrivateKeyDir) != "" {
+	if result.PrivateKeyDir != "" {
 		fmt.Printf("Private key directory: %s\n", result.PrivateKeyDir)
 	}
 	if len(result.Migrated) > 0 {

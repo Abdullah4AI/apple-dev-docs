@@ -126,6 +126,7 @@ func TestRun_IntroductoryOffersImportPartialFailureReturnsExitError(t *testing.T
 			"--offer-duration", "ONE_WEEK",
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
+			"--confirm",
 		}, "1.0.0")
 		if code != cmd.ExitError {
 			t.Fatalf("expected exit code %d, got %d", cmd.ExitError, code)

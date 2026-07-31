@@ -33,9 +33,9 @@ type APIAssociatedError struct {
 }
 
 func (e *APIError) Error() string {
-	title := strings.TrimSpace(sanitizeTerminal(e.Title))
-	detail := strings.TrimSpace(sanitizeTerminal(e.Detail))
-	code := strings.TrimSpace(sanitizeTerminal(e.Code))
+	title := strings.TrimSpace(SanitizeTerminalText(e.Title))
+	detail := strings.TrimSpace(SanitizeTerminalText(e.Detail))
+	code := strings.TrimSpace(SanitizeTerminalText(e.Code))
 	baseMessage := ""
 	switch {
 	case title != "" && detail != "":
@@ -77,7 +77,7 @@ func formatAssociatedErrors(values map[string][]APIAssociatedError) string {
 
 	sections := make([]string, 0, len(keys))
 	for _, key := range keys {
-		resource := strings.TrimSpace(sanitizeTerminal(key))
+		resource := strings.TrimSpace(SanitizeTerminalText(key))
 		if resource == "" {
 			resource = "(unknown resource)"
 		}
@@ -87,8 +87,8 @@ func formatAssociatedErrors(values map[string][]APIAssociatedError) string {
 		lines = append(lines, fmt.Sprintf("Associated errors for %s:", resource))
 
 		for _, entry := range entries {
-			entryDetail := strings.TrimSpace(sanitizeTerminal(entry.Detail))
-			entryCode := strings.TrimSpace(sanitizeTerminal(entry.Code))
+			entryDetail := strings.TrimSpace(SanitizeTerminalText(entry.Detail))
+			entryCode := strings.TrimSpace(SanitizeTerminalText(entry.Code))
 			switch {
 			case entryDetail != "":
 				lines = append(lines, fmt.Sprintf("  - %s", entryDetail))

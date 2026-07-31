@@ -975,7 +975,7 @@ func SubscriptionsPricesCommand() *ffcli.Command {
 Examples:
   asc subscriptions prices list --subscription-id "SUB_ID"
   asc subscriptions prices add --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID"
-  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv"
+  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --confirm
   asc subscriptions prices delete --price-id "PRICE_ID" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,

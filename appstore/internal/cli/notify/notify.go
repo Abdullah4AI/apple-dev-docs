@@ -19,6 +19,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/urlsanitize"
 )
 
 const (
@@ -34,6 +35,20 @@ var slackThreadTSPattern = regexp.MustCompile(`^\d+\.\d+$`)
 
 var slackHTTPClient = func() *http.Client {
 	return &http.Client{Timeout: asc.ResolveTimeout()}
+}
+
+func slackClientWithoutRedirects(client *http.Client) *http.Client {
+	if client == nil {
+		client = &http.Client{Timeout: asc.ResolveTimeout()}
+	}
+	safeClient := *client
+	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		// Return the redirect response to the caller without making the next
+		// request. Following it can disclose the webhook path through Referer,
+		// and 307/308 responses can also replay the JSON message body.
+		return http.ErrUseLastResponse
+	}
+	return &safeClient
 }
 
 func slackFlags(fs *flag.FlagSet) (
@@ -180,14 +195,14 @@ Examples:
 
 			req, err := http.NewRequestWithContext(requestCtx, "POST", webhookURL, bytes.NewReader(body))
 			if err != nil {
-				return fmt.Errorf("notify slack: failed to create request: %w", err)
+				return fmt.Errorf("notify slack: failed to create request: %w", newSanitizedWebhookError("request creation", webhookURL, err))
 			}
 			req.Header.Set("Content-Type", "application/json")
 
-			client := slackHTTPClient()
+			client := slackClientWithoutRedirects(slackHTTPClient())
 			resp, err := client.Do(req)
 			if err != nil {
-				return fmt.Errorf("notify slack: failed to send: %w", err)
+				return fmt.Errorf("notify slack: failed to send: %w", newSanitizedWebhookError("webhook POST", webhookURL, err))
 			}
 			defer resp.Body.Close()
 
@@ -197,7 +212,10 @@ Examples:
 				if readErr != nil {
 					return fmt.Errorf("notify slack: failed to read response: %w", readErr)
 				}
-				message := strings.TrimSpace(string(respBody))
+				message := redactWebhookSecretFromText(
+					asc.SanitizeTerminalText(strings.TrimSpace(string(respBody))),
+					webhookURL,
+				)
 				if message == "" {
 					return fmt.Errorf("notify slack: unexpected response %d", resp.StatusCode)
 				}
@@ -208,6 +226,48 @@ Examples:
 			return nil
 		},
 	}
+}
+
+// redactWebhookSecretFromText removes the webhook secret from response text
+// before it becomes part of an error message. Some servers and intercepting
+// proxies echo the requested URL or path in their error body, and for a Slack
+// incoming webhook the path is the secret. The full URL, the path, and each
+// path segment long enough to be an identifier are replaced; the rest of the
+// body keeps its diagnostic value.
+func redactWebhookSecretFromText(text, webhookURL string) string {
+	trimmed := strings.TrimSpace(webhookURL)
+	if text == "" || trimmed == "" {
+		return text
+	}
+	sanitized := strings.ReplaceAll(text, trimmed, urlsanitize.RedactedPlaceholder)
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return sanitized
+	}
+	secrets := make([]string, 0, 8)
+	if escaped := parsed.EscapedPath(); len(escaped) > 1 {
+		secrets = append(secrets, escaped)
+	}
+	if len(parsed.Path) > 1 {
+		secrets = append(secrets, parsed.Path)
+	}
+	for _, segment := range strings.Split(strings.Trim(parsed.Path, "/"), "/") {
+		if len(segment) >= 4 && segment != "services" {
+			secrets = append(secrets, segment)
+		}
+	}
+	for _, secret := range secrets {
+		sanitized = strings.ReplaceAll(sanitized, secret, urlsanitize.RedactedPlaceholder)
+	}
+	return sanitized
+}
+
+// newSanitizedWebhookError keeps the failing host and failure class while
+// dropping the webhook path, which is the incoming-webhook secret itself.
+// net/http renders the full request URL in its own error text, so the cause is
+// wrapped for inspection instead of being interpolated into the message.
+func newSanitizedWebhookError(operation, webhookURL string, err error) error {
+	return urlsanitize.NewTransportError(operation, urlsanitize.RedactURLHostForError(webhookURL), err)
 }
 
 func resolveWebhook(flagValue string) string {
@@ -347,6 +407,9 @@ func validateSlackWebhookURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
 		return fmt.Errorf("--webhook must be a valid Slack webhook URL (https://hooks.slack.com/... or https://hooks.slack-gov.com/...)")
+	}
+	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return fmt.Errorf("--webhook must not contain a query string or fragment")
 	}
 	host := strings.ToLower(parsed.Hostname())
 	if allowLocalSlackWebhook() && isLocalhost(host) {

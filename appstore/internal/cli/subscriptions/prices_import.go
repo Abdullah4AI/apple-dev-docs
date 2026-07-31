@@ -137,6 +137,7 @@ func SubscriptionsPricesImportCommand() *ffcli.Command {
 	startDate := fs.String("start-date", "", "Default start date (YYYY-MM-DD) for rows without start_date")
 	preserved := fs.Bool("preserved", false, "Set preserveCurrentPrice=true for rows without preserved columns")
 	dryRun := fs.Bool("dry-run", false, "Validate and resolve price points without creating subscription prices")
+	confirm := fs.Bool("confirm", false, "Confirm creating subscription prices (required unless --dry-run)")
 	continueOnError := fs.Bool("continue-on-error", true, "Continue processing rows after failures (default true)")
 	output := shared.BindOutputFlags(fs)
 
@@ -161,8 +162,9 @@ Header aliases:
 
 Examples:
   asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --dry-run
-  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --start-date "2026-03-01"
-  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --preserved`,
+  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --confirm
+  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --start-date "2026-03-01" --confirm
+  asc subscriptions prices import --subscription-id "SUB_ID" --input "./prices.csv" --preserved --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -185,6 +187,10 @@ Examples:
 					return shared.UsageError(err.Error())
 				}
 				defaultStartDate = normalized
+			}
+
+			if err := shared.RequireConfirmUnlessDryRun(*dryRun, *confirm); err != nil {
+				return err
 			}
 
 			rows, err := readSubscriptionPricesImportCSV(inputValue)

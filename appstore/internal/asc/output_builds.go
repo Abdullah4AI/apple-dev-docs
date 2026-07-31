@@ -201,11 +201,11 @@ func buildIconsRows(resp *BuildIconsResponse) ([]string, [][]string) {
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		rows = append(rows, []string{
-			item.ID,
+			SanitizeTerminalText(item.ID),
 			compactWhitespace(item.Attributes.Name),
-			string(item.Attributes.IconType),
+			SanitizeTerminalText(string(item.Attributes.IconType)),
 			fmt.Sprintf("%t", item.Attributes.Masked),
-			sanitizeTerminal(buildIconAssetURL(item.Attributes)),
+			SanitizeTerminalText(buildIconAssetURL(item.Attributes)),
 		})
 	}
 	return headers, rows

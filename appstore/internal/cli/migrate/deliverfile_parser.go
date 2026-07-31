@@ -3,6 +3,7 @@ package migrate
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,9 +25,12 @@ func parseDeliverfile(path string) (DeliverfileConfig, error) {
 		return DeliverfileConfig{}, err
 	}
 	defer file.Close()
+	return parseDeliverfileReader(path, file)
+}
 
+func parseDeliverfileReader(path string, reader io.Reader) (DeliverfileConfig, error) {
 	var config DeliverfileConfig
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

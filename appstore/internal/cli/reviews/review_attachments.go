@@ -25,6 +25,7 @@ func ReviewDetailsAttachmentsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -87,16 +88,25 @@ Examples:
 				pages, err := shared.PaginateWithSpinner(
 					requestCtx,
 					func(ctx context.Context) (asc.PaginatedResponse, error) {
-						return client.GetAppStoreReviewAttachmentsForReviewDetail(ctx, reviewDetailValue, paginateOpts...)
+						resp, err := client.GetAppStoreReviewAttachmentsForReviewDetail(ctx, reviewDetailValue, paginateOpts...)
+						if err != nil || *includeSensitive {
+							return resp, err
+						}
+						return asc.RedactAppStoreReviewDetailIncludesInListResponse(resp)
 					},
 					func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-						return client.GetAppStoreReviewAttachmentsForReviewDetail(ctx, reviewDetailValue, asc.WithAppStoreReviewAttachmentsNextURL(nextURL))
+						resp, err := client.GetAppStoreReviewAttachmentsForReviewDetail(ctx, reviewDetailValue, asc.WithAppStoreReviewAttachmentsNextURL(nextURL))
+						if err != nil || *includeSensitive {
+							return resp, err
+						}
+						return asc.RedactAppStoreReviewDetailIncludesInListResponse(resp)
 					},
 				)
 				if err != nil {
 					return fmt.Errorf("review attachments-list: %w", err)
 				}
 
+				shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
 				return shared.PrintOutput(pages, *output.Output, *output.Pretty)
 			}
 
@@ -105,7 +115,15 @@ Examples:
 				return fmt.Errorf("review attachments-list: failed to fetch: %w", err)
 			}
 
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
+			if *includeSensitive {
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+			safe, err := asc.RedactAppStoreReviewDetailIncludesInListResponse(resp)
+			if err != nil {
+				return fmt.Errorf("review attachments-list: %w", err)
+			}
+			return shared.PrintOutput(safe, *output.Output, *output.Pretty)
 		},
 	}
 }
@@ -118,6 +136,7 @@ func ReviewDetailsAttachmentsGetCommand() *ffcli.Command {
 	fields := fs.String("fields", "", "Fields to include: "+strings.Join(reviewAttachmentFieldList(), ", "))
 	detailFields := fs.String("detail-fields", "", "Review detail fields to include: "+strings.Join(reviewDetailFieldList(), ", "))
 	include := fs.String("include", "", "Include relationships: "+strings.Join(reviewAttachmentIncludeList(), ", "))
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -169,7 +188,15 @@ Examples:
 				return fmt.Errorf("review attachments-get: failed to fetch: %w", err)
 			}
 
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
+			if *includeSensitive {
+				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			}
+			safe, err := asc.RedactAppStoreReviewDetailIncludesInSingleResponse(resp)
+			if err != nil {
+				return fmt.Errorf("review attachments-get: %w", err)
+			}
+			return shared.PrintOutput(safe, *output.Output, *output.Pretty)
 		},
 	}
 }

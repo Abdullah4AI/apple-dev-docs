@@ -159,7 +159,7 @@ func formatCapabilitySettings(settings []CapabilitySetting) string {
 	if err != nil {
 		return ""
 	}
-	return sanitizeTerminal(string(payload))
+	return SanitizeTerminalText(string(payload))
 }
 
 func certificateDisplayName(attrs CertificateAttributes) string {

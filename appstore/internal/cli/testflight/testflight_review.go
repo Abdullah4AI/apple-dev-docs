@@ -51,6 +51,7 @@ func TestFlightReviewGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("view", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 	output := shared.BindOutputFlags(fs)
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
@@ -97,6 +98,10 @@ Examples:
 				return fmt.Errorf("testflight review view: failed to fetch: %w", err)
 			}
 
+			shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
+			if !*includeSensitive {
+				details = asc.RedactBetaAppReviewDetailsResponse(details)
+			}
 			return shared.PrintOutput(details, *output.Output, *output.Pretty)
 		},
 	}
@@ -115,6 +120,7 @@ func TestFlightReviewUpdateCommand() *ffcli.Command {
 	demoAccountPassword := fs.String("demo-account-password", "", "Demo account password")
 	demoAccountRequired := fs.Bool("demo-account-required", false, "Demo account required")
 	notes := fs.String("notes", "", "Review notes")
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -200,6 +206,10 @@ Examples:
 				return fmt.Errorf("testflight review update: failed to update: %w", err)
 			}
 
+			shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
+			if !*includeSensitive {
+				detail = asc.RedactBetaAppReviewDetailResponse(detail)
+			}
 			return shared.PrintOutput(detail, *output.Output, *output.Pretty)
 		},
 	}

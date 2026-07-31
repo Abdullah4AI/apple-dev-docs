@@ -40,16 +40,16 @@ func feedbackRows(resp *FeedbackResponse) ([]string, [][]string) {
 	for _, item := range resp.Data {
 		if hasScreenshots {
 			rows = append(rows, []string{
-				sanitizeTerminal(item.Attributes.CreatedDate),
-				sanitizeTerminal(item.Attributes.Email),
+				SanitizeTerminalText(item.Attributes.CreatedDate),
+				SanitizeTerminalText(item.Attributes.Email),
 				compactWhitespace(item.Attributes.Comment),
-				sanitizeTerminal(formatScreenshotURLs(item.Attributes.Screenshots)),
+				SanitizeTerminalText(formatScreenshotURLs(item.Attributes.Screenshots)),
 			})
 			continue
 		}
 		rows = append(rows, []string{
-			sanitizeTerminal(item.Attributes.CreatedDate),
-			sanitizeTerminal(item.Attributes.Email),
+			SanitizeTerminalText(item.Attributes.CreatedDate),
+			SanitizeTerminalText(item.Attributes.Email),
 			compactWhitespace(item.Attributes.Comment),
 		})
 	}
@@ -61,10 +61,10 @@ func crashesRows(resp *CrashesResponse) ([]string, [][]string) {
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		rows = append(rows, []string{
-			sanitizeTerminal(item.Attributes.CreatedDate),
-			sanitizeTerminal(item.Attributes.Email),
-			sanitizeTerminal(item.Attributes.DeviceModel),
-			sanitizeTerminal(item.Attributes.OSVersion),
+			SanitizeTerminalText(item.Attributes.CreatedDate),
+			SanitizeTerminalText(item.Attributes.Email),
+			SanitizeTerminalText(item.Attributes.DeviceModel),
+			SanitizeTerminalText(item.Attributes.OSVersion),
 			compactWhitespace(item.Attributes.Comment),
 		})
 	}
@@ -76,9 +76,9 @@ func reviewsRows(resp *ReviewsResponse) ([]string, [][]string) {
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		rows = append(rows, []string{
-			sanitizeTerminal(item.Attributes.CreatedDate),
+			SanitizeTerminalText(item.Attributes.CreatedDate),
 			fmt.Sprintf("%d", item.Attributes.Rating),
-			sanitizeTerminal(item.Attributes.Territory),
+			SanitizeTerminalText(item.Attributes.Territory),
 			compactWhitespace(item.Attributes.Title),
 		})
 	}

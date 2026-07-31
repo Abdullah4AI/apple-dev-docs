@@ -759,7 +759,7 @@ func TestRun_NoArgsShowsHelpReturnsSuccess(t *testing.T) {
 	}
 }
 
-func TestRun_InvokesSkillsUpdateCheckForSubcommand(t *testing.T) {
+func TestRun_DisablesAutomaticSkillsUpdateCheckForSubcommand(t *testing.T) {
 	resetReportFlags(t)
 
 	origCheck := maybeScheduleSkillsUpdateCheck
@@ -782,8 +782,8 @@ func TestRun_InvokesSkillsUpdateCheckForSubcommand(t *testing.T) {
 
 	select {
 	case <-called:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected skills update check to be invoked")
+		t.Fatal("automatic skills update check unexpectedly ran")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -887,44 +887,22 @@ func TestShouldCancelRunContextAfterError(t *testing.T) {
 }
 
 func TestShouldRunSkillsUpdateCheck(t *testing.T) {
-	t.Run("runs for successful subcommand context", func(t *testing.T) {
-		if !shouldRunSkillsUpdateCheck("asc completion", context.Background(), nil) {
-			t.Fatal("expected skills update check to run for successful subcommand")
-		}
-	})
+	for _, commandName := range []string{"asc", "asc completion", "asc install-skills", "asc version"} {
+		t.Run(commandName, func(t *testing.T) {
+			if shouldRunSkillsUpdateCheck(commandName, context.Background(), nil) {
+				t.Fatal("automatic external skills check must remain disabled")
+			}
+		})
+	}
 
-	t.Run("skips for root command", func(t *testing.T) {
-		if shouldRunSkillsUpdateCheck("asc", context.Background(), nil) {
-			t.Fatal("expected skills update check to be skipped for root command")
-		}
-	})
-
-	t.Run("skips for install-skills command", func(t *testing.T) {
-		if shouldRunSkillsUpdateCheck("asc install-skills", context.Background(), nil) {
-			t.Fatal("expected skills update check to be skipped for install-skills command")
-		}
-	})
-
-	t.Run("skips for version command", func(t *testing.T) {
-		if shouldRunSkillsUpdateCheck("asc version", context.Background(), nil) {
-			t.Fatal("expected skills update check to be skipped for version command")
-		}
-	})
-
-	t.Run("skips when run context is already canceled", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		if shouldRunSkillsUpdateCheck("asc web auth login", ctx, nil) {
-			t.Fatal("expected skills update check to be skipped for canceled run context")
-		}
-	})
-
-	t.Run("skips when run error indicates cancellation before context observes it", func(t *testing.T) {
-		if shouldRunSkillsUpdateCheck("asc web auth login", context.Background(), fmt.Errorf("prompt interrupted: %w", context.Canceled)) {
-			t.Fatal("expected skills update check to be skipped for canceled run error")
-		}
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if shouldRunSkillsUpdateCheck("asc web auth login", ctx, context.Canceled) {
+		t.Fatal("automatic external skills check must remain disabled")
+	}
+	if shouldRunSkillsUpdateCheck("asc web auth login", context.Background(), fmt.Errorf("boom")) {
+		t.Fatal("automatic external skills check must remain disabled")
+	}
 }
 
 func TestRun_HelpSkipsAuthResolution(t *testing.T) {

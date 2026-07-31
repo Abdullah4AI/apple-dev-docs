@@ -31,6 +31,23 @@ func respondToPublishAppLookup(t *testing.T, req *http.Request) (*http.Response,
 	return resp, err, true
 }
 
+func respondToFinalReviewSubmissionValidation(req *http.Request) (*http.Response, error, bool) {
+	if req.Method != http.MethodGet {
+		return nil, nil, false
+	}
+
+	switch req.URL.Path {
+	case "/v1/reviewSubmissions/review-sub-1":
+		resp, err := jsonResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"review-sub-1","attributes":{"state":"READY_FOR_REVIEW","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}}}}`)
+		return resp, err, true
+	case "/v1/reviewSubmissions/review-sub-1/items":
+		resp, err := jsonResponse(http.StatusOK, `{"data":[{"type":"reviewSubmissionItems","id":"item-1","relationships":{"appStoreVersion":{"data":{"type":"appStoreVersions","id":"version-1"}}}}]}`)
+		return resp, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
 func TestPublishAppStoreSubmitUsesModernReviewSubmissionFlow(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -45,6 +62,9 @@ func TestPublishAppStoreSubmitUsesModernReviewSubmissionFlow(t *testing.T) {
 	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requests.Add(req.Method + " " + req.URL.Path)
 		if resp, err, ok := respondToPublishAppLookup(t, req); ok {
+			return resp, err
+		}
+		if resp, err, ok := respondToFinalReviewSubmissionValidation(req); ok {
 			return resp, err
 		}
 
@@ -634,6 +654,9 @@ func TestPublishAppStoreSubmitUsesFreshTimeoutBudgetsForPreflightAndSubmission(t
 		if resp, err, ok := respondToPublishAppLookup(t, req); ok {
 			return resp, err
 		}
+		if resp, err, ok := respondToFinalReviewSubmissionValidation(req); ok {
+			return resp, err
+		}
 
 		switch {
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
@@ -765,6 +788,9 @@ func TestPublishAppStoreSubmitPreflightUsesPublishTimeoutOverride(t *testing.T) 
 
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if resp, err, ok := respondToPublishAppLookup(t, req); ok {
+			return resp, err
+		}
+		if resp, err, ok := respondToFinalReviewSubmissionValidation(req); ok {
 			return resp, err
 		}
 
@@ -1012,6 +1038,9 @@ func TestPublishAppStoreSubmitDefaultTimeoutUsesSharedPipelineBudget(t *testing.
 
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if resp, err, ok := respondToPublishAppLookup(t, req); ok {
+			return resp, err
+		}
+		if resp, err, ok := respondToFinalReviewSubmissionValidation(req); ok {
 			return resp, err
 		}
 

@@ -18,14 +18,14 @@ func appEncryptionDeclarationsRows(resp *AppEncryptionDeclarationsResponse) ([]s
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(fallbackValue(string(attrs.AppEncryptionDeclarationState))),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(fallbackValue(string(attrs.AppEncryptionDeclarationState))),
 			formatOptionalBool(attrs.Exempt),
 			formatOptionalBool(attrs.ContainsProprietaryCryptography),
 			formatOptionalBool(attrs.ContainsThirdPartyCryptography),
 			formatOptionalBool(attrs.AvailableOnFrenchStore),
-			sanitizeTerminal(fallbackValue(attrs.CreatedDate)),
-			sanitizeTerminal(fallbackValue(attrs.CodeValue)),
+			SanitizeTerminalText(fallbackValue(attrs.CreatedDate)),
+			SanitizeTerminalText(fallbackValue(attrs.CodeValue)),
 		})
 	}
 	return headers, rows
@@ -96,9 +96,9 @@ func appEncryptionDeclarationDocumentFields(resp *AppEncryptionDeclarationDocume
 func appEncryptionDeclarationBuildsUpdateResultRows(result *AppEncryptionDeclarationBuildsUpdateResult) ([]string, [][]string) {
 	headers := []string{"Declaration ID", "Build IDs", "Action"}
 	rows := [][]string{{
-		sanitizeTerminal(result.DeclarationID),
-		sanitizeTerminal(strings.Join(result.BuildIDs, ",")),
-		sanitizeTerminal(result.Action),
+		SanitizeTerminalText(result.DeclarationID),
+		SanitizeTerminalText(strings.Join(result.BuildIDs, ",")),
+		SanitizeTerminalText(result.Action),
 	}}
 	return headers, rows
 }

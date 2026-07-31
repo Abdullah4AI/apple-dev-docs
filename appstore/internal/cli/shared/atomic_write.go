@@ -1,44 +1,17 @@
 package shared
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/secureopen"
 )
 
 func createTempFileNoFollowWithPerm(dir string, pattern string, perm os.FileMode) (*os.File, error) {
-	// Mirror os.CreateTemp pattern semantics: replace the last "*" with random text,
-	// or append random text if no "*" is present.
-	prefix := pattern
-	suffix := ""
-	if idx := strings.LastIndex(pattern, "*"); idx != -1 {
-		prefix = pattern[:idx]
-		suffix = pattern[idx+1:]
-	}
-
-	const maxAttempts = 10_000
-	var randBytes [12]byte
-	for i := 0; i < maxAttempts; i++ {
-		if _, err := rand.Read(randBytes[:]); err != nil {
-			return nil, err
-		}
-		name := prefix + hex.EncodeToString(randBytes[:]) + suffix
-		f, err := OpenNewFileNoFollow(filepath.Join(dir, name), perm)
-		if err == nil {
-			return f, nil
-		}
-		if errors.Is(err, os.ErrExist) {
-			continue
-		}
-		return nil, err
-	}
-
-	return nil, fmt.Errorf("failed to create temporary file in %q", dir)
+	return secureopen.CreateTempNoFollow(dir, pattern, perm)
 }
 
 func writeFileNoSymlinkOverwrite(path string, perm os.FileMode, tempPattern string, backupPattern string, write func(*os.File) (int64, error)) (int64, error) {

@@ -11,11 +11,11 @@ func offerCodeCustomCodesRows(resp *SubscriptionOfferCodeCustomCodesResponse) ([
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(attrs.CustomCode),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(attrs.CustomCode),
 			fmt.Sprintf("%d", attrs.NumberOfCodes),
-			sanitizeTerminal(attrs.ExpirationDate),
-			sanitizeTerminal(attrs.CreatedDate),
+			SanitizeTerminalText(attrs.ExpirationDate),
+			SanitizeTerminalText(attrs.CreatedDate),
 			fmt.Sprintf("%t", attrs.Active),
 		})
 	}
@@ -30,7 +30,7 @@ func offerCodePricesRows(resp *SubscriptionOfferCodePricesResponse) ([]string, [
 		if err != nil {
 			return nil, nil, err
 		}
-		rows = append(rows, []string{sanitizeTerminal(item.ID), sanitizeTerminal(territoryID), sanitizeTerminal(pricePointID)})
+		rows = append(rows, []string{SanitizeTerminalText(item.ID), SanitizeTerminalText(territoryID), SanitizeTerminalText(pricePointID)})
 	}
 	return headers, rows, nil
 }
@@ -54,7 +54,7 @@ func offerCodeValuesRows(result *OfferCodeValuesResult) ([]string, [][]string) {
 	headers := []string{"Code"}
 	rows := make([][]string, 0, len(result.Codes))
 	for _, code := range result.Codes {
-		rows = append(rows, []string{sanitizeTerminal(code)})
+		rows = append(rows, []string{SanitizeTerminalText(code)})
 	}
 	return headers, rows
 }

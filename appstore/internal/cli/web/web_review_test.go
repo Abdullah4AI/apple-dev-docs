@@ -48,12 +48,15 @@ func TestNormalizeAttachmentFilenameSanitizesFallbackAttachmentID(t *testing.T) 
 }
 
 func TestResolveDownloadPathRejectsEscapingOutDir(t *testing.T) {
-	outDir := t.TempDir()
-	_, err := resolveDownloadPath(outDir, "../outside.txt", true)
+	root, prefix, err := newDownloadRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("newDownloadRoot() error: %v", err)
+	}
+	_, err = resolveDownloadPath(root, prefix, "../outside.txt", true)
 	if err == nil {
 		t.Fatal("expected path escape error")
 	}
-	if !strings.Contains(err.Error(), "escapes output directory") {
+	if !strings.Contains(err.Error(), "escapes trusted root") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -63,6 +66,13 @@ func TestResolveShowOutDirSanitizesDotDotPathPart(t *testing.T) {
 	want := filepath.Join(".asc", "web-review", "unknown", "submission-1")
 	if got != want {
 		t.Fatalf("expected resolved path %q, got %q", want, got)
+	}
+}
+
+func TestResolveShowOutDirPreservesWhitespacePathBytes(t *testing.T) {
+	want := filepath.Join(t.TempDir(), " downloads ")
+	if got := resolveShowOutDir("app", "submission", want); got != want {
+		t.Fatalf("resolveShowOutDir() = %q, want %q", got, want)
 	}
 }
 

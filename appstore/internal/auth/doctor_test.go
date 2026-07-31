@@ -268,7 +268,7 @@ end
 	expectedCommands := []string{
 		`asc auth login --name "MyKey" --key-id "KEY_ID" --issuer-id "ISSUER_ID" --private-key /path/to/AuthKey.p8`,
 		"asc migrate validate --fastlane-dir ./fastlane",
-		`asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane`,
+		`asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./fastlane --confirm`,
 		`asc builds info --app "APP_ID" --latest`,
 		`asc publish testflight --app "APP_ID" --ipa app.ipa --group "GROUP_ID"`,
 	}
@@ -544,7 +544,7 @@ func TestDoctorMigrationHintsUsesResolvedIDsWhenLookupSucceeds(t *testing.T) {
 	if report.Migration == nil {
 		t.Fatal("expected migration hints in report")
 	}
-	if !sliceContains(report.Migration.SuggestedCommands, `asc migrate import --app "987654321" --version-id "version-id-123" --fastlane-dir ./fastlane`) {
+	if !sliceContains(report.Migration.SuggestedCommands, `asc migrate import --app "987654321" --version-id "version-id-123" --fastlane-dir ./fastlane --confirm`) {
 		t.Fatalf("expected personalized migrate import command, got %#v", report.Migration.SuggestedCommands)
 	}
 	if !sliceContains(report.Migration.SuggestedCommands, `asc publish appstore --app "987654321" --ipa app.ipa --version "4.5.6" --submit --confirm`) {

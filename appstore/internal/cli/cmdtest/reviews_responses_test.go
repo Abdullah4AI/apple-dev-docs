@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -66,6 +67,43 @@ func writeReviewBatchFile(t *testing.T, body string) string {
 		t.Fatalf("write batch file: %v", err)
 	}
 	return path
+}
+
+// Documented respond-batch ceilings, restated here so the CLI-level tests fail
+// if the enforced limits ever drift from the published contract.
+const (
+	reviewBatchFileByteLimit     = 64 << 20
+	reviewBatchTargetLimit       = 500
+	reviewBatchResponseByteLimit = 24 << 10
+)
+
+// reviewBatchJSONOfSize returns a valid single-target batch document whose byte
+// length is exactly totalSize.
+func reviewBatchJSONOfSize(t *testing.T, totalSize int) string {
+	t.Helper()
+
+	envelope := func(padding int) string {
+		return `{"replies":[{"response":"` + strings.Repeat("a", padding) + `","reviewIds":["review-1"]}]}`
+	}
+	overhead := len(envelope(0))
+	if overhead > totalSize {
+		t.Fatalf("cannot build a batch document as small as %d bytes", totalSize)
+	}
+	body := envelope(totalSize - overhead)
+	if len(body) != totalSize {
+		t.Fatalf("expected a %d byte batch document, got %d", totalSize, len(body))
+	}
+	return body
+}
+
+func reviewBatchJSONWithReviewIDs(t *testing.T, count int) string {
+	t.Helper()
+
+	reviewIDs := make([]string, 0, count)
+	for i := range count {
+		reviewIDs = append(reviewIDs, fmt.Sprintf(`"review-%d"`, i))
+	}
+	return `{"replies":[{"response":"Thanks","reviewIds":[` + strings.Join(reviewIDs, ",") + `]}]}`
 }
 
 type reviewBatchTestOutput struct {
@@ -160,7 +198,7 @@ func TestReviewsRespondBatchCreatesGroupedReplies(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -282,7 +320,7 @@ func TestReviewsRespondBatchSkipExisting(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--skip-existing", "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--skip-existing", "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -332,7 +370,7 @@ func TestReviewsRespondBatchResponseStateUnrespondedSkipsRespondedReviews(t *tes
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--response-state", "unresponded", "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--response-state", "unresponded", "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -353,6 +391,127 @@ func TestReviewsRespondBatchResponseStateUnrespondedSkipsRespondedReviews(t *tes
 	skipped := findReviewBatchTestResult(t, payload, "review-1")
 	if skipped.Status != "skipped" || skipped.Reason != "response-state-mismatch" {
 		t.Fatalf("unexpected response-state skipped result: %+v", skipped)
+	}
+}
+
+func TestReviewsRespondBatchRejectsOversizedFileWithoutRequests(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("expected no HTTP request, got %s %s", req.Method, req.URL.String())
+		return nil, nil
+	}))
+
+	inputPath := writeReviewBatchFile(t, reviewBatchJSONOfSize(t, reviewBatchFileByteLimit+1))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--confirm"}, "1.2.3")
+		if code != cmd.ExitUsage {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--file must not exceed 67108864 bytes") {
+		t.Fatalf("expected batch file size rejection, got %q", stderr)
+	}
+}
+
+func TestReviewsRespondBatchRejectsOversizedResponseWithoutRequests(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("expected no HTTP request, got %s %s", req.Method, req.URL.String())
+		return nil, nil
+	}))
+
+	oversized := `{"replies":[{"response":"` + strings.Repeat("a", reviewBatchResponseByteLimit+1) + `","reviewIds":["review-1"]}]}`
+	inputPath := writeReviewBatchFile(t, oversized)
+
+	stdout, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--dry-run"}, "1.2.3")
+		if code != cmd.ExitUsage {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "replies[0].response must not exceed 24576 bytes") {
+		t.Fatalf("expected response size rejection, got %q", stderr)
+	}
+}
+
+func TestReviewsRespondBatchRejectsTooManyReviewIDsWithoutRequests(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("expected no HTTP request, got %s %s", req.Method, req.URL.String())
+		return nil, nil
+	}))
+
+	inputPath := writeReviewBatchFile(t, reviewBatchJSONWithReviewIDs(t, reviewBatchTargetLimit+1))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--dry-run"}, "1.2.3")
+		if code != cmd.ExitUsage {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--file must not contain more than 500 review ids") {
+		t.Fatalf("expected batch target count rejection, got %q", stderr)
+	}
+}
+
+func TestReviewsRespondBatchDryRunAtReviewIDLimit(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	inputPath := writeReviewBatchFile(t, reviewBatchJSONWithReviewIDs(t, reviewBatchTargetLimit))
+	requests := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/customerReviews" {
+			t.Fatalf("dry-run should only fetch reviews, got %s %s", req.Method, req.URL.Path)
+		}
+		reviews := make([]string, 0, reviewBatchTargetLimit)
+		for i := range reviewBatchTargetLimit {
+			reviews = append(reviews, fmt.Sprintf(`{"type":"customerReviews","id":"review-%d"}`, i))
+		}
+		return jsonResponse(http.StatusOK, `{"data":[`+strings.Join(reviews, ",")+`]}`)
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--dry-run", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requests != 1 {
+		t.Fatalf("expected one preflight request, got %d", requests)
+	}
+	payload := decodeReviewBatchTestOutput(t, stdout)
+	if payload.Summary.Total != reviewBatchTargetLimit || payload.Summary.Planned != reviewBatchTargetLimit {
+		t.Fatalf("unexpected dry-run summary at target limit: %+v", payload.Summary)
+	}
+	if payload.Summary.Created != 0 || payload.Summary.Failed != 0 || payload.Summary.Skipped != 0 {
+		t.Fatalf("expected only planned results at target limit: %+v", payload.Summary)
 	}
 }
 
@@ -377,31 +536,31 @@ func TestReviewsRespondBatchValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "bad json",
-			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE"},
+			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE", "--confirm"},
 			body:    `{"replies":[`,
 			wantErr: "failed to parse",
 		},
 		{
 			name:    "trailing json",
-			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE"},
+			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE", "--confirm"},
 			body:    `{"replies":[{"response":"Thanks","reviewIds":["review-1"]}]} {"extra":true}`,
 			wantErr: "multiple JSON values are not allowed",
 		},
 		{
 			name:    "duplicate review id",
-			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE"},
+			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE", "--confirm"},
 			body:    `{"replies":[{"response":"Thanks","reviewIds":["review-1","review-1"]}]}`,
 			wantErr: "duplicate review id",
 		},
 		{
 			name:    "empty response",
-			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE"},
+			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE", "--confirm"},
 			body:    `{"replies":[{"response":" ","reviewIds":["review-1"]}]}`,
 			wantErr: "response is required",
 		},
 		{
 			name:    "empty review id",
-			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE"},
+			args:    []string{"reviews", "respond-batch", "--app", "app-1", "--file", "FILE", "--confirm"},
 			body:    `{"replies":[{"response":"Thanks","reviewIds":[" "]}]}`,
 			wantErr: "reviewIds[0] is required",
 		},
@@ -597,7 +756,7 @@ func TestRunReviewsRespondBatchPartialFailureReturnsExitError(t *testing.T) {
 	}))
 
 	stdout, stderr := captureOutput(t, func() {
-		code := cmd.Run([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--output", "json"}, "1.2.3")
+		code := cmd.Run([]string{"reviews", "respond-batch", "--app", "app-1", "--file", inputPath, "--output", "json", "--confirm"}, "1.2.3")
 		if code != cmd.ExitError {
 			t.Fatalf("expected exit code %d, got %d", cmd.ExitError, code)
 		}

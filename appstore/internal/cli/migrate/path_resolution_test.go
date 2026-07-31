@@ -195,3 +195,46 @@ func TestResolveImportInputs_AllowsMissingFastlaneScreenshotsWhenDeliverfileSkip
 		t.Fatalf("expected screenshots dir %q, got %q", filepath.Join(fastlaneDir, "screenshots"), inputs.ScreenshotsDir)
 	}
 }
+
+func TestResolveImportInputsPreservesWhitespaceInFastlanePath(t *testing.T) {
+	base := t.TempDir()
+	fastlaneDir := filepath.Join(base, " fastlane ")
+	if err := os.MkdirAll(filepath.Join(fastlaneDir, "metadata"), 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+
+	inputs, _, err := resolveImportInputs(importInputOptions{
+		WorkDir:         base,
+		FastlaneDir:     fastlaneDir,
+		SkipScreenshots: true,
+	})
+	if err != nil {
+		t.Fatalf("resolveImportInputs() error: %v", err)
+	}
+	if inputs.MetadataDir != filepath.Join(fastlaneDir, "metadata") {
+		t.Fatalf("MetadataDir = %q, want exact whitespace path %q", inputs.MetadataDir, filepath.Join(fastlaneDir, "metadata"))
+	}
+}
+
+func TestResolveImportInputsPreservesWhitespaceInDeliverfilePathValue(t *testing.T) {
+	workDir := t.TempDir()
+	metadataName := " metadata "
+	if err := os.MkdirAll(filepath.Join(workDir, metadataName), 0o755); err != nil {
+		t.Fatalf("mkdir metadata: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workDir, "Deliverfile"),
+		[]byte("metadata_path \""+metadataName+"\"\nskip_screenshots true\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write Deliverfile: %v", err)
+	}
+
+	inputs, _, err := resolveImportInputs(importInputOptions{WorkDir: workDir})
+	if err != nil {
+		t.Fatalf("resolveImportInputs() error: %v", err)
+	}
+	if inputs.MetadataDir != filepath.Join(workDir, metadataName) {
+		t.Fatalf("MetadataDir = %q, want exact whitespace path %q", inputs.MetadataDir, filepath.Join(workDir, metadataName))
+	}
+}

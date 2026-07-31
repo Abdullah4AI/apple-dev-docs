@@ -15,6 +15,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	submitcli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/submit"
 	validatecli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
@@ -193,6 +194,35 @@ func executePipeline(ctx context.Context, opts runOptions) (runResult, error) {
 
 	requestCtx, cancel := shared.ContextWithTimeoutDuration(ctx, opts.Timeout)
 	defer cancel()
+
+	if result.Resumed || strings.TrimSpace(checkpoint.VersionID) != "" || checkpoint.SubmissionID != "" {
+		completedBeforeVerification := len(checkpoint.Completed)
+		submissionBeforeVerification := checkpoint.SubmissionID
+		if err := verifyResumedCheckpointBinding(requestCtx, client, opts, &checkpoint, nil); err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+			result.VersionID = ""
+			result.SubmissionID = ""
+			return result, err
+		}
+		// Verification only ever discards completions. Persist those discards
+		// before the pipeline mutates anything: otherwise a later checkpoint
+		// write that fails leaves the stale flags on disk, and the next resume
+		// finds the mutation already applied and skips the steps the discard
+		// was meant to force.
+		discarded := len(checkpoint.Completed) != completedBeforeVerification ||
+			checkpoint.SubmissionID != submissionBeforeVerification
+		if !opts.DryRun && discarded {
+			if saveErr := saveCheckpoint(opts.CheckpointFile, checkpoint); saveErr != nil {
+				result.Status = "error"
+				result.Error = saveErr.Error()
+				return result, saveErr
+			}
+		}
+		result.Resumed = len(checkpoint.Completed) > 0
+		result.VersionID = strings.TrimSpace(checkpoint.VersionID)
+		result.SubmissionID = strings.TrimSpace(checkpoint.SubmissionID)
+	}
 
 	versionID := strings.TrimSpace(checkpoint.VersionID)
 	submissionID := strings.TrimSpace(checkpoint.SubmissionID)
@@ -705,8 +735,46 @@ func sanitizeCheckpointToken(value string) string {
 	return result
 }
 
+// checkpointRoot anchors checkpoint reads and writes to a trusted root so the
+// checkpoint file and its staging file cannot redirect through symlinks.
+//
+// Checkpoints under the working directory (including the default
+// .asc/release/checkpoints path) are anchored to the working directory so every
+// repository-controlled directory component is validated. A checkpoint the
+// operator placed outside the working directory is anchored to its own parent,
+// which keeps explicitly selected external locations working.
+func checkpointRoot(path string) (rootfs.Root, string, error) {
+	if path == "" {
+		return rootfs.Root{}, "", fmt.Errorf("checkpoint path is empty")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return rootfs.Root{}, "", err
+	}
+
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		if root, rootErr := rootfs.New(cwd); rootErr == nil {
+			if relative, relErr := filepath.Rel(root.Path(), absolute); relErr == nil {
+				if relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+					return root, relative, nil
+				}
+			}
+		}
+	}
+
+	root, err := rootfs.New(filepath.Dir(absolute))
+	if err != nil {
+		return rootfs.Root{}, "", err
+	}
+	return root, filepath.Base(absolute), nil
+}
+
 func loadCheckpoint(path string) (*runCheckpoint, error) {
-	data, err := os.ReadFile(path)
+	root, name, err := checkpointRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+	data, err := root.ReadFile(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -729,15 +797,12 @@ func saveCheckpoint(path string, checkpoint runCheckpoint) error {
 	if err != nil {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create checkpoint directory: %w", err)
-	}
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	root, name, err := checkpointRoot(path)
+	if err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("persist checkpoint: %w", err)
+	if err := root.WriteFile(name, data, 0o600); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
 	}
 	return nil
 }

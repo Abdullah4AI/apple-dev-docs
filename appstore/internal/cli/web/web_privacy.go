@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -724,11 +724,14 @@ func validateApplyPlanUsageIDs(plan privacyPlanOutput) error {
 }
 
 func parsePrivacyDeclarationFile(path string) (privacyDeclarationFile, error) {
-	path = strings.TrimSpace(path)
 	if path == "" {
 		return privacyDeclarationFile{}, fmt.Errorf("file path is required")
 	}
-	data, err := os.ReadFile(path)
+	root, name, err := privacyDeclarationRoot(path)
+	if err != nil {
+		return privacyDeclarationFile{}, err
+	}
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return privacyDeclarationFile{}, fmt.Errorf("failed to read %s: %w", path, err)
 	}
@@ -753,20 +756,40 @@ func parsePrivacyDeclarationFile(path string) (privacyDeclarationFile, error) {
 	return declarationFromTupleSet(tuples), nil
 }
 
-func writePrivacyDeclarationFile(path string, declaration privacyDeclarationFile) error {
-	path = strings.TrimSpace(path)
+// privacyDeclarationRoot anchors privacy declaration reads and writes to the
+// parent directory of the operator-selected path, so the final component and any
+// component created below it cannot resolve through a symlink.
+func privacyDeclarationRoot(path string) (rootfs.Root, string, error) {
 	if path == "" {
+		return rootfs.Root{}, "", fmt.Errorf("file path is required")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return rootfs.Root{}, "", err
+	}
+	root, err := rootfs.New(filepath.Dir(absolute))
+	if err != nil {
+		return rootfs.Root{}, "", err
+	}
+	return root, filepath.Base(absolute), nil
+}
+
+func writePrivacyDeclarationFile(path string, declaration privacyDeclarationFile) error {
+	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("output path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
+	root, name, err := privacyDeclarationRoot(path)
+	if err != nil {
+		return err
 	}
 	jsonData, err := json.MarshalIndent(declaration, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal privacy declaration: %w", err)
 	}
 	jsonData = append(jsonData, '\n')
-	if err := os.WriteFile(path, jsonData, 0o600); err != nil {
+	// An existing declaration keeps its permissions, matching the previous
+	// in-place write; new files default to 0600.
+	if err := root.WriteFilePreservingMode(name, jsonData, 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil
@@ -1278,11 +1301,13 @@ Examples:
 			}
 
 			declaration := declarationFromRemoteDataUsages(remoteUsages)
-			outPath := strings.TrimSpace(*out)
+			outPath := *out
 			if outPath != "" {
 				if err := writePrivacyDeclarationFile(outPath, declaration); err != nil {
 					return err
 				}
+			} else {
+				outPath = ""
 			}
 
 			payload := privacyPullOutput{
@@ -1335,7 +1360,7 @@ Examples:
 			if resolvedAppID == "" {
 				return shared.UsageError("--app is required (or set ASC_APP_ID)")
 			}
-			resolvedFilePath := strings.TrimSpace(*filePath)
+			resolvedFilePath := *filePath
 			if resolvedFilePath == "" {
 				return shared.UsageError("--file is required")
 			}
@@ -1415,7 +1440,7 @@ Examples:
 			if resolvedAppID == "" {
 				return shared.UsageError("--app is required (or set ASC_APP_ID)")
 			}
-			resolvedFilePath := strings.TrimSpace(*filePath)
+			resolvedFilePath := *filePath
 			if resolvedFilePath == "" {
 				return shared.UsageError("--file is required")
 			}

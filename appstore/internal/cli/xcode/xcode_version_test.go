@@ -81,6 +81,44 @@ func TestXcodeVersionViewCommandSupportsProjectFlag(t *testing.T) {
 	}
 }
 
+func TestSelectedProjectInputPreservesExactPathBytes(t *testing.T) {
+	tests := []struct {
+		name       string
+		projectDir string
+		project    string
+		want       string
+	}{
+		{
+			name:       "explicit project with trailing whitespace",
+			projectDir: "./ignored",
+			project:    "./MyApp/Foo.xcodeproj ",
+			want:       "./MyApp/Foo.xcodeproj ",
+		},
+		{
+			name:       "project directory with surrounding whitespace",
+			projectDir: " ./My App ",
+			want:       " ./My App ",
+		},
+		{
+			name:       "all-whitespace explicit project remains a path",
+			projectDir: "./ignored",
+			project:    " ",
+			want:       " ",
+		},
+		{
+			name: "empty values keep default",
+			want: ".",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := selectedProjectInput(test.projectDir, test.project); got != test.want {
+				t.Fatalf("selectedProjectInput(%q, %q) = %q, want %q", test.projectDir, test.project, got, test.want)
+			}
+		})
+	}
+}
+
 func TestXcodeVersionEditCommandOutputsResult(t *testing.T) {
 	originalRunSetVersion := runSetVersion
 	t.Cleanup(func() {

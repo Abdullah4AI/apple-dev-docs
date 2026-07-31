@@ -3,6 +3,8 @@ package assets
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -350,9 +352,28 @@ func uploadScreenshotAsset(ctx context.Context, client *asc.Client, setID, fileP
 		return asc.AssetUploadResultItem{}, err
 	}
 	defer file.Close()
+	return uploadScreenshotAssetFromFile(ctx, client, setID, filePath, file)
+}
 
+func uploadScreenshotAssetFromFile(ctx context.Context, client *asc.Client, setID, filePath string, file *os.File) (asc.AssetUploadResultItem, error) {
+	if file == nil {
+		return asc.AssetUploadResultItem{}, fmt.Errorf("screenshot file is required")
+	}
 	info, err := file.Stat()
 	if err != nil {
+		return asc.AssetUploadResultItem{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return asc.AssetUploadResultItem{}, fmt.Errorf("expected regular file: %q", filePath)
+	}
+	if info.Size() <= 0 {
+		return asc.AssetUploadResultItem{}, fmt.Errorf("file is empty: %q", filePath)
+	}
+	const maxScreenshotUploadFileSize = int64(1024 * 1024 * 1024)
+	if info.Size() > maxScreenshotUploadFileSize {
+		return asc.AssetUploadResultItem{}, fmt.Errorf("file size exceeds %d bytes: %q", maxScreenshotUploadFileSize, filePath)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return asc.AssetUploadResultItem{}, err
 	}
 
@@ -393,6 +414,13 @@ func uploadScreenshotAsset(ctx context.Context, client *asc.Client, setID, fileP
 // UploadScreenshotAsset uploads a screenshot file to a set.
 func UploadScreenshotAsset(ctx context.Context, client *asc.Client, setID, filePath string) (asc.AssetUploadResultItem, error) {
 	return uploadScreenshotAsset(ctx, client, setID, filePath)
+}
+
+// UploadScreenshotAssetFromFile uploads from an already-open, validated source
+// handle. Callers that discover files under a rooted filesystem can retain the
+// handle so a later pathname replacement cannot redirect the upload.
+func UploadScreenshotAssetFromFile(ctx context.Context, client *asc.Client, setID, filePath string, file *os.File) (asc.AssetUploadResultItem, error) {
+	return uploadScreenshotAssetFromFile(ctx, client, setID, filePath, file)
 }
 
 func waitForScreenshotDelivery(ctx context.Context, client *asc.Client, screenshotID string) (string, error) {

@@ -924,8 +924,10 @@ func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 
 	markerPath := filepath.Join(tmpDir, "skills-check-ran")
 	scriptPath := filepath.Join(scriptDir, "skills")
+	// Marker paths are baked into the script: helper processes receive an
+	// allowlisted environment, so arbitrary test variables cannot reach them.
 	script := "#!/bin/sh\n" +
-		"printf 'ran' > \"$SKILLS_MARKER\"\n" +
+		"printf 'ran' > '" + markerPath + "'\n" +
 		"sleep 2\n" +
 		"printf 'update available\\n'\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
@@ -941,7 +943,6 @@ func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 		"ASC_IRIS_SESSION_CACHE=0",
 		"ASC_SKILLS_AUTO_CHECK=1",
 		"CI=",
-		"SKILLS_MARKER="+markerPath,
 		"PATH="+scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	runCmd.Env = env
@@ -999,7 +1000,7 @@ func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 	}
 }
 
-func TestSkillsAutoCheckDoesNotDelayForegroundCommand(t *testing.T) {
+func TestSkillsAutoCheckIsDisabledEvenWhenEnvironmentOptsIn(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY timing regression requires a Unix shell")
 	}
@@ -1031,10 +1032,12 @@ func TestSkillsAutoCheckDoesNotDelayForegroundCommand(t *testing.T) {
 		}
 	})
 	scriptPath := filepath.Join(scriptDir, "skills")
+	// Marker paths are baked into the script: helper processes receive an
+	// allowlisted environment, so arbitrary test variables cannot reach them.
 	script := "#!/bin/sh\n" +
-		"printf 'ran' > \"$SKILLS_MARKER\"\n" +
+		"printf 'ran' > '" + markerPath + "'\n" +
 		"sleep 10 &\n" +
-		"printf '%s' \"$!\" > \"$SKILLS_SLEEP_PID\"\n" +
+		"printf '%s' \"$!\" > '" + sleepPIDPath + "'\n" +
 		"printf '2 updates available\\n'\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write fake skills command: %v", err)
@@ -1045,8 +1048,6 @@ func TestSkillsAutoCheckDoesNotDelayForegroundCommand(t *testing.T) {
 		isolatedCLITestEnv(configPath),
 		"ASC_SKILLS_AUTO_CHECK=1",
 		"CI=",
-		"SKILLS_MARKER="+markerPath,
-		"SKILLS_SLEEP_PID="+sleepPIDPath,
 		"PATH="+scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 
@@ -1084,63 +1085,12 @@ func TestSkillsAutoCheckDoesNotDelayForegroundCommand(t *testing.T) {
 		t.Fatalf("PTY stayed open after foreground exit\noutput:\n%s", output.String())
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, statErr := os.Stat(markerPath); statErr == nil {
-			break
-		} else if !os.IsNotExist(statErr) {
-			t.Fatalf("failed to stat skills marker: %v", statErr)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("detached skills checker did not start")
-		}
-		time.Sleep(10 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	if _, statErr := os.Stat(markerPath); !os.IsNotExist(statErr) {
+		t.Fatalf("automatic skills checker ran despite being disabled: %v", statErr)
 	}
-
-	cachePath := filepath.Join(tmpDir, "skills-check.json")
-	lockPath := filepath.Join(tmpDir, "skills-check.lock")
-	deadline = time.Now().Add(3 * time.Second)
-	for {
-		_, cacheErr := os.Stat(cachePath)
-		_, lockErr := os.Stat(lockPath)
-		if cacheErr == nil && os.IsNotExist(lockErr) {
-			break
-		}
-		if cacheErr != nil && !os.IsNotExist(cacheErr) {
-			t.Fatalf("stat skills cache: %v", cacheErr)
-		}
-		if lockErr != nil && !os.IsNotExist(lockErr) {
-			t.Fatalf("stat skills worker lock: %v", lockErr)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("detached worker did not finish cache publication (cache: %v, lock: %v)", cacheErr, lockErr)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	deadline = time.Now().Add(2 * time.Second)
-	for {
-		pidBytes, readErr := os.ReadFile(sleepPIDPath)
-		if readErr == nil {
-			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-			if parseErr != nil {
-				t.Fatalf("parse checker sleep PID: %v", parseErr)
-			}
-			process, findErr := os.FindProcess(pid)
-			if findErr != nil {
-				t.Fatalf("find checker sleep process: %v", findErr)
-			}
-			_ = process.Kill()
-			_ = os.Remove(sleepPIDPath)
-			break
-		}
-		if !os.IsNotExist(readErr) {
-			t.Fatalf("read checker sleep PID: %v", readErr)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("checker did not record descendant PID")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if _, statErr := os.Stat(sleepPIDPath); !os.IsNotExist(statErr) {
+		t.Fatalf("automatic skills checker spawned a descendant despite being disabled: %v", statErr)
 	}
 }
 

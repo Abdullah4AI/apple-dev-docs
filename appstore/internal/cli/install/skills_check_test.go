@@ -702,8 +702,8 @@ func TestDefaultRunSkillsCheckCommandUsesSkillsBinaryCheckCommand(t *testing.T) 
 		}
 		return mockSkills, nil
 	}
-	lookupNpx = func(string) (string, error) {
-		t.Fatal("lookupNpx should not run when skills is available")
+	lookupExecutable = func(string) (string, error) {
+		t.Fatal("lookupExecutable should not run when skills is available")
 		return "", errors.New("unexpected")
 	}
 
@@ -721,7 +721,7 @@ func TestDefaultRunSkillsCheckCommandMissingCLIsIsUnavailable(t *testing.T) {
 	lookupSkillsCheckCLI = func(string) (string, error) {
 		return "", exec.ErrNotFound
 	}
-	lookupNpx = func(string) (string, error) {
+	lookupExecutable = func(string) (string, error) {
 		return "", exec.ErrNotFound
 	}
 
@@ -743,9 +743,9 @@ func TestDefaultRunSkillsCheckCommandFallsBackToNpxOffline(t *testing.T) {
 	lookupSkillsCheckCLI = func(string) (string, error) {
 		return "", exec.ErrNotFound
 	}
-	lookupNpx = func(file string) (string, error) {
+	lookupExecutable = func(file string) (string, error) {
 		if file != "npx" {
-			t.Fatalf("lookupNpx called with %q, want npx", file)
+			t.Fatalf("lookupExecutable called with %q, want npx", file)
 		}
 		return mockNpx, nil
 	}
@@ -754,8 +754,9 @@ func TestDefaultRunSkillsCheckCommandFallsBackToNpxOffline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultRunSkillsCheckCommand() error: %v", err)
 	}
-	if !strings.Contains(output, "--offline --yes skills check|true") {
-		t.Fatalf("offline npx invocation = %q", output)
+	want := "--offline --yes " + skillsInstallerPackage + " check|true"
+	if !strings.Contains(output, want) {
+		t.Fatalf("offline npx invocation = %q, want %q", output, want)
 	}
 }
 
@@ -768,7 +769,7 @@ func TestDefaultRunSkillsCheckCommandOfflineCacheMissIsUnavailable(t *testing.T)
 	lookupSkillsCheckCLI = func(string) (string, error) {
 		return "", exec.ErrNotFound
 	}
-	lookupNpx = func(string) (string, error) {
+	lookupExecutable = func(string) (string, error) {
 		return mockNpx, nil
 	}
 
@@ -790,8 +791,8 @@ func TestDefaultRunSkillsCheckCommandDoesNotWaitForDescendantPipes(t *testing.T)
 	lookupSkillsCheckCLI = func(string) (string, error) {
 		return mockSkills, nil
 	}
-	lookupNpx = func(string) (string, error) {
-		t.Fatal("lookupNpx should not run")
+	lookupExecutable = func(string) (string, error) {
+		t.Fatal("lookupExecutable should not run")
 		return "", errors.New("unexpected")
 	}
 
@@ -921,10 +922,10 @@ func TestValidateSkillsCheckWorkerSpec(t *testing.T) {
 func restoreSkillsCheckLookups(t *testing.T) {
 	t.Helper()
 	origSkills := lookupSkillsCheckCLI
-	origNpx := lookupNpx
+	origNpx := lookupExecutable
 	t.Cleanup(func() {
 		lookupSkillsCheckCLI = origSkills
-		lookupNpx = origNpx
+		lookupExecutable = origNpx
 	})
 }
 

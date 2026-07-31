@@ -38,6 +38,7 @@ func BuildsUploadCommand() *ffcli.Command {
 	pollInterval := fs.Duration("poll-interval", shared.PublishDefaultPollInterval, "Polling interval for --wait and --test-notes")
 	verifyTimeout := fs.Duration("verify-timeout", 0, "How long to watch for immediate post-commit upload failures (0 to disable)")
 	output := shared.BindOutputFlags(fs)
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 
 	return &ffcli.Command{
 		Name:       "upload",
@@ -50,6 +51,8 @@ the file immediately. Use --verify-timeout to briefly watch for immediate
 post-commit processing failures, or --wait for full build discovery and
 processing.
 Use --dry-run to only reserve the upload operations.
+Presigned URLs and request-header values are redacted from output by default.
+Pass --include-sensitive only when another tool must consume those capabilities.
 
 Use --ipa for iOS, tvOS, and visionOS apps. Use --pkg for macOS apps.
 When using --pkg, the platform is automatically set to MAC_OS.
@@ -58,6 +61,7 @@ Examples:
   asc builds upload --app "123456789" --ipa "path/to/app.ipa"
   asc builds upload --ipa "app.ipa" --version "1.0.0" --build-number "123"
   asc builds upload --app "123456789" --ipa "app.ipa" --dry-run
+  asc builds upload --app "123456789" --ipa "app.ipa" --dry-run --include-sensitive
   asc builds upload --app "123456789" --ipa "app.ipa" --test-notes "Test flow" --locale "en-US" --wait
   asc builds upload --app "123456789" --pkg "path/to/app.pkg" --version "1.0.0" --build-number "123"`,
 		FlagSet:   fs,
@@ -236,13 +240,21 @@ Examples:
 				return fmt.Errorf("builds upload: %w", err)
 			}
 
-			// Return upload info including presigned URL operations
+			outputOperations := fileResp.Data.Attributes.UploadOperations
+			if *includeSensitive {
+				shared.WarnIncludeSensitive(os.Stderr, true)
+			} else {
+				outputOperations = asc.RedactUploadOperations(outputOperations)
+			}
+
+			// Return upload metadata. Capability-bearing URL and header values
+			// require an explicit per-invocation opt-in.
 			result := &asc.BuildUploadResult{
 				UploadID:   uploadResp.Data.ID,
 				FileID:     fileResp.Data.ID,
 				FileName:   fileResp.Data.Attributes.FileName,
 				FileSize:   fileResp.Data.Attributes.FileSize,
-				Operations: fileResp.Data.Attributes.UploadOperations,
+				Operations: outputOperations,
 			}
 
 			if !*dryRun {

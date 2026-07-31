@@ -516,7 +516,7 @@ func (c *Client) DownloadCiArtifact(ctx context.Context, downloadURL string) (*R
 		return nil, fmt.Errorf("ci artifact download: %w", err)
 	}
 
-	resp, err := c.doStreamNoAuth(ctx, "GET", downloadURL, "application/octet-stream")
+	resp, err := c.doStreamNoAuth(ctx, downloadURL, "application/octet-stream")
 	if err != nil {
 		return nil, err
 	}

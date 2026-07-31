@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 type ReviewInformation struct {
@@ -20,9 +21,42 @@ type ReviewInformation struct {
 	Notes               *string `json:"notes,omitempty"`
 }
 
+const reviewInformationDir = "review_information"
+
+// presentableImportResult returns the result to render. Without an explicit
+// opt-in the imported demo account password is replaced so JSON, table, and
+// Markdown output cannot carry it, while the original result keeps the real
+// value for request construction and comparison.
+func presentableImportResult(result *MigrateImportResult, includeSensitive bool) *MigrateImportResult {
+	if includeSensitive || result == nil || result.ReviewInformation == nil {
+		return result
+	}
+	safe := *result
+	safe.ReviewInformation = result.ReviewInformation.redactedCopy()
+	return &safe
+}
+
+func (info *ReviewInformation) redactedCopy() *ReviewInformation {
+	if info == nil {
+		return nil
+	}
+	safe := *info
+	if info.DemoAccountPassword != nil {
+		redacted := asc.RedactSecret(*info.DemoAccountPassword)
+		safe.DemoAccountPassword = &redacted
+	}
+	return &safe
+}
+
 func readFastlaneReviewInformation(metadataDir string) (*ReviewInformation, error) {
-	reviewDir := filepath.Join(metadataDir, "review_information")
-	if exists, err := dirExists(reviewDir); err != nil {
+	root, prefix, err := newMigrateContentRoot(metadataDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkContentRootContained(root, prefix); err != nil {
+		return nil, err
+	}
+	if exists, err := dirExists(filepath.Join(metadataDir, reviewInformationDir)); err != nil {
 		return nil, err
 	} else if !exists {
 		return nil, nil
@@ -30,50 +64,32 @@ func readFastlaneReviewInformation(metadataDir string) (*ReviewInformation, erro
 
 	info := &ReviewInformation{}
 	assigned := 0
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "first_name.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.ContactFirstName = &value
-		assigned++
+	fields := []struct {
+		file  string
+		field **string
+	}{
+		{"first_name.txt", &info.ContactFirstName},
+		{"last_name.txt", &info.ContactLastName},
+		{"phone_number.txt", &info.ContactPhone},
+		{"email_address.txt", &info.ContactEmail},
+		{"demo_user.txt", &info.DemoAccountName},
+		{"demo_password.txt", &info.DemoAccountPassword},
+		{"notes.txt", &info.Notes},
 	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "last_name.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.ContactLastName = &value
-		assigned++
-	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "phone_number.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.ContactPhone = &value
-		assigned++
-	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "email_address.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.ContactEmail = &value
-		assigned++
-	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "demo_user.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.DemoAccountName = &value
-		assigned++
-	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "demo_password.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.DemoAccountPassword = &value
-		assigned++
-	}
-	if value, ok, err := readOptionalFile(filepath.Join(reviewDir, "notes.txt")); err != nil {
-		return nil, err
-	} else if ok {
-		info.Notes = &value
+	for _, field := range fields {
+		value, ok, err := readOptionalFile(root, filepath.Join(prefix, reviewInformationRelativePath(field.file)))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		stored := value
+		*field.field = &stored
 		assigned++
 	}
 
-	required, err := readOptionalReviewRequired(reviewDir)
+	required, err := readOptionalReviewRequired(root, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +100,9 @@ func readFastlaneReviewInformation(metadataDir string) (*ReviewInformation, erro
 
 	if assigned == 0 {
 		return nil, nil
+	}
+	if err := asc.ValidateSecretMutationValue(info.DemoAccountPassword); err != nil {
+		return nil, fmt.Errorf("review information: %w", err)
 	}
 	return info, nil
 }
@@ -151,15 +170,15 @@ func reviewInformationMatches(existing asc.AppStoreReviewDetailAttributes, info 
 	return true
 }
 
-func readOptionalReviewRequired(reviewDir string) (*bool, error) {
-	primary := filepath.Join(reviewDir, "demo_account_required.txt")
-	secondary := filepath.Join(reviewDir, "demo_required.txt")
+func readOptionalReviewRequired(root rootfs.Root, prefix string) (*bool, error) {
+	primary := filepath.Join(prefix, reviewInformationRelativePath("demo_account_required.txt"))
+	secondary := filepath.Join(prefix, reviewInformationRelativePath("demo_required.txt"))
 
-	primaryValue, primaryExists, err := readOptionalFile(primary)
+	primaryValue, primaryExists, err := readOptionalFile(root, primary)
 	if err != nil {
 		return nil, err
 	}
-	secondaryValue, secondaryExists, err := readOptionalFile(secondary)
+	secondaryValue, secondaryExists, err := readOptionalFile(root, secondary)
 	if err != nil {
 		return nil, err
 	}
@@ -168,11 +187,11 @@ func readOptionalReviewRequired(reviewDir string) (*bool, error) {
 		return nil, nil
 	}
 
-	primaryParsed, primaryErr := parseReviewRequiredValue(primary, primaryValue, primaryExists)
+	primaryParsed, primaryErr := parseReviewRequiredValue(filepath.Join(root.Path(), primary), primaryValue, primaryExists)
 	if primaryErr != nil {
 		return nil, primaryErr
 	}
-	secondaryParsed, secondaryErr := parseReviewRequiredValue(secondary, secondaryValue, secondaryExists)
+	secondaryParsed, secondaryErr := parseReviewRequiredValue(filepath.Join(root.Path(), secondary), secondaryValue, secondaryExists)
 	if secondaryErr != nil {
 		return nil, secondaryErr
 	}
@@ -205,13 +224,17 @@ func parseReviewRequiredValue(path, value string, exists bool) (*bool, error) {
 	}
 }
 
-func readOptionalFile(path string) (string, bool, error) {
-	data, err := os.ReadFile(path)
+func reviewInformationRelativePath(file string) string {
+	return filepath.Join(reviewInformationDir, file)
+}
+
+func readOptionalFile(root rootfs.Root, name string) (string, bool, error) {
+	data, found, err := root.ReadFileOptional(name)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", false, nil
-		}
 		return "", false, err
+	}
+	if !found {
+		return "", false, nil
 	}
 	return strings.TrimSpace(string(data)), true, nil
 }

@@ -12,6 +12,7 @@ import (
 // Headers preserve their original casing and are center-aligned.
 // Data rows are left-aligned for readability.
 func RenderTable(headers []string, rows [][]string) {
+	safeHeaders, safeRows := sanitizeHumanTableData(headers, rows)
 	table := tablewriter.NewTable(
 		os.Stdout,
 		tablewriter.WithConfig(tablewriter.Config{
@@ -26,8 +27,8 @@ func RenderTable(headers []string, rows [][]string) {
 			},
 		}),
 	)
-	table.Header(headers)
-	_ = table.Bulk(rows)
+	table.Header(safeHeaders)
+	_ = table.Bulk(safeRows)
 	_ = table.Render()
 }
 
@@ -35,6 +36,7 @@ func RenderTable(headers []string, rows [][]string) {
 // Headers preserve their original casing. Data rows are left-aligned.
 // Pipe characters in cell values are escaped automatically by the renderer.
 func RenderMarkdown(headers []string, rows [][]string) {
+	safeHeaders, safeRows := sanitizeHumanTableData(headers, rows)
 	table := tablewriter.NewTable(
 		os.Stdout,
 		tablewriter.WithRenderer(renderer.NewMarkdown()),
@@ -50,7 +52,23 @@ func RenderMarkdown(headers []string, rows [][]string) {
 			},
 		}),
 	)
-	table.Header(headers)
-	_ = table.Bulk(rows)
+	table.Header(safeHeaders)
+	_ = table.Bulk(safeRows)
 	_ = table.Render()
+}
+
+func sanitizeHumanTableData(headers []string, rows [][]string) ([]string, [][]string) {
+	safeHeaders := make([]string, len(headers))
+	for i, header := range headers {
+		safeHeaders[i] = SanitizeTerminalText(header)
+	}
+
+	safeRows := make([][]string, len(rows))
+	for i, row := range rows {
+		safeRows[i] = make([]string, len(row))
+		for j, cell := range row {
+			safeRows[i][j] = SanitizeTerminalText(cell)
+		}
+	}
+	return safeHeaders, safeRows
 }

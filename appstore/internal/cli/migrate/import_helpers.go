@@ -60,6 +60,23 @@ func resolveVersionID(ctx context.Context, client *asc.Client, versionFlag strin
 	return shared.ResolveAppStoreVersionID(ctx, client, appID, config.AppVersion, normalizedPlatform)
 }
 
+// verifyExplicitVersionOwnership proves that an operator-supplied --version-id
+// belongs to the selected app before any version is mutated. Deliverfile
+// resolution already scopes its lookup to the app, so only the explicit flag
+// needs the extra round trip.
+func verifyExplicitVersionOwnership(ctx context.Context, client *asc.Client, versionFlag, appID, versionID string) error {
+	if strings.TrimSpace(versionFlag) == "" {
+		return nil
+	}
+	if client == nil {
+		return fmt.Errorf("--version-id requires API access to verify that it belongs to app %s", appID)
+	}
+	if _, err := shared.ResolveOwnedAppStoreVersionByID(ctx, client, appID, versionID, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
 func normalizeDeliverfilePlatform(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "ios":
@@ -371,7 +388,21 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 					})
 					continue
 				}
-				item, err := assets.UploadScreenshotAsset(uploadCtx, client, setID, filePath)
+				var item asc.AssetUploadResultItem
+				var err error
+				if opened, ok, openErr := plan.openedFile(filePath); openErr != nil {
+					err = openErr
+				} else if ok {
+					item, err = assets.UploadScreenshotAssetFromFile(uploadCtx, client, setID, filePath, opened)
+					if closeErr := opened.Close(); err == nil {
+						err = closeErr
+					}
+				} else {
+					// Keep compatibility for callers that construct plans
+					// directly; migrate import discovery always supplies a
+					// pinned rooted handle.
+					item, err = assets.UploadScreenshotAsset(uploadCtx, client, setID, filePath)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("migrate import: failed to upload screenshot %s: %w", filePath, err)
 				}

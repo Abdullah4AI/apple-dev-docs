@@ -114,8 +114,8 @@ asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confir
 
 ```bash
 asc migrate validate --fastlane-dir ./metadata
-asc migrate import --app "APP_ID" --fastlane-dir ./metadata
-asc migrate export --app "APP_ID" --output ./exported-metadata
+asc migrate import --app "APP_ID" --version-id "VERSION_ID" --fastlane-dir ./metadata --confirm
+asc migrate export --app "APP_ID" --version-id "VERSION_ID" --output-dir ./exported-metadata
 ```
 
 ## Command Groups

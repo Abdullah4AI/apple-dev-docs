@@ -2148,330 +2148,11 @@ func TestCollectSubmissionErrorSignalsTraversesJoinedErrorTree(t *testing.T) {
 	}
 }
 
-func TestAddVersionToSubmissionOrRecover_ExhaustsRetriesForRecentlyCanceledSubmission(t *testing.T) {
-	const staleSubmissionID = "stale-1"
-
-	attempts := 0
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost || req.URL.Path != "/v1/reviewSubmissionItems" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		attempts++
-		return submitJSONResponse(http.StatusConflict, submitAlreadyAddedConflictBody(staleSubmissionID))
-	}))
-
-	originalDelays := submitCreateRecentlyCanceledRetryDelays
-	submitCreateRecentlyCanceledRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
-	t.Cleanup(func() {
-		submitCreateRecentlyCanceledRetryDelays = originalDelays
-	})
-
-	resolvedID, err := addVersionToSubmissionOrRecover(
-		context.Background(),
-		client,
-		"new-sub-1",
-		"version-1",
-		map[string]struct{}{staleSubmissionID: {}},
-		nil,
-	)
-	if err == nil {
-		t.Fatal("expected retry exhaustion error")
-	}
-	if resolvedID != "" {
-		t.Fatalf("expected empty resolved submission ID on failure, got %q", resolvedID)
-	}
-	if !strings.Contains(err.Error(), "still attached to recently canceled review submission stale-1 after 2 retries") {
-		t.Fatalf("expected retry exhaustion message, got: %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("expected 3 add-item attempts (initial + 2 retries), got %d", attempts)
-	}
-}
-
-func TestAddVersionToSubmissionOrRecover_RetriesStillInProgressConflictForRecentlyCanceledSubmission(t *testing.T) {
-	const staleSubmissionID = "stale-1"
-
-	attempts := 0
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost || req.URL.Path != "/v1/reviewSubmissionItems" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		attempts++
-		if attempts < 3 {
-			return submitJSONResponse(http.StatusConflict, submitStillInProgressConflictBody(staleSubmissionID))
-		}
-		return submitJSONResponse(http.StatusCreated, `{
-			"data": {
-				"type": "reviewSubmissionItems",
-				"id": "item-123",
-				"attributes": {
-					"state": "READY_FOR_REVIEW"
-				}
-			}
-		}`)
-	}))
-
-	originalDelays := submitCreateRecentlyCanceledRetryDelays
-	submitCreateRecentlyCanceledRetryDelays = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
-	t.Cleanup(func() {
-		submitCreateRecentlyCanceledRetryDelays = originalDelays
-	})
-
-	resolvedID, err := addVersionToSubmissionOrRecover(
-		context.Background(),
-		client,
-		"new-sub-1",
-		"version-1",
-		map[string]struct{}{staleSubmissionID: {}},
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("expected retry recovery, got %v", err)
-	}
-	if resolvedID != "new-sub-1" {
-		t.Fatalf("expected new submission ID after retry recovery, got %q", resolvedID)
-	}
-	if attempts != 3 {
-		t.Fatalf("expected 3 add-item attempts (2 conflicts + success), got %d", attempts)
-	}
-}
-
-func TestAddVersionToSubmissionOrRecover_ReturnsContextErrorWhileWaitingForDetach(t *testing.T) {
-	const staleSubmissionID = "stale-1"
-
-	attempts := 0
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost || req.URL.Path != "/v1/reviewSubmissionItems" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		attempts++
-		return submitJSONResponse(http.StatusConflict, submitAlreadyAddedConflictBody(staleSubmissionID))
-	}))
-
-	originalDelays := submitCreateRecentlyCanceledRetryDelays
-	submitCreateRecentlyCanceledRetryDelays = []time.Duration{100 * time.Millisecond}
-	t.Cleanup(func() {
-		submitCreateRecentlyCanceledRetryDelays = originalDelays
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-
-	resolvedID, err := addVersionToSubmissionOrRecover(
-		ctx,
-		client,
-		"new-sub-1",
-		"version-1",
-		map[string]struct{}{staleSubmissionID: {}},
-		nil,
-	)
-	if err == nil {
-		t.Fatal("expected context cancellation while waiting to retry")
-	}
-	if resolvedID != "" {
-		t.Fatalf("expected empty resolved submission ID on failure, got %q", resolvedID)
-	}
-	if !strings.Contains(err.Error(), "waiting for recently canceled review submission stale-1 to clear") {
-		t.Fatalf("expected wait/cancellation error message, got: %v", err)
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected wrapped context deadline exceeded error, got: %v", err)
-	}
-	if attempts != 1 {
-		t.Fatalf("expected one add-item attempt before context cancellation, got %d", attempts)
-	}
-}
-
-func TestCleanupEmptyReviewSubmissionWarnsOnUnexpectedCancelError(t *testing.T) {
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPatch || req.URL.Path != "/v1/reviewSubmissions/empty-sub-1" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		return submitJSONResponse(http.StatusInternalServerError, `{
-			"errors": [{
-				"status": "500",
-				"code": "INTERNAL_ERROR",
-				"title": "Internal Server Error"
-			}]
-		}`)
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		cleanupEmptyReviewSubmission(context.Background(), client, "empty-sub-1", nil)
-	})
-	if !strings.Contains(stderr, "Warning: failed to cancel empty submission empty-sub-1:") {
-		t.Fatalf("expected cleanup warning, got %q", stderr)
-	}
-}
-
-func TestCleanupEmptyReviewSubmissionIgnoresExpectedNonCancellableState(t *testing.T) {
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPatch || req.URL.Path != "/v1/reviewSubmissions/empty-sub-1" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		return submitJSONResponse(http.StatusConflict, `{
-			"errors": [{
-				"status": "409",
-				"code": "CONFLICT",
-				"title": "Resource state is invalid.",
-				"detail": "Resource is not in cancellable state"
-			}]
-		}`)
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		cleanupEmptyReviewSubmission(context.Background(), client, "empty-sub-1", nil)
-	})
-	if stderr != "" {
-		t.Fatalf("expected no cleanup warning for expected non-cancellable state, got %q", stderr)
-	}
-}
-
-func TestCleanupEmptyReviewSubmissionWarnsOnGenericConflict(t *testing.T) {
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPatch || req.URL.Path != "/v1/reviewSubmissions/empty-sub-1" {
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-		return submitJSONResponse(http.StatusConflict, `{
-			"errors": [{
-				"status": "409",
-				"code": "CONFLICT",
-				"title": "Conflict",
-				"detail": "Another operation is already in progress"
-			}]
-		}`)
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		cleanupEmptyReviewSubmission(context.Background(), client, "empty-sub-1", nil)
-	})
-	if !strings.Contains(stderr, "Warning: failed to cancel empty submission empty-sub-1:") {
-		t.Fatalf("expected cleanup warning for generic conflict, got %q", stderr)
-	}
-}
-
-func TestPrepareReviewSubmissionForCreateWarnsOnGenericConflict(t *testing.T) {
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/reviewSubmissions":
-			return submitJSONResponse(http.StatusOK, `{
-				"data": [{
-					"type": "reviewSubmissions",
-					"id": "stale-sub-1",
-					"attributes": {
-						"state": "READY_FOR_REVIEW",
-						"platform": "IOS"
-					}
-				}]
-			}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/stale-sub-1":
-			return submitJSONResponse(http.StatusConflict, `{
-				"errors": [{
-					"status": "409",
-					"code": "CONFLICT",
-					"title": "Conflict",
-					"detail": "Another operation is already in progress"
-				}]
-			}`)
-		default:
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
-		}
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		got := prepareReviewSubmissionForCreate(context.Background(), client, "app-1", "IOS", "version-1", nil)
-		if got.reuseSubmissionID != "" {
-			t.Fatalf("expected no reusable submission, got %#v", got)
-		}
-		if got.canceledSubmissionIDs != nil {
-			t.Fatalf("expected no canceled submissions, got %#v", got.canceledSubmissionIDs)
-		}
-	})
-	if !strings.Contains(stderr, "Warning: failed to cancel stale submission stale-sub-1:") {
-		t.Fatalf("expected stale submission warning for generic conflict, got %q", stderr)
-	}
-	if strings.Contains(stderr, "Skipped stale submission stale-sub-1") {
-		t.Fatalf("did not expect stale submission skip message, got %q", stderr)
-	}
-}
-
-func TestPrepareReviewSubmissionForCreateDoesNotReuseSubmissionThatBecameCanceling(t *testing.T) {
-	requests := make([]string, 0, 3)
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requests = append(requests, req.Method+" "+req.URL.RequestURI())
-
-		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/reviewSubmissions":
-			return submitJSONResponse(http.StatusOK, `{
-				"data": [{
-					"type": "reviewSubmissions",
-					"id": "stale-sub-1",
-					"attributes": {
-						"state": "READY_FOR_REVIEW",
-						"platform": "IOS"
-					}
-				}]
-			}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/stale-sub-1":
-			return submitJSONResponse(http.StatusConflict, `{
-				"errors": [{
-					"status": "409",
-					"code": "CONFLICT",
-					"title": "Resource state is invalid.",
-					"detail": "Resource is not in cancellable state"
-				}]
-			}`)
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/stale-sub-1":
-			return submitJSONResponse(http.StatusOK, `{
-				"data": {
-					"type": "reviewSubmissions",
-					"id": "stale-sub-1",
-					"attributes": {
-						"state": "CANCELING",
-						"platform": "IOS"
-					},
-					"relationships": {
-						"appStoreVersionForReview": {
-							"data": {"type": "appStoreVersions", "id": "version-1"}
-						}
-					}
-				}
-			}`)
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/stale-sub-1/items":
-			t.Fatalf("did not expect item lookup once refreshed submission includes the version relationship")
-			return nil, fmt.Errorf("unexpected request after fatal: %s %s", req.Method, req.URL.RequestURI())
-		default:
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
-		}
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		got := prepareReviewSubmissionForCreate(context.Background(), client, "app-1", "IOS", "version-1", nil)
-		if got.reuseSubmissionID != "" {
-			t.Fatalf("expected no reusable submission after refreshed CANCELING state, got %#v", got)
-		}
-		if got.canceledSubmissionIDs != nil {
-			t.Fatalf("expected no canceled submissions, got %#v", got.canceledSubmissionIDs)
-		}
-	})
-
-	wantRequests := []string{
-		"GET /v1/apps/app-1/reviewSubmissions?filter%5Bplatform%5D=IOS&filter%5Bstate%5D=READY_FOR_REVIEW&include=appStoreVersionForReview&limit=200",
-		"PATCH /v1/reviewSubmissions/stale-sub-1",
-		"GET /v1/reviewSubmissions/stale-sub-1",
-	}
-	if !reflect.DeepEqual(requests, wantRequests) {
-		t.Fatalf("unexpected requests: got %v want %v", requests, wantRequests)
-	}
-	if !strings.Contains(stderr, "Skipped stale submission stale-sub-1: already transitioned to a non-cancellable state") {
-		t.Fatalf("expected stale submission skip message, got %q", stderr)
-	}
-	if strings.Contains(stderr, "Reusing existing review submission stale-sub-1") {
-		t.Fatalf("did not expect reuse message, got %q", stderr)
-	}
-}
-
-func TestPrepareReviewSubmissionForCreateCancelsMixedTargetVersionSubmission(t *testing.T) {
+// TestPrepareReviewSubmissionForCreateSkipsMixedTargetVersionSubmission proves
+// that a submission holding the selected version alongside other review items
+// (another version, an in-app purchase, an app event) is neither reused nor
+// implicitly withdrawn: cancelling it would drop the unrelated review work.
+func TestPrepareReviewSubmissionForCreateSkipsMixedTargetVersionSubmission(t *testing.T) {
 	requests := make([]string, 0, 4)
 	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requests = append(requests, req.Method+" "+req.URL.RequestURI())
@@ -2514,8 +2195,6 @@ func TestPrepareReviewSubmissionForCreateCancelsMixedTargetVersionSubmission(t *
 					}
 				]
 			}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/mixed-submission":
-			return submitJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"mixed-submission"}}`)
 		default:
 			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
 		}
@@ -2529,15 +2208,11 @@ func TestPrepareReviewSubmissionForCreateCancelsMixedTargetVersionSubmission(t *
 		if got.reuseSubmissionHasVersion {
 			t.Fatalf("expected mixed-item submission not to be marked as reusable target version, got %#v", got)
 		}
-		if _, ok := got.canceledSubmissionIDs["mixed-submission"]; !ok {
-			t.Fatalf("expected mixed-item submission to be canceled, got %#v", got.canceledSubmissionIDs)
-		}
 	})
 
 	wantRequests := []string{
 		"GET /v1/apps/app-1/reviewSubmissions?filter%5Bplatform%5D=IOS&filter%5Bstate%5D=READY_FOR_REVIEW&include=appStoreVersionForReview&limit=200",
 		"GET /v1/reviewSubmissions/mixed-submission/items?limit=200",
-		"PATCH /v1/reviewSubmissions/mixed-submission",
 	}
 	if !reflect.DeepEqual(requests, wantRequests) {
 		t.Fatalf("unexpected requests: got %v want %v", requests, wantRequests)
@@ -2545,8 +2220,11 @@ func TestPrepareReviewSubmissionForCreateCancelsMixedTargetVersionSubmission(t *
 	if strings.Contains(stderr, "Reusing existing review submission mixed-submission") {
 		t.Fatalf("did not expect reuse message, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "Canceled stale review submission mixed-submission") {
-		t.Fatalf("expected stale submission cancellation message, got %q", stderr)
+	if !strings.Contains(stderr, "Skipped stale review submission mixed-submission") {
+		t.Fatalf("expected skip diagnostic naming the submission, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "asc submit cancel") {
+		t.Fatalf("expected skip diagnostic to point at explicit cancellation, got %q", stderr)
 	}
 }
 
@@ -2587,9 +2265,6 @@ func TestPrepareReviewSubmissionForCreateTreatsEmptyItemsAsMissingVersion(t *tes
 		if got.reuseSubmissionHasVersion {
 			t.Fatalf("expected empty-items submission to require re-attaching the version, got %#v", got)
 		}
-		if got.canceledSubmissionIDs != nil {
-			t.Fatalf("did not expect canceled submissions when reusable empty submission exists, got %#v", got.canceledSubmissionIDs)
-		}
 	})
 
 	wantRequests := []string{
@@ -2601,89 +2276,6 @@ func TestPrepareReviewSubmissionForCreateTreatsEmptyItemsAsMissingVersion(t *tes
 	}
 	if !strings.Contains(stderr, "Reusing existing review submission empty-items-submission") {
 		t.Fatalf("expected reuse message for empty-items submission, got %q", stderr)
-	}
-}
-
-func TestPrepareReviewSubmissionForCreatePreservesCanceledIDsWhenReusingAfterConflict(t *testing.T) {
-	requests := make([]string, 0, 6)
-	client := newSubmitTestClient(t, submitRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requests = append(requests, req.Method+" "+req.URL.RequestURI())
-
-		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/app-1/reviewSubmissions":
-			return submitJSONResponse(http.StatusOK, `{
-				"data": [
-					{
-						"type": "reviewSubmissions",
-						"id": "stale-sub-1",
-						"attributes": {"state": "READY_FOR_REVIEW", "platform": "IOS"}
-					},
-					{
-						"type": "reviewSubmissions",
-						"id": "reusable-empty-sub",
-						"attributes": {"state": "READY_FOR_REVIEW", "platform": "IOS"}
-					}
-				]
-			}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/stale-sub-1":
-			return submitJSONResponse(http.StatusOK, `{"data":{"type":"reviewSubmissions","id":"stale-sub-1"}}`)
-		case req.Method == http.MethodPatch && req.URL.Path == "/v1/reviewSubmissions/reusable-empty-sub":
-			return submitJSONResponse(http.StatusConflict, `{
-				"errors": [{
-					"status": "409",
-					"code": "CONFLICT",
-					"title": "Resource state is invalid.",
-					"detail": "Resource is not in cancellable state"
-				}]
-			}`)
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/reusable-empty-sub":
-			return submitJSONResponse(http.StatusOK, `{
-				"data": {
-					"type": "reviewSubmissions",
-					"id": "reusable-empty-sub",
-					"attributes": {"state": "READY_FOR_REVIEW", "platform": "IOS"},
-					"relationships": {
-						"appStoreVersionForReview": {
-							"data": {"type": "appStoreVersions", "id": "version-1"}
-						}
-					}
-				}
-			}`)
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/reusable-empty-sub/items":
-			return submitJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
-		default:
-			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.RequestURI())
-		}
-	}))
-
-	stderr := captureSubmitStderr(t, func() {
-		got := prepareReviewSubmissionForCreate(context.Background(), client, "app-1", "IOS", "version-1", nil)
-		if got.reuseSubmissionID != "reusable-empty-sub" {
-			t.Fatalf("expected reusable submission after cancel conflict, got %#v", got)
-		}
-		if got.reuseSubmissionHasVersion {
-			t.Fatalf("expected empty reusable submission to require re-adding the version, got %#v", got)
-		}
-		if _, ok := got.canceledSubmissionIDs["stale-sub-1"]; !ok {
-			t.Fatalf("expected earlier canceled submission ID to be preserved, got %#v", got.canceledSubmissionIDs)
-		}
-	})
-
-	wantRequests := []string{
-		"GET /v1/apps/app-1/reviewSubmissions?filter%5Bplatform%5D=IOS&filter%5Bstate%5D=READY_FOR_REVIEW&include=appStoreVersionForReview&limit=200",
-		"PATCH /v1/reviewSubmissions/stale-sub-1",
-		"PATCH /v1/reviewSubmissions/reusable-empty-sub",
-		"GET /v1/reviewSubmissions/reusable-empty-sub",
-		"GET /v1/reviewSubmissions/reusable-empty-sub/items?limit=200",
-	}
-	if !reflect.DeepEqual(requests, wantRequests) {
-		t.Fatalf("unexpected requests: got %v want %v", requests, wantRequests)
-	}
-	if !strings.Contains(stderr, "Canceled stale review submission stale-sub-1") {
-		t.Fatalf("expected stale submission cancellation message, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "Reusing existing empty review submission reusable-empty-sub") {
-		t.Fatalf("expected empty reusable submission message, got %q", stderr)
 	}
 }
 
@@ -2741,9 +2333,6 @@ func TestPrepareReviewSubmissionForCreatePaginatesReadyForReviewLookups(t *testi
 		}
 		if !got.reuseSubmissionHasVersion {
 			t.Fatalf("expected reused paginated submission to already carry the target version, got %#v", got)
-		}
-		if got.canceledSubmissionIDs != nil {
-			t.Fatalf("did not expect canceled submissions when paginated reusable submission exists, got %#v", got.canceledSubmissionIDs)
 		}
 	})
 
@@ -3026,25 +2615,6 @@ func submitAlreadyAddedConflictBody(existingSubmissionID string) string {
 					"/v1/reviewSubmissionItems": [{
 						"code": "ENTITY_ERROR.RELATIONSHIP.INVALID",
 						"detail": "appStoreVersions with id version-1 was already added to another reviewSubmission with id %s"
-					}]
-				}
-			}
-		}]
-	}`, existingSubmissionID)
-}
-
-func submitStillInProgressConflictBody(existingSubmissionID string) string {
-	return fmt.Sprintf(`{
-		"errors": [{
-			"status": "409",
-			"code": "ENTITY_ERROR",
-			"title": "The request entity is not valid.",
-			"detail": "This resource cannot be reviewed, please check associated errors to see why.",
-			"meta": {
-				"associatedErrors": {
-					"/v1/reviewSubmissionItems": [{
-						"code": "ENTITY_ERROR.RELATIONSHIP.INVALID",
-						"detail": "appStoreVersions with id version-1 is already in another reviewSubmission with id %s still in progress"
 					}]
 				}
 			}

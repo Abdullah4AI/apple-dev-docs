@@ -54,6 +54,22 @@ func TestSubmitResolvedVersionReusesReadySubmissionWithTargetVersion(t *testing.
 					}
 				}]
 			}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/reviewSubmissions/existing-submission":
+			return submitJSONResponse(http.StatusOK, `{
+				"data": {
+					"type": "reviewSubmissions",
+					"id": "existing-submission",
+					"attributes": {
+						"state": "READY_FOR_REVIEW",
+						"platform": "IOS"
+					},
+					"relationships": {
+						"app": {
+							"data": {"type": "apps", "id": "app-1"}
+						}
+					}
+				}
+			}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/reviewSubmissions":
 			createdSubmission = true
 			return submitJSONResponse(http.StatusCreated, `{"data":{"type":"reviewSubmissions","id":"new-submission"}}`)

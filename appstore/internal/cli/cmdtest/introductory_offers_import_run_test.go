@@ -95,6 +95,7 @@ func TestSubscriptionsIntroductoryOffersImport_CreateSuccessSummary(t *testing.T
 			"--offer-duration", "ONE_WEEK",
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -244,6 +245,7 @@ func TestSubscriptionsIntroductoryOffersImport_PartialFailureReturnsReportedErro
 			"--offer-duration", "ONE_WEEK",
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -336,6 +338,7 @@ func TestSubscriptionsIntroductoryOffersImport_StopOnFirstFailureWhenRequested(t
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
 			"--continue-on-error=false",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -436,6 +439,7 @@ func TestSubscriptionsIntroductoryOffersImport_RowValuesOverrideDefaults(t *test
 			"--number-of-periods", "1",
 			"--start-date", "2026-03-01",
 			"--end-date", "2026-03-15",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -504,6 +508,7 @@ func TestSubscriptionsIntroductoryOffersImport_NormalizesInheritedDefaultEnums(t
 			"--offer-duration", "one_week",
 			"--offer-mode", "free_trial",
 			"--number-of-periods", "1",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -554,6 +559,7 @@ func TestSubscriptionsIntroductoryOffersImport_SkipsExactExistingOffer(t *testin
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
 			"--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -616,6 +622,7 @@ func TestSubscriptionsIntroductoryOffersImport_ReconcilesAmbiguousCreateWithoutR
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
 			"--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -678,6 +685,7 @@ func TestSubscriptionsIntroductoryOffersImport_PaginatesIndexAndUsesEncodedTerri
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
 			"--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -756,6 +764,7 @@ func TestSubscriptionsIntroductoryOffersImport_PaidOfferMatchesPricePoint(t *tes
 				if err := root.Parse([]string{
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "8000000003", "--input", csvPath, "--output", "json",
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -812,6 +821,7 @@ func TestSubscriptionsIntroductoryOffersImport_RetriesTimedOutInitialStateRead(t
 			"subscriptions", "offers", "introductory", "import",
 			"--subscription-id", "8000000003", "--input", csvPath,
 			"--offer-duration", "ONE_WEEK", "--offer-mode", "FREE_TRIAL", "--number-of-periods", "1", "--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -855,6 +865,7 @@ func TestSubscriptionsIntroductoryOffersImport_PrintsFailuresWhenArtifactWriteFa
 			"subscriptions", "offers", "introductory", "import",
 			"--subscription-id", "8000000003", "--input", csvPath,
 			"--offer-duration", "ONE_WEEK", "--offer-mode", "FREE_TRIAL", "--number-of-periods", "1", "--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -912,6 +923,7 @@ func TestSubscriptionsIntroductoryOffersImport_WritesVersionedFailureArtifact(t 
 			"--offer-mode", "FREE_TRIAL",
 			"--number-of-periods", "1",
 			"--output", "json",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}

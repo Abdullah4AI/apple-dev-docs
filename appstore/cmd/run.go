@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,9 +31,6 @@ var (
 // Run executes the CLI using the provided args (not including argv[0]) and version string.
 // It returns the intended process exit code.
 func Run(args []string, versionInfo string) int {
-	if install.RunSkillsCheckWorkerIfRequested() {
-		return ExitSuccess
-	}
 	defer shared.CleanupTempPrivateKeys()
 
 	// Fast path for the most common version check invocation. This avoids
@@ -43,6 +41,7 @@ func Run(args []string, versionInfo string) int {
 	}
 
 	root := rootCommandForArgs(versionInfo, args)
+	args = normalizeSpacedBooleanFlags(root, args)
 	analysis := analyzeInvocation(root, args)
 	runCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stopSignals()
@@ -73,13 +72,10 @@ func Run(args []string, versionInfo string) int {
 	}
 
 	if versionRequested {
-		if err := root.Run(runCtx); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return ExitUsage
-			}
-			fmt.Fprint(os.Stderr, errfmt.FormatStderr(err))
-			return ExitCodeFromError(err)
-		}
+		// A root informational flag must never dispatch a trailing subcommand.
+		// Printing directly also keeps `asc --version true ...` as harmless as
+		// the conventional `asc --version` form.
+		fmt.Fprintln(os.Stdout, versionInfo)
 		return ExitSuccess
 	}
 
@@ -167,6 +163,101 @@ func Run(args []string, versionInfo string) int {
 		InvocationShape: analysis.shape,
 	})
 	return ExitSuccess
+}
+
+// normalizeSpacedBooleanFlags preserves the CLI's liberal support for both
+// `--flag=false` and `--flag false`. The standard flag package stops parsing at
+// the value after a bare bool flag, which can otherwise leave later safety
+// flags unparsed and make an explicit false behave as true.
+//
+// Commands with positional payloads retain the standard flag ambiguity for
+// compatibility: in `asc snitch --dry-run false`, for example, v3.2.0 treated
+// `--dry-run` as true and `false` as the report description. Callers of those
+// commands can use `--dry-run=false` when they intend an explicit bool value.
+func normalizeSpacedBooleanFlags(root *ffcli.Command, args []string) []string {
+	command := root
+	commandPath := make([]string, 0, 4)
+	if root != nil && root.Name != "" {
+		commandPath = append(commandPath, root.Name)
+	}
+	normalized := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		token := args[index]
+		if token == "--" {
+			normalized = append(normalized, args[index:]...)
+			break
+		}
+		if !strings.HasPrefix(token, "-") || token == "-" {
+			if subcommand := findDirectSubcommand(command, token); subcommand != nil {
+				command = subcommand
+				commandPath = append(commandPath, subcommand.Name)
+				normalized = append(normalized, token)
+				continue
+			}
+			normalized = append(normalized, args[index:]...)
+			break
+		}
+
+		name := strings.TrimLeft(strings.SplitN(token, "=", 2)[0], "-")
+		if command == nil || command.FlagSet == nil || name == "" {
+			normalized = append(normalized, token)
+			continue
+		}
+		item := command.FlagSet.Lookup(name)
+		if item == nil {
+			// Parsing will report the unknown flag. Do not reinterpret anything
+			// after the token that stops standard flag parsing.
+			normalized = append(normalized, args[index:]...)
+			break
+		}
+		if strings.ContainsRune(token, '=') {
+			normalized = append(normalized, token)
+			continue
+		}
+
+		boolFlag, isBool := item.Value.(interface{ IsBoolFlag() bool })
+		if isBool && boolFlag.IsBoolFlag() {
+			if commandAcceptsPositionalPayload(commandPath) {
+				normalized = append(normalized, token)
+				continue
+			}
+			if index+1 < len(args) {
+				if value, err := strconv.ParseBool(strings.TrimSpace(args[index+1])); err == nil {
+					normalized = append(normalized, token+"="+strconv.FormatBool(value))
+					index++
+					continue
+				}
+			}
+			normalized = append(normalized, token)
+			continue
+		}
+
+		// A non-bool flag consumes its following value even when that value
+		// looks like another flag. Never normalize inside the value.
+		normalized = append(normalized, token)
+		if index+1 < len(args) {
+			index++
+			normalized = append(normalized, args[index])
+		}
+	}
+	return normalized
+}
+
+// commandAcceptsPositionalPayload lists the commands whose positional strings
+// are part of their public contract. A positional value can legitimately be the
+// word "true" or "false", so consuming it as a spaced boolean would break the
+// standard flag behavior these commands exposed before spaced bool recovery.
+func commandAcceptsPositionalPayload(commandPath []string) bool {
+	switch strings.Join(commandPath, " ") {
+	case "asc docs show",
+		"asc schema",
+		"asc search",
+		"asc snitch",
+		"asc workflow run":
+		return true
+	default:
+		return false
+	}
 }
 
 func printParseFailure(parseErr error, parseOutput string, analysis invocationAnalysis) {
@@ -267,16 +358,11 @@ func shouldCancelRunContextAfterError(err error) bool {
 }
 
 func shouldRunSkillsUpdateCheck(commandName string, runCtx context.Context, runErr error) bool {
-	if commandName == "asc" || commandName == "asc install-skills" || commandName == "asc version" {
-		return false
-	}
-	if runCtx != nil && runCtx.Err() != nil {
-		return false
-	}
-	if shouldCancelRunContextAfterError(runErr) {
-		return false
-	}
-	return true
+	// The external `skills check` command is not read-only: current releases
+	// route it through the updater and can rewrite globally installed skills.
+	// Keep automatic execution disabled until a reviewed, read-only protocol
+	// exists. Explicit `asc install-skills` remains available.
+	return false
 }
 
 func isVersionOnlyInvocation(args []string) bool {

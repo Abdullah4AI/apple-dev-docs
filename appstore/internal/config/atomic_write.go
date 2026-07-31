@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -165,32 +163,7 @@ func isAllowedConfigDirSymlink(path string) bool {
 }
 
 func createTempConfigFile(dir, pattern string, perm os.FileMode) (*os.File, error) {
-	prefix := pattern
-	suffix := ""
-	if idx := strings.LastIndex(pattern, "*"); idx != -1 {
-		prefix = pattern[:idx]
-		suffix = pattern[idx+1:]
-	}
-
-	const maxAttempts = 10_000
-	var randBytes [12]byte
-	for i := 0; i < maxAttempts; i++ {
-		if _, err := rand.Read(randBytes[:]); err != nil {
-			return nil, err
-		}
-
-		name := prefix + hex.EncodeToString(randBytes[:]) + suffix
-		file, err := secureopen.OpenNewFileNoFollow(filepath.Join(dir, name), perm)
-		if err == nil {
-			return file, nil
-		}
-		if errors.Is(err, os.ErrExist) {
-			continue
-		}
-		return nil, err
-	}
-
-	return nil, fmt.Errorf("failed to create temporary config file in %q", dir)
+	return secureopen.CreateTempNoFollow(dir, pattern, perm)
 }
 
 func syncDir(path string) error {

@@ -41,7 +41,7 @@ func UploadAssetFromFile(ctx context.Context, file *os.File, fileSize int64, ope
 		return fmt.Errorf("no upload operations provided")
 	}
 
-	client := &http.Client{Timeout: ResolveUploadTimeout()}
+	client := clientWithoutRedirects(&http.Client{Timeout: ResolveUploadTimeout()})
 
 	for i, op := range operations {
 		method := strings.ToUpper(strings.TrimSpace(op.Method))
@@ -61,7 +61,7 @@ func UploadAssetFromFile(ctx context.Context, file *os.File, fileSize int64, ope
 		reader := io.NewSectionReader(file, op.Offset, op.Length)
 		req, err := http.NewRequestWithContext(ctx, method, op.URL, reader)
 		if err != nil {
-			return fmt.Errorf("upload operation %d: %w", i, err)
+			return fmt.Errorf("upload operation %d: %w", i, newSanitizedUploadError("create upload request", op.URL, err))
 		}
 		req.ContentLength = op.Length
 		for _, header := range op.RequestHeaders {
@@ -70,7 +70,7 @@ func UploadAssetFromFile(ctx context.Context, file *os.File, fileSize int64, ope
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("upload operation %d failed: %w", i, err)
+			return fmt.Errorf("upload operation %d: %w", i, newSanitizedUploadError("upload request", op.URL, err))
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()

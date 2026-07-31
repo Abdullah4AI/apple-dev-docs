@@ -30,12 +30,12 @@ func appEventsRows(resp *AppEventsResponse) ([]string, [][]string) {
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
+			SanitizeTerminalText(item.ID),
 			compactWhitespace(attrs.ReferenceName),
-			sanitizeTerminal(attrs.Badge),
-			sanitizeTerminal(attrs.EventState),
-			sanitizeTerminal(attrs.PrimaryLocale),
-			sanitizeTerminal(attrs.Priority),
+			SanitizeTerminalText(attrs.Badge),
+			SanitizeTerminalText(attrs.EventState),
+			SanitizeTerminalText(attrs.PrimaryLocale),
+			SanitizeTerminalText(attrs.Priority),
 		})
 	}
 	return headers, rows
@@ -47,8 +47,8 @@ func appEventLocalizationsRows(resp *AppEventLocalizationsResponse) ([]string, [
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(attrs.Locale),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(attrs.Locale),
 			compactWhitespace(attrs.Name),
 			compactWhitespace(attrs.ShortDescription),
 			compactWhitespace(attrs.LongDescription),
@@ -63,11 +63,11 @@ func appEventScreenshotsRows(resp *AppEventScreenshotsResponse) ([]string, [][]s
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(attrs.FileName),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(attrs.FileName),
 			fmt.Sprintf("%d", attrs.FileSize),
-			sanitizeTerminal(attrs.AppEventAssetType),
-			sanitizeTerminal(formatAppMediaAssetState(attrs.AssetDeliveryState)),
+			SanitizeTerminalText(attrs.AppEventAssetType),
+			SanitizeTerminalText(formatAppMediaAssetState(attrs.AssetDeliveryState)),
 		})
 	}
 	return headers, rows
@@ -79,11 +79,11 @@ func appEventVideoClipsRows(resp *AppEventVideoClipsResponse) ([]string, [][]str
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(attrs.FileName),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(attrs.FileName),
 			fmt.Sprintf("%d", attrs.FileSize),
-			sanitizeTerminal(attrs.AppEventAssetType),
-			sanitizeTerminal(formatAppMediaVideoState(attrs.VideoDeliveryState, attrs.AssetDeliveryState)),
+			SanitizeTerminalText(attrs.AppEventAssetType),
+			SanitizeTerminalText(formatAppMediaVideoState(attrs.VideoDeliveryState, attrs.AssetDeliveryState)),
 		})
 	}
 	return headers, rows
@@ -108,12 +108,12 @@ func appEventSubmissionResultRows(result *AppEventSubmissionResult) ([]string, [
 		submittedDate = *result.SubmittedDate
 	}
 	rows := [][]string{{
-		sanitizeTerminal(result.SubmissionID),
-		sanitizeTerminal(result.ItemID),
-		sanitizeTerminal(result.EventID),
-		sanitizeTerminal(result.AppID),
-		sanitizeTerminal(result.Platform),
-		sanitizeTerminal(submittedDate),
+		SanitizeTerminalText(result.SubmissionID),
+		SanitizeTerminalText(result.ItemID),
+		SanitizeTerminalText(result.EventID),
+		SanitizeTerminalText(result.AppID),
+		SanitizeTerminalText(result.Platform),
+		SanitizeTerminalText(submittedDate),
 	}}
 	return headers, rows
 }

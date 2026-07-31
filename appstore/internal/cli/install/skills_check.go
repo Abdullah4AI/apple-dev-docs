@@ -584,10 +584,10 @@ func skillsOutputHasUpdates(output string) bool {
 func defaultRunSkillsCheckCommand(ctx context.Context) (string, error) {
 	skillsPath, err := lookupSkillsCheckCLI("skills")
 	if err == nil && !shouldSkipProjectLocalSkillsBinary(skillsPath) {
-		return runSkillsCheckProcess(ctx, skillsPath, []string{"check"}, nil)
+		return runSkillsCheckProcess(ctx, skillsPath, []string{"check"}, skillsCheckHelperEnvironment(os.Environ()))
 	}
 
-	npxPath, err := lookupNpx("npx")
+	npxPath, err := lookupExecutable("npx")
 	if err != nil {
 		return "", errSkillsCheckUnavailable
 	}
@@ -595,8 +595,8 @@ func defaultRunSkillsCheckCommand(ctx context.Context) (string, error) {
 	output, runErr := runSkillsCheckProcess(
 		ctx,
 		npxPath,
-		[]string{"--offline", "--yes", "skills", "check"},
-		append(os.Environ(), "npm_config_offline=true"),
+		[]string{"--offline", "--yes", skillsInstallerPackage, "check"},
+		append(skillsCheckHelperEnvironment(os.Environ()), "npm_config_offline=true"),
 	)
 	if runErr != nil && isUnavailableSkillsCheckOutput(output) {
 		return output, errSkillsCheckUnavailable

@@ -13,9 +13,9 @@ func accessibilityDeclarationsRows(resp *AccessibilityDeclarationsResponse) ([]s
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(fallbackValue(string(attrs.DeviceFamily))),
-			sanitizeTerminal(fallbackValue(string(attrs.State))),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(fallbackValue(string(attrs.DeviceFamily))),
+			SanitizeTerminalText(fallbackValue(string(attrs.State))),
 			formatOptionalBool(attrs.SupportsAudioDescriptions),
 			formatOptionalBool(attrs.SupportsCaptions),
 			formatOptionalBool(attrs.SupportsDarkInterface),

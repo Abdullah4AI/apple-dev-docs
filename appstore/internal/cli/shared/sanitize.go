@@ -1,19 +1,8 @@
 package shared
 
-import "strings"
+import "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 
-// SanitizeTerminal strips ASCII control characters to prevent terminal escape injection.
+// SanitizeTerminal removes characters interpreted by terminals and log viewers.
 func SanitizeTerminal(input string) string {
-	if input == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.Grow(len(input))
-	for _, r := range input {
-		if r < 0x20 || r == 0x7f {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return asc.SanitizeTerminalText(input)
 }

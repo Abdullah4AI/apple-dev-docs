@@ -112,6 +112,9 @@ func (c *Client) UpdateBetaAppReviewDetail(ctx context.Context, detailID string,
 	if detailID == "" {
 		return nil, fmt.Errorf("detailID is required")
 	}
+	if err := validateSecretMutationValue(attrs.DemoAccountPassword); err != nil {
+		return nil, err
+	}
 
 	payload := BetaAppReviewDetailUpdateRequest{
 		Data: BetaAppReviewDetailUpdateData{
@@ -128,7 +131,7 @@ func (c *Client) UpdateBetaAppReviewDetail(ctx context.Context, detailID string,
 
 	data, err := c.do(ctx, "PATCH", fmt.Sprintf("/v1/betaAppReviewDetails/%s", detailID), body)
 	if err != nil {
-		return nil, err
+		return nil, redactSubmittedSecretFromError(err, attrs.DemoAccountPassword)
 	}
 
 	var response BetaAppReviewDetailResponse

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 type pathSource string
@@ -21,6 +23,12 @@ type importInputOptions struct {
 	MetadataDir     string
 	ScreenshotsDir  string
 	SkipScreenshots bool
+	// The allow options preserve legacy Fastlane layouts only when the operator
+	// explicitly trusts paths that repository-controlled configuration can
+	// redirect outside the selected checkout.
+	AllowExternalMetadata     bool
+	AllowExternalScreenshots  bool
+	AllowSymlinkedDeliverfile bool
 }
 
 type importInputs struct {
@@ -33,8 +41,8 @@ type importInputs struct {
 }
 
 func resolveImportInputs(opts importInputOptions) (importInputs, []SkippedItem, error) {
-	workDir := strings.TrimSpace(opts.WorkDir)
-	if workDir == "" {
+	workDir := opts.WorkDir
+	if strings.TrimSpace(workDir) == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return importInputs{}, nil, fmt.Errorf("resolve import paths: %w", err)
@@ -55,7 +63,7 @@ func resolveImportInputs(opts importInputOptions) (importInputs, []SkippedItem, 
 
 	var config DeliverfileConfig
 	if deliverfilePath != "" {
-		config, err = parseDeliverfile(deliverfilePath)
+		config, err = readDeliverfileConfig(workDir, opts.FastlaneDir, deliverfilePath, opts.AllowSymlinkedDeliverfile)
 		if err != nil {
 			return importInputs{}, nil, err
 		}
@@ -66,8 +74,14 @@ func resolveImportInputs(opts importInputOptions) (importInputs, []SkippedItem, 
 		DeliverfileConfig: config,
 	}
 
-	metadataDir, metadataSource := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.MetadataDir, config.MetadataPath, "metadata")
-	screenshotsDir, screenshotsSource := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.ScreenshotsDir, config.ScreenshotsPath, "screenshots")
+	metadataDir, metadataSource, err := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.MetadataDir, config.MetadataPath, "metadata", opts.AllowExternalMetadata)
+	if err != nil {
+		return importInputs{}, nil, err
+	}
+	screenshotsDir, screenshotsSource, err := resolveImportPath(workDir, opts.FastlaneDir, deliverfilePath, opts.ScreenshotsDir, config.ScreenshotsPath, "screenshots", opts.AllowExternalScreenshots)
+	if err != nil {
+		return importInputs{}, nil, err
+	}
 	skipScreenshots := opts.SkipScreenshots || config.SkipScreenshots
 
 	skipped := []SkippedItem{}
@@ -90,25 +104,103 @@ func resolveImportInputs(opts importInputOptions) (importInputs, []SkippedItem, 
 	return inputs, skipped, nil
 }
 
-func resolveImportPath(workDir, fastlaneDir, deliverfilePath, explicitPath, deliverfilePathValue, defaultDir string) (string, pathSource) {
+func resolveImportPath(workDir, fastlaneDir, deliverfilePath, explicitPath, deliverfilePathValue, defaultDir string, allowExternal bool) (string, pathSource, error) {
 	if strings.TrimSpace(explicitPath) != "" {
-		return explicitPath, pathSourceFlag
+		return explicitPath, pathSourceFlag, nil
 	}
 	if strings.TrimSpace(fastlaneDir) != "" {
-		return filepath.Join(fastlaneDir, defaultDir), pathSourceFlag
+		resolved, err := resolveFastlaneChild(fastlaneDir, defaultDir, allowExternal)
+		if err != nil {
+			return "", pathSourceFlag, err
+		}
+		return resolved, pathSourceFlag, nil
 	}
 	if strings.TrimSpace(deliverfilePathValue) != "" {
 		base := workDir
 		if deliverfilePath != "" {
 			base = filepath.Dir(deliverfilePath)
 		}
-		return resolveRelativePath(base, deliverfilePathValue), pathSourceDeliverfile
+		resolved, err := containDeliverfilePath(workDir, base, deliverfilePathValue)
+		if err != nil {
+			if !allowExternal {
+				return "", pathSourceDeliverfile, err
+			}
+			resolved, err = resolveTrustedDeliverfilePath(base, deliverfilePathValue)
+			if err != nil {
+				return "", pathSourceDeliverfile, err
+			}
+		}
+		return resolved, pathSourceDeliverfile, nil
 	}
 	base := workDir
 	if deliverfilePath != "" {
 		base = filepath.Dir(deliverfilePath)
 	}
-	return filepath.Join(base, defaultDir), pathSourceDefault
+	return filepath.Join(base, defaultDir), pathSourceDefault, nil
+}
+
+func resolveFastlaneChild(fastlaneDir, child string, allowExternal bool) (string, error) {
+	resolved, err := containFastlaneChild(fastlaneDir, child)
+	if err == nil {
+		return resolved, nil
+	}
+	if !allowExternal {
+		return "", err
+	}
+	return filepath.EvalSymlinks(filepath.Join(fastlaneDir, child))
+}
+
+func resolveTrustedDeliverfilePath(base, value string) (string, error) {
+	path := value
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+// containFastlaneChild resolves a conventional child directory beneath the
+// operator-selected fastlane root and refuses a symlinked child, because the
+// fastlane checkout's contents are repository-controlled even when the root
+// itself was chosen by the operator.
+func containFastlaneChild(fastlaneDir, child string) (string, error) {
+	root, err := rootfs.New(fastlaneDir)
+	if err != nil {
+		return "", err
+	}
+	if err := root.CheckContained(child); err != nil {
+		return "", err
+	}
+	return filepath.Join(fastlaneDir, child), nil
+}
+
+// containDeliverfilePath resolves a repository-controlled Deliverfile path
+// value against the Deliverfile's own directory and requires the result to stay
+// inside the working directory, because the Deliverfile ships with the checkout
+// and must not select files outside it.
+func containDeliverfilePath(workDir, base, value string) (string, error) {
+	if err := rootfs.ValidateRelativeAllowingTraversal(value); err != nil {
+		return "", fmt.Errorf("deliverfile path %q: %w", value, err)
+	}
+	root, err := rootfs.New(workDir)
+	if err != nil {
+		return "", err
+	}
+	// The Deliverfile directory may itself be relative to the process working
+	// directory; make it absolute so joining below cannot re-resolve it against
+	// the trusted root and duplicate the leading components.
+	absoluteBase, err := filepath.Abs(base)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := root.Resolve(filepath.Clean(filepath.Join(absoluteBase, value)))
+	if err != nil {
+		return "", fmt.Errorf("deliverfile path %q must stay inside %s: %w", value, root.Path(), err)
+	}
+	return resolved, nil
 }
 
 func validateResolvedDir(path string, source pathSource, label string, skipped []SkippedItem) (string, []SkippedItem, error) {
@@ -153,11 +245,35 @@ func discoverDeliverfilePath(workDir, fastlaneDir string) (string, error) {
 	return "", nil
 }
 
-func resolveRelativePath(base, value string) string {
-	if filepath.IsAbs(value) {
-		return value
+// readDeliverfileConfig reads repository-controlled Deliverfiles through a
+// rooted no-follow handle. The legacy symlink-following behavior remains
+// available only behind an explicit trust decision.
+func readDeliverfileConfig(workDir, fastlaneDir, path string, allowSymlink bool) (DeliverfileConfig, error) {
+	if allowSymlink {
+		return parseDeliverfile(path)
 	}
-	return filepath.Join(base, value)
+	rootPath := workDir
+	if strings.TrimSpace(fastlaneDir) != "" {
+		rootPath = fastlaneDir
+	}
+	root, err := rootfs.New(rootPath)
+	if err != nil {
+		return DeliverfileConfig{}, err
+	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return DeliverfileConfig{}, err
+	}
+	relative, err := filepath.Rel(root.Path(), absolutePath)
+	if err != nil {
+		return DeliverfileConfig{}, err
+	}
+	file, err := root.OpenFile(relative)
+	if err != nil {
+		return DeliverfileConfig{}, fmt.Errorf("read Deliverfile: %w", err)
+	}
+	defer file.Close()
+	return parseDeliverfileReader(path, file)
 }
 
 func ensureDirExists(path string) error {

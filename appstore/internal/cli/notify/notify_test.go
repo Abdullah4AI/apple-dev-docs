@@ -612,6 +612,17 @@ func TestValidateSlackWebhookURLAllowsGovHost(t *testing.T) {
 	}
 }
 
+func TestValidateSlackWebhookURLRejectsQueryAndFragment(t *testing.T) {
+	for _, webhook := range []string{
+		"https://hooks.slack.com/services/T/B/secret?token=query-secret",
+		"https://hooks.slack.com/services/T/B/secret#fragment-secret",
+	} {
+		if err := validateSlackWebhookURL(webhook); err == nil {
+			t.Fatalf("validateSlackWebhookURL(%q) error = nil, want rejection", webhook)
+		}
+	}
+}
+
 func TestNotifySlackRejectsInsecureScheme(t *testing.T) {
 	t.Setenv(slackWebhookEnvVar, "")
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

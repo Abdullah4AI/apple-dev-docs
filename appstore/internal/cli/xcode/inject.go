@@ -18,6 +18,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 type xcodeInjectManifest struct {
@@ -59,6 +60,11 @@ type xcodeInjectOutputPlan struct {
 	Path    string
 	Source  string
 	Payload []byte
+	// DisplayPath and DisplaySource report the manifest-relative form the
+	// operator wrote, keeping the output contract stable while rooted I/O uses
+	// the absolute Path and Source.
+	DisplayPath   string
+	DisplaySource string
 }
 
 func XcodeInjectCommand() *ffcli.Command {
@@ -81,6 +87,12 @@ The manifest is JSON with top-level "values" and "outputs" fields. Outputs can
 generate plist, json, or text files, and can copy declared assets such as app
 icons into asset catalog paths. Relative output paths and copy sources resolve
 from the manifest directory.
+
+Manifest paths must stay inside the manifest project root: the enclosing
+repository when one is found, the parent directory when the manifest lives in a
+dot-directory such as .asc, or the manifest directory itself. Absolute paths,
+volume or UNC-style paths, traversal that leaves the root, and symlinks that
+resolve outside the root are rejected before anything is written.
 
 String values support ${key} placeholders from manifest values and repeated
 --set key=value overrides.
@@ -186,8 +198,15 @@ func runXcodeInject(opts xcodeInjectOptions) (xcodeInjectResult, error) {
 		return xcodeInjectResult{}, err
 	}
 
-	baseDir := filepath.Dir(opts.ManifestPath)
-	if err := validateXcodeInjectOutputDestinations(baseDir, manifest.Outputs, opts.Overwrite); err != nil {
+	root, err := newXcodeInjectRoot(opts.ManifestPath)
+	if err != nil {
+		return xcodeInjectResult{}, err
+	}
+	baseDir, err := xcodeInjectBaseDir(opts.ManifestPath)
+	if err != nil {
+		return xcodeInjectResult{}, err
+	}
+	if err := validateXcodeInjectOutputDestinations(root, baseDir, manifest.Outputs, opts.Overwrite); err != nil {
 		return xcodeInjectResult{}, err
 	}
 
@@ -198,8 +217,11 @@ func runXcodeInject(opts xcodeInjectOptions) (xcodeInjectResult, error) {
 	}
 	plans := make([]xcodeInjectOutputPlan, 0, len(manifest.Outputs))
 
+	// Result paths keep the manifest-relative form the operator wrote, so a
+	// relative --manifest keeps producing relative output paths.
+	displayBase := filepath.Dir(opts.ManifestPath)
 	for i, output := range manifest.Outputs {
-		plan, err := planXcodeInjectOutput(baseDir, values, output)
+		plan, err := planXcodeInjectOutput(root, baseDir, displayBase, values, output)
 		if err != nil {
 			return xcodeInjectResult{}, fmt.Errorf("output %d: %w", i+1, err)
 		}
@@ -207,7 +229,7 @@ func runXcodeInject(opts xcodeInjectOptions) (xcodeInjectResult, error) {
 	}
 
 	for i, plan := range plans {
-		fileResult, err := writeXcodeInjectBytes(plan.Path, plan.Type, plan.Source, plan.Payload, opts)
+		fileResult, err := writeXcodeInjectBytes(root, plan, opts)
 		if err != nil {
 			return xcodeInjectResult{}, fmt.Errorf("output %d: %w", i+1, err)
 		}
@@ -217,16 +239,77 @@ func runXcodeInject(opts xcodeInjectOptions) (xcodeInjectResult, error) {
 	return result, nil
 }
 
-func validateXcodeInjectOutputDestinations(baseDir string, outputs []xcodeInjectManifestOutput, overwrite bool) error {
+// newXcodeInjectRoot anchors manifest-declared outputs and copy sources to the
+// manifest's project root: the enclosing repository when one is found, the parent
+// of a dot-directory manifest location such as .asc, or the manifest directory
+// itself. Symlinked directories inside that tree remain supported because they
+// are a common asset-catalog layout, but a symlink that resolves outside the root
+// is refused.
+func newXcodeInjectRoot(manifestPath string) (rootfs.Root, error) {
+	rootDir, err := xcodeInjectRootDir(manifestPath)
+	if err != nil {
+		return rootfs.Root{}, err
+	}
+	root, err := rootfs.New(rootDir)
+	if err != nil {
+		return rootfs.Root{}, err
+	}
+	return root.AllowingInternalSymlinks(), nil
+}
+
+func xcodeInjectRootDir(manifestPath string) (string, error) {
+	absolute, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	manifestDir := filepath.Dir(absolute)
+	if repositoryRoot := xcodeInjectRepositoryRoot(manifestDir); repositoryRoot != "" {
+		return repositoryRoot, nil
+	}
+	if strings.HasPrefix(filepath.Base(manifestDir), ".") {
+		if parent := filepath.Dir(manifestDir); parent != manifestDir {
+			return parent, nil
+		}
+	}
+	return manifestDir, nil
+}
+
+func xcodeInjectRepositoryRoot(dir string) string {
+	current := dir
+	for {
+		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
+}
+
+// xcodeInjectBaseDir is the directory manifest-relative paths resolve from.
+func xcodeInjectBaseDir(manifestPath string) (string, error) {
+	absolute, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(absolute), nil
+}
+
+func validateXcodeInjectOutputDestinations(root rootfs.Root, baseDir string, outputs []xcodeInjectManifestOutput, overwrite bool) error {
 	seen := map[string]int{}
 	paths := make([]string, 0, len(outputs))
 	pathKeys := make([]string, 0, len(outputs))
 	for i, output := range outputs {
-		targetPath := resolveXcodeInjectPath(baseDir, strings.TrimSpace(output.Path))
-		if targetPath == "" {
+		if strings.TrimSpace(output.Path) == "" {
 			continue
 		}
-		if err := validateXcodeInjectDestinationParents(targetPath); err != nil {
+		targetPath, err := resolveXcodeInjectPath(root, baseDir, output.Path)
+		if err != nil {
+			return fmt.Errorf("output %d: %w", i+1, err)
+		}
+		if err := validateXcodeInjectDestinationParents(root, targetPath); err != nil {
 			return fmt.Errorf("output %d: %w", i+1, err)
 		}
 		if err := validateXcodeInjectDestination(targetPath, overwrite); err != nil {
@@ -256,7 +339,10 @@ func validateXcodeInjectOutputDestinations(baseDir string, outputs []xcodeInject
 		if strings.ToLower(strings.TrimSpace(output.Type)) != "copy" || strings.TrimSpace(output.Source) == "" {
 			continue
 		}
-		sourcePath := resolveXcodeInjectPath(baseDir, strings.TrimSpace(output.Source))
+		sourcePath, err := resolveXcodeInjectPath(root, baseDir, output.Source)
+		if err != nil {
+			return fmt.Errorf("output %d: %w", i+1, err)
+		}
 		sourceKey, err := xcodeInjectPathConflictKey(sourcePath)
 		if err != nil {
 			return fmt.Errorf("output %d: %w", i+1, err)
@@ -268,7 +354,11 @@ func validateXcodeInjectOutputDestinations(baseDir string, outputs []xcodeInject
 	return nil
 }
 
-func validateXcodeInjectDestinationParents(path string) error {
+func validateXcodeInjectDestinationParents(root rootfs.Root, path string) error {
+	if err := root.CheckParents(path); err != nil {
+		return err
+	}
+
 	parent := filepath.Dir(path)
 	for {
 		if parent == "." || parent == "" {
@@ -358,12 +448,16 @@ func applyXcodeInjectSetValues(values map[string]any, setValues []string) error 
 	return nil
 }
 
-func planXcodeInjectOutput(baseDir string, values map[string]any, output xcodeInjectManifestOutput) (xcodeInjectOutputPlan, error) {
+func planXcodeInjectOutput(root rootfs.Root, baseDir, displayBase string, values map[string]any, output xcodeInjectManifestOutput) (xcodeInjectOutputPlan, error) {
 	outputType := strings.ToLower(strings.TrimSpace(output.Type))
-	targetPath := resolveXcodeInjectPath(baseDir, strings.TrimSpace(output.Path))
-	if targetPath == "" {
+	if strings.TrimSpace(output.Path) == "" {
 		return xcodeInjectOutputPlan{}, newXcodeInjectUsageError("path is required")
 	}
+	targetPath, err := resolveXcodeInjectPath(root, baseDir, output.Path)
+	if err != nil {
+		return xcodeInjectOutputPlan{}, err
+	}
+	displayPath := xcodeInjectDisplayPath(displayBase, output.Path)
 
 	switch outputType {
 	case "plist":
@@ -375,7 +469,7 @@ func planXcodeInjectOutput(baseDir string, values map[string]any, output xcodeIn
 		if err != nil {
 			return xcodeInjectOutputPlan{}, err
 		}
-		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, Payload: payload}, nil
+		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, DisplayPath: displayPath, Payload: payload}, nil
 	case "json":
 		renderedValues, err := renderXcodeInjectValue(output.Values, values)
 		if err != nil {
@@ -386,23 +480,33 @@ func planXcodeInjectOutput(baseDir string, values map[string]any, output xcodeIn
 			return xcodeInjectOutputPlan{}, err
 		}
 		payload = append(payload, '\n')
-		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, Payload: payload}, nil
+		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, DisplayPath: displayPath, Payload: payload}, nil
 	case "text":
 		renderedContents, err := renderXcodeInjectString(output.Contents, values)
 		if err != nil {
 			return xcodeInjectOutputPlan{}, err
 		}
-		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, Payload: []byte(renderedContents)}, nil
+		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, DisplayPath: displayPath, Payload: []byte(renderedContents)}, nil
 	case "copy":
-		sourcePath := resolveXcodeInjectPath(baseDir, strings.TrimSpace(output.Source))
-		if sourcePath == "" {
+		if strings.TrimSpace(output.Source) == "" {
 			return xcodeInjectOutputPlan{}, newXcodeInjectUsageError("source is required for copy outputs")
 		}
-		payload, err := os.ReadFile(sourcePath)
+		sourcePath, err := resolveXcodeInjectPath(root, baseDir, output.Source)
 		if err != nil {
 			return xcodeInjectOutputPlan{}, err
 		}
-		return xcodeInjectOutputPlan{Type: outputType, Path: targetPath, Source: sourcePath, Payload: payload}, nil
+		payload, err := root.ReadFile(sourcePath)
+		if err != nil {
+			return xcodeInjectOutputPlan{}, err
+		}
+		return xcodeInjectOutputPlan{
+			Type:          outputType,
+			Path:          targetPath,
+			Source:        sourcePath,
+			Payload:       payload,
+			DisplayPath:   displayPath,
+			DisplaySource: xcodeInjectDisplayPath(displayBase, output.Source),
+		}, nil
 	default:
 		return xcodeInjectOutputPlan{}, newXcodeInjectUsageError("type must be one of plist, json, text, copy")
 	}
@@ -476,28 +580,28 @@ func sortedXcodeInjectValueKeys(values map[string]any) []string {
 	return keys
 }
 
-func writeXcodeInjectBytes(path, outputType, source string, payload []byte, opts xcodeInjectOptions) (xcodeInjectFileResult, error) {
+func writeXcodeInjectBytes(root rootfs.Root, plan xcodeInjectOutputPlan, opts xcodeInjectOptions) (xcodeInjectFileResult, error) {
 	result := xcodeInjectFileResult{
-		Type:   outputType,
-		Path:   path,
-		Source: source,
-		Bytes:  int64(len(payload)),
+		Type:   plan.Type,
+		Path:   plan.DisplayPath,
+		Source: plan.DisplaySource,
+		Bytes:  int64(len(plan.Payload)),
 	}
-	if err := validateXcodeInjectDestination(path, opts.Overwrite); err != nil {
+	if err := validateXcodeInjectDestination(plan.Path, opts.Overwrite); err != nil {
 		return xcodeInjectFileResult{}, err
 	}
 	if opts.DryRun {
-		if outputType == "copy" {
+		if plan.Type == "copy" {
 			result.Action = "would_copy"
 		} else {
 			result.Action = "would_write"
 		}
 		return result, nil
 	}
-	if _, err := shared.WriteFileNoSymlinkOverwrite(path, bytes.NewReader(payload), 0o644, ".asc-inject-*", ".asc-inject-backup-*"); err != nil {
+	if _, err := root.WriteFrom(plan.Path, bytes.NewReader(plan.Payload), 0o644); err != nil {
 		return xcodeInjectFileResult{}, err
 	}
-	if outputType == "copy" {
+	if plan.Type == "copy" {
 		result.Action = "copied"
 	} else {
 		result.Action = "written"
@@ -525,15 +629,33 @@ func validateXcodeInjectDestination(path string, overwrite bool) error {
 	return nil
 }
 
-func resolveXcodeInjectPath(baseDir, path string) string {
-	path = strings.TrimSpace(path)
+// xcodeInjectDisplayPath reports a manifest-declared path the way the operator
+// wrote it: resolved from the manifest directory as typed, so a relative
+// --manifest keeps relative result paths and an absolute one stays absolute.
+func xcodeInjectDisplayPath(displayBase, path string) string {
+	return filepath.Clean(filepath.Join(displayBase, path))
+}
+
+// resolveXcodeInjectPath resolves a manifest-declared path from the manifest
+// directory and confirms it stays inside the manifest project root. Absolute
+// paths, volume or UNC-style changes, and traversal that leaves the root are
+// refused because the manifest is repository-controlled.
+func resolveXcodeInjectPath(root rootfs.Root, baseDir string, path string) (string, error) {
 	if path == "" {
-		return ""
+		return "", newXcodeInjectUsageError("path is required")
 	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
+	if err := rootfs.ValidateRelativeAllowingTraversal(path); err != nil {
+		return "", fmt.Errorf(
+			"%w; manifest paths must be relative to the manifest directory and stay inside %s",
+			err,
+			root.Path(),
+		)
 	}
-	return filepath.Clean(filepath.Join(baseDir, path))
+	resolved, err := root.Resolve(filepath.Clean(filepath.Join(baseDir, path)))
+	if err != nil {
+		return "", fmt.Errorf("%w; manifest paths must stay inside %s", err, root.Path())
+	}
+	return resolved, nil
 }
 
 func xcodeInjectResultRows(result xcodeInjectResult) [][]string {

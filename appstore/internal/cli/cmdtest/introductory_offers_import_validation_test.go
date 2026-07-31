@@ -222,6 +222,7 @@ func TestSubscriptionsIntroductoryOffersImport_UnknownCSVColumnReturnsUsage(t *t
 			"subscriptions", "offers", "introductory", "import",
 			"--subscription-id", "SUB_ID",
 			"--input", csvPath,
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -329,6 +330,7 @@ func TestSubscriptionsIntroductoryOffersImport_InvalidCSVSchemaReturnsUsage(t *t
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "SUB_ID",
 					"--input", csvPath,
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -392,6 +394,7 @@ func TestSubscriptionsIntroductoryOffersImport_InvalidRowDatesReturnUsage(t *tes
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "SUB_ID",
 					"--input", csvPath,
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -455,6 +458,7 @@ func TestSubscriptionsIntroductoryOffersImport_InvalidRowOfferEnumsReturnUsage(t
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "SUB_ID",
 					"--input", csvPath,
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -518,6 +522,7 @@ func TestSubscriptionsIntroductoryOffersImport_InvalidRowPeriodsReturnUsage(t *t
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "SUB_ID",
 					"--input", csvPath,
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -581,6 +586,7 @@ func TestSubscriptionsIntroductoryOffersImport_InvalidRowTerritoryReturnsUsage(t
 					"subscriptions", "offers", "introductory", "import",
 					"--subscription-id", "SUB_ID",
 					"--input", csvPath,
+					"--confirm",
 				}); err != nil {
 					t.Fatalf("parse error: %v", err)
 				}
@@ -623,6 +629,7 @@ func TestSubscriptionsIntroductoryOffersImport_MissingRequiredOfferFieldsReturnU
 				"subscriptions", "offers", "introductory", "import",
 				"--subscription-id", "SUB_ID",
 				"--input", writeTempIntroOffersCSV(t, "territory\nUSA\n"),
+				"--confirm",
 			},
 			wantErr: "row 1: offer_mode is required",
 		},
@@ -632,6 +639,7 @@ func TestSubscriptionsIntroductoryOffersImport_MissingRequiredOfferFieldsReturnU
 				"subscriptions", "offers", "introductory", "import",
 				"--subscription-id", "SUB_ID",
 				"--input", writeTempIntroOffersCSV(t, "territory,offer_mode\nUSA,FREE_TRIAL\n"),
+				"--confirm",
 			},
 			wantErr: "row 1: offer_duration is required",
 		},
@@ -641,6 +649,7 @@ func TestSubscriptionsIntroductoryOffersImport_MissingRequiredOfferFieldsReturnU
 				"subscriptions", "offers", "introductory", "import",
 				"--subscription-id", "SUB_ID",
 				"--input", writeTempIntroOffersCSV(t, "territory,offer_mode,offer_duration\nUSA,FREE_TRIAL,ONE_WEEK\n"),
+				"--confirm",
 			},
 			wantErr: "row 1: number_of_periods is required",
 		},

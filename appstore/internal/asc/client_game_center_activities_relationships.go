@@ -44,7 +44,11 @@ func (c *Client) AddGameCenterActivityAchievementsV2(ctx context.Context, activi
 		return err
 	}
 
-	path := fmt.Sprintf("/v1/gameCenterActivities/%s/relationships/achievementsV2", activityID)
+	path, err := resourcePath("/v1/gameCenterActivities/%s/relationships/achievementsV2", activityID)
+	if err != nil {
+		return err
+	}
+
 	_, err = c.do(ctx, http.MethodPost, path, body)
 	return err
 }
@@ -68,7 +72,11 @@ func (c *Client) RemoveGameCenterActivityAchievementsV2(ctx context.Context, act
 		return err
 	}
 
-	path := fmt.Sprintf("/v1/gameCenterActivities/%s/relationships/achievementsV2", activityID)
+	path, err := resourcePath("/v1/gameCenterActivities/%s/relationships/achievementsV2", activityID)
+	if err != nil {
+		return err
+	}
+
 	_, err = c.do(ctx, http.MethodDelete, path, body)
 	return err
 }
@@ -92,7 +100,11 @@ func (c *Client) AddGameCenterActivityLeaderboardsV2(ctx context.Context, activi
 		return err
 	}
 
-	path := fmt.Sprintf("/v1/gameCenterActivities/%s/relationships/leaderboardsV2", activityID)
+	path, err := resourcePath("/v1/gameCenterActivities/%s/relationships/leaderboardsV2", activityID)
+	if err != nil {
+		return err
+	}
+
 	_, err = c.do(ctx, http.MethodPost, path, body)
 	return err
 }
@@ -116,7 +128,11 @@ func (c *Client) RemoveGameCenterActivityLeaderboardsV2(ctx context.Context, act
 		return err
 	}
 
-	path := fmt.Sprintf("/v1/gameCenterActivities/%s/relationships/leaderboardsV2", activityID)
+	path, err := resourcePath("/v1/gameCenterActivities/%s/relationships/leaderboardsV2", activityID)
+	if err != nil {
+		return err
+	}
+
 	_, err = c.do(ctx, http.MethodDelete, path, body)
 	return err
 }

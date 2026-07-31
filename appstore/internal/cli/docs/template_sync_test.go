@@ -50,6 +50,25 @@ func TestASCTemplateIncludesAllRootFlags(t *testing.T) {
 	}
 }
 
+func TestASCTemplateMigrateExamplesBindVersionID(t *testing.T) {
+	section := sectionBetween(t, embeddedTemplate, "### Migrate Metadata (Fastlane)", "## Command Groups")
+	for _, command := range []string{"asc migrate import", "asc migrate export"} {
+		line := ""
+		for _, candidate := range strings.Split(section, "\n") {
+			if strings.Contains(candidate, command) {
+				line = candidate
+				break
+			}
+		}
+		if line == "" {
+			t.Fatalf("template migrate section is missing %q", command)
+		}
+		if !strings.Contains(line, `--version-id "VERSION_ID"`) {
+			t.Fatalf("template example %q must bind the App Store version with --version-id", line)
+		}
+	}
+}
+
 func sectionBetween(t *testing.T, content, startHeading, endHeading string) string {
 	t.Helper()
 

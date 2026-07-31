@@ -56,7 +56,7 @@ func SubscriptionsPricingPricesCommand() *ffcli.Command {
 Examples:
   asc subscriptions pricing prices list --subscription-id "SUB_ID"
   asc subscriptions pricing prices set --subscription-id "SUB_ID" --price-point "PRICE_POINT_ID"
-  asc subscriptions pricing prices import --subscription-id "SUB_ID" --input "./prices.csv"
+  asc subscriptions pricing prices import --subscription-id "SUB_ID" --input "./prices.csv" --confirm
   asc subscriptions pricing prices delete --price-id "PRICE_ID" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,

@@ -2,12 +2,16 @@ package shared
 
 import (
 	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"howett.net/plist"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist/infoplisttest"
 )
 
 func TestExtractBundleInfoFromIPA(t *testing.T) {
@@ -96,6 +100,66 @@ func TestExtractBundleInfoFromIPA_BinaryPlist(t *testing.T) {
 	}
 	if info.BuildNumber != "7" {
 		t.Fatalf("expected build number 7, got %q", info.BuildNumber)
+	}
+}
+
+func TestExtractBundleInfoFromIPA_InfoPlistAtSizeLimit(t *testing.T) {
+	plistData := buildInfoPlistOfSize(t, infoplist.MaxBytes)
+	ipaPath := writeTestIPA(t, map[string][]byte{
+		"Payload/Demo.app/Info.plist": plistData,
+	})
+
+	info, err := ExtractBundleInfoFromIPA(ipaPath)
+	if err != nil {
+		t.Fatalf("ExtractBundleInfoFromIPA() error: %v", err)
+	}
+	if info.Version != "1.2.3" || info.BuildNumber != "45" {
+		t.Fatalf("unexpected bundle info at size limit: %+v", info)
+	}
+}
+
+func TestExtractBundleInfoFromIPA_RejectsInfoPlistOneByteOverLimit(t *testing.T) {
+	plistData := buildInfoPlistOfSize(t, infoplist.MaxBytes+1)
+	ipaPath := writeTestIPA(t, map[string][]byte{
+		"Payload/Demo.app/Info.plist": plistData,
+	})
+
+	_, err := ExtractBundleInfoFromIPA(ipaPath)
+	if err == nil {
+		t.Fatal("expected oversized Info.plist rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "Info.plist limit") {
+		t.Fatalf("expected Info.plist limit error, got %v", err)
+	}
+}
+
+func TestExtractBundleInfoFromIPA_RejectsHighlyCompressibleInfoPlist(t *testing.T) {
+	ipaPath := writeTestIPA(t, map[string][]byte{
+		"Payload/Demo.app/Info.plist": bytes.Repeat([]byte("A"), infoplist.MaxBytes*2),
+	})
+
+	_, err := ExtractBundleInfoFromIPA(ipaPath)
+	if err == nil {
+		t.Fatal("expected compressible oversized Info.plist rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "declared uncompressed size") {
+		t.Fatalf("expected declared-size rejection, got %v", err)
+	}
+}
+
+// A member that understates its uncompressed size must not slip past the
+// declared-size check and then expand freely. archive/zip refuses a member as
+// soon as it streams past its advertised size, and the bounded read is the
+// backstop if it ever does not, so the caller always gets an error instead of
+// an unbounded expansion.
+func TestExtractBundleInfoFromIPA_RejectsUnderstatedInfoPlistSize(t *testing.T) {
+	ipaPath := writeTestIPA(t, map[string][]byte{
+		"Payload/Demo.app/Info.plist": bytes.Repeat([]byte("A"), infoplist.MaxBytes*2),
+	})
+	infoplisttest.ForgeZipDeclaredUncompressedSize(t, ipaPath, 1024)
+
+	if _, err := ExtractBundleInfoFromIPA(ipaPath); err == nil {
+		t.Fatal("expected rejection for forged ZIP size metadata, got nil")
 	}
 }
 
@@ -208,6 +272,34 @@ func buildInfoPlist(t *testing.T, version string, build string) []byte {
 	t.Helper()
 
 	return buildInfoPlistWithValues(t, version, build, plist.XMLFormat)
+}
+
+// buildInfoPlistOfSize returns a valid XML Info.plist whose serialized length
+// is exactly totalSize, padded with a filler key so boundary tests can hit the
+// documented limit precisely.
+func buildInfoPlistOfSize(t *testing.T, totalSize int) []byte {
+	t.Helper()
+
+	padding := 0
+	for range 8 {
+		data, err := plist.Marshal(map[string]any{
+			"CFBundleShortVersionString": "1.2.3",
+			"CFBundleVersion":            "45",
+			"Padding":                    strings.Repeat("a", padding),
+		}, plist.XMLFormat)
+		if err != nil {
+			t.Fatalf("marshal plist: %v", err)
+		}
+		if len(data) == totalSize {
+			return data
+		}
+		padding += totalSize - len(data)
+		if padding < 0 {
+			t.Fatalf("cannot build an Info.plist as small as %d bytes", totalSize)
+		}
+	}
+	t.Fatalf("failed to build an Info.plist of exactly %d bytes", totalSize)
+	return nil
 }
 
 func buildInfoPlistWithValues(t *testing.T, versionValue any, buildValue any, format int) []byte {

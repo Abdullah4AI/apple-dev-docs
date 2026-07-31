@@ -8,12 +8,12 @@ func nominationsRows(resp *NominationsResponse) ([]string, [][]string) {
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
+			SanitizeTerminalText(item.ID),
 			compactWhitespace(fallbackValue(attrs.Name)),
-			sanitizeTerminal(fallbackValue(string(attrs.Type))),
-			sanitizeTerminal(fallbackValue(string(attrs.State))),
-			sanitizeTerminal(fallbackValue(attrs.PublishStartDate)),
-			sanitizeTerminal(fallbackValue(attrs.PublishEndDate)),
+			SanitizeTerminalText(fallbackValue(string(attrs.Type))),
+			SanitizeTerminalText(fallbackValue(string(attrs.State))),
+			SanitizeTerminalText(fallbackValue(attrs.PublishStartDate)),
+			SanitizeTerminalText(fallbackValue(attrs.PublishEndDate)),
 		})
 	}
 	return headers, rows

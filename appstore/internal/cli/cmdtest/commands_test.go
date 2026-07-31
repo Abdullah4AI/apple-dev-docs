@@ -2301,7 +2301,7 @@ func TestAgeRatingValidationErrors(t *testing.T) {
 			name:     "age-rating edit missing updates",
 			args:     []string{"age-rating", "edit", "--id", "AGE_ID"},
 			wantErr:  "at least one update flag is required",
-			wantHelp: false,
+			wantHelp: true,
 		},
 		{
 			name:     "age-rating edit invalid enum",

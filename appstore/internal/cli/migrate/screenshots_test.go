@@ -1,13 +1,62 @@
 package migrate
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestDiscoverScreenshotPlanForUploadRejectsReplacedFile(t *testing.T) {
+	screenshotsDir := t.TempDir()
+	localeDir := filepath.Join(screenshotsDir, "en-US")
+	if err := os.MkdirAll(localeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	path := filepath.Join(localeDir, "iphone_65_1.png")
+	writePNG(t, path, 1242, 2688)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(original) error = %v", err)
+	}
+
+	plans, _, err := discoverScreenshotPlanForUpload(screenshotsDir)
+	if err != nil {
+		t.Fatalf("discoverScreenshotPlanForUpload() error = %v", err)
+	}
+	defer closeScreenshotPlans(plans)
+	if len(plans) != 1 || len(plans[0].Files) != 1 {
+		t.Fatalf("plans = %#v, want one screenshot", plans)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	writePNG(t, path, 1290, 2796)
+
+	opened, ok, err := plans[0].openedFile(path)
+	if !ok {
+		t.Fatal("openedFile() did not retain a rooted source")
+	}
+	if opened != nil {
+		_ = opened.Close()
+		t.Fatal("openedFile() returned a replaced screenshot")
+	}
+	if err == nil || !strings.Contains(err.Error(), "changed after discovery") {
+		t.Fatalf("openedFile() error = %v, want changed-after-discovery rejection", err)
+	}
+	replacement, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(replacement) error = %v", err)
+	}
+	if bytes.Equal(replacement, original) {
+		t.Fatal("test setup did not replace the pathname")
+	}
+}
 
 func TestInferScreenshotDisplayType_FromFilenameAndDimensions(t *testing.T) {
 	dir := t.TempDir()

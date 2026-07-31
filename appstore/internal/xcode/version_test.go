@@ -253,6 +253,43 @@ func TestFindXcodeprojAcceptsExplicitProjectPath(t *testing.T) {
 	}
 }
 
+func TestFindXcodeprojDoesNotRetargetTrailingWhitespaceProjectPath(t *testing.T) {
+	tempDir := t.TempDir()
+	exactProject := filepath.Join(tempDir, "Foo.xcodeproj")
+	whitespaceProject := exactProject + " "
+	if err := os.MkdirAll(exactProject, 0o755); err != nil {
+		t.Fatalf("mkdir exact project: %v", err)
+	}
+	if err := os.MkdirAll(whitespaceProject, 0o755); err != nil {
+		t.Fatalf("mkdir whitespace project: %v", err)
+	}
+
+	got, err := findXcodeproj(whitespaceProject)
+	if err == nil {
+		t.Fatalf("findXcodeproj(%q) = %q, want no nested project error", whitespaceProject, got)
+	}
+	if got == exactProject {
+		t.Fatalf("trailing-whitespace path was retargeted to %q", exactProject)
+	}
+}
+
+func TestFindXcodeprojPreservesWhitespaceProjectDirectory(t *testing.T) {
+	parent := t.TempDir()
+	projectDir := filepath.Join(parent, " Project Root ")
+	projectPath := filepath.Join(projectDir, "Demo.xcodeproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir whitespace project directory: %v", err)
+	}
+
+	got, err := findXcodeproj(projectDir)
+	if err != nil {
+		t.Fatalf("findXcodeproj(%q) error = %v", projectDir, err)
+	}
+	if got != projectPath {
+		t.Fatalf("findXcodeproj(%q) = %q, want %q", projectDir, got, projectPath)
+	}
+}
+
 func TestFindXcodeprojMultipleProjectsSuggestsProjectFlag(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tempDir, "App.xcodeproj"), 0o755); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/urlsanitize"
 )
 
 // dsymHTTPClient is the HTTP client used for dSYM downloads.
@@ -249,12 +250,28 @@ func displayBundleID(bundleID string, index int) string {
 func downloadDSYM(ctx context.Context, rawURL, destPath string) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return 0, fmt.Errorf("download failed: %w", err)
+		return 0, urlsanitize.NewTransportError(
+			"create dSYM download request",
+			urlsanitize.RedactURLHostForError(rawURL),
+			err,
+		)
 	}
 
-	resp, err := dsymHTTPClient.Do(req)
+	client := dsymHTTPClient
+	if client == nil {
+		client = &http.Client{}
+	}
+	safeClient := *client
+	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := safeClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("download failed: %w", err)
+		return 0, urlsanitize.NewTransportError(
+			"dSYM download request",
+			urlsanitize.RedactURLHostForError(rawURL),
+			err,
+		)
 	}
 	defer resp.Body.Close()
 

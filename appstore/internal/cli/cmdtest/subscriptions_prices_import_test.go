@@ -218,7 +218,7 @@ func TestSubscriptionsPricesImport_PartialFailureReturnsReportedErrorAndSummary(
 
 	var runErr error
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())
@@ -285,7 +285,7 @@ func TestSubscriptionsPricesImport_SkipsExactExistingPrice(t *testing.T) {
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -348,7 +348,7 @@ func TestSubscriptionsPricesImport_ReconcilesAmbiguousCreateWithoutReplay(t *tes
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -403,7 +403,7 @@ func TestSubscriptionsPricesImport_SkipsImmediatePriceWithConcreteEffectiveDate(
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -455,7 +455,7 @@ func TestSubscriptionsPricesImport_RetriesTimedOutInitialStateRead(t *testing.T)
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -597,7 +597,7 @@ func TestSubscriptionsPricesImport_PrintsFailuresWhenArtifactWriteFails(t *testi
 	root.FlagSet.SetOutput(io.Discard)
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())
@@ -680,7 +680,7 @@ func TestSubscriptionsPricesImport_WritesVersionedFailureArtifact(t *testing.T) 
 	root.FlagSet.SetOutput(io.Discard)
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json"}); err != nil {
+		if err := root.Parse([]string{"subscriptions", "pricing", "prices", "import", "--subscription-id", "8000000001", "--input", csvPath, "--output", "json", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())

@@ -40,7 +40,7 @@ func TestRun_AgeRatingSetAllNoneFalseReturnsUsage(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "unexpected argument(s): false") {
-		t.Fatalf("expected unexpected argument error, got %q", stderr)
+	if !strings.Contains(stderr, "at least one update flag is required") {
+		t.Fatalf("expected no-update usage error, got %q", stderr)
 	}
 }

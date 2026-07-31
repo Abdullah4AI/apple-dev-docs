@@ -13,11 +13,11 @@ func appStoreReviewAttachmentsRows(resp *AppStoreReviewAttachmentsResponse) ([]s
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(fallbackValue(attrs.FileName)),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(fallbackValue(attrs.FileName)),
 			formatAttachmentFileSize(attrs.FileSize),
-			sanitizeTerminal(fallbackValue(attrs.SourceFileChecksum)),
-			sanitizeTerminal(formatAssetDeliveryState(attrs.AssetDeliveryState)),
+			SanitizeTerminalText(fallbackValue(attrs.SourceFileChecksum)),
+			SanitizeTerminalText(formatAssetDeliveryState(attrs.AssetDeliveryState)),
 		})
 	}
 	return headers, rows

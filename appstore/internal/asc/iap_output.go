@@ -140,9 +140,9 @@ func inAppPurchaseOfferCodePricesRows(resp *InAppPurchaseOfferPricesResponse) ([
 			return nil, nil, err
 		}
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(territoryID),
-			sanitizeTerminal(pricePointID),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(territoryID),
+			SanitizeTerminalText(pricePointID),
 		})
 	}
 	return headers, rows, nil
@@ -169,11 +169,11 @@ func inAppPurchaseOfferCodeCustomCodesRows(resp *InAppPurchaseOfferCodeCustomCod
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(attrs.CustomCode),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(attrs.CustomCode),
 			fmt.Sprintf("%d", attrs.NumberOfCodes),
-			sanitizeTerminal(attrs.ExpirationDate),
-			sanitizeTerminal(attrs.CreatedDate),
+			SanitizeTerminalText(attrs.ExpirationDate),
+			SanitizeTerminalText(attrs.CreatedDate),
 			fmt.Sprintf("%t", attrs.Active),
 		})
 	}
@@ -186,12 +186,12 @@ func inAppPurchaseOfferCodeOneTimeUseCodesRows(resp *InAppPurchaseOfferCodeOneTi
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
+			SanitizeTerminalText(item.ID),
 			fmt.Sprintf("%d", attrs.NumberOfCodes),
-			sanitizeTerminal(attrs.ExpirationDate),
-			sanitizeTerminal(attrs.CreatedDate),
+			SanitizeTerminalText(attrs.ExpirationDate),
+			SanitizeTerminalText(attrs.CreatedDate),
 			fmt.Sprintf("%t", attrs.Active),
-			sanitizeTerminal(attrs.Environment),
+			SanitizeTerminalText(attrs.Environment),
 		})
 	}
 	return headers, rows

@@ -11,10 +11,10 @@ func offerCodesRows(resp *SubscriptionOfferCodeOneTimeUseCodesResponse) ([]strin
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
+			SanitizeTerminalText(item.ID),
 			fmt.Sprintf("%d", attrs.NumberOfCodes),
-			sanitizeTerminal(attrs.ExpirationDate),
-			sanitizeTerminal(attrs.CreatedDate),
+			SanitizeTerminalText(attrs.ExpirationDate),
+			SanitizeTerminalText(attrs.CreatedDate),
 			fmt.Sprintf("%t", attrs.Active),
 		})
 	}
@@ -27,12 +27,12 @@ func subscriptionOfferCodesRows(resp *SubscriptionOfferCodesResponse) ([]string,
 	for _, item := range resp.Data {
 		attrs := item.Attributes
 		rows = append(rows, []string{
-			sanitizeTerminal(item.ID),
-			sanitizeTerminal(compactWhitespace(attrs.Name)),
-			sanitizeTerminal(formatOfferCodeCustomerEligibilities(attrs.CustomerEligibilities)),
-			sanitizeTerminal(string(attrs.OfferEligibility)),
-			sanitizeTerminal(string(attrs.Duration)),
-			sanitizeTerminal(string(attrs.OfferMode)),
+			SanitizeTerminalText(item.ID),
+			SanitizeTerminalText(compactWhitespace(attrs.Name)),
+			SanitizeTerminalText(formatOfferCodeCustomerEligibilities(attrs.CustomerEligibilities)),
+			SanitizeTerminalText(string(attrs.OfferEligibility)),
+			SanitizeTerminalText(string(attrs.Duration)),
+			SanitizeTerminalText(string(attrs.OfferMode)),
 			fmt.Sprintf("%d", attrs.NumberOfPeriods),
 			fmt.Sprintf("%d", attrs.TotalNumberOfCodes),
 			fmt.Sprintf("%d", attrs.ProductionCodeCount),

@@ -3,7 +3,7 @@ package asc
 import "strings"
 
 func compactWhitespace(input string) string {
-	clean := sanitizeTerminal(input)
+	clean := SanitizeTerminalText(input)
 	return strings.Join(strings.Fields(clean), " ")
 }
 

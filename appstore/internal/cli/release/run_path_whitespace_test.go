@@ -1,0 +1,64 @@
+package release
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestCheckpointRootPreservesOperatorPathWhitespace(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		wantName string
+	}{
+		{
+			name:     "leading whitespace in relative path",
+			path:     " release-checkpoint.json",
+			wantName: " release-checkpoint.json",
+		},
+		{
+			name:     "trailing whitespace in absolute path",
+			path:     filepath.Join(t.TempDir(), "release-checkpoint.json "),
+			wantName: "release-checkpoint.json ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, gotName, err := checkpointRoot(tt.path)
+			if err != nil {
+				t.Fatalf("checkpointRoot(%q) error = %v", tt.path, err)
+			}
+			if gotName != tt.wantName {
+				t.Fatalf("checkpointRoot(%q) name = %q, want %q", tt.path, gotName, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestSaveAndLoadCheckpointPreserveOperatorPathWhitespace(t *testing.T) {
+	checkpointPath := filepath.Join(t.TempDir(), " release-checkpoint.json ")
+	checkpoint := runCheckpoint{
+		AppID:     "123",
+		Version:   "1.2.3",
+		BuildID:   "456",
+		Platform:  "IOS",
+		Completed: map[string]bool{stepEnsureVersion: true},
+	}
+
+	if err := saveCheckpoint(checkpointPath, checkpoint); err != nil {
+		t.Fatalf("saveCheckpoint(%q) error = %v", checkpointPath, err)
+	}
+	if _, err := os.Lstat(checkpointPath); err != nil {
+		t.Fatalf("Lstat(%q) error = %v", checkpointPath, err)
+	}
+
+	loaded, err := loadCheckpoint(checkpointPath)
+	if err != nil {
+		t.Fatalf("loadCheckpoint(%q) error = %v", checkpointPath, err)
+	}
+	if loaded == nil || loaded.AppID != checkpoint.AppID {
+		t.Fatalf("loadCheckpoint(%q) = %#v, want app %q", checkpointPath, loaded, checkpoint.AppID)
+	}
+}

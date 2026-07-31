@@ -296,7 +296,7 @@ Examples:
 			}
 
 			if !hasAgeRatingUpdates(attributes) {
-				return fmt.Errorf("age-rating edit: at least one update flag is required")
+				return shared.UsageError("age-rating edit: at least one update flag is required")
 			}
 
 			client, err := shared.GetASCClient()

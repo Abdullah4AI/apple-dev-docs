@@ -148,6 +148,7 @@ func VersionsViewCommand() *ffcli.Command {
 	includeBuild := fs.Bool("include-build", false, "Include attached build information")
 	includeSubmission := fs.Bool("include-submission", false, "Include submission information")
 	include := fs.String("include", "", "Include related resources: "+strings.Join(appStoreVersionIncludeList(), ", "))
+	includeSensitive := shared.BindIncludeSensitiveFlag(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -211,7 +212,15 @@ Examples:
 					}
 				}
 
-				return shared.PrintOutput(versionResp, *output.Output, *output.Pretty)
+				if *includeSensitive {
+					shared.WarnIncludeSensitive(os.Stderr, true)
+					return shared.PrintOutput(versionResp, *output.Output, *output.Pretty)
+				}
+				safe, err := asc.RedactAppStoreReviewDetailIncludesInSingleResponse(versionResp)
+				if err != nil {
+					return fmt.Errorf("versions view: %w", err)
+				}
+				return shared.PrintOutput(safe, *output.Output, *output.Pretty)
 			}
 
 			versionResp, err := client.GetAppStoreVersion(requestCtx, trimmedID)
