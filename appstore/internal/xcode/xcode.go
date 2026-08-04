@@ -609,7 +609,7 @@ func activeDeveloperDir(ctx context.Context) (string, error) {
 		ctx = context.Background()
 	}
 	cmd := exec.CommandContext(ctx, "xcode-select", "-p")
-	output, err := cmd.Output()
+	output, err := outputXcodeCommand(cmd)
 	if err != nil {
 		return "", err
 	}
@@ -775,7 +775,7 @@ func runAltoolAndCapture(ctx context.Context, args []string, logWriter io.Writer
 	}
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
-	if err := cmd.Run(); err != nil {
+	if err := runXcodeCommand(cmd); err != nil {
 		detail := strings.TrimSpace(outputTail.String())
 		if detail == "" {
 			detail = strings.TrimSpace(mergeCapturedCommandOutput(stdout.String(), stderr.String()))
@@ -811,7 +811,7 @@ func readAltoolHelpOutput(ctx context.Context) (string, error) {
 	var stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runXcodeCommand(cmd); err != nil {
 		return "", err
 	}
 	return mergeCapturedCommandOutput(stdout.String(), stderr.String()), nil
@@ -1073,7 +1073,7 @@ func runCommandWithTail(ctx context.Context, name string, args []string, logWrit
 	}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
-	if err := cmd.Run(); err != nil {
+	if err := runXcodeCommand(cmd); err != nil {
 		detail := strings.TrimSpace(outputTail.String())
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if detail != "" {

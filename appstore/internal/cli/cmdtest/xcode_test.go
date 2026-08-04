@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestXcodeCommandExists(t *testing.T) {
@@ -46,6 +48,9 @@ func TestXcodeCommandExists(t *testing.T) {
 	if viewCmd.FlagSet.Lookup("project") == nil {
 		t.Fatal("expected xcode version view to expose --project")
 	}
+	if viewCmd.FlagSet.Lookup("xcodebuild-settings-lookup") == nil {
+		t.Fatal("expected xcode version view to expose --xcodebuild-settings-lookup")
+	}
 	editCmd := findSubcommand(root, "xcode", "version", "edit")
 	if editCmd == nil {
 		t.Fatal("expected xcode version edit command")
@@ -62,6 +67,9 @@ func TestXcodeCommandExists(t *testing.T) {
 	}
 	if editCmd.FlagSet.Lookup("next-build-number") == nil {
 		t.Fatal("expected xcode version edit to expose --next-build-number")
+	}
+	if editCmd.FlagSet.Lookup("xcodebuild-settings-lookup") == nil {
+		t.Fatal("expected xcode version edit to expose --xcodebuild-settings-lookup")
 	}
 	if flag := editCmd.FlagSet.Lookup("allow-external-xcconfig"); flag == nil {
 		t.Fatal("expected xcode version edit to expose --allow-external-xcconfig")
@@ -84,6 +92,9 @@ func TestXcodeCommandExists(t *testing.T) {
 	}
 	if bumpCmd.FlagSet.Lookup("next-build-number") == nil {
 		t.Fatal("expected xcode version bump to expose --next-build-number")
+	}
+	if bumpCmd.FlagSet.Lookup("xcodebuild-settings-lookup") == nil {
+		t.Fatal("expected xcode version bump to expose --xcodebuild-settings-lookup")
 	}
 	if flag := bumpCmd.FlagSet.Lookup("allow-external-xcconfig"); flag == nil {
 		t.Fatal("expected xcode version bump to expose --allow-external-xcconfig")
@@ -124,6 +135,31 @@ func TestXcodeVersionHelpShowsCanonicalSubcommands(t *testing.T) {
 		if strings.Contains(stderr, hidden) {
 			t.Fatalf("expected help to hide %q, got %q", hidden, stderr)
 		}
+	}
+}
+
+func TestXcodeVersionSettingsLookupInvalidValueReturnsUsageExitCode(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"xcode", "version", "view", "--xcodebuild-settings-lookup", "sometimes",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--xcodebuild-settings-lookup must be one of: auto, never") {
+		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+	if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
 	}
 }
 

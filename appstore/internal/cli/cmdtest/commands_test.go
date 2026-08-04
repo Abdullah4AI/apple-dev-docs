@@ -2081,6 +2081,21 @@ func TestCertificatesCreateGenerateCSRFlagValidation(t *testing.T) {
 			args:    []string{"certificates", "create", "--certificate-type", "IOS_DISTRIBUTION", "--key-out", "./dist.key", "--csr", "./dist.csr"},
 			wantErr: "--key-out, --csr-out, CSR subject flags, --key-type, --key-size, and --force require --generate-csr",
 		},
+		{
+			name:    "pass type certificate requires pass type id before reading csr",
+			args:    []string{"certificates", "create", "--csr", "./missing.csr", "--certificate-type", "PASS_TYPE_ID"},
+			wantErr: "--pass-type-id is required with --certificate-type PASS_TYPE_ID",
+		},
+		{
+			name:    "pass type certificate with nfc requires pass type id",
+			args:    []string{"certificates", "create", "--certificate-type", "PASS_TYPE_ID_WITH_NFC", "--csr", "./missing.csr"},
+			wantErr: "--pass-type-id is required with --certificate-type PASS_TYPE_ID_WITH_NFC",
+		},
+		{
+			name:    "pass type id rejects incompatible certificate type",
+			args:    []string{"certificates", "create", "--pass-type-id", "create", "--certificate-type", "IOS_DISTRIBUTION", "--csr", "./missing.csr"},
+			wantErr: "--pass-type-id can only be used with --certificate-type PASS_TYPE_ID or PASS_TYPE_ID_WITH_NFC",
+		},
 	}
 
 	for _, test := range tests {

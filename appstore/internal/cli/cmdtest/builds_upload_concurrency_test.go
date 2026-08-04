@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -15,10 +14,7 @@ func TestBuildsUploadDryRunRejectsExplicitConcurrency(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
-	ipaPath := filepath.Join(t.TempDir(), "app.ipa")
-	if err := os.WriteFile(ipaPath, []byte("test"), 0o600); err != nil {
-		t.Fatalf("write ipa fixture: %v", err)
-	}
+	ipaPath := writeBuildUploadIPA(t, "com.example.demo")
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -60,10 +56,7 @@ func TestBuildsUploadDryRunSucceedsWithDefaultConcurrency(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
-	ipaPath := filepath.Join(t.TempDir(), "app.ipa")
-	if err := os.WriteFile(ipaPath, []byte("test"), 0o600); err != nil {
-		t.Fatalf("write ipa fixture: %v", err)
-	}
+	ipaPath := writeBuildUploadIPA(t, "com.example.demo")
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -73,6 +66,8 @@ func TestBuildsUploadDryRunSucceedsWithDefaultConcurrency(t *testing.T) {
 	var uploadRequests int32
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"apps","id":"123456789","attributes":{"name":"Demo","bundleId":"com.example.demo"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
 			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleShortVersionString":"1.0.0","cfBundleVersion":"42","platform":"IOS"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploadFiles":
@@ -127,10 +122,7 @@ func TestBuildsUploadDryRunRequiresExplicitOptInForUploadCapabilities(t *testing
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
-	ipaPath := filepath.Join(t.TempDir(), "app.ipa")
-	if err := os.WriteFile(ipaPath, []byte("test"), 0o600); err != nil {
-		t.Fatalf("write ipa fixture: %v", err)
-	}
+	ipaPath := writeBuildUploadIPA(t, "com.example.demo")
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -138,6 +130,8 @@ func TestBuildsUploadDryRunRequiresExplicitOptInForUploadCapabilities(t *testing
 	})
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"apps","id":"123456789","attributes":{"name":"Demo","bundleId":"com.example.demo"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
 			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleShortVersionString":"1.0.0","cfBundleVersion":"42","platform":"IOS"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploadFiles":

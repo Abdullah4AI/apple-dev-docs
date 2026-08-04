@@ -9,7 +9,44 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+func TestAnalyticsViewProcessingDateFlagLifecycle(t *testing.T) {
+	cmd := AnalyticsGetCommand()
+	if cmd.FlagSet.Lookup("processing-date") == nil {
+		t.Fatal("canonical --processing-date flag is not registered")
+	}
+	if cmd.FlagSet.Lookup("date") == nil {
+		t.Fatal("deprecated --date compatibility flag is not registered")
+	}
+
+	visible := make(map[string]bool)
+	for _, item := range shared.VisibleHelpFlags(cmd.FlagSet) {
+		visible[item.Name] = true
+	}
+	if !visible["processing-date"] {
+		t.Fatal("canonical --processing-date flag is hidden from help")
+	}
+	if visible["date"] {
+		t.Fatal("deprecated --date flag should be hidden from canonical help")
+	}
+
+	usage := cmd.UsageFunc(cmd)
+	for _, want := range []string{
+		"The --processing-date and --granularity filters are sent to App Store Connect",
+		"The deprecated --date compatibility flag retains its previous local matching",
+		`--processing-date "2024-01-20"`,
+	} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("analytics view help does not contain %q:\n%s", want, usage)
+		}
+	}
+	if strings.Contains(usage, `--date "2024-01-20"`) {
+		t.Fatalf("analytics view help still teaches deprecated --date:\n%s", usage)
+	}
+}
 
 func parseAnalyticsArgs(args []string) []string {
 	if len(args) > 0 && args[0] == "analytics" {

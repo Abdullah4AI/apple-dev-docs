@@ -76,6 +76,19 @@ func TestBuildsUploadCommandHasExplicitSensitiveOutputOptIn(t *testing.T) {
 	}
 }
 
+func TestBuildsUploadCommandAppHelpDescribesExactIPAIdentityLookup(t *testing.T) {
+	cmd := BuildsUploadCommand()
+	appFlag := cmd.FlagSet.Lookup("app")
+	if appFlag == nil {
+		t.Fatal("expected --app flag to be registered")
+	}
+	for _, want := range []string{"IPA uploads", "exact bundle ID", "exact name"} {
+		if !strings.Contains(appFlag.Usage, want) {
+			t.Fatalf("expected --app usage to include %q, got %q", want, appFlag.Usage)
+		}
+	}
+}
+
 func TestBuildsListCommand_ProcessingStateFlagDescription(t *testing.T) {
 	cmd := BuildsListCommand()
 

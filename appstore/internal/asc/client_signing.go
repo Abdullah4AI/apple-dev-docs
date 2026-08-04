@@ -383,8 +383,27 @@ func (c *Client) GetCertificate(ctx context.Context, id string, opts ...Certific
 	return &response, nil
 }
 
+type certificateCreateOptions struct {
+	passTypeID string
+}
+
+// CertificateCreateOption configures certificate creation.
+type CertificateCreateOption func(*certificateCreateOptions)
+
+// WithCertificatePassTypeID associates a pass type ID with a pass certificate.
+func WithCertificatePassTypeID(passTypeID string) CertificateCreateOption {
+	return func(options *certificateCreateOptions) {
+		options.passTypeID = strings.TrimSpace(passTypeID)
+	}
+}
+
 // CreateCertificate creates a new certificate.
-func (c *Client) CreateCertificate(ctx context.Context, csrContent string, certType string) (*CertificateResponse, error) {
+func (c *Client) CreateCertificate(ctx context.Context, csrContent string, certType string, opts ...CertificateCreateOption) (*CertificateResponse, error) {
+	options := &certificateCreateOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
 	request := CertificateCreateRequest{
 		Data: CertificateCreateData{
 			Type: ResourceTypeCertificates,
@@ -393,6 +412,16 @@ func (c *Client) CreateCertificate(ctx context.Context, csrContent string, certT
 				CSRContent:      strings.TrimSpace(csrContent),
 			},
 		},
+	}
+	if options.passTypeID != "" {
+		request.Data.Relationships = &CertificateCreateRelationships{
+			PassTypeID: &Relationship{
+				Data: ResourceData{
+					Type: ResourceTypePassTypeIds,
+					ID:   options.passTypeID,
+				},
+			},
+		}
 	}
 
 	body, err := BuildRequestBody(request)

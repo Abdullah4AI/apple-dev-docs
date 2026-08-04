@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"howett.net/plist"
 
@@ -1175,6 +1178,54 @@ func TestRunXcodebuildWithLogWriterKeepsOnlyTailInErrorMessage(t *testing.T) {
 	}
 }
 
+func TestRunXcodebuildDoesNotWaitForDescendantHoldingOutputPipes(t *testing.T) {
+	tempDir := t.TempDir()
+	pidPath := filepath.Join(tempDir, "descendant.pid")
+
+	restore := overrideTestEnvironment(t)
+	commandContextFn = helperCommandContext(t, filepath.Join(tempDir, "commands.log"))
+	t.Setenv("ASC_XCODE_HELPER_DESCENDANT_PID", pidPath)
+	t.Cleanup(restore)
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidPath)
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return
+		}
+		if process, err := os.FindProcess(pid); err == nil {
+			_ = process.Kill()
+		}
+	})
+
+	started := time.Now()
+	err := runXcodebuild(context.Background(), []string{"retain-output-after-exit"}, io.Discard)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("runXcodebuild() error = %v", err)
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("runXcodebuild() waited %s for a descendant after the direct process exited", elapsed)
+	}
+}
+
+func TestRunXcodebuildPreservesContextCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	restore := overrideTestEnvironment(t)
+	commandContextFn = helperCommandContext(t, filepath.Join(tempDir, "commands.log"))
+	t.Cleanup(restore)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := runXcodebuild(ctx, []string{"wait-for-context-cancel"}, io.Discard)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runXcodebuild() error = %v, want context deadline exceeded", err)
+	}
+}
+
 func overrideTestEnvironment(t *testing.T) func() {
 	t.Helper()
 
@@ -1266,6 +1317,10 @@ func TestXcodeHelperProcess(t *testing.T) {
 	if len(commandArgs) >= 2 && commandArgs[0] == "agvtool" {
 		switch commandArgs[1] {
 		case "what-marketing-version":
+			if os.Getenv("ASC_XCODE_HELPER_VARIABLE_VERSION") == "1" {
+				fmt.Fprint(os.Stdout, "App=$(MARKETING_VERSION)\n")
+				os.Exit(0)
+			}
 			if os.Getenv("ASC_XCODE_HELPER_DIVERGENT_CONFIGURATIONS") == "1" {
 				fmt.Fprint(os.Stdout, "App=1.2.3\nApp=2.0.0\n")
 				os.Exit(0)
@@ -1286,6 +1341,11 @@ func TestXcodeHelperProcess(t *testing.T) {
 		case "new-marketing-version", "new-version", "next-version":
 			os.Exit(0)
 		}
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "-showBuildSettings" {
+		fmt.Fprint(os.Stdout, "Build settings for action build and target App:\n    MARKETING_VERSION = 4.5.6\n    CURRENT_PROJECT_VERSION = 99\n")
+		os.Exit(0)
 	}
 
 	if len(commandArgs) >= 1 && commandArgs[0] == "xcodebuild" && helperContainsArg(commandArgs[1:], "archive") {
@@ -1330,6 +1390,33 @@ func TestXcodeHelperProcess(t *testing.T) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "retain-output-after-exit" {
+		descendantArgs := []string{"-test.run=TestXcodeHelperProcess", "--", "xcodebuild", "hold-output-descriptors"}
+		descendant := exec.Command(os.Args[0], descendantArgs...)
+		descendant.Env = os.Environ()
+		descendant.Stdout = os.Stdout
+		descendant.Stderr = os.Stderr
+		if err := descendant.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(os.Getenv("ASC_XCODE_HELPER_DESCENDANT_PID"), []byte(strconv.Itoa(descendant.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "hold-output-descriptors" {
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "wait-for-context-cancel" {
+		time.Sleep(2 * time.Second)
 		os.Exit(0)
 	}
 

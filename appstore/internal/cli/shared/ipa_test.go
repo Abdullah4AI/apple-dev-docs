@@ -30,11 +30,21 @@ func TestExtractBundleInfoFromIPA(t *testing.T) {
 	if info.BuildNumber != "45" {
 		t.Fatalf("expected build number 45, got %q", info.BuildNumber)
 	}
+	if info.BundleID != "com.example.demo" {
+		t.Fatalf("expected bundle ID com.example.demo, got %q", info.BundleID)
+	}
 }
 
 func TestExtractBundleInfoFromIPA_PrefersTopLevelApp(t *testing.T) {
 	plistData := buildInfoPlist(t, "2.0.0", "200")
-	extensionPlist := buildInfoPlist(t, "9.9.9", "999")
+	extensionPlist, err := plist.Marshal(map[string]any{
+		"CFBundleIdentifier":         "com.example.demo.widget",
+		"CFBundleShortVersionString": "9.9.9",
+		"CFBundleVersion":            "999",
+	}, plist.XMLFormat)
+	if err != nil {
+		t.Fatalf("marshal extension plist: %v", err)
+	}
 	ipaPath := writeTestIPA(t, map[string][]byte{
 		"Payload/Demo.app/Info.plist":                              plistData,
 		"Payload/Demo.app/PlugIns/Widget.appex/Info.plist":         extensionPlist,
@@ -53,6 +63,9 @@ func TestExtractBundleInfoFromIPA_PrefersTopLevelApp(t *testing.T) {
 	}
 	if info.BuildNumber != "200" {
 		t.Fatalf("expected build number 200, got %q", info.BuildNumber)
+	}
+	if info.BundleID != "com.example.demo" {
+		t.Fatalf("expected top-level bundle ID com.example.demo, got %q", info.BundleID)
 	}
 }
 
@@ -306,6 +319,7 @@ func buildInfoPlistWithValues(t *testing.T, versionValue any, buildValue any, fo
 	t.Helper()
 
 	payload := map[string]any{
+		"CFBundleIdentifier":         "com.example.demo",
 		"CFBundleShortVersionString": versionValue,
 		"CFBundleVersion":            buildValue,
 	}

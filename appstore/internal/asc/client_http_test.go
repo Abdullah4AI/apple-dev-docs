@@ -7415,6 +7415,9 @@ func TestCreateCertificate_SendsRequest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read body error: %v", err)
 		}
+		if strings.Contains(string(body), `"relationships"`) {
+			t.Fatalf("expected relationships member to be omitted, got %s", body)
+		}
 		var payload CertificateCreateRequest
 		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Fatalf("decode body error: %v", err)
@@ -7428,10 +7431,52 @@ func TestCreateCertificate_SendsRequest(t *testing.T) {
 		if payload.Data.Attributes.CSRContent != "CSR_CONTENT" {
 			t.Fatalf("expected csr content, got %q", payload.Data.Attributes.CSRContent)
 		}
+		if payload.Data.Relationships != nil {
+			t.Fatalf("expected relationships to be omitted, got %#v", payload.Data.Relationships)
+		}
 		assertAuthorized(t, req)
 	}, response)
 
 	if _, err := client.CreateCertificate(context.Background(), "CSR_CONTENT", "IOS_DISTRIBUTION"); err != nil {
+		t.Fatalf("CreateCertificate() error: %v", err)
+	}
+}
+
+func TestCreateCertificate_WithPassTypeIDRelationship(t *testing.T) {
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"certificates","id":"c1","attributes":{"name":"Pass Cert","certificateType":"PASS_TYPE_ID"}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/certificates" {
+			t.Fatalf("expected path /v1/certificates, got %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body error: %v", err)
+		}
+		var payload CertificateCreateRequest
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode body error: %v", err)
+		}
+		if payload.Data.Relationships == nil || payload.Data.Relationships.PassTypeID == nil {
+			t.Fatal("expected passTypeId relationship")
+		}
+		if got := payload.Data.Relationships.PassTypeID.Data.Type; got != ResourceTypePassTypeIds {
+			t.Fatalf("expected relationship type passTypeIds, got %q", got)
+		}
+		if got := payload.Data.Relationships.PassTypeID.Data.ID; got != "pass-123" {
+			t.Fatalf("expected relationship ID pass-123, got %q", got)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.CreateCertificate(
+		context.Background(),
+		"CSR_CONTENT",
+		"PASS_TYPE_ID",
+		WithCertificatePassTypeID(" pass-123 "),
+	); err != nil {
 		t.Fatalf("CreateCertificate() error: %v", err)
 	}
 }

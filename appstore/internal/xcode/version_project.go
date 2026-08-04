@@ -64,6 +64,14 @@ type xcconfigMutation struct {
 
 // GetVersionScoped reads version values from a selected Xcode target and configuration.
 func GetVersionScoped(ctx context.Context, opts GetVersionOptions) (*VersionInfo, error) {
+	lookupSession, err := resolveBuildSettingsLookupSession(
+		opts.BuildSettingsLookup,
+		opts.BuildSettingsDiagnostic,
+		opts.BuildSettingsSession,
+	)
+	if err != nil {
+		return nil, err
+	}
 	project, err := openStructuredVersionProject(opts.ProjectDir)
 	if err != nil {
 		return nil, err
@@ -79,11 +87,19 @@ func GetVersionScoped(ctx context.Context, opts GetVersionOptions) (*VersionInfo
 	if strings.TrimSpace(opts.Configuration) != "" {
 		return nil, fmt.Errorf("--configuration requires structured MARKETING_VERSION and CURRENT_PROJECT_VERSION settings: %w", err)
 	}
-	return getVersionLegacy(ctx, opts.ProjectDir, opts.Target)
+	return getVersionLegacy(ctx, opts.ProjectDir, opts.Target, lookupSession)
 }
 
 // GetConsistentMarketingVersion resolves one marketing version across the full selected mutation scope.
 func GetConsistentMarketingVersion(ctx context.Context, opts GetVersionOptions) (string, error) {
+	lookupSession, err := resolveBuildSettingsLookupSession(
+		opts.BuildSettingsLookup,
+		opts.BuildSettingsDiagnostic,
+		opts.BuildSettingsSession,
+	)
+	if err != nil {
+		return "", err
+	}
 	project, err := openStructuredVersionProject(opts.ProjectDir)
 	if err != nil {
 		return "", err
@@ -103,7 +119,7 @@ func GetConsistentMarketingVersion(ctx context.Context, opts GetVersionOptions) 
 	if strings.TrimSpace(opts.Configuration) != "" {
 		return "", fmt.Errorf("--configuration requires structured %s settings: %w", marketingVersionSetting, err)
 	}
-	legacy, err := getVersionLegacy(ctx, opts.ProjectDir, opts.Target)
+	legacy, err := getVersionLegacy(ctx, opts.ProjectDir, opts.Target, lookupSession)
 	if err != nil {
 		return "", err
 	}

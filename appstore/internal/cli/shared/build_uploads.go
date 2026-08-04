@@ -2,8 +2,10 @@ package shared
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
@@ -58,8 +60,11 @@ func PrepareBuildUpload(ctx context.Context, client *asc.Client, appID string, f
 }
 
 // CommitBuildUploadFile marks a reserved upload file as uploaded and optionally
-// persists source-file checksums.
-func CommitBuildUploadFile(ctx context.Context, client *asc.Client, fileID string, checksums *asc.Checksums) (*asc.BuildUploadFileResponse, error) {
+// persists source-file checksums. When the mutation result is ambiguous, it
+// reads the parent build upload once and accepts success only when App Store
+// Connect reports that processing has started or completed. A reconciled
+// success returns a nil response because no authoritative file payload exists.
+func CommitBuildUploadFile(ctx context.Context, client *asc.Client, uploadID, fileID string, checksums *asc.Checksums) (*asc.BuildUploadFileResponse, error) {
 	uploaded := true
 	req := asc.BuildUploadFileUpdateRequest{
 		Data: asc.BuildUploadFileUpdateData{
@@ -73,8 +78,86 @@ func CommitBuildUploadFile(ctx context.Context, client *asc.Client, fileID strin
 	}
 
 	resp, err := client.UpdateBuildUploadFile(ctx, fileID, req)
-	if err != nil {
-		return nil, fmt.Errorf("commit upload file: %w", err)
+	if err == nil {
+		return resp, nil
 	}
-	return resp, nil
+
+	if !isAmbiguousBuildUploadCommitError(err) {
+		return nil, buildUploadCommitError(uploadID, err, "")
+	}
+
+	uploadID = strings.TrimSpace(uploadID)
+	if uploadID == "" {
+		return nil, buildUploadCommitError(uploadID, err, "build upload ID is unavailable for reconciliation")
+	}
+
+	// The mutation context may already have reached its deadline. Remove only
+	// that request deadline so an outer operation deadline still bounds the
+	// reconciliation readback.
+	reconcileBase := contextWithoutCurrentTimeout(ctx)
+	if parentErr := reconcileBase.Err(); parentErr != nil {
+		return nil, buildUploadCommitError(uploadID, err, fmt.Sprintf("reconciliation skipped because the parent operation ended: %v", parentErr))
+	}
+	reconcileCtx, cancel := ContextWithTimeout(reconcileBase)
+	defer cancel()
+
+	uploadResp, lookupErr := client.GetBuildUpload(reconcileCtx, uploadID)
+	if lookupErr != nil {
+		return nil, buildUploadCommitError(uploadID, err, fmt.Sprintf("reconciliation lookup failed: %v", lookupErr))
+	}
+
+	state := buildUploadState(uploadResp)
+	switch state {
+	case "PROCESSING", "COMPLETE":
+		return nil, nil
+	case "":
+		return nil, buildUploadCommitError(uploadID, err, "reconciliation returned no authoritative upload state")
+	default:
+		return nil, buildUploadCommitError(uploadID, err, fmt.Sprintf("reconciliation returned upload state %q", state))
+	}
+}
+
+func isAmbiguousBuildUploadCommitError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if asc.IsBuildUploadFileCommitResponseError(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if !asc.IsRetryable(err) {
+		return false
+	}
+
+	var statusErr interface{ HTTPStatusCode() int }
+	if !errors.As(err, &statusErr) {
+		return true
+	}
+	status := statusErr.HTTPStatusCode()
+	return status == 0 || status == 408 || status >= 500
+}
+
+func buildUploadState(resp *asc.BuildUploadResponse) string {
+	if resp == nil || resp.Data.Attributes.State == nil || resp.Data.Attributes.State.State == nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(asc.SanitizeTerminalText(*resp.Data.Attributes.State.State)))
+}
+
+func buildUploadCommitError(uploadID string, mutationErr error, reconciliation string) error {
+	uploadID = strings.TrimSpace(uploadID)
+	if uploadID == "" {
+		if reconciliation == "" {
+			return fmt.Errorf("commit upload file: %w", mutationErr)
+		}
+		return fmt.Errorf("commit upload file: %w; %s", mutationErr, reconciliation)
+	}
+
+	message := fmt.Sprintf("commit upload file for build upload %q", uploadID)
+	if reconciliation != "" {
+		message += "; " + reconciliation
+	}
+	return fmt.Errorf("%s; inspect with asc builds uploads view --id %q: %w", message, uploadID, mutationErr)
 }

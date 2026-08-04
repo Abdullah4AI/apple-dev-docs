@@ -484,6 +484,94 @@ func TestBuildsListMissingAppExitCode(t *testing.T) {
 	}
 }
 
+func TestAnalyticsViewInvalidGranularityExitCode(t *testing.T) {
+	binaryPath := buildASCBlackboxBinary(t)
+
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "unsupported", value: "HOURLY"},
+		{name: "empty", value: ""},
+		{name: "empty entry", value: "DAILY,,WEEKLY"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			runCmd := exec.Command(
+				binaryPath,
+				"analytics", "view",
+				"--request-id", "11111111-1111-1111-1111-111111111111",
+				"--granularity", test.value,
+			)
+			runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			runCmd.Stdout = &stdout
+			runCmd.Stderr = &stderr
+			err := runCmd.Run()
+			if err == nil {
+				t.Fatalf("expected non-zero exit for granularity %q", test.value)
+			}
+
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
+			}
+			if exitErr.ExitCode() != ExitUsage {
+				t.Fatalf("exit code = %d, want %d; stderr=%q", exitErr.ExitCode(), ExitUsage, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("expected empty stdout, got %q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "--granularity must be a comma-separated list of: DAILY, WEEKLY, MONTHLY") {
+				t.Fatalf("unexpected stderr: %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestAnalyticsViewInvalidProcessingDateExitCode(t *testing.T) {
+	binaryPath := buildASCBlackboxBinary(t)
+	for _, value := range []string{"2024-13-40", ""} {
+		t.Run(fmt.Sprintf("value=%q", value), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			runCmd := exec.Command(
+				binaryPath,
+				"analytics", "view",
+				"--request-id", "11111111-1111-1111-1111-111111111111",
+				"--processing-date", value,
+			)
+			runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			runCmd.Stdout = &stdout
+			runCmd.Stderr = &stderr
+			err := runCmd.Run()
+			if err == nil {
+				t.Fatal("expected invalid --processing-date to fail")
+			}
+
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
+			}
+			if exitErr.ExitCode() != ExitUsage {
+				t.Fatalf("exit code = %d, want %d; stderr=%q", exitErr.ExitCode(), ExitUsage, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("expected empty stdout, got %q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "--processing-date must be in YYYY-MM-DD format") {
+				t.Fatalf("unexpected stderr: %q", stderr.String())
+			}
+		})
+	}
+}
+
 func TestScreenshotsUploadResumeMissingValueExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryPath := buildASCBlackboxBinary(t)

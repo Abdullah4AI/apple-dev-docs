@@ -876,7 +876,7 @@ func uploadBuildAndWaitForID(ctx context.Context, client *asc.Client, appID, ipa
 	}
 
 	commitCtx, commitCancel := contextWithPublishUploadTimeout(ctx, uploadTimeout, overrideUploadTimeout)
-	_, err = shared.CommitBuildUploadFile(commitCtx, client, fileResp.Data.ID, nil)
+	_, err = shared.CommitBuildUploadFile(commitCtx, client, uploadResp.Data.ID, fileResp.Data.ID, nil)
 	commitCancel()
 	if err != nil {
 		return nil, err
@@ -937,10 +937,7 @@ func resolvePublishTimeout(timeout time.Duration) time.Duration {
 
 func contextWithPublishUploadTimeout(ctx context.Context, timeout time.Duration, override bool) (context.Context, context.CancelFunc) {
 	if override {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		return context.WithTimeout(ctx, timeout)
+		return shared.ContextWithTimeoutDuration(ctx, timeout)
 	}
 	return shared.ContextWithUploadTimeout(ctx)
 }

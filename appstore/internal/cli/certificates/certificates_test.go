@@ -12,7 +12,9 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +63,141 @@ func TestCertificatesCreateCommand_CSRAndGenerateCSRAreMutuallyExclusive(t *test
 	err := cmd.Exec(context.Background(), []string{})
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected flag.ErrHelp for mutually exclusive CSR flags, got %v", err)
+	}
+}
+
+func TestCertificatesCreateCommand_PassTypeCertificateRequiresPassTypeIDBeforeCSRGeneration(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "pass.key")
+	csrOut := filepath.Join(dir, "pass.csr")
+
+	originalGetClient := getCertificatesASCClient
+	getCertificatesASCClient = func() (*asc.Client, error) {
+		t.Fatal("ASC client should not be resolved when --pass-type-id is missing")
+		return nil, nil
+	}
+	t.Cleanup(func() { getCertificatesASCClient = originalGetClient })
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "PASS_TYPE_ID",
+		"--generate-csr",
+		"--key-out", keyOut,
+		"--csr-out", csrOut,
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	err := cmd.Exec(context.Background(), []string{})
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when --pass-type-id is missing, got %v", err)
+	}
+	if _, err := os.Stat(keyOut); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("private key should not be generated, stat error: %v", err)
+	}
+	if _, err := os.Stat(csrOut); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("CSR should not be generated, stat error: %v", err)
+	}
+}
+
+func TestCertificatesCreateCommand_PassTypeIDRejectsIncompatibleTypeBeforeCSRGeneration(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "distribution.key")
+	csrOut := filepath.Join(dir, "distribution.csr")
+
+	originalGetClient := getCertificatesASCClient
+	getCertificatesASCClient = func() (*asc.Client, error) {
+		t.Fatal("ASC client should not be resolved for an incompatible --pass-type-id")
+		return nil, nil
+	}
+	t.Cleanup(func() { getCertificatesASCClient = originalGetClient })
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "IOS_DISTRIBUTION",
+		"--pass-type-id", "pass-123",
+		"--generate-csr",
+		"--key-out", keyOut,
+		"--csr-out", csrOut,
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	err := cmd.Exec(context.Background(), []string{})
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp for an incompatible --pass-type-id, got %v", err)
+	}
+	if _, err := os.Stat(keyOut); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("private key should not be generated, stat error: %v", err)
+	}
+	if _, err := os.Stat(csrOut); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("CSR should not be generated, stat error: %v", err)
+	}
+}
+
+func TestCertificatesCreateCommand_PassTypeIDRelationship(t *testing.T) {
+	csrPath := filepath.Join(t.TempDir(), "pass.csr")
+	if err := os.WriteFile(csrPath, []byte("CSR_CONTENT"), 0o600); err != nil {
+		t.Fatalf("write CSR: %v", err)
+	}
+
+	var got asc.CertificateCreateRequest
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost || req.URL.Path != "/v1/certificates" {
+			t.Errorf("expected POST /v1/certificates, got %s %s", req.Method, req.URL.Path)
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"data":{"type":"certificates","id":"cert-1","attributes":{"name":"Pass Cert","certificateType":"PASS_TYPE_ID"}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	transport, ok := server.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("server transport type = %T, want *http.Transport", server.Client().Transport)
+	}
+	transport = transport.Clone()
+	transport.Proxy = nil
+	transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	transport.TLSClientConfig.ServerName = "example.com"
+	dialer := &net.Dialer{}
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	client := newCertificatesTestClient(t, transport)
+
+	originalGetClient := getCertificatesASCClient
+	getCertificatesASCClient = func() (*asc.Client, error) { return client, nil }
+	t.Cleanup(func() { getCertificatesASCClient = originalGetClient })
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "pass_type_id",
+		"--pass-type-id", "  pass-123  ",
+		"--csr", csrPath,
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); err != nil {
+		t.Fatalf("exec error: %v", err)
+	}
+	if got.Data.Relationships == nil || got.Data.Relationships.PassTypeID == nil {
+		t.Fatal("expected passTypeId relationship")
+	}
+	if got.Data.Relationships.PassTypeID.Data.Type != asc.ResourceTypePassTypeIds {
+		t.Fatalf("expected passTypeIds relationship type, got %q", got.Data.Relationships.PassTypeID.Data.Type)
+	}
+	if got.Data.Relationships.PassTypeID.Data.ID != "pass-123" {
+		t.Fatalf("expected trimmed pass type ID, got %q", got.Data.Relationships.PassTypeID.Data.ID)
 	}
 }
 

@@ -1451,6 +1451,19 @@ func contextWithoutTimeout(ctx context.Context) context.Context {
 	return ctx
 }
 
+// contextWithoutCurrentTimeout removes only the innermost timeout applied by
+// withTimeoutContext. Unlike contextWithoutTimeout, it preserves outer parent
+// deadlines so they continue to bound subsequent work.
+func contextWithoutCurrentTimeout(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	if base, ok := ctx.Value(timeoutParentContextKey{}).(context.Context); ok && base != nil {
+		return base
+	}
+	return ctx
+}
+
 func contextWithTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	return withTimeoutContext(ctx, asc.ResolveTimeout())
 }

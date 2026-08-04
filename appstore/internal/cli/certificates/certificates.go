@@ -33,6 +33,7 @@ Examples:
   asc certificates list --certificate-type IOS_DISTRIBUTION
   asc certificates view --id "CERT_ID" --include passTypeId
   asc certificates create --certificate-type IOS_DISTRIBUTION --csr "./cert.csr"
+  asc certificates create --certificate-type PASS_TYPE_ID --pass-type-id "PASS_TYPE_ID" --csr "./pass.csr"
   asc certificates update --id "CERT_ID" --activated true
   asc certificates update --id "CERT_ID" --activated false
   asc certificates revoke --id "CERT_ID" --confirm
@@ -189,6 +190,7 @@ func CertificatesCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 
 	certificateType := fs.String("certificate-type", "", "Certificate type (e.g., IOS_DISTRIBUTION)")
+	passTypeID := fs.String("pass-type-id", "", "Pass Type ID resource ID (required for PASS_TYPE_ID and PASS_TYPE_ID_WITH_NFC)")
 	csrPath := fs.String("csr", "", "CSR file path")
 	generateCSR := fs.Bool("generate-csr", false, "Generate a private key and CSR before creating the certificate")
 	keyOut := fs.String("key-out", "", "Private key output path for --generate-csr (PEM)")
@@ -205,12 +207,13 @@ func CertificatesCreateCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "create",
-		ShortUsage: "asc certificates create --certificate-type TYPE (--csr ./cert.csr | --generate-csr --key-out ./cert.key --csr-out ./cert.csr)",
+		ShortUsage: "asc certificates create --certificate-type TYPE [--pass-type-id ID] (--csr ./cert.csr | --generate-csr --key-out ./cert.key --csr-out ./cert.csr)",
 		ShortHelp:  "Create a signing certificate.",
 		LongHelp: `Create a signing certificate.
 
 Examples:
   asc certificates create --certificate-type IOS_DISTRIBUTION --csr "./cert.csr"
+  asc certificates create --certificate-type PASS_TYPE_ID --pass-type-id "PASS_TYPE_ID" --csr "./pass.csr"
   asc certificates create --certificate-type IOS_DISTRIBUTION --generate-csr --key-out "./signing/dist.key" --csr-out "./signing/dist.csr"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -219,6 +222,15 @@ Examples:
 			if certificateValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --certificate-type is required")
 				return shared.MissingRequiredUsageError()
+			}
+			passTypeIDValue := strings.TrimSpace(*passTypeID)
+			isPassTypeCertificate := certificateValue == "PASS_TYPE_ID" || certificateValue == "PASS_TYPE_ID_WITH_NFC"
+			if isPassTypeCertificate && passTypeIDValue == "" {
+				fmt.Fprintf(os.Stderr, "Error: --pass-type-id is required with --certificate-type %s\n", certificateValue)
+				return shared.MissingRequiredUsageError("--pass-type-id")
+			}
+			if !isPassTypeCertificate && passTypeIDValue != "" {
+				return shared.UsageError("--pass-type-id can only be used with --certificate-type PASS_TYPE_ID or PASS_TYPE_ID_WITH_NFC")
 			}
 			csrValue := strings.TrimSpace(*csrPath)
 
@@ -281,7 +293,12 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.CreateCertificate(requestCtx, csrContent, certificateValue)
+			createOpts := []asc.CertificateCreateOption{}
+			if passTypeIDValue != "" {
+				createOpts = append(createOpts, asc.WithCertificatePassTypeID(passTypeIDValue))
+			}
+
+			resp, err := client.CreateCertificate(requestCtx, csrContent, certificateValue, createOpts...)
 			if err != nil {
 				return fmt.Errorf("certificates create: failed to create: %w", err)
 			}

@@ -12,7 +12,10 @@ import (
 
 const analyticsMaxLimit = 200
 
-var uuidPattern = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+var (
+	uuidPattern               = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+	salesReportVersionPattern = regexp.MustCompile(`^[0-9]+_[0-9]+$`)
+)
 
 func normalizeSalesReportType(value string) (asc.SalesReportType, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(value))
@@ -60,21 +63,22 @@ func normalizeSalesReportFrequency(value string) (asc.SalesReportFrequency, erro
 	}
 }
 
-func normalizeSalesReportVersion(value string) (asc.SalesReportVersion, error) {
+func normalizeSalesReportVersion(value string, reportType asc.SalesReportType) (asc.SalesReportVersion, error) {
 	normalized := strings.TrimSpace(value)
 	if normalized == "" {
-		return asc.SalesReportVersion1_0, nil
+		return defaultSalesReportVersion(reportType), nil
 	}
-	switch normalized {
-	case string(asc.SalesReportVersion1_0):
-		return asc.SalesReportVersion1_0, nil
-	case string(asc.SalesReportVersion1_1):
-		return asc.SalesReportVersion1_1, nil
-	case string(asc.SalesReportVersion1_3):
-		return asc.SalesReportVersion1_3, nil
-	default:
-		return "", fmt.Errorf("--version must be 1_0, 1_1, or 1_3")
+	if !salesReportVersionPattern.MatchString(normalized) {
+		return "", fmt.Errorf("--version must use major_minor format (for example, 1_4)")
 	}
+	return asc.SalesReportVersion(normalized), nil
+}
+
+func defaultSalesReportVersion(reportType asc.SalesReportType) asc.SalesReportVersion {
+	if reportType == asc.SalesReportTypeSubscription {
+		return asc.SalesReportVersion1_4
+	}
+	return asc.SalesReportVersion1_0
 }
 
 func normalizeAnalyticsAccessType(value string) (asc.AnalyticsAccessType, error) {
@@ -153,6 +157,18 @@ func normalizeReportDate(value string, frequency asc.SalesReportFrequency) (stri
 	}
 }
 
+func normalizeAnalyticsProcessingDateFilter(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("--processing-date must be in YYYY-MM-DD format")
+	}
+	parsed, err := time.Parse("2006-01-02", trimmed)
+	if err != nil {
+		return "", fmt.Errorf("--processing-date must be in YYYY-MM-DD format")
+	}
+	return parsed.Format("2006-01-02"), nil
+}
+
 func normalizeAnalyticsDateFilter(value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -173,6 +189,29 @@ func matchAnalyticsInstanceDate(attrs asc.AnalyticsReportInstanceAttributes, dat
 		return true
 	}
 	return strings.HasPrefix(attrs.ProcessingDate, date)
+}
+
+func normalizeAnalyticsGranularities(value string) ([]string, error) {
+	parts := strings.Split(value, ",")
+	seen := make(map[string]struct{}, len(parts))
+	granularities := make([]string, 0, len(parts))
+	for _, part := range parts {
+		granularity := strings.ToUpper(strings.TrimSpace(part))
+		if granularity == "" {
+			return nil, fmt.Errorf("--granularity must be a comma-separated list of: DAILY, WEEKLY, MONTHLY")
+		}
+		switch granularity {
+		case "DAILY", "WEEKLY", "MONTHLY":
+		default:
+			return nil, fmt.Errorf("--granularity must be a comma-separated list of: DAILY, WEEKLY, MONTHLY")
+		}
+		if _, exists := seen[granularity]; exists {
+			continue
+		}
+		seen[granularity] = struct{}{}
+		granularities = append(granularities, granularity)
+	}
+	return granularities, nil
 }
 
 func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID string, limit int, next string, paginate bool) ([]asc.Resource[asc.AnalyticsReportAttributes], asc.Links, error) {
@@ -222,7 +261,7 @@ func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID st
 	return all, links, nil
 }
 
-func fetchAnalyticsReportInstances(ctx context.Context, client *asc.Client, reportID string) ([]asc.Resource[asc.AnalyticsReportInstanceAttributes], error) {
+func fetchAnalyticsReportInstances(ctx context.Context, client *asc.Client, reportID string, opts ...asc.AnalyticsReportInstancesOption) ([]asc.Resource[asc.AnalyticsReportInstanceAttributes], error) {
 	var (
 		all  []asc.Resource[asc.AnalyticsReportInstanceAttributes]
 		next string
@@ -238,7 +277,10 @@ func fetchAnalyticsReportInstances(ctx context.Context, client *asc.Client, repo
 			seen[next] = true
 			resp, err = client.GetAnalyticsReportInstances(ctx, reportID, asc.WithAnalyticsReportInstancesNextURL(next))
 		} else {
-			resp, err = client.GetAnalyticsReportInstances(ctx, reportID, asc.WithAnalyticsReportInstancesLimit(analyticsMaxLimit))
+			firstPageOpts := make([]asc.AnalyticsReportInstancesOption, 0, len(opts)+1)
+			firstPageOpts = append(firstPageOpts, asc.WithAnalyticsReportInstancesLimit(analyticsMaxLimit))
+			firstPageOpts = append(firstPageOpts, opts...)
+			resp, err = client.GetAnalyticsReportInstances(ctx, reportID, firstPageOpts...)
 		}
 		if err != nil {
 			return nil, err

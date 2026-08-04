@@ -81,6 +81,80 @@ func TestXcodeVersionViewCommandSupportsProjectFlag(t *testing.T) {
 	}
 }
 
+func TestXcodeVersionViewCommandForwardsXcodebuildSettingsLookupPolicy(t *testing.T) {
+	originalRunGetVersion := runGetVersion
+	t.Cleanup(func() { runGetVersion = originalRunGetVersion })
+
+	runGetVersion = func(_ context.Context, opts localxcode.GetVersionOptions) (*localxcode.VersionInfo, error) {
+		if opts.BuildSettingsLookup != localxcode.BuildSettingsLookupNever {
+			t.Fatalf("lookup policy = %q, want never", opts.BuildSettingsLookup)
+		}
+		if opts.BuildSettingsDiagnostic == nil {
+			t.Fatal("expected stderr diagnostic writer")
+		}
+		return &localxcode.VersionInfo{Version: "1.2.3", BuildNumber: "42", ProjectDir: opts.ProjectDir}, nil
+	}
+
+	_, stderr, err := runXcodeVersionCommand(t, []string{
+		"view", "--xcodebuild-settings-lookup", "never", "--output", "json",
+	})
+	if err != nil {
+		t.Fatalf("view run error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no diagnostic without a fallback, got %q", stderr)
+	}
+}
+
+func TestXcodeVersionCommandsRejectInvalidXcodebuildSettingsLookupBeforeWork(t *testing.T) {
+	originalRunGetVersion := runGetVersion
+	originalRunSetVersion := runSetVersion
+	originalRunBumpVersion := runBumpVersion
+	t.Cleanup(func() {
+		runGetVersion = originalRunGetVersion
+		runSetVersion = originalRunSetVersion
+		runBumpVersion = originalRunBumpVersion
+	})
+
+	runGetVersion = func(context.Context, localxcode.GetVersionOptions) (*localxcode.VersionInfo, error) {
+		t.Fatal("view work ran before --xcodebuild-settings-lookup validation")
+		return nil, nil
+	}
+	runSetVersion = func(context.Context, localxcode.SetVersionOptions) (*localxcode.SetVersionResult, error) {
+		t.Fatal("edit work ran before --xcodebuild-settings-lookup validation")
+		return nil, nil
+	}
+	runBumpVersion = func(context.Context, localxcode.BumpVersionOptions) (*localxcode.BumpVersionResult, error) {
+		t.Fatal("bump work ran before --xcodebuild-settings-lookup validation")
+		return nil, nil
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "view", args: []string{"view", "--xcodebuild-settings-lookup", "sometimes"}},
+		{name: "view empty", args: []string{"view", "--xcodebuild-settings-lookup="}},
+		{name: "edit", args: []string{"edit", "--version", "1.2.3", "--xcodebuild-settings-lookup", "sometimes"}},
+		{name: "bump", args: []string{"bump", "--type", "patch", "--xcodebuild-settings-lookup", "sometimes"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr, err := runXcodeVersionCommand(t, test.args)
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected usage error, got %v", err)
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "--xcodebuild-settings-lookup must be one of: auto, never") {
+				t.Fatalf("unexpected stderr: %q", stderr)
+			}
+		})
+	}
+}
+
 func TestSelectedProjectInputPreservesExactPathBytes(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -320,6 +394,9 @@ func TestXcodeVersionEditResolvesAndAppliesRemoteSafeBuildNumber(t *testing.T) {
 	runValidateSetVersion = func(opts localxcode.SetVersionOptions) error { return nil }
 
 	runGetConsistentMarketingVersion = func(ctx context.Context, opts localxcode.GetVersionOptions) (string, error) {
+		if opts.BuildSettingsLookup != localxcode.BuildSettingsLookupNever || opts.BuildSettingsDiagnostic == nil {
+			t.Fatalf("unexpected lookup policy options: %#v", opts)
+		}
 		return "2.4.0", nil
 	}
 	runResolveXcodeNextBuildNumber = func(ctx context.Context, opts xcodeRemoteBuildNumberOptions) (string, error) {
@@ -337,7 +414,8 @@ func TestXcodeVersionEditResolvesAndAppliesRemoteSafeBuildNumber(t *testing.T) {
 
 	stdout, stderr, err := runXcodeVersionCommand(t, []string{
 		"edit", "--project", "Demo.xcodeproj", "--target", "App", "--configuration", "Release",
-		"--next-build-number", "--app", "com.example.demo", "--platform", "IOS", "--output", "json",
+		"--next-build-number", "--app", "com.example.demo", "--platform", "IOS",
+		"--xcodebuild-settings-lookup", "never", "--output", "json",
 	})
 	if err != nil {
 		t.Fatalf("edit run error: %v", err)
@@ -351,6 +429,31 @@ func TestXcodeVersionEditResolvesAndAppliesRemoteSafeBuildNumber(t *testing.T) {
 	}
 	if result.BuildNumber != "108" || result.Target != "App" || result.Configuration != "Release" {
 		t.Fatalf("unexpected structured output: %#v", result)
+	}
+}
+
+func TestXcodeVersionBumpCommandForwardsXcodebuildSettingsLookupPolicy(t *testing.T) {
+	originalRunBumpVersion := runBumpVersion
+	t.Cleanup(func() { runBumpVersion = originalRunBumpVersion })
+
+	runBumpVersion = func(_ context.Context, opts localxcode.BumpVersionOptions) (*localxcode.BumpVersionResult, error) {
+		if opts.BuildSettingsLookup != localxcode.BuildSettingsLookupNever {
+			t.Fatalf("lookup policy = %q, want never", opts.BuildSettingsLookup)
+		}
+		if opts.BuildSettingsDiagnostic == nil {
+			t.Fatal("expected stderr diagnostic writer")
+		}
+		return &localxcode.BumpVersionResult{BumpType: string(opts.BumpType), NewVersion: "1.2.4"}, nil
+	}
+
+	_, stderr, err := runXcodeVersionCommand(t, []string{
+		"bump", "--type", "patch", "--xcodebuild-settings-lookup", "never", "--output", "json",
+	})
+	if err != nil {
+		t.Fatalf("bump run error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no diagnostic without a fallback, got %q", stderr)
 	}
 }
 
@@ -468,9 +571,19 @@ func TestXcodeVersionBumpResolvesAndAppliesRemoteSafeBuildNumber(t *testing.T) {
 		runBumpVersion = originalBump
 		runResolveXcodeNextBuildNumber = originalResolve
 	})
-	runValidateBumpVersion = func(ctx context.Context, opts localxcode.BumpVersionOptions) error { return nil }
+	var lookupSession *localxcode.BuildSettingsLookupSession
+	runValidateBumpVersion = func(ctx context.Context, opts localxcode.BumpVersionOptions) error {
+		if opts.BuildSettingsSession == nil {
+			t.Fatal("validate phase did not receive a build settings lookup session")
+		}
+		lookupSession = opts.BuildSettingsSession
+		return nil
+	}
 
 	runGetConsistentMarketingVersion = func(ctx context.Context, opts localxcode.GetVersionOptions) (string, error) {
+		if opts.BuildSettingsSession != lookupSession {
+			t.Fatal("marketing-version phase did not reuse the validation lookup session")
+		}
 		return "3.0.0", nil
 	}
 	runResolveXcodeNextBuildNumber = func(ctx context.Context, opts xcodeRemoteBuildNumberOptions) (string, error) {
@@ -480,6 +593,9 @@ func TestXcodeVersionBumpResolvesAndAppliesRemoteSafeBuildNumber(t *testing.T) {
 		return "301", nil
 	}
 	runBumpVersion = func(ctx context.Context, opts localxcode.BumpVersionOptions) (*localxcode.BumpVersionResult, error) {
+		if opts.BuildSettingsSession != lookupSession {
+			t.Fatal("mutation phase did not reuse the validation lookup session")
+		}
 		if opts.BumpType != localxcode.BumpBuild || opts.BuildNumber != "301" || opts.Target != "Widget" || opts.Configuration != "Debug" {
 			t.Fatalf("unexpected bump options: %#v", opts)
 		}

@@ -135,10 +135,16 @@ type CertificateCreateAttributes struct {
 	CSRContent      string `json:"csrContent"`
 }
 
+// CertificateCreateRelationships describes relationships for certificate creation.
+type CertificateCreateRelationships struct {
+	PassTypeID *Relationship `json:"passTypeId,omitempty"`
+}
+
 // CertificateCreateData is the data portion of a certificate create request.
 type CertificateCreateData struct {
-	Type       ResourceType                `json:"type"`
-	Attributes CertificateCreateAttributes `json:"attributes"`
+	Type          ResourceType                    `json:"type"`
+	Attributes    CertificateCreateAttributes     `json:"attributes"`
+	Relationships *CertificateCreateRelationships `json:"relationships,omitempty"`
 }
 
 // CertificateCreateRequest is a request to create a certificate.

@@ -256,7 +256,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body io.Reader
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		readErr := fmt.Errorf("failed to read response body: %w", err)
+		readErr := &responseBodyReadError{err: err}
 		if isTransientTransportError(err) {
 			return nil, &RetryableError{Err: readErr}
 		}

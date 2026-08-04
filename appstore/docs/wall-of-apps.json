@@ -359,6 +359,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/74/16/00/7416000d-28a9-7c8f-6537-9b6d8b92cc18/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Doco Translate: PDF Translator",
+    "link": "https://apps.apple.com/us/app/doco-translate-pdf-translator/id6758205667?mt=12&uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/cf/13/14/cf1314c4-8eb3-026f-47c4-52de70683231/AppIcon-0-0-85-220-0-0-1-0-2x-P3.png/512x512bb.png"
+  },
+  {
     "app": "Don't Spiral: ROCD & Anxiety",
     "link": "https://apps.apple.com/us/app/dont-spiral-rocd-anxiety/id6758227509?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/c6/e9/77/c6e977ac-bc3b-5f1c-fbdb-e7f46ae3e467/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -416,6 +421,11 @@
     "app": "Envelope Budget - Kualia",
     "link": "https://apps.apple.com/us/app/envelope-budget-kualia/id6466455367?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/c9/42/c0/c942c0f5-bb5c-faf0-0306-0eaa72a08112/AppIcon-Kualia-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "EQMonitor",
+    "link": "https://apps.apple.com/jp/app/eqmonitor-%E5%9C%B0%E9%9C%87%E9%80%9F%E5%A0%B1/id6447546703?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/84/23/23/8423230f-6766-b3f1-3880-ad95174413a5/iOSAppIcon-0-0-1x_U007epad-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Expense Tracker: ExpenseKit",
@@ -1774,6 +1784,11 @@
     "app": "知了，RSS智能聚合阅读",
     "link": "https://apps.apple.com/app/id1525056652",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/11/3e/43/113e432e-0c18-db1b-fff8-0dec1e3d1fcb/AppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "织诗 - AI写诗与古诗词创作",
+    "link": "https://apps.apple.com/us/app/%E7%BB%87%E8%AF%97-ai%E5%86%99%E8%AF%97%E4%B8%8E%E5%8F%A4%E8%AF%97%E8%AF%8D%E5%88%9B%E4%BD%9C/id6777856347?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4b/05/11/4b051114-60b4-13e8-f567-23d7f4170600/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
     "app": "시선 - 사진 한 장, 시 한 줄",

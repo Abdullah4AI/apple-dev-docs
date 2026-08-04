@@ -23,7 +23,7 @@ const (
 func BuildsUploadCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("upload", flag.ExitOnError)
 
-	appID := fs.String("app", "", "App Store Connect app ID (required, or ASC_APP_ID env)")
+	appID := fs.String("app", "", "App Store Connect app ID; IPA uploads also accept an exact bundle ID or exact name (required, or ASC_APP_ID env)")
 	ipaPath := fs.String("ipa", "", "Path to .ipa file (for iOS, tvOS, visionOS apps)")
 	pkgPath := fs.String("pkg", "", "Path to .pkg file (for macOS apps)")
 	version := fs.String("version", "", "CFBundleShortVersionString (e.g., 1.0.0, auto-extracted from IPA if not provided)")
@@ -190,24 +190,32 @@ Examples:
 
 			versionValue := strings.TrimSpace(*version)
 			buildNumberValue := strings.TrimSpace(*buildNumber)
-			if versionValue == "" || buildNumberValue == "" {
-				// Auto-extraction only works for IPA files
-				if hasIPA {
-					versionValue, buildNumberValue, err = shared.ResolveBundleInfoForIPA(filePath, versionValue, buildNumberValue)
-					if err != nil {
-						return fmt.Errorf("builds upload: %w", err)
-					}
-				} else {
-					// PKG files require explicit version and build number
-					missingFlags := make([]string, 0, 2)
-					if versionValue == "" {
-						missingFlags = append(missingFlags, "--version")
-					}
-					if buildNumberValue == "" {
-						missingFlags = append(missingFlags, "--build-number")
-					}
-					return fmt.Errorf("builds upload: %s required for PKG uploads", strings.Join(missingFlags, " and "))
+			var ipaBundleID string
+			if hasIPA {
+				ipaInfo, extractErr := shared.ExtractBundleInfoFromIPA(filePath)
+				if extractErr != nil {
+					return fmt.Errorf("builds upload: inspect IPA metadata: %w", extractErr)
 				}
+				ipaBundleID = strings.TrimSpace(ipaInfo.BundleID)
+				if ipaBundleID == "" {
+					return fmt.Errorf("builds upload: IPA top-level app Info.plist is missing CFBundleIdentifier")
+				}
+				if versionValue == "" {
+					versionValue = ipaInfo.Version
+				}
+				if buildNumberValue == "" {
+					buildNumberValue = ipaInfo.BuildNumber
+				}
+			} else if versionValue == "" || buildNumberValue == "" {
+				// PKG files require explicit version and build number
+				missingFlags := make([]string, 0, 2)
+				if versionValue == "" {
+					missingFlags = append(missingFlags, "--version")
+				}
+				if buildNumberValue == "" {
+					missingFlags = append(missingFlags, "--build-number")
+				}
+				return fmt.Errorf("builds upload: %s required for PKG uploads", strings.Join(missingFlags, " and "))
 			}
 			if versionValue == "" || buildNumberValue == "" {
 				missingFields := make([]string, 0, 2)
@@ -234,6 +242,31 @@ Examples:
 			}
 			requestCtx, cancel := shared.ContextWithTimeoutDuration(ctx, timeoutValue)
 			defer cancel()
+
+			if hasIPA {
+				resolvedAppID, err = shared.ResolveAppIDWithExactLookup(requestCtx, client, resolvedAppID)
+				if err != nil {
+					return fmt.Errorf("builds upload: %w", err)
+				}
+				appResp, err := client.GetApp(requestCtx, resolvedAppID)
+				if err != nil {
+					return fmt.Errorf("builds upload: fetch selected app %q: %w", resolvedAppID, err)
+				}
+				if appResp == nil {
+					return fmt.Errorf("builds upload: fetch selected app %q: empty response", resolvedAppID)
+				}
+				appBundleID := strings.TrimSpace(appResp.Data.Attributes.BundleID)
+				if appBundleID == "" {
+					return fmt.Errorf("builds upload: selected app %q has no bundle ID", resolvedAppID)
+				}
+				if !strings.EqualFold(ipaBundleID, appBundleID) {
+					appName := strings.TrimSpace(appResp.Data.Attributes.Name)
+					if appName == "" {
+						appName = resolvedAppID
+					}
+					return fmt.Errorf("builds upload: IPA bundle ID %q does not match selected app %q bundle ID %q", ipaBundleID, appName, appBundleID)
+				}
+			}
 
 			uploadResp, fileResp, err := shared.PrepareBuildUpload(requestCtx, client, resolvedAppID, fileInfo, versionValue, buildNumberValue, platformValue, fileUTI)
 			if err != nil {
@@ -291,7 +324,7 @@ Examples:
 				}
 
 				commitCtx, commitCancel := shared.ContextWithUploadTimeout(ctx)
-				commitResp, err := shared.CommitBuildUploadFile(commitCtx, client, fileResp.Data.ID, verifiedChecksums)
+				commitResp, err := shared.CommitBuildUploadFile(commitCtx, client, uploadResp.Data.ID, fileResp.Data.ID, verifiedChecksums)
 				commitCancel()
 				if err != nil {
 					return fmt.Errorf("builds upload: %w", err)

@@ -842,12 +842,15 @@ func (c *Client) UpdateBuildUploadFile(ctx context.Context, id string, req Build
 
 	data, err := c.do(ctx, "PATCH", fmt.Sprintf("/v1/buildUploadFiles/%s", id), body)
 	if err != nil {
+		if isResponseBodyReadError(err) {
+			return nil, newBuildUploadFileCommitResponseError(err)
+		}
 		return nil, err
 	}
 
 	var response BuildUploadFileResponse
 	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, newBuildUploadFileCommitResponseError(fmt.Errorf("failed to parse response: %w", err))
 	}
 
 	return &response, nil

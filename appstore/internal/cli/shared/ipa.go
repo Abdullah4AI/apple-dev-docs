@@ -14,6 +14,7 @@ import (
 )
 
 type IPABundleInfo struct {
+	BundleID    string
 	Version     string
 	BuildNumber string
 }
@@ -34,7 +35,8 @@ func ValidateIPAPath(ipaPath string) (os.FileInfo, error) {
 	return fileInfo, nil
 }
 
-// ExtractBundleInfoFromIPA reads CFBundleVersion info from an IPA.
+// ExtractBundleInfoFromIPA reads the top-level app's bundle identifier and
+// version metadata from an IPA.
 func ExtractBundleInfoFromIPA(ipaPath string) (IPABundleInfo, error) {
 	reader, err := zip.OpenReader(ipaPath)
 	if err != nil {
@@ -94,6 +96,7 @@ func readBundleInfoFromInfoPlist(file *zip.File) (IPABundleInfo, error) {
 	}
 
 	return IPABundleInfo{
+		BundleID:    coercePlistValueToString(info["CFBundleIdentifier"]),
 		Version:     coercePlistValueToString(info["CFBundleShortVersionString"]),
 		BuildNumber: coercePlistValueToString(info["CFBundleVersion"]),
 	}, nil
