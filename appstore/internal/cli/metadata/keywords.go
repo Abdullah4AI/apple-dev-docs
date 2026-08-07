@@ -69,10 +69,13 @@ Most commands operate on local ` + "`./metadata/version/<version>/<locale>.json`
 files. The direct-remote ` + "`push`" + ` helper writes locale-keyed keyword input
 straight to App Store Connect by App Store version ID.
 
-It does not front the raw App Store Connect ` + "`searchKeywords`" + `
-relationship APIs. Those low-level surfaces remain available under:
-  - ` + "`asc apps search-keywords ...`" + `
-  - ` + "`asc localizations search-keywords ...`" + `
+It does not front the raw App Store Connect ` + "`searchKeywords`" + ` relationship APIs.
+The supported low-level read and linkage surfaces remain available under:
+  - ` + "`asc apps search-keywords list`" + ` for app-level reads
+  - ` + "`asc localizations search-keywords ...`" + ` for version-localization linkages
+
+The compatibility command ` + "`asc apps search-keywords set`" + ` resolves a version
+and locale before updating this same version-localization ` + "`keywords`" + ` attribute.
 
 Examples:
   asc metadata keywords import --dir "./metadata" --version "1.2.3" --locale "en-US" --input "./keywords.csv"

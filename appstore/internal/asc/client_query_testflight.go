@@ -107,15 +107,30 @@ func buildFeedbackQuery(query *feedbackQuery) string {
 			"email",
 			"deviceModel",
 			"osVersion",
+			"locale",
+			"timeZone",
+			"architecture",
+			"connectionType",
+			"pairedAppleWatch",
+			"appUptimeInMilliseconds",
+			"diskBytesAvailable",
+			"diskBytesTotal",
+			"batteryPercentage",
+			"screenWidthInPoints",
+			"screenHeightInPoints",
 			"appPlatform",
 			"devicePlatform",
+			"deviceFamily",
+			"buildBundleId",
 			"screenshots",
+			"build",
+			"tester",
 		}
 		// A sparse fieldset omits any field not listed, including relationship
-		// fields. If the caller also requested relationships via include, those
-		// relationship names must be present here or ASC will not return the
-		// linked resources. `build`/`tester` are valid screenshot submission
-		// fields, so append whatever was included.
+		// fields. Keep build and tester above even when the caller did not ask
+		// for compound resources via include, so enabling screenshots does not
+		// suppress the primary resources' relationship linkages. Also append any
+		// included relationship defensively if this endpoint gains another one.
 		for _, rel := range normalizeList(query.include) {
 			if !slices.Contains(fields, rel) {
 				fields = append(fields, rel)

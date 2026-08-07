@@ -16,6 +16,35 @@ import (
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
+func TestAppCreateCanPromptInteractivelyUsesControllingTTYWhenStdinIsNotTerminal(t *testing.T) {
+	origOpenTTY := openTTYFn
+	origIsTerminal := termIsTerminalFn
+	t.Cleanup(func() {
+		openTTYFn = origOpenTTY
+		termIsTerminalFn = origIsTerminal
+	})
+
+	tty, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open test TTY: %v", err)
+	}
+	t.Cleanup(func() { _ = tty.Close() })
+
+	openTTYFn = func() (*os.File, error) {
+		return tty, nil
+	}
+	termIsTerminalFn = func(fd int) bool {
+		return false
+	}
+
+	if !appCreateCanPromptInteractively() {
+		t.Fatal("expected controlling TTY to allow app-create prompts when stdin is not a terminal")
+	}
+	if _, err := tty.Stat(); err == nil {
+		t.Fatal("expected controlling TTY availability probe to close its file")
+	}
+}
+
 func TestWebAppsCreatePassesPasswordCompatibilityFlagToSessionResolver(t *testing.T) {
 	origResolveAppCreateSession := resolveAppCreateSessionFn
 	origNewWebClient := newWebClientFn
@@ -1149,13 +1178,23 @@ func TestWebAppsCreateSurfacesBundleIDRollbackFailure(t *testing.T) {
 }
 
 func TestBundleIDPlatformForWebApp(t *testing.T) {
-	t.Run("maps UNIVERSAL to IOS for bundle id create", func(t *testing.T) {
+	t.Run("keeps universal bundle id platform", func(t *testing.T) {
 		got, err := bundleIDPlatformForWebApp("UNIVERSAL")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got != asc.PlatformIOS {
-			t.Fatalf("expected %q, got %q", asc.PlatformIOS, got)
+		if got != asc.BundleIDPlatformUniversal {
+			t.Fatalf("expected %q, got %q", asc.BundleIDPlatformUniversal, got)
+		}
+	})
+
+	t.Run("maps tvOS app to iOS bundle id platform", func(t *testing.T) {
+		got, err := bundleIDPlatformForWebApp("TV_OS")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != asc.BundleIDPlatformIOS {
+			t.Fatalf("expected %q, got %q", asc.BundleIDPlatformIOS, got)
 		}
 	})
 
@@ -1164,8 +1203,8 @@ func TestBundleIDPlatformForWebApp(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got != asc.PlatformMacOS {
-			t.Fatalf("expected %q, got %q", asc.PlatformMacOS, got)
+		if got != asc.BundleIDPlatformMacOS {
+			t.Fatalf("expected %q, got %q", asc.BundleIDPlatformMacOS, got)
 		}
 	})
 

@@ -3,6 +3,7 @@ package asc
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -64,7 +65,40 @@ func TestGetCustomerReviewSummarizations_UsesNextURL(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetCustomerReviewSummarizations(context.Background(), "app-1", WithCustomerReviewSummarizationsNextURL(next)); err != nil {
+	if _, err := client.GetCustomerReviewSummarizations(context.Background(), "", WithCustomerReviewSummarizationsNextURL(next)); err != nil {
 		t.Fatalf("GetCustomerReviewSummarizations() error: %v", err)
+	}
+}
+
+func TestGetCustomerReviewSummarizations_RejectsNextURLWithSelectorsOrQueryOptions(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v1/apps/app-1/customerReviewSummarizations?cursor=abc"
+	tests := []struct {
+		name  string
+		appID string
+		opts  []CustomerReviewSummarizationsOption
+	}{
+		{name: "app ID", appID: "app-1"},
+		{name: "platform", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsPlatforms([]string{"IOS"})}},
+		{name: "territory", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsTerritories([]string{"USA"})}},
+		{name: "fields", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsFields([]string{"text"})}},
+		{name: "territory fields", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsTerritoryFields([]string{"currency"})}},
+		{name: "include", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsInclude([]string{"territory"})}},
+		{name: "limit", opts: []CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsLimit(25)}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			client := newTestClient(t, func(*http.Request) { requests++ }, jsonResponse(http.StatusOK, `{"data":[]}`))
+			opts := append([]CustomerReviewSummarizationsOption{WithCustomerReviewSummarizationsNextURL(next)}, test.opts...)
+
+			_, err := client.GetCustomerReviewSummarizations(context.Background(), test.appID, opts...)
+			if err == nil || !strings.Contains(err.Error(), "next URL cannot be combined with") {
+				t.Fatalf("error = %v, want next URL conflict", err)
+			}
+			if requests != 0 {
+				t.Fatalf("requests = %d, want 0", requests)
+			}
+		})
 	}
 }

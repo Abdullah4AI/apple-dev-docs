@@ -361,7 +361,9 @@ func TestPaginateAll_PreReleaseVersionsResponse(t *testing.T) {
 			{Type: ResourceTypePreReleaseVersions, ID: "prv-1-0"},
 			{Type: ResourceTypePreReleaseVersions, ID: "prv-1-1"},
 		},
-		Links: Links{Next: "page=2"},
+		Links:    Links{Self: "page=1", First: "page=1", Next: "page=2"},
+		Included: json.RawMessage(`[{"type":"apps","id":"app-1"}]`),
+		Meta:     json.RawMessage(`{"paging":{"total":4,"limit":2}}`),
 	}
 
 	result, err := PaginateAll(context.Background(), firstPage, func(ctx context.Context, nextURL string) (PaginatedResponse, error) {
@@ -370,7 +372,8 @@ func TestPaginateAll_PreReleaseVersionsResponse(t *testing.T) {
 				{Type: ResourceTypePreReleaseVersions, ID: "prv-2-0"},
 				{Type: ResourceTypePreReleaseVersions, ID: "prv-2-1"},
 			},
-			Links: Links{},
+			Links:    Links{},
+			Included: json.RawMessage(`[{"type":"builds","id":"build-1"}]`),
 		}, nil
 	})
 	if err != nil {
@@ -384,6 +387,63 @@ func TestPaginateAll_PreReleaseVersionsResponse(t *testing.T) {
 	expected := totalPages * perPage
 	if len(versions.Data) != expected {
 		t.Fatalf("expected %d versions, got %d", expected, len(versions.Data))
+	}
+	if versions.Links != (Links{}) {
+		t.Fatalf("expected page-local links to be cleared, got %#v", versions.Links)
+	}
+	if len(versions.Meta) != 0 {
+		t.Fatalf("expected page-local meta to be cleared, got %s", versions.Meta)
+	}
+	var included []Resource[json.RawMessage]
+	if err := json.Unmarshal(versions.Included, &included); err != nil {
+		t.Fatalf("decode included resources: %v", err)
+	}
+	if len(included) != 2 {
+		t.Fatalf("expected 2 included resources, got %d", len(included))
+	}
+	gotIDs := make(map[string]bool, len(included))
+	for _, resource := range included {
+		gotIDs[resource.ID] = true
+	}
+	for _, id := range []string{"app-1", "build-1"} {
+		if !gotIDs[id] {
+			t.Fatalf("missing included resource %q: %#v", id, included)
+		}
+	}
+}
+
+func TestPaginateAll_PreReleaseVersionsEmptyDataIsArray(t *testing.T) {
+	result, err := PaginateAll(context.Background(), &PreReleaseVersionsResponse{
+		Data:  []PreReleaseVersion{},
+		Links: Links{Self: "page=1"},
+		Meta:  json.RawMessage(`{"paging":{"total":0,"limit":50}}`),
+	}, func(context.Context, string) (PaginatedResponse, error) {
+		t.Fatal("unexpected next-page fetch")
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("PaginateAll() error: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal paginated response: %v", err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("unmarshal paginated response: %v", err)
+	}
+	if string(envelope["data"]) != "[]" {
+		t.Fatalf("expected empty data array, got %s", envelope["data"])
+	}
+	if result.GetLinks().Self != "page=1" {
+		t.Fatalf("expected document links to be preserved, got %#v", result.GetLinks())
+	}
+	versions, ok := result.(*PreReleaseVersionsResponse)
+	if !ok {
+		t.Fatalf("expected *PreReleaseVersionsResponse, got %T", result)
+	}
+	if string(versions.Meta) != `{"paging":{"total":0,"limit":50}}` {
+		t.Fatalf("expected document meta to be preserved, got %s", versions.Meta)
 	}
 }
 

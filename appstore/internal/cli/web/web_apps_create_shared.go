@@ -59,7 +59,7 @@ func callResolveAppCreateSessionFn(ctx context.Context, appleID, password, twoFa
 }
 
 func appCreateCanPromptInteractively() bool {
-	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+	if tty, err := openTTYFn(); err == nil {
 		_ = tty.Close()
 		return true
 	}

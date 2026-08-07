@@ -50,29 +50,42 @@ func TestEmitQueuesEventAndSwallowsWorkerStartErrors(t *testing.T) {
 	}
 }
 
-func TestEmitDoesNotWaitForBlockedSender(t *testing.T) {
+func TestEmitQueuesEventWithoutForegroundHTTPDelivery(t *testing.T) {
 	clearContextEnv(t)
 	setTelemetryTestHome(t)
 	t.Setenv("ASC_TELEMETRY_DISABLED", "")
 	t.Setenv("DO_NOT_TRACK", "")
 	t.Setenv(endpointEnvVar, "https://telemetry.example.test/events")
 
+	transportCalls := 0
 	originalClient := http.DefaultClient
 	http.DefaultClient = &http.Client{
-		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			<-request.Context().Done()
-			return nil, request.Context().Err()
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			transportCalls++
+			return nil, errors.New("unexpected foreground telemetry request")
 		}),
 	}
 	t.Cleanup(func() { http.DefaultClient = originalClient })
-	stubMaintenanceWorkerStart(t, func() error { return nil })
+	workerStarted := false
+	stubMaintenanceWorkerStart(t, func() error {
+		workerStarted = true
+		return nil
+	})
 
-	start := time.Now()
 	Emit("asc builds list", "1.2.3", time.Millisecond, 0)
-	elapsed := time.Since(start)
 
-	if elapsed >= 150*time.Millisecond {
-		t.Fatalf("Emit() elapsed = %s, want foreground return before blocked network deadline", elapsed)
+	if transportCalls != 0 {
+		t.Fatalf("foreground HTTP transport calls = %d, want 0", transportCalls)
+	}
+	if !workerStarted {
+		t.Fatal("expected maintenance worker start")
+	}
+	records := readDefaultSpool(t)
+	if len(records) != 1 {
+		t.Fatalf("spool records = %d, want 1", len(records))
+	}
+	if got := records[0].Endpoint; got != "https://telemetry.example.test/events" {
+		t.Fatalf("spooled endpoint = %q, want endpoint override", got)
 	}
 }
 
@@ -253,6 +266,41 @@ func TestSendHTTPEventAllowsSlowCollectorResponse(t *testing.T) {
 
 	if err := sendHTTPEventToEndpoint(Event{}, server.URL); err != nil {
 		t.Fatalf("sendHTTPEvent() error = %v, want slow collector response accepted", err)
+	}
+}
+
+func TestSendHTTPEventClassifiesPermanentCollectorRejections(t *testing.T) {
+	tests := []struct {
+		name          string
+		statusCode    int
+		wantPermanent bool
+	}{
+		{name: "bad request", statusCode: http.StatusBadRequest, wantPermanent: true},
+		{name: "unprocessable event", statusCode: http.StatusUnprocessableEntity, wantPermanent: true},
+		{name: "request timeout", statusCode: http.StatusRequestTimeout, wantPermanent: false},
+		{name: "rate limited", statusCode: http.StatusTooManyRequests, wantPermanent: false},
+		{name: "server error", statusCode: http.StatusInternalServerError, wantPermanent: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.statusCode)
+			}))
+			t.Cleanup(server.Close)
+
+			originalClient := http.DefaultClient
+			http.DefaultClient = server.Client()
+			t.Cleanup(func() { http.DefaultClient = originalClient })
+
+			err := sendHTTPEventToEndpoint(Event{}, server.URL)
+			if err == nil {
+				t.Fatalf("sendHTTPEvent() error = nil for status %d", test.statusCode)
+			}
+			if got := isPermanentDeliveryError(err); got != test.wantPermanent {
+				t.Fatalf("isPermanentDeliveryError(%v) = %t, want %t", err, got, test.wantPermanent)
+			}
+		})
 	}
 }
 

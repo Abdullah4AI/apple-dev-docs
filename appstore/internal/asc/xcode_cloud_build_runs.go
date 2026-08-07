@@ -69,12 +69,13 @@ type CiIssueCounts struct {
 
 // CiBuildRunRelationships describes relationships for a CI build run.
 type CiBuildRunRelationships struct {
-	Builds            *RelationshipList `json:"builds,omitempty"`
-	Workflow          *Relationship     `json:"workflow,omitempty"`
-	Product           *Relationship     `json:"product,omitempty"`
-	SourceBranchOrTag *Relationship     `json:"sourceBranchOrTag,omitempty"`
-	DestinationBranch *Relationship     `json:"destinationBranch,omitempty"`
-	PullRequest       *Relationship     `json:"pullRequest,omitempty"`
+	Builds            *RelationshipList        `json:"builds,omitempty"`
+	Workflow          *Relationship            `json:"workflow,omitempty"`
+	Product           *Relationship            `json:"product,omitempty"`
+	SourceBranchOrTag *Relationship            `json:"sourceBranchOrTag,omitempty"`
+	DestinationBranch *Relationship            `json:"destinationBranch,omitempty"`
+	Actions           *CiRelationshipLinksOnly `json:"actions,omitempty"`
+	PullRequest       *Relationship            `json:"pullRequest,omitempty"`
 }
 
 // CiBuildRunResource represents a CI build run resource.

@@ -85,23 +85,6 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 	return stdout, stderr
 }
 
-func withNonTTYStdin(t *testing.T, fn func()) {
-	t.Helper()
-
-	oldStdin := os.Stdin
-	stdinFile, err := os.CreateTemp(t.TempDir(), "stdin")
-	if err != nil {
-		t.Fatalf("failed to create non-tty stdin file: %v", err)
-	}
-	defer func() {
-		os.Stdin = oldStdin
-		_ = stdinFile.Close()
-	}()
-
-	os.Stdin = stdinFile
-	fn()
-}
-
 func writeECDSAPEM(t *testing.T, path string) {
 	t.Helper()
 
@@ -1728,6 +1711,16 @@ func TestSubscriptionsValidationErrors(t *testing.T) {
 			wantErr: "--subscription-id is required",
 		},
 		{
+			name:    "subscriptions introductory-offers view missing subscription-id",
+			args:    []string{"subscriptions", "offers", "introductory", "view", "--id", "OFFER_ID"},
+			wantErr: "--subscription-id is required",
+		},
+		{
+			name:    "subscriptions introductory-offers view missing offer id",
+			args:    []string{"subscriptions", "offers", "introductory", "view", "--subscription-id", "SUB_ID"},
+			wantErr: "--id is required",
+		},
+		{
 			name:    "subscriptions introductory-offers create missing offer-duration",
 			args:    []string{"subscriptions", "offers", "introductory", "create", "--subscription-id", "SUB_ID", "--offer-mode", "FREE_TRIAL", "--number-of-periods", "1"},
 			wantErr: "--offer-duration is required",
@@ -3146,12 +3139,12 @@ func TestTestFlightBetaDetailsValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "beta-details update missing id",
-			args:    []string{"testflight", "review", "edit"},
+			args:    []string{"testflight", "distribution", "edit"},
 			wantErr: "--id is required",
 		},
 		{
 			name:    "beta-details update missing updates",
-			args:    []string{"testflight", "review", "edit", "--id", "DETAIL_ID"},
+			args:    []string{"testflight", "distribution", "edit", "--id", "DETAIL_ID"},
 			wantErr: "at least one update flag is required",
 		},
 	}
@@ -5872,11 +5865,6 @@ func TestAppEventsCreateValidationErrors(t *testing.T) {
 			name:    "missing name",
 			args:    []string{"app-events", "create", "--app", "APP_ID", "--event-type", "CHALLENGE", "--start", "2026-01-01T00:00:00Z", "--end", "2026-01-02T00:00:00Z"},
 			wantErr: "Error: --name is required",
-		},
-		{
-			name:    "missing event type",
-			args:    []string{"app-events", "create", "--app", "APP_ID", "--name", "Launch", "--start", "2026-01-01T00:00:00Z", "--end", "2026-01-02T00:00:00Z"},
-			wantErr: "Error: --event-type is required",
 		},
 		{
 			name:    "missing end time",

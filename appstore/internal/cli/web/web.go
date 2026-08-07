@@ -27,6 +27,7 @@ Use ` + "`asc web apps create`" + ` as the canonical app-creation command in thi
 
 Examples:
   asc web auth status
+  asc web api-keys create --name "Release automation"
   asc web sandbox create --first-name "Jane" --last-name "Tester" --email "jane+sandbox@example.com" --password "Passwordtest1" --territory "USA"
   asc web auth login --apple-id "user@example.com"
   asc web apps create --name "My App" --bundle-id "com.example.app" --sku "MYAPP123"
@@ -41,6 +42,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			WebAuthCommand(),
+			WebAPIKeysCommand(),
 			WebSandboxCommand(),
 			WebAppsCommand(),
 			WebRemovedAppsCommand(),

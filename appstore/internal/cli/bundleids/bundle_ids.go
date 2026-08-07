@@ -166,7 +166,7 @@ func BundleIDsCreateCommand() *ffcli.Command {
 
 	identifier := fs.String("identifier", "", "Bundle ID identifier (e.g., com.example.app)")
 	name := fs.String("name", "", "Bundle ID name")
-	platform := fs.String("platform", "IOS", "Platform: "+strings.Join(shared.PlatformList(), ", "))
+	platform := fs.String("platform", "IOS", "Platform: "+strings.Join(shared.BundleIDPlatformList(), ", "))
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -190,9 +190,9 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
 				return shared.MissingRequiredUsageError()
 			}
-			platformValue, err := shared.NormalizePlatform(*platform)
+			platformValue, err := shared.NormalizeBundleIDPlatform(*platform)
 			if err != nil {
-				return fmt.Errorf("bundle-ids create: %w", err)
+				return fmt.Errorf("bundle-ids create: %w", shared.UsageError(err.Error()))
 			}
 
 			client, err := shared.GetASCClient()

@@ -675,14 +675,9 @@ Examples:
 func TestFlightBetaDetailsUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 
-	const (
-		externalStateEnabled  = "READY_FOR_TESTING"
-		externalStateDisabled = "NOT_READY_FOR_TESTING"
-	)
-
 	id := fs.String("id", "", "Build beta detail ID")
 	autoNotify := fs.Bool("auto-notify", false, "Enable auto-notify for external testers")
-	externalTesting := fs.Bool("external-testing", false, "Enable external testing (maps to externalBuildState)")
+	externalTesting := fs.Bool("external-testing", false, "DEPRECATED: unsupported; use builds add-groups or builds remove-groups")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -693,22 +688,33 @@ func TestFlightBetaDetailsUpdateCommand() *ffcli.Command {
 
 Examples:
   asc testflight beta-details update --id "DETAIL_ID" --auto-notify
-  asc testflight beta-details update --id "DETAIL_ID" --external-testing true`,
+
+Deprecated:
+  --external-testing is retained only for migration and always exits before HTTP.
+  Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm to enable external distribution.
+  Use asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm to remove group assignments.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			visited := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) {
+				visited[f.Name] = true
+			})
+			if visited["external-testing"] {
+				fmt.Fprintln(os.Stderr, "Warning: `--external-testing` is deprecated and cannot be applied safely; App Store Connect does not support editing `externalBuildState`.")
+				if *externalTesting {
+					return shared.UsageError(`--external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`)
+				}
+				return shared.UsageError(`--external-testing=false cannot identify which beta groups to remove. Use asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm.`)
+			}
+
 			detailID := strings.TrimSpace(*id)
 			if detailID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()
 			}
 
-			visited := map[string]bool{}
-			fs.Visit(func(f *flag.Flag) {
-				visited[f.Name] = true
-			})
-
-			hasUpdates := visited["auto-notify"] || visited["external-testing"]
+			hasUpdates := visited["auto-notify"]
 			if !hasUpdates {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
 				return shared.MissingRequiredUsageError()
@@ -719,14 +725,6 @@ Examples:
 				value := *autoNotify
 				attrs.AutoNotifyEnabled = &value
 			}
-			if visited["external-testing"] {
-				state := externalStateDisabled
-				if *externalTesting {
-					state = externalStateEnabled
-				}
-				attrs.ExternalBuildState = &state
-			}
-
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("testflight beta-details update: %w", err)

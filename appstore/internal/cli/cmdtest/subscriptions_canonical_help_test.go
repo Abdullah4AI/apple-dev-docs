@@ -133,6 +133,22 @@ func TestSubscriptionsHelpShowsCanonicalCommerceSubcommands(t *testing.T) {
 		}
 	}
 
+	introductoryViewCmd := findSubcommand(root, "subscriptions", "offers", "introductory", "view")
+	if introductoryViewCmd == nil {
+		t.Fatal("expected subscriptions offers introductory view command")
+		return
+	}
+	introductoryViewUsage := introductoryViewCmd.UsageFunc(introductoryViewCmd)
+	if !strings.Contains(introductoryViewUsage, `asc subscriptions offers introductory view --subscription-id "SUB_ID" --id "OFFER_ID"`) {
+		t.Fatalf("expected introductory offer view help to require the parent subscription, got %q", introductoryViewUsage)
+	}
+	if !strings.Contains(introductoryViewUsage, "--app") {
+		t.Fatalf("expected introductory offer view help to document subscription resolution, got %q", introductoryViewUsage)
+	}
+	if strings.Contains(introductoryViewUsage, `asc subscriptions offers introductory view --id "OFFER_ID"`) {
+		t.Fatalf("expected introductory offer view help to drop the unsupported id-only invocation, got %q", introductoryViewUsage)
+	}
+
 	offerCodesCmd := findSubcommand(root, "subscriptions", "offers", "offer-codes")
 	if offerCodesCmd == nil {
 		t.Fatal("expected subscriptions offers offer-codes command")
@@ -153,6 +169,31 @@ func TestSubscriptionsHelpShowsCanonicalCommerceSubcommands(t *testing.T) {
 	}
 	if strings.Contains(offerCodesUsage, `--prices "PRICE_ID"`) {
 		t.Fatalf("expected subscriptions offers offer-codes help to drop stale price example, got %q", offerCodesUsage)
+	}
+
+	promotionalCmd := findSubcommand(root, "subscriptions", "offers", "promotional")
+	if promotionalCmd == nil {
+		t.Fatal("expected subscriptions offers promotional command")
+		return
+	}
+	promotionalUsage := promotionalCmd.UsageFunc(promotionalCmd)
+	if !strings.Contains(promotionalUsage, `--prices "US"`) {
+		t.Fatalf("expected promotional offer help to show FREE_TRIAL territory prices, got %q", promotionalUsage)
+	}
+	if strings.Contains(promotionalUsage, `--prices "PRICE_ID"`) {
+		t.Fatalf("expected promotional offer help to drop pre-existing price IDs, got %q", promotionalUsage)
+	}
+	promotionalCreateCmd := findSubcommand(root, "subscriptions", "offers", "promotional", "create")
+	if promotionalCreateCmd == nil {
+		t.Fatal("expected subscriptions offers promotional create command")
+		return
+	}
+	promotionalCreateUsage := promotionalCreateCmd.UsageFunc(promotionalCreateCmd)
+	if !strings.Contains(promotionalCreateUsage, `--prices "US:PRICE_POINT_ID"`) {
+		t.Fatalf("expected promotional offer create help to show paid territory prices, got %q", promotionalCreateUsage)
+	}
+	if strings.Contains(promotionalCreateUsage, `--prices "PRICE_ID"`) {
+		t.Fatalf("expected promotional offer create help to drop pre-existing price IDs, got %q", promotionalCreateUsage)
 	}
 
 	reviewCmd := findSubcommand(root, "subscriptions", "review")

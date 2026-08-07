@@ -55,6 +55,11 @@ func TestNormalizeSpacedBooleanFlags(t *testing.T) {
 			want: []string{"import", "--confirm=false"},
 		},
 		{
+			name: "invalid spaced boolean reaches flag validation",
+			args: []string{"import", "--confirm", "maybe"},
+			want: []string{"import", "--confirm=maybe"},
+		},
+		{
 			name: "modifier false cannot hide later dry run",
 			args: []string{"import", "--confirm", "--invite", "false", "--dry-run"},
 			want: []string{"import", "--confirm", "--invite=false", "--dry-run"},

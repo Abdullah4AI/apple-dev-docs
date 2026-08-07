@@ -232,7 +232,7 @@ func ciBuildRunsRows(resp *CiBuildRunsResponse) ([]string, [][]string) {
 }
 
 func ciBuildActionsRows(resp *CiBuildActionsResponse) ([]string, [][]string) {
-	headers := []string{"Name", "Type", "Progress", "Status", "Errors", "Warnings", "Started", "Finished"}
+	headers := []string{"ID", "Name", "Type", "Progress", "Status", "Errors", "Warnings", "Started", "Finished"}
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		errors := 0
@@ -242,6 +242,7 @@ func ciBuildActionsRows(resp *CiBuildActionsResponse) ([]string, [][]string) {
 			warnings = item.Attributes.IssueCounts.Warnings
 		}
 		rows = append(rows, []string{
+			item.ID,
 			item.Attributes.Name,
 			item.Attributes.ActionType,
 			string(item.Attributes.ExecutionProgress),

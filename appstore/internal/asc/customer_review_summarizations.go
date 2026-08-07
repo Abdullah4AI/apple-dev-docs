@@ -50,6 +50,9 @@ func (c *Client) GetCustomerReviewSummarizations(ctx context.Context, appID stri
 		if err := validateNextURL(query.nextURL); err != nil {
 			return nil, fmt.Errorf("customerReviewSummarizations: %w", err)
 		}
+		if appID != "" || buildCustomerReviewSummarizationsQuery(query) != "" {
+			return nil, fmt.Errorf("customerReviewSummarizations: next URL cannot be combined with appID or query options")
+		}
 		path = query.nextURL
 	} else {
 		if appID == "" {

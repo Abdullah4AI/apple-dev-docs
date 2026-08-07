@@ -1592,7 +1592,7 @@ func TestGetAppStoreVersions_WithFilters(t *testing.T) {
 }
 
 func TestGetPreReleaseVersions_WithFilters(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"preReleaseVersions","id":"1","attributes":{"version":"1.0.0","platform":"IOS"}}]}`)
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"preReleaseVersions","id":"1","attributes":{"version":"1.0.0","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}},"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions/1"}}],"included":[{"type":"apps","id":"app-1"}],"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions"},"meta":{"paging":{"total":1,"limit":5}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -1616,19 +1616,40 @@ func TestGetPreReleaseVersions_WithFilters(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetPreReleaseVersions(
+	result, err := client.GetPreReleaseVersions(
 		context.Background(),
 		"123",
 		WithPreReleaseVersionsLimit(5),
 		WithPreReleaseVersionsPlatform("ios"),
 		WithPreReleaseVersionsVersion("1.0.0"),
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("GetPreReleaseVersions() error: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal pre-release versions response: %v", err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("unmarshal pre-release versions envelope: %v", err)
+	}
+	if len(envelope["included"]) == 0 {
+		t.Fatal("expected included resources to be preserved")
+	}
+	if total := ParsePagingTotal(envelope["meta"]); total != 1 {
+		t.Fatalf("expected paging total 1, got %d", total)
+	}
+	if len(result.Data) != 1 || len(result.Data[0].Relationships) == 0 {
+		t.Fatalf("expected resource relationships to be preserved: %#v", result.Data)
+	}
+	if len(result.Data[0].Links) == 0 {
+		t.Fatalf("expected resource links to be preserved: %#v", result.Data[0])
 	}
 }
 
 func TestGetPreReleaseVersion(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"preReleaseVersions","id":"pr-1","attributes":{"version":"1.0.0","platform":"IOS"}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"preReleaseVersions","id":"pr-1","attributes":{"version":"1.0.0","platform":"IOS"},"relationships":{"builds":{"data":[{"type":"builds","id":"build-1"}]}},"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions/pr-1"}},"included":[{"type":"builds","id":"build-1"}],"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions/pr-1"}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -1639,8 +1660,15 @@ func TestGetPreReleaseVersion(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetPreReleaseVersion(context.Background(), "pr-1"); err != nil {
+	result, err := client.GetPreReleaseVersion(context.Background(), "pr-1")
+	if err != nil {
 		t.Fatalf("GetPreReleaseVersion() error: %v", err)
+	}
+	if len(result.Data.Relationships) == 0 || len(result.Data.Links) == 0 {
+		t.Fatalf("expected resource relationships and links to be preserved: %#v", result.Data)
+	}
+	if len(result.Included) == 0 {
+		t.Fatal("expected top-level included resources to be preserved")
 	}
 }
 
@@ -2309,7 +2337,7 @@ func TestGetBetaTesters_RejectsGroupAndBuildConflict(t *testing.T) {
 }
 
 func TestGetBuild_ByID(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"builds","id":"123","attributes":{"version":"1.0","uploadedDate":"2026-01-20T00:00:00Z","expired":false}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"builds","id":"123","attributes":{"version":"1.0","uploadedDate":"2026-01-20T00:00:00Z","expired":false,"lsMinimumSystemVersion":"13.0","computedMinMacOsVersion":"13.0","computedMinVisionOsVersion":"1.0","iconAssetToken":{"templateUrl":"https://example.com/{w}x{h}.png","width":1024,"height":1024},"buildAudienceType":"APP_STORE_ELIGIBLE"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -2320,8 +2348,59 @@ func TestGetBuild_ByID(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetBuild(context.Background(), "123"); err != nil {
+	result, err := client.GetBuild(context.Background(), "123")
+	if err != nil {
 		t.Fatalf("GetBuild() error: %v", err)
+	}
+	encoded, err := json.Marshal(result.Data.Attributes)
+	if err != nil {
+		t.Fatalf("marshal build attributes: %v", err)
+	}
+	for _, field := range []string{"lsMinimumSystemVersion", "computedMinMacOsVersion", "computedMinVisionOsVersion", "iconAssetToken", "buildAudienceType"} {
+		if !strings.Contains(string(encoded), `"`+field+`"`) {
+			t.Errorf("expected decoded build attributes to preserve %s: %s", field, encoded)
+		}
+	}
+	if result.Data.Attributes.LSMinimumSystemVersion != "13.0" || result.Data.Attributes.ComputedMinMacOSVersion != "13.0" || result.Data.Attributes.ComputedMinVisionOSVersion != "1.0" {
+		t.Fatalf("unexpected decoded minimum OS versions: %#v", result.Data.Attributes)
+	}
+	if result.Data.Attributes.IconAssetToken == nil || result.Data.Attributes.IconAssetToken.Width != 1024 {
+		t.Fatalf("unexpected decoded icon asset token: %#v", result.Data.Attributes.IconAssetToken)
+	}
+	if result.Data.Attributes.BuildAudienceType != BuildAudienceTypeAppStoreEligible {
+		t.Fatalf("unexpected build audience type: %q", result.Data.Attributes.BuildAudienceType)
+	}
+	if !strings.Contains(string(encoded), `"expired":false`) {
+		t.Fatalf("expected explicit expired=false to survive decode and encode: %s", encoded)
+	}
+}
+
+func TestBuildAttributesPreservesExpiredPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		input    string
+		contains string
+		excludes string
+	}{
+		{name: "explicit false", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z","expired":false}`, contains: `"expired":false`},
+		{name: "absent", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z"}`, excludes: `"expired"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attrs BuildAttributes
+			if err := json.Unmarshal([]byte(tc.input), &attrs); err != nil {
+				t.Fatalf("unmarshal build attributes: %v", err)
+			}
+			encoded, err := json.Marshal(attrs)
+			if err != nil {
+				t.Fatalf("marshal build attributes: %v", err)
+			}
+			if tc.contains != "" && !strings.Contains(string(encoded), tc.contains) {
+				t.Fatalf("expected %q in %s", tc.contains, encoded)
+			}
+			if tc.excludes != "" && strings.Contains(string(encoded), tc.excludes) {
+				t.Fatalf("did not expect %q in %s", tc.excludes, encoded)
+			}
+		})
 	}
 }
 
@@ -2627,16 +2706,37 @@ func TestCreateBetaGroup_SendsRequest(t *testing.T) {
 		if payload.Data.Relationships.App.Data.ID != "app-1" {
 			t.Fatalf("expected app id app-1, got %q", payload.Data.Relationships.App.Data.ID)
 		}
+		var rawPayload struct {
+			Data struct {
+				Attributes map[string]any `json:"attributes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &rawPayload); err != nil {
+			t.Fatalf("decode raw body error: %v", err)
+		}
+		for _, field := range []string{"createdDate", "publicLinkId", "publicLink", "iosBuildsAvailableForAppleSiliconMac", "iosBuildsAvailableForAppleVision"} {
+			if _, ok := rawPayload.Data.Attributes[field]; ok {
+				t.Errorf("response-only field %s leaked into create payload: %s", field, body)
+			}
+		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.CreateBetaGroup(context.Background(), "app-1", "Beta"); err != nil {
+	available := true
+	if _, err := client.CreateBetaGroupWithAttributes(context.Background(), "app-1", BetaGroupAttributes{
+		Name:                                 "Beta",
+		CreatedDate:                          "2026-08-06T00:00:00Z",
+		PublicLinkID:                         "public-1",
+		PublicLink:                           "https://testflight.apple.com/join/example",
+		IOSBuildsAvailableForAppleSiliconMac: &available,
+		IOSBuildsAvailableForAppleVision:     &available,
+	}); err != nil {
 		t.Fatalf("CreateBetaGroup() error: %v", err)
 	}
 }
 
 func TestGetBetaGroup_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"betaGroups","id":"bg1","attributes":{"name":"Beta Testers","isInternalGroup":true}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"betaGroups","id":"bg1","attributes":{"name":"Beta Testers","isInternalGroup":true,"publicLinkId":"public-1","iosBuildsAvailableForAppleSiliconMac":true,"iosBuildsAvailableForAppleVision":false}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -2647,13 +2747,25 @@ func TestGetBetaGroup_SendsRequest(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetBetaGroup(context.Background(), "bg1"); err != nil {
+	result, err := client.GetBetaGroup(context.Background(), "bg1")
+	if err != nil {
 		t.Fatalf("GetBetaGroup() error: %v", err)
+	}
+	if result.Data.Attributes.PublicLinkID != "public-1" {
+		t.Fatalf("expected public link ID public-1, got %q", result.Data.Attributes.PublicLinkID)
+	}
+	if result.Data.Attributes.IOSBuildsAvailableForAppleSiliconMac == nil ||
+		!*result.Data.Attributes.IOSBuildsAvailableForAppleSiliconMac {
+		t.Fatal("expected Apple Silicon Mac availability to be true")
+	}
+	if result.Data.Attributes.IOSBuildsAvailableForAppleVision == nil ||
+		*result.Data.Attributes.IOSBuildsAvailableForAppleVision {
+		t.Fatal("expected Apple Vision availability to be false")
 	}
 }
 
 func TestGetBetaTester_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"betaTesters","id":"bt1","attributes":{"email":"tester@example.com","firstName":"Test","lastName":"User","state":"INVITED","inviteType":"EMAIL"}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"betaTesters","id":"bt1","attributes":{"email":"tester@example.com","firstName":"Test","lastName":"User","state":"INVITED","inviteType":"EMAIL","appDevices":[{"model":"iPhone17,1","platform":"IOS","osVersion":"18.0","appBuildVersion":"42"}]}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -2679,6 +2791,50 @@ func TestGetBetaTester_SendsRequest(t *testing.T) {
 	}
 	if tester.Data.Attributes.InviteType != BetaInviteTypeEmail {
 		t.Fatalf("expected invite type %q, got %q", BetaInviteTypeEmail, tester.Data.Attributes.InviteType)
+	}
+	encoded, err := json.Marshal(tester.Data.Attributes)
+	if err != nil {
+		t.Fatalf("marshal beta tester attributes: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"appDevices"`) {
+		t.Fatalf("expected decoded beta tester attributes to preserve appDevices: %s", encoded)
+	}
+	if len(tester.Data.Attributes.AppDevices) != 1 || tester.Data.Attributes.AppDevices[0].AppBuildVersion != "42" {
+		t.Fatalf("unexpected decoded app devices: %#v", tester.Data.Attributes.AppDevices)
+	}
+}
+
+func TestBetaTesterAttributesPreservesAppDevicesPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		input       string
+		wantPresent bool
+		wantValue   string
+	}{
+		{name: "explicit empty array", input: `{"email":"tester@example.com","appDevices":[]}`, wantPresent: true, wantValue: `[]`},
+		{name: "absent", input: `{"email":"tester@example.com"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attrs BetaTesterAttributes
+			if err := json.Unmarshal([]byte(tc.input), &attrs); err != nil {
+				t.Fatalf("unmarshal beta tester attributes: %v", err)
+			}
+			encoded, err := json.Marshal(attrs)
+			if err != nil {
+				t.Fatalf("marshal beta tester attributes: %v", err)
+			}
+			var output map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &output); err != nil {
+				t.Fatalf("decode beta tester attributes output: %v", err)
+			}
+			value, present := output["appDevices"]
+			if present != tc.wantPresent {
+				t.Fatalf("appDevices presence = %t in %s, want %t", present, encoded, tc.wantPresent)
+			}
+			if tc.wantPresent && string(value) != tc.wantValue {
+				t.Fatalf("appDevices JSON = %s, want %s", value, tc.wantValue)
+			}
+		})
 	}
 }
 
@@ -3939,18 +4095,58 @@ func TestGetFeedback_BuildsQuery(t *testing.T) {
 }
 
 func TestGetFeedback_IncludesScreenshots(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"betaFeedbackScreenshotSubmissions","id":"1","attributes":{"createdDate":"2026-01-20T00:00:00Z","comment":"Nice","email":"tester@example.com","screenshots":[{"url":"https://example.com/shot.png","width":320,"height":640,"expirationDate":"2026-01-21T00:00:00Z"}]}}]}`)
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"betaFeedbackScreenshotSubmissions","id":"1","attributes":{"createdDate":"2026-01-20T00:00:00Z","comment":"Nice","email":"tester@example.com","deviceModel":"iPhone17,1","osVersion":"18.0","locale":"en-US","timeZone":"America/Los_Angeles","architecture":"arm64","connectionType":"WIFI","pairedAppleWatch":"Watch7,1","appUptimeInMilliseconds":1234,"diskBytesAvailable":2000,"diskBytesTotal":4000,"batteryPercentage":85,"screenWidthInPoints":430,"screenHeightInPoints":932,"appPlatform":"IOS","devicePlatform":"IOS","deviceFamily":"IPHONE","buildBundleId":"com.example.app","screenshots":[{"url":"https://example.com/shot.png","width":320,"height":640,"expirationDate":"2026-01-21T00:00:00Z"}]},"relationships":{"build":{"data":{"type":"builds","id":"build-1"}},"tester":{"data":{"type":"betaTesters","id":"tester-1"}}}}]}`)
 	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/123/betaFeedbackScreenshotSubmissions" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
 		values := req.URL.Query()
-		expected := "createdDate,comment,email,deviceModel,osVersion,appPlatform,devicePlatform,screenshots"
+		if len(values) != 1 {
+			t.Fatalf("expected only the feedback sparse fieldset, got %q", values.Encode())
+		}
+		expected := "createdDate,comment,email,deviceModel,osVersion,locale,timeZone,architecture,connectionType,pairedAppleWatch,appUptimeInMilliseconds,diskBytesAvailable,diskBytesTotal,batteryPercentage,screenWidthInPoints,screenHeightInPoints,appPlatform,devicePlatform,deviceFamily,buildBundleId,screenshots,build,tester"
 		if values.Get("fields[betaFeedbackScreenshotSubmissions]") != expected {
 			t.Fatalf("expected screenshot fields, got %q", values.Get("fields[betaFeedbackScreenshotSubmissions]"))
 		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetFeedback(context.Background(), "123", WithFeedbackIncludeScreenshots()); err != nil {
+	feedback, err := client.GetFeedback(context.Background(), "123", WithFeedbackIncludeScreenshots())
+	if err != nil {
 		t.Fatalf("GetFeedback() error: %v", err)
+	}
+	if len(feedback.Data) != 1 {
+		t.Fatalf("feedback count = %d, want 1", len(feedback.Data))
+	}
+	attributes := feedback.Data[0].Attributes
+	if attributes.Locale != "en-US" || attributes.TimeZone != "America/Los_Angeles" || attributes.Architecture != "arm64" {
+		t.Fatalf("environment attributes were not decoded: %+v", attributes)
+	}
+	if attributes.ConnectionType != DeviceConnectionType("WIFI") || attributes.PairedAppleWatch != "Watch7,1" {
+		t.Fatalf("device attributes were not decoded: %+v", attributes)
+	}
+	if attributes.AppUptimeInMilliseconds != 1234 || attributes.DiskBytesAvailable != 2000 || attributes.DiskBytesTotal != 4000 {
+		t.Fatalf("runtime attributes were not decoded: %+v", attributes)
+	}
+	if attributes.BatteryPercentage != 85 || attributes.ScreenWidthInPoints != 430 || attributes.ScreenHeightInPoints != 932 {
+		t.Fatalf("screen and battery attributes were not decoded: %+v", attributes)
+	}
+	if attributes.DeviceFamily != DeviceFamily("IPHONE") || attributes.BuildBundleID != "com.example.app" {
+		t.Fatalf("family and bundle attributes were not decoded: %+v", attributes)
+	}
+	if len(attributes.Screenshots) != 1 || attributes.Screenshots[0].URL != "https://example.com/shot.png" {
+		t.Fatalf("screenshots were not decoded: %+v", attributes.Screenshots)
+	}
+	var relationships map[string]struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(feedback.Data[0].Relationships, &relationships); err != nil {
+		t.Fatalf("failed to decode relationships: %v", err)
+	}
+	if relationships["build"].Data.ID != "build-1" || relationships["tester"].Data.ID != "tester-1" {
+		t.Fatalf("relationships were not preserved: %+v", relationships)
 	}
 }
 
@@ -5392,7 +5588,20 @@ func TestGetCiProducts_WithAppFilterAndLimit(t *testing.T) {
 }
 
 func TestGetCiProduct(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"ciProducts","id":"prod-1"}}`)
+	response := jsonResponse(http.StatusOK, `{
+		"data": {
+			"type": "ciProducts",
+			"id": "prod-1",
+			"relationships": {
+				"app": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/app"}, "data": {"type": "apps", "id": "app-1"}},
+				"bundleId": {"data": {"type": "bundleIds", "id": "bundle-id-1"}},
+				"workflows": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/workflows"}},
+				"primaryRepositories": {"data": [{"type": "scmRepositories", "id": "repo-1"}]},
+				"additionalRepositories": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/additionalRepositories"}},
+				"buildRuns": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciProducts/prod-1/buildRuns"}}
+			}
+		}
+	}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -5403,8 +5612,28 @@ func TestGetCiProduct(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetCiProduct(context.Background(), "prod-1"); err != nil {
+	got, err := client.GetCiProduct(context.Background(), "prod-1")
+	if err != nil {
 		t.Fatalf("GetCiProduct() error: %v", err)
+	}
+	relationships := got.Data.Relationships
+	if relationships == nil || relationships.App == nil || relationships.App.Data == nil || relationships.App.Data.ID != "app-1" || relationships.App.Links == nil || relationships.App.Links.Related == "" {
+		t.Fatalf("unexpected app relationship: %#v", relationships)
+	}
+	if relationships.BundleID == nil || relationships.BundleID.Data.ID != "bundle-id-1" {
+		t.Fatalf("unexpected bundle ID relationship: %#v", relationships)
+	}
+	if relationships.Workflows == nil || relationships.Workflows.Links == nil || relationships.Workflows.Links.Related == "" {
+		t.Fatalf("unexpected workflows relationship: %#v", relationships)
+	}
+	if relationships.PrimaryRepositories == nil || len(relationships.PrimaryRepositories.Data) != 1 {
+		t.Fatalf("unexpected primary repositories relationship: %#v", relationships)
+	}
+	if relationships.AdditionalRepositories == nil || relationships.AdditionalRepositories.Links == nil || relationships.AdditionalRepositories.Links.Related == "" {
+		t.Fatalf("unexpected additional repositories relationship: %#v", relationships)
+	}
+	if relationships.BuildRuns == nil || relationships.BuildRuns.Links == nil || relationships.BuildRuns.Links.Related == "" {
+		t.Fatalf("unexpected build runs relationship: %#v", relationships)
 	}
 }
 
@@ -5511,6 +5740,16 @@ func TestGetCiWorkflow(t *testing.T) {
 			"type": "ciWorkflows",
 			"id": "wf-1",
 			"attributes": {
+				"branchStartCondition": {
+					"filesAndFoldersRule": {
+						"mode": "START_IF_ANY_FILE_MATCHES",
+						"matchers": [{"directory": "Sources", "fileExtension": "swift", "fileName": "App.swift"}]
+					}
+				},
+				"manualPullRequestStartCondition": {
+					"source": {"patterns": [{"pattern": "feature/", "isPrefix": true}]},
+					"destination": {"patterns": [{"pattern": "main", "isPrefix": false}]}
+				},
 				"actions": [{
 					"name": "Archive - iOS",
 					"actionType": "ARCHIVE",
@@ -5554,6 +5793,14 @@ func TestGetCiWorkflow(t *testing.T) {
 	if len(got.Data.Attributes.Actions) != 1 || got.Data.Attributes.Actions[0].Scheme != "Example" {
 		t.Fatalf("unexpected actions: %#v", got.Data.Attributes.Actions)
 	}
+	matchers := got.Data.Attributes.BranchStartCondition.FilesAndFoldersRule.Matchers
+	if len(matchers) != 1 || matchers[0].Directory != "Sources" || matchers[0].FileExtension != "swift" || matchers[0].FileName != "App.swift" {
+		t.Fatalf("unexpected file matchers: %#v", matchers)
+	}
+	manualPullRequest := got.Data.Attributes.ManualPullRequestStartCondition
+	if manualPullRequest == nil || manualPullRequest.Destination == nil || len(manualPullRequest.Destination.Patterns) != 1 || manualPullRequest.Destination.Patterns[0].Pattern != "main" {
+		t.Fatalf("unexpected manual pull request condition: %#v", manualPullRequest)
+	}
 	if got.Data.Relationships == nil || got.Data.Relationships.Repository == nil {
 		t.Fatal("expected repository relationship")
 	}
@@ -5590,10 +5837,39 @@ func TestCreateCiWorkflow(t *testing.T) {
 		if !ok || data["type"] != "ciWorkflows" {
 			t.Fatalf("expected data.type=ciWorkflows")
 		}
+		attributes, ok := data["attributes"].(map[string]any)
+		if !ok || attributes["name"] != "CI" || attributes["description"] != "Build and test" || attributes["containerFilePath"] != "App.xcodeproj" || attributes["isEnabled"] != true || attributes["clean"] != true {
+			t.Fatalf("unexpected workflow attributes: %#v", data["attributes"])
+		}
+		if actions, ok := attributes["actions"].([]any); !ok || len(actions) != 0 {
+			t.Fatalf("unexpected workflow actions: %#v", attributes["actions"])
+		}
+		relationships, ok := data["relationships"].(map[string]any)
+		if !ok || len(relationships) != 4 {
+			t.Fatalf("unexpected workflow relationships: %#v", data["relationships"])
+		}
 		assertAuthorized(t, req)
 	}, response)
 
-	body := json.RawMessage(`{"data":{"type":"ciWorkflows"}}`)
+	body := json.RawMessage(`{
+		"data": {
+			"type": "ciWorkflows",
+			"attributes": {
+				"name": "CI",
+				"description": "Build and test",
+				"containerFilePath": "App.xcodeproj",
+				"isEnabled": true,
+				"clean": true,
+				"actions": []
+			},
+			"relationships": {
+				"product": {"data": {"type": "ciProducts", "id": "prod-1"}},
+				"repository": {"data": {"type": "scmRepositories", "id": "repo-1"}},
+				"xcodeVersion": {"data": {"type": "ciXcodeVersions", "id": "xcode-1"}},
+				"macOsVersion": {"data": {"type": "ciMacOsVersions", "id": "macos-1"}}
+			}
+		}
+	}`)
 	if _, err := client.CreateCiWorkflow(context.Background(), body); err != nil {
 		t.Fatalf("CreateCiWorkflow() error: %v", err)
 	}
@@ -5894,7 +6170,22 @@ func TestGetCiBuildRuns_WithSort(t *testing.T) {
 }
 
 func TestGetCiBuildRun(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"ciBuildRuns","id":"run-1","attributes":{"number":1}}}`)
+	response := jsonResponse(http.StatusOK, `{
+		"data": {
+			"type": "ciBuildRuns",
+			"id": "run-1",
+			"attributes": {"number": 1},
+			"relationships": {
+				"builds": {"data": [{"type": "builds", "id": "build-1"}]},
+				"workflow": {"data": {"type": "ciWorkflows", "id": "wf-1"}},
+				"product": {"data": {"type": "ciProducts", "id": "prod-1"}},
+				"sourceBranchOrTag": {"data": {"type": "scmGitReferences", "id": "source-ref-1"}},
+				"destinationBranch": {"data": {"type": "scmGitReferences", "id": "destination-ref-1"}},
+				"actions": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciBuildRuns/run-1/actions"}},
+				"pullRequest": {"data": {"type": "scmPullRequests", "id": "pr-1"}}
+			}
+		}
+	}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -5905,8 +6196,22 @@ func TestGetCiBuildRun(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetCiBuildRun(context.Background(), "run-1"); err != nil {
+	got, err := client.GetCiBuildRun(context.Background(), "run-1")
+	if err != nil {
 		t.Fatalf("GetCiBuildRun() error: %v", err)
+	}
+	relationships := got.Data.Relationships
+	if relationships == nil || relationships.Builds == nil || len(relationships.Builds.Data) != 1 {
+		t.Fatalf("unexpected builds relationship: %#v", relationships)
+	}
+	if relationships.Workflow == nil || relationships.Workflow.Data.ID != "wf-1" || relationships.Product == nil || relationships.Product.Data.ID != "prod-1" {
+		t.Fatalf("unexpected workflow/product relationships: %#v", relationships)
+	}
+	if relationships.SourceBranchOrTag == nil || relationships.SourceBranchOrTag.Data.ID != "source-ref-1" || relationships.DestinationBranch == nil || relationships.DestinationBranch.Data.ID != "destination-ref-1" {
+		t.Fatalf("unexpected source/destination relationships: %#v", relationships)
+	}
+	if relationships.Actions == nil || relationships.Actions.Links == nil || relationships.Actions.Links.Related == "" || relationships.PullRequest == nil || relationships.PullRequest.Data.ID != "pr-1" {
+		t.Fatalf("unexpected actions/pull request relationships: %#v", relationships)
 	}
 }
 
@@ -6128,7 +6433,19 @@ func TestCreateCiBuildRun_WithSourceBuildRunOnly(t *testing.T) {
 }
 
 func TestGetCiBuildAction(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"ciBuildActions","id":"action-1"}}`)
+	response := jsonResponse(http.StatusOK, `{
+		"data": {
+			"type": "ciBuildActions",
+			"id": "action-1",
+			"attributes": {"name": "Archive", "isRequiredToPass": false},
+			"relationships": {
+				"buildRun": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciBuildActions/action-1/buildRun"}, "data": {"type": "ciBuildRuns", "id": "run-1"}},
+				"artifacts": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciBuildActions/action-1/artifacts"}},
+				"issues": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciBuildActions/action-1/issues"}},
+				"testResults": {"links": {"related": "https://api.appstoreconnect.apple.com/v1/ciBuildActions/action-1/testResults"}}
+			}
+		}
+	}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -6139,8 +6456,26 @@ func TestGetCiBuildAction(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetCiBuildAction(context.Background(), "action-1"); err != nil {
+	got, err := client.GetCiBuildAction(context.Background(), "action-1")
+	if err != nil {
 		t.Fatalf("GetCiBuildAction() error: %v", err)
+	}
+	if got.Data.Attributes.IsRequiredToPass == nil || *got.Data.Attributes.IsRequiredToPass {
+		t.Fatalf("expected explicit false isRequiredToPass, got %#v", got.Data.Attributes.IsRequiredToPass)
+	}
+	relationships := got.Data.Relationships
+	if relationships == nil || relationships.BuildRun == nil || relationships.BuildRun.Data == nil || relationships.BuildRun.Data.ID != "run-1" || relationships.BuildRun.Links == nil || relationships.BuildRun.Links.Related == "" {
+		t.Fatalf("unexpected build run relationship: %#v", relationships)
+	}
+	if relationships.Artifacts == nil || relationships.Artifacts.Links == nil || relationships.Artifacts.Links.Related == "" || relationships.Issues == nil || relationships.Issues.Links == nil || relationships.Issues.Links.Related == "" || relationships.TestResults == nil || relationships.TestResults.Links == nil || relationships.TestResults.Links.Related == "" {
+		t.Fatalf("unexpected action resource relationships: %#v", relationships)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"isRequiredToPass":false`) {
+		t.Fatalf("action response lost explicit false isRequiredToPass: %s", encoded)
 	}
 }
 
@@ -6848,7 +7183,7 @@ func TestGetBundleID_SendsRequest(t *testing.T) {
 }
 
 func TestCreateBundleID_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"bundleIds","id":"b1","attributes":{"name":"Demo","identifier":"com.example.demo","platform":"IOS"}}}`)
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"bundleIds","id":"b1","attributes":{"name":"Demo","identifier":"com.example.demo","platform":"UNIVERSAL"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", req.Method)
@@ -6870,8 +7205,8 @@ func TestCreateBundleID_SendsRequest(t *testing.T) {
 		if payload.Data.Attributes.Identifier != "com.example.demo" {
 			t.Fatalf("expected identifier com.example.demo, got %q", payload.Data.Attributes.Identifier)
 		}
-		if payload.Data.Attributes.Platform != PlatformIOS {
-			t.Fatalf("expected platform IOS, got %q", payload.Data.Attributes.Platform)
+		if payload.Data.Attributes.Platform != BundleIDPlatformUniversal {
+			t.Fatalf("expected platform UNIVERSAL, got %q", payload.Data.Attributes.Platform)
 		}
 		assertAuthorized(t, req)
 	}, response)
@@ -6879,7 +7214,7 @@ func TestCreateBundleID_SendsRequest(t *testing.T) {
 	attrs := BundleIDCreateAttributes{
 		Name:       "Demo",
 		Identifier: "com.example.demo",
-		Platform:   PlatformIOS,
+		Platform:   BundleIDPlatformUniversal,
 	}
 	if _, err := client.CreateBundleID(context.Background(), attrs); err != nil {
 		t.Fatalf("CreateBundleID() error: %v", err)
@@ -7235,6 +7570,13 @@ func TestCreateBundleIDCapability_SendsRequest(t *testing.T) {
 		if payload.Data.Attributes.CapabilityType != "ICLOUD" {
 			t.Fatalf("expected capability ICLOUD, got %q", payload.Data.Attributes.CapabilityType)
 		}
+		if len(payload.Data.Attributes.Settings) != 1 || payload.Data.Attributes.Settings[0].Key != "ICLOUD_VERSION" {
+			t.Fatalf("expected ICLOUD_VERSION setting, got %+v", payload.Data.Attributes.Settings)
+		}
+		options := payload.Data.Attributes.Settings[0].Options
+		if len(options) != 1 || options[0].Key != "XCODE_6" || options[0].Enabled == nil || !*options[0].Enabled {
+			t.Fatalf("expected enabled XCODE_6 option, got %+v", options)
+		}
 		if payload.Data.Relationships == nil || payload.Data.Relationships.BundleID == nil {
 			t.Fatalf("expected bundleId relationship")
 		}
@@ -7251,7 +7593,7 @@ func TestCreateBundleIDCapability_SendsRequest(t *testing.T) {
 			{
 				Key: "ICLOUD_VERSION",
 				Options: []CapabilityOption{
-					{Key: "XCODE_13", Enabled: &enabled},
+					{Key: "XCODE_6", Enabled: &enabled},
 				},
 			},
 		},
@@ -7279,7 +7621,7 @@ func TestDeleteBundleIDCapability_SendsRequest(t *testing.T) {
 }
 
 func TestUpdateBundleIDCapability_UsesPatchPath(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"bundleIdCapabilities","id":"cap1","attributes":{"capabilityType":"ICLOUD","settings":[{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_13","enabled":true}]}]}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"bundleIdCapabilities","id":"cap1","attributes":{"capabilityType":"ICLOUD","settings":[{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6","enabled":true}]}]}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodPatch {
 			t.Fatalf("expected PATCH, got %s", req.Method)
@@ -7313,8 +7655,8 @@ func TestUpdateBundleIDCapability_UsesPatchPath(t *testing.T) {
 		if len(payload.Data.Attributes.Settings[0].Options) != 1 {
 			t.Fatalf("expected 1 option, got %d", len(payload.Data.Attributes.Settings[0].Options))
 		}
-		if payload.Data.Attributes.Settings[0].Options[0].Key != "XCODE_13" {
-			t.Fatalf("expected option key XCODE_13, got %q", payload.Data.Attributes.Settings[0].Options[0].Key)
+		if payload.Data.Attributes.Settings[0].Options[0].Key != "XCODE_6" {
+			t.Fatalf("expected option key XCODE_6, got %q", payload.Data.Attributes.Settings[0].Options[0].Key)
 		}
 		if payload.Data.Attributes.Settings[0].Options[0].Enabled == nil || !*payload.Data.Attributes.Settings[0].Options[0].Enabled {
 			t.Fatalf("expected option enabled true")
@@ -7328,7 +7670,7 @@ func TestUpdateBundleIDCapability_UsesPatchPath(t *testing.T) {
 			{
 				Key: "ICLOUD_VERSION",
 				Options: []CapabilityOption{
-					{Key: "XCODE_13", Enabled: &enabled},
+					{Key: "XCODE_6", Enabled: &enabled},
 				},
 			},
 		},
@@ -7611,7 +7953,7 @@ func TestGetDevice_SendsRequest(t *testing.T) {
 }
 
 func TestRegisterDevice_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"devices","id":"d1","attributes":{"name":"Device","udid":"UDID","platform":"IOS","status":"ENABLED"}}}`)
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"devices","id":"d1","attributes":{"name":"Device","udid":"UDID","platform":"UNIVERSAL","status":"ENABLED"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", req.Method)
@@ -7633,8 +7975,8 @@ func TestRegisterDevice_SendsRequest(t *testing.T) {
 		if payload.Data.Attributes.UDID != "UDID" {
 			t.Fatalf("expected udid UDID, got %q", payload.Data.Attributes.UDID)
 		}
-		if payload.Data.Attributes.Platform != DevicePlatformIOS {
-			t.Fatalf("expected platform IOS, got %q", payload.Data.Attributes.Platform)
+		if payload.Data.Attributes.Platform != DevicePlatformUniversal {
+			t.Fatalf("expected platform UNIVERSAL, got %q", payload.Data.Attributes.Platform)
 		}
 		assertAuthorized(t, req)
 	}, response)
@@ -7642,7 +7984,7 @@ func TestRegisterDevice_SendsRequest(t *testing.T) {
 	attrs := DeviceCreateAttributes{
 		Name:     "Device",
 		UDID:     "UDID",
-		Platform: DevicePlatformIOS,
+		Platform: DevicePlatformUniversal,
 	}
 	if _, err := client.RegisterDevice(context.Background(), attrs); err != nil {
 		t.Fatalf("RegisterDevice() error: %v", err)
@@ -9044,13 +9386,21 @@ func TestGetUsers_WithFiltersAndLimit(t *testing.T) {
 		if values.Get("filter[username]") != "user@example.com" {
 			t.Fatalf("expected filter[username]=user@example.com, got %q", values.Get("filter[username]"))
 		}
+		if values.Get("filter[roles]") != "DEVELOPER,APP_MANAGER" {
+			t.Fatalf("expected filter[roles]=DEVELOPER,APP_MANAGER, got %q", values.Get("filter[roles]"))
+		}
 		if values.Get("limit") != "5" {
 			t.Fatalf("expected limit=5, got %q", values.Get("limit"))
 		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetUsers(context.Background(), WithUsersEmail("user@example.com"), WithUsersLimit(5)); err != nil {
+	if _, err := client.GetUsers(
+		context.Background(),
+		WithUsersEmail("user@example.com"),
+		WithUsersRoles([]string{"developer", " app_manager "}),
+		WithUsersLimit(5),
+	); err != nil {
 		t.Fatalf("GetUsers() error: %v", err)
 	}
 }
@@ -9459,7 +9809,7 @@ func TestGetBuildBetaDetails_WithBuildFilter(t *testing.T) {
 }
 
 func TestGetBuildBetaDetail(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":true}}}`)
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":true,"internalBuildState":"PROCESSING","externalBuildState":"READY_FOR_TESTING"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -9470,8 +9820,15 @@ func TestGetBuildBetaDetail(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetBuildBetaDetail(context.Background(), "detail-1"); err != nil {
+	detail, err := client.GetBuildBetaDetail(context.Background(), "detail-1")
+	if err != nil {
 		t.Fatalf("GetBuildBetaDetail() error: %v", err)
+	}
+	if detail.Data.Attributes.InternalBuildState != "PROCESSING" {
+		t.Fatalf("expected internalBuildState to remain available in responses, got %q", detail.Data.Attributes.InternalBuildState)
+	}
+	if detail.Data.Attributes.ExternalBuildState != "READY_FOR_TESTING" {
+		t.Fatalf("expected externalBuildState to remain available in responses, got %q", detail.Data.Attributes.ExternalBuildState)
 	}
 }
 

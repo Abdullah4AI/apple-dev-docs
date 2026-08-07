@@ -7,16 +7,6 @@ import (
 	"reflect"
 )
 
-// GetLinks returns the links field for pagination.
-func (r *PreReleaseVersionsResponse) GetLinks() *Links {
-	return &r.Links
-}
-
-// GetData returns the data field for aggregation.
-func (r *PreReleaseVersionsResponse) GetData() any {
-	return r.Data
-}
-
 // PaginateFunc is a function that fetches a page of results
 type PaginateFunc func(ctx context.Context, nextURL string) (PaginatedResponse, error)
 
@@ -42,6 +32,9 @@ func PaginateAll(ctx context.Context, firstPage PaginatedResponse, fetchNext Pag
 	if err != nil {
 		return nil, err
 	}
+	if err := initializeAggregatedResponse(result, firstPage); err != nil {
+		return nil, err
+	}
 
 	page := 1
 	seenNext := make(map[string]struct{})
@@ -49,6 +42,11 @@ func PaginateAll(ctx context.Context, firstPage PaginatedResponse, fetchNext Pag
 		// Aggregate data from current page using reflection over the Data field.
 		if err := aggregatePageData(result, firstPage); err != nil {
 			return nil, fmt.Errorf("page %d: %w", page, err)
+		}
+		if page > 1 {
+			if err := clearPageLocalContext(result); err != nil {
+				return nil, fmt.Errorf("page %d: %w", page, err)
+			}
 		}
 
 		// Check for next page
@@ -75,6 +73,9 @@ func PaginateAll(ctx context.Context, firstPage PaginatedResponse, fetchNext Pag
 		}
 
 		firstPage = nextPage
+	}
+	if links := result.GetLinks(); links != nil {
+		links.Next = ""
 	}
 
 	return result, nil
@@ -139,11 +140,63 @@ func newEmptyPaginatedResponse(src PaginatedResponse) (PaginatedResponse, error)
 	// Use srcValue.Type().Elem() instead of srcValue.Elem().Type() to handle
 	// typed nil pointers (e.g., var resp *Type = nil passed as interface).
 	newPtr := reflect.New(srcValue.Type().Elem())
+	initializeEmptyDataSlice(newPtr.Elem())
 	result, ok := newPtr.Interface().(PaginatedResponse)
 	if !ok {
 		return nil, fmt.Errorf("unsupported response type for pagination: %T does not implement PaginatedResponse", src)
 	}
 	return result, nil
+}
+
+// initializeAggregatedResponse preserves the first page's document context
+// while preparing a non-nil data slice for the aggregated collection.
+func initializeAggregatedResponse(result, firstPage PaginatedResponse) error {
+	resultValue := reflect.ValueOf(result)
+	pageValue := reflect.ValueOf(firstPage)
+	if resultValue.Kind() != reflect.Pointer || pageValue.Kind() != reflect.Pointer ||
+		resultValue.IsNil() || pageValue.IsNil() {
+		return fmt.Errorf("pagination initialization expects non-nil pointers (got %T and %T)", result, firstPage)
+	}
+	if resultValue.Type() != pageValue.Type() {
+		return fmt.Errorf("pagination initialization type mismatch: page is %T but result is %T", firstPage, result)
+	}
+
+	resultElem := resultValue.Elem()
+	pageElem := pageValue.Elem()
+	initializeEmptyDataSlice(resultElem)
+	for _, fieldName := range []string{"Links", "Meta"} {
+		resultField := resultElem.FieldByName(fieldName)
+		pageField := pageElem.FieldByName(fieldName)
+		if resultField.IsValid() && pageField.IsValid() && resultField.CanSet() && resultField.Type() == pageField.Type() {
+			resultField.Set(pageField)
+		}
+	}
+	return nil
+}
+
+// clearPageLocalContext removes links and metadata that describe an individual
+// API page once the result contains data aggregated from multiple pages.
+func clearPageLocalContext(response PaginatedResponse) error {
+	responseValue := reflect.ValueOf(response)
+	if responseValue.Kind() != reflect.Pointer || responseValue.IsNil() {
+		return fmt.Errorf("pagination context clearing expects a non-nil pointer (got %T)", response)
+	}
+
+	responseElem := responseValue.Elem()
+	for _, fieldName := range []string{"Links", "Meta"} {
+		field := responseElem.FieldByName(fieldName)
+		if field.IsValid() && field.CanSet() {
+			field.Set(reflect.Zero(field.Type()))
+		}
+	}
+	return nil
+}
+
+func initializeEmptyDataSlice(responseValue reflect.Value) {
+	data := responseValue.FieldByName("Data")
+	if data.IsValid() && data.CanSet() && data.Kind() == reflect.Slice && data.IsNil() {
+		data.Set(reflect.MakeSlice(data.Type(), 0, 0))
+	}
 }
 
 // aggregatePageData appends page data to result by reflecting on the shared Data field.

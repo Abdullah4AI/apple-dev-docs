@@ -1,11 +1,12 @@
 package asc
 
 // DevicePlatform represents the platform of a device.
-type DevicePlatform string
+type DevicePlatform = BundleIDPlatform
 
 const (
-	DevicePlatformIOS   DevicePlatform = "IOS"
-	DevicePlatformMacOS DevicePlatform = "MAC_OS"
+	DevicePlatformIOS       = BundleIDPlatformIOS
+	DevicePlatformMacOS     = BundleIDPlatformMacOS
+	DevicePlatformUniversal = BundleIDPlatformUniversal
 )
 
 // DeviceStatus represents the status of a device.

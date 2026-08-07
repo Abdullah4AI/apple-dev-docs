@@ -339,6 +339,27 @@ func TestPrintMarkdown_CiBuildRuns(t *testing.T) {
 	}
 }
 
+func TestPrintTable_CiBuildActionsIncludesID(t *testing.T) {
+	resp := &CiBuildActionsResponse{
+		Data: []CiBuildActionResource{{
+			ID: "action-1",
+			Attributes: CiBuildActionAttributes{
+				Name:              "Archive",
+				ActionType:        "ARCHIVE",
+				ExecutionProgress: CiBuildRunExecutionProgressComplete,
+			},
+		}},
+	}
+
+	headers, rows := ciBuildActionsRows(resp)
+	if len(headers) == 0 || headers[0] != "ID" {
+		t.Fatalf("expected first action header ID, got %#v", headers)
+	}
+	if len(rows) != 1 || len(rows[0]) == 0 || rows[0][0] != "action-1" {
+		t.Fatalf("expected first action value action-1, got %#v", rows)
+	}
+}
+
 func TestPrintTable_CiArtifacts(t *testing.T) {
 	resp := &CiArtifactsResponse{
 		Data: []CiArtifactResource{

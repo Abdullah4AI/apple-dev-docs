@@ -7,19 +7,18 @@ import (
 	"flag"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
-func TestAppEventsCreateNormalizesPurchaseRequirement(t *testing.T) {
+func TestAppEventsCreateAllowsOptionalEventTypeAndNormalizesPurchaseRequirement(t *testing.T) {
 	setupAuth(t)
 
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", req.Method)
 		}
@@ -36,6 +35,9 @@ func TestAppEventsCreateNormalizesPurchaseRequirement(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected data object, got %T", payload["data"])
 		}
+		if data["type"] != "appEvents" {
+			t.Fatalf("expected data type appEvents, got %v", data["type"])
+		}
 		attrs, ok := data["attributes"].(map[string]any)
 		if !ok {
 			t.Fatalf("expected attributes object, got %T", data["attributes"])
@@ -44,14 +46,26 @@ func TestAppEventsCreateNormalizesPurchaseRequirement(t *testing.T) {
 		if attrs["purchaseRequirement"] != "NO_COST_ASSOCIATED" {
 			t.Fatalf("expected purchaseRequirement NO_COST_ASSOCIATED, got %v", attrs["purchaseRequirement"])
 		}
+		if _, ok := attrs["badge"]; ok {
+			t.Fatalf("expected optional badge to be omitted, got %v", attrs["badge"])
+		}
 
-		body := `{"data":{"type":"appEvents","id":"event-1","attributes":{"referenceName":"Launch","badge":"CHALLENGE"}}}`
-		return &http.Response{
-			StatusCode: http.StatusCreated,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
-	})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"data":{"type":"appEvents","id":"event-1","attributes":{"referenceName":"Launch"}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		cloned := req.Clone(req.Context())
+		cloned.URL.Scheme = serverURL.Scheme
+		cloned.URL.Host = serverURL.Host
+		return server.Client().Transport.RoundTrip(cloned)
+	}))
 
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
@@ -61,7 +75,6 @@ func TestAppEventsCreateNormalizesPurchaseRequirement(t *testing.T) {
 			"app-events", "create",
 			"--app", "APP_ID",
 			"--name", "Launch",
-			"--event-type", "CHALLENGE",
 			"--purchase-requirement", "noCostAssociated",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -74,8 +87,12 @@ func TestAppEventsCreateNormalizesPurchaseRequirement(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if !strings.Contains(stdout, `"id":"event-1"`) {
-		t.Fatalf("expected created event output, got %q", stdout)
+	var response asc.AppEventResponse
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if response.Data.ID != "event-1" {
+		t.Fatalf("expected created event id event-1, got %q", response.Data.ID)
 	}
 }
 

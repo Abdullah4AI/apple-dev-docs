@@ -2,13 +2,20 @@ package cmdtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestTestFlightDistributionViewOutputWithLimit(t *testing.T) {
@@ -110,32 +117,56 @@ func TestTestFlightDistributionEditOutput(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPatch {
 			t.Fatalf("expected PATCH, got %s", req.Method)
 		}
 		if req.URL.Path != "/v1/buildBetaDetails/detail-1" {
 			t.Fatalf("expected path /v1/buildBetaDetails/detail-1, got %s", req.URL.Path)
 		}
-		payload, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("read body error: %v", err)
+		var payload struct {
+			Data struct {
+				Type       string         `json:"type"`
+				ID         string         `json:"id"`
+				Attributes map[string]any `json:"attributes"`
+			} `json:"data"`
 		}
-		if !strings.Contains(string(payload), `"autoNotifyEnabled":true`) {
-			t.Fatalf("expected autoNotifyEnabled in body, got %s", string(payload))
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode body error: %v", err)
 		}
-		body := `{"data":{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":true}}}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
+		if payload.Data.Type != "buildBetaDetails" || payload.Data.ID != "detail-1" {
+			t.Fatalf("unexpected resource linkage: %#v", payload.Data)
+		}
+		if len(payload.Data.Attributes) != 1 || payload.Data.Attributes["autoNotifyEnabled"] != true {
+			t.Fatalf("expected only autoNotifyEnabled=true, got %#v", payload.Data.Attributes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":true}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		cloned := req.Clone(req.Context())
+		cloned.URL.Scheme = serverURL.Scheme
+		cloned.URL.Host = serverURL.Host
+		return server.Client().Transport.RoundTrip(cloned)
 	})
+	client, err := asc.NewClientWithHTTPClient(
+		"TEST_KEY",
+		"TEST_ISSUER",
+		os.Getenv("ASC_PRIVATE_KEY_PATH"),
+		&http.Client{Transport: transport},
+	)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		return client, nil
+	}))
 
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
@@ -154,6 +185,67 @@ func TestTestFlightDistributionEditOutput(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"id":"detail-1"`) {
 		t.Fatalf("expected detail id in output, got %q", stdout)
+	}
+}
+
+func TestTestFlightDistributionEditExternalTestingDeprecation(t *testing.T) {
+	clientFactoryCalled := false
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientFactoryCalled = true
+		return nil, errors.New("client factory must not be called")
+	}))
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantError string
+	}{
+		{
+			name:      "enable",
+			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=true"},
+			wantError: `Error: --external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`,
+		},
+		{
+			name:      "disable",
+			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=false"},
+			wantError: `Error: --external-testing=false cannot identify which beta groups to remove. Use asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm.`,
+		},
+		{
+			name:      "mixed with supported update",
+			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--auto-notify", "--external-testing=true"},
+			wantError: `Error: --external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientFactoryCalled = false
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(test.args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				if err := root.Run(context.Background()); !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected usage error, got %v", err)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			const warning = "Warning: `--external-testing` is deprecated and cannot be applied safely; App Store Connect does not support editing `externalBuildState`."
+			if !strings.Contains(stderr, warning) {
+				t.Fatalf("expected deprecation warning %q, got %q", warning, stderr)
+			}
+			if !strings.Contains(stderr, test.wantError) {
+				t.Fatalf("expected migration error %q, got %q", test.wantError, stderr)
+			}
+			if clientFactoryCalled {
+				t.Fatal("expected deprecated flag to fail before client creation or HTTP")
+			}
+		})
 	}
 }
 

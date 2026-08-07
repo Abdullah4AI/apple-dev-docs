@@ -9,14 +9,17 @@ func normalizeAppStoreVersionInclude(value string) ([]string, error) {
 func appStoreVersionIncludeList() []string {
 	return []string{
 		"ageRatingDeclaration",
+		"app",
+		"appStoreVersionLocalizations",
+		"build",
+		"appStoreVersionPhasedRelease",
+		"gameCenterAppVersion",
+		"routingAppCoverage",
 		"appStoreReviewDetail",
+		"appStoreVersionSubmission",
 		"appClipDefaultExperience",
 		"appStoreVersionExperiments",
 		"appStoreVersionExperimentsV2",
-		"appStoreVersionSubmission",
-		"customerReviews",
-		"routingAppCoverage",
 		"alternativeDistributionPackage",
-		"gameCenterAppVersion",
 	}
 }

@@ -42,12 +42,12 @@ func TestMetadataHelpShowsKeywordsWorkflow(t *testing.T) {
 			t.Fatalf("expected metadata keywords help to list %s, got %q", subcommand, keywordsUsage)
 		}
 	}
-	if !strings.Contains(keywordsUsage, "asc apps search-keywords") {
-		t.Fatalf("expected metadata keywords help to point to raw relationship commands, got %q", keywordsUsage)
+	if !strings.Contains(keywordsUsage, "asc apps search-keywords list") {
+		t.Fatalf("expected metadata keywords help to point to the app keyword read command, got %q", keywordsUsage)
 	}
 }
 
-func TestRawSearchKeywordsHelpPointsToMetadataKeywords(t *testing.T) {
+func TestSearchKeywordsHelpDistinguishesSupportedWorkflows(t *testing.T) {
 	root := RootCommand("1.2.3")
 
 	appsCmd := findSubcommand(root, "apps", "search-keywords")
@@ -56,8 +56,8 @@ func TestRawSearchKeywordsHelpPointsToMetadataKeywords(t *testing.T) {
 		return
 	}
 	appsUsage := appsCmd.UsageFunc(appsCmd)
-	if !strings.Contains(appsUsage, "asc metadata keywords") {
-		t.Fatalf("expected apps search-keywords help to point to metadata keywords, got %q", appsUsage)
+	if !strings.Contains(appsUsage, "set --app") || !strings.Contains(appsUsage, "version-localized") {
+		t.Fatalf("expected apps search-keywords help to document the supported version-localization setter, got %q", appsUsage)
 	}
 
 	localizationsCmd := findSubcommand(root, "localizations", "search-keywords")

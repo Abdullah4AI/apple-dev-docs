@@ -185,24 +185,69 @@ type AppInfoAttributes map[string]any
 
 // BetaGroupAttributes describes a beta group resource.
 type BetaGroupAttributes struct {
-	Name                   string `json:"name"`
-	CreatedDate            string `json:"createdDate,omitempty"`
-	IsInternalGroup        bool   `json:"isInternalGroup,omitempty"`
-	HasAccessToAllBuilds   bool   `json:"hasAccessToAllBuilds,omitempty"`
-	PublicLinkEnabled      bool   `json:"publicLinkEnabled,omitempty"`
-	PublicLinkLimitEnabled bool   `json:"publicLinkLimitEnabled,omitempty"`
-	PublicLinkLimit        int    `json:"publicLinkLimit,omitempty"`
-	PublicLink             string `json:"publicLink,omitempty"`
-	FeedbackEnabled        bool   `json:"feedbackEnabled,omitempty"`
+	Name                                 string `json:"name"`
+	CreatedDate                          string `json:"createdDate,omitempty"`
+	IsInternalGroup                      bool   `json:"isInternalGroup,omitempty"`
+	HasAccessToAllBuilds                 bool   `json:"hasAccessToAllBuilds,omitempty"`
+	PublicLinkEnabled                    bool   `json:"publicLinkEnabled,omitempty"`
+	PublicLinkID                         string `json:"publicLinkId,omitempty"`
+	PublicLinkLimitEnabled               bool   `json:"publicLinkLimitEnabled,omitempty"`
+	PublicLinkLimit                      int    `json:"publicLinkLimit,omitempty"`
+	PublicLink                           string `json:"publicLink,omitempty"`
+	FeedbackEnabled                      bool   `json:"feedbackEnabled,omitempty"`
+	IOSBuildsAvailableForAppleSiliconMac *bool  `json:"iosBuildsAvailableForAppleSiliconMac,omitempty"`
+	IOSBuildsAvailableForAppleVision     *bool  `json:"iosBuildsAvailableForAppleVision,omitempty"`
 }
 
 // BetaTesterAttributes describes a beta tester resource.
 type BetaTesterAttributes struct {
-	FirstName  string          `json:"firstName,omitempty"`
-	LastName   string          `json:"lastName,omitempty"`
-	Email      string          `json:"email,omitempty"`
-	InviteType BetaInviteType  `json:"inviteType,omitempty"`
-	State      BetaTesterState `json:"state,omitempty"`
+	FirstName  string                `json:"firstName,omitempty"`
+	LastName   string                `json:"lastName,omitempty"`
+	Email      string                `json:"email,omitempty"`
+	InviteType BetaInviteType        `json:"inviteType,omitempty"`
+	State      BetaTesterState       `json:"state,omitempty"`
+	AppDevices []BetaTesterAppDevice `json:"-"`
+}
+
+// UnmarshalJSON keeps absent appDevices nil while retaining explicit arrays.
+func (a *BetaTesterAttributes) UnmarshalJSON(data []byte) error {
+	type betaTesterAttributesAlias BetaTesterAttributes
+	*a = BetaTesterAttributes{}
+	aux := struct {
+		*betaTesterAttributesAlias
+		AppDevices []BetaTesterAppDevice `json:"appDevices"`
+	}{
+		betaTesterAttributesAlias: (*betaTesterAttributesAlias)(a),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	a.AppDevices = aux.AppDevices
+	return nil
+}
+
+// MarshalJSON preserves absent and explicit empty appDevices values.
+func (a BetaTesterAttributes) MarshalJSON() ([]byte, error) {
+	type betaTesterAttributesAlias BetaTesterAttributes
+	var appDevices *[]BetaTesterAppDevice
+	if a.AppDevices != nil {
+		appDevices = &a.AppDevices
+	}
+	return json.Marshal(struct {
+		betaTesterAttributesAlias
+		AppDevices *[]BetaTesterAppDevice `json:"appDevices,omitempty"`
+	}{
+		betaTesterAttributesAlias: betaTesterAttributesAlias(a),
+		AppDevices:                appDevices,
+	})
+}
+
+// BetaTesterAppDevice describes a device on which a tester installed the app.
+type BetaTesterAppDevice struct {
+	Model           string `json:"model,omitempty"`
+	Platform        string `json:"platform,omitempty"`
+	OSVersion       string `json:"osVersion,omitempty"`
+	AppBuildVersion string `json:"appBuildVersion,omitempty"`
 }
 
 // BetaInviteType represents the invitation type for a beta tester.
@@ -351,9 +396,20 @@ type AppInfoLocalizationRelationships struct {
 
 // BetaGroupCreateData is the data portion of a beta group create request.
 type BetaGroupCreateData struct {
-	Type          ResourceType            `json:"type"`
-	Attributes    BetaGroupAttributes     `json:"attributes"`
-	Relationships *BetaGroupRelationships `json:"relationships"`
+	Type          ResourceType              `json:"type"`
+	Attributes    BetaGroupCreateAttributes `json:"attributes"`
+	Relationships *BetaGroupRelationships   `json:"relationships"`
+}
+
+// BetaGroupCreateAttributes describes attributes accepted when creating a beta group.
+type BetaGroupCreateAttributes struct {
+	Name                   string `json:"name"`
+	IsInternalGroup        bool   `json:"isInternalGroup,omitempty"`
+	HasAccessToAllBuilds   bool   `json:"hasAccessToAllBuilds,omitempty"`
+	PublicLinkEnabled      bool   `json:"publicLinkEnabled,omitempty"`
+	PublicLinkLimitEnabled bool   `json:"publicLinkLimitEnabled,omitempty"`
+	PublicLinkLimit        int    `json:"publicLinkLimit,omitempty"`
+	FeedbackEnabled        bool   `json:"feedbackEnabled,omitempty"`
 }
 
 // BetaGroupCreateRequest is a request to create a beta group.
@@ -677,8 +733,16 @@ func (c *Client) CreateBetaGroup(ctx context.Context, appID, name string) (*Beta
 func (c *Client) CreateBetaGroupWithAttributes(ctx context.Context, appID string, attrs BetaGroupAttributes) (*BetaGroupResponse, error) {
 	payload := BetaGroupCreateRequest{
 		Data: BetaGroupCreateData{
-			Type:       ResourceTypeBetaGroups,
-			Attributes: attrs,
+			Type: ResourceTypeBetaGroups,
+			Attributes: BetaGroupCreateAttributes{
+				Name:                   attrs.Name,
+				IsInternalGroup:        attrs.IsInternalGroup,
+				HasAccessToAllBuilds:   attrs.HasAccessToAllBuilds,
+				PublicLinkEnabled:      attrs.PublicLinkEnabled,
+				PublicLinkLimitEnabled: attrs.PublicLinkLimitEnabled,
+				PublicLinkLimit:        attrs.PublicLinkLimit,
+				FeedbackEnabled:        attrs.FeedbackEnabled,
+			},
 			Relationships: &BetaGroupRelationships{
 				App: &Relationship{
 					Data: ResourceData{

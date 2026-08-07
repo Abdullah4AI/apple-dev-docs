@@ -20,12 +20,9 @@ func supportedAppEventPurchaseRequirementValues() string {
 	return string(asc.AppEventPurchaseRequirementNoCostAssociated)
 }
 
-func normalizeAppEventBadge(value string, required bool) (string, error) {
+func normalizeAppEventBadge(value string) (string, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(value))
 	if normalized == "" {
-		if required {
-			return "", fmt.Errorf("--event-type is required")
-		}
 		return "", nil
 	}
 	if slices.Contains(asc.ValidAppEventBadges, normalized) {

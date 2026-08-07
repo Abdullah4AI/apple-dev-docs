@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -573,23 +574,6 @@ func TestDeleteSubscriptionImage(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionIntroductoryOffer(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionIntroductoryOffers","id":"offer-1","attributes":{"duration":"ONE_MONTH","numberOfPeriods":1,"offerMode":"FREE_TRIAL"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionIntroductoryOffers/offer-1" {
-			t.Fatalf("expected path /v1/subscriptionIntroductoryOffers/offer-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionIntroductoryOffer(context.Background(), "offer-1"); err != nil {
-		t.Fatalf("GetSubscriptionIntroductoryOffer() error: %v", err)
-	}
-}
-
 func TestCreateSubscriptionIntroductoryOffer(t *testing.T) {
 	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionIntroductoryOffers","id":"offer-1","attributes":{"duration":"ONE_MONTH","numberOfPeriods":1,"offerMode":"FREE_TRIAL"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -692,42 +676,108 @@ func TestGetSubscriptionPromotionalOffer(t *testing.T) {
 }
 
 func TestCreateSubscriptionPromotionalOffer(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionPromotionalOffers","id":"offer-1","attributes":{"name":"Spring"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionPromotionalOffers" {
-			t.Fatalf("expected path /v1/subscriptionPromotionalOffers, got %s", req.URL.Path)
-		}
-		var payload SubscriptionPromotionalOfferCreateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionPromotionalOffers {
-			t.Fatalf("expected type subscriptionPromotionalOffers, got %q", payload.Data.Type)
-		}
-		if payload.Data.Attributes.Name != "Spring" || payload.Data.Attributes.OfferCode != "SPRING" {
-			t.Fatalf("unexpected attributes: %+v", payload.Data.Attributes)
-		}
-		if payload.Data.Relationships.Subscription.Data.ID != "sub-1" {
-			t.Fatalf("unexpected subscription relationship: %+v", payload.Data.Relationships.Subscription.Data)
-		}
-		if len(payload.Data.Relationships.Prices.Data) != 1 || payload.Data.Relationships.Prices.Data[0].ID != "price-1" {
-			t.Fatalf("unexpected price relationships: %+v", payload.Data.Relationships.Prices.Data)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	attrs := SubscriptionPromotionalOfferCreateAttributes{
-		Name:            "Spring",
-		OfferCode:       "SPRING",
-		Duration:        SubscriptionOfferDurationOneMonth,
-		OfferMode:       SubscriptionOfferModeFreeTrial,
-		NumberOfPeriods: 1,
+	tests := []struct {
+		name         string
+		mode         SubscriptionOfferMode
+		prices       []SubscriptionPromotionalOfferPrice
+		expectedBody string
+	}{
+		{
+			name:         "compound price with both relationships",
+			mode:         SubscriptionOfferModePayAsYouGo,
+			prices:       []SubscriptionPromotionalOfferPrice{{TerritoryID: "USA", PricePointID: "price-1"}},
+			expectedBody: `{"data":{"type":"subscriptionPromotionalOffers","attributes":{"duration":"ONE_MONTH","name":"Spring","numberOfPeriods":1,"offerCode":"SPRING","offerMode":"PAY_AS_YOU_GO"},"relationships":{"subscription":{"data":{"type":"subscriptions","id":"sub-1"}},"prices":{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}"}]}}},"included":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}","relationships":{"territory":{"data":{"type":"territories","id":"USA"}},"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"price-1"}}}}]}`,
+		},
+		{
+			name:         "paid mode with territory only",
+			mode:         SubscriptionOfferModePayUpFront,
+			prices:       []SubscriptionPromotionalOfferPrice{{TerritoryID: "FRA"}},
+			expectedBody: `{"data":{"type":"subscriptionPromotionalOffers","attributes":{"duration":"ONE_MONTH","name":"Spring","numberOfPeriods":1,"offerCode":"SPRING","offerMode":"PAY_UP_FRONT"},"relationships":{"subscription":{"data":{"type":"subscriptions","id":"sub-1"}},"prices":{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}"}]}}},"included":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}","relationships":{"territory":{"data":{"type":"territories","id":"FRA"}}}}]}`,
+		},
+		{
+			name:         "free trial with price point",
+			mode:         SubscriptionOfferModeFreeTrial,
+			prices:       []SubscriptionPromotionalOfferPrice{{TerritoryID: "DEU", PricePointID: "price-2"}},
+			expectedBody: `{"data":{"type":"subscriptionPromotionalOffers","attributes":{"duration":"ONE_MONTH","name":"Spring","numberOfPeriods":1,"offerCode":"SPRING","offerMode":"FREE_TRIAL"},"relationships":{"subscription":{"data":{"type":"subscriptions","id":"sub-1"}},"prices":{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}"}]}}},"included":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}","relationships":{"territory":{"data":{"type":"territories","id":"DEU"}},"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"price-2"}}}}]}`,
+		},
+		{
+			name:         "price point relationship without territory",
+			mode:         SubscriptionOfferModeFreeTrial,
+			prices:       []SubscriptionPromotionalOfferPrice{{PricePointID: "price-3"}},
+			expectedBody: `{"data":{"type":"subscriptionPromotionalOffers","attributes":{"duration":"ONE_MONTH","name":"Spring","numberOfPeriods":1,"offerCode":"SPRING","offerMode":"FREE_TRIAL"},"relationships":{"subscription":{"data":{"type":"subscriptions","id":"sub-1"}},"prices":{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}"}]}}},"included":[{"type":"subscriptionPromotionalOfferPrices","id":"${local-price-1}","relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"price-3"}}}}]}`,
+		},
+		{
+			name:         "legacy existing price reference",
+			mode:         SubscriptionOfferModePayUpFront,
+			prices:       []SubscriptionPromotionalOfferPrice{{ID: "price-legacy"}},
+			expectedBody: `{"data":{"type":"subscriptionPromotionalOffers","attributes":{"duration":"ONE_MONTH","name":"Spring","numberOfPeriods":1,"offerCode":"SPRING","offerMode":"PAY_UP_FRONT"},"relationships":{"subscription":{"data":{"type":"subscriptions","id":"sub-1"}},"prices":{"data":[{"type":"subscriptionPromotionalOfferPrices","id":"price-legacy"}]}}}}`,
+		},
 	}
-	if _, err := client.CreateSubscriptionPromotionalOffer(context.Background(), "sub-1", attrs, []string{"price-1"}); err != nil {
-		t.Fatalf("CreateSubscriptionPromotionalOffer() error: %v", err)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionPromotionalOffers","id":"offer-1","attributes":{"name":"Spring"}}}`)
+			client := newTestClient(t, func(req *http.Request) {
+				if req.Method != http.MethodPost {
+					t.Fatalf("expected POST, got %s", req.Method)
+				}
+				if req.URL.Path != "/v1/subscriptionPromotionalOffers" {
+					t.Fatalf("expected path /v1/subscriptionPromotionalOffers, got %s", req.URL.Path)
+				}
+				var got map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
+					t.Fatalf("failed to decode request: %v", err)
+				}
+				var want map[string]any
+				if err := json.Unmarshal([]byte(test.expectedBody), &want); err != nil {
+					t.Fatalf("failed to decode expected body: %v", err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("unexpected request body:\n got: %#v\nwant: %#v", got, want)
+				}
+				assertAuthorized(t, req)
+			}, response)
+
+			attrs := SubscriptionPromotionalOfferCreateAttributes{
+				Name:            "Spring",
+				OfferCode:       "SPRING",
+				Duration:        SubscriptionOfferDurationOneMonth,
+				OfferMode:       test.mode,
+				NumberOfPeriods: 1,
+			}
+			if _, err := client.CreateSubscriptionPromotionalOffer(context.Background(), "sub-1", attrs, test.prices); err != nil {
+				t.Fatalf("CreateSubscriptionPromotionalOffer() error: %v", err)
+			}
+		})
+	}
+}
+
+func TestCreateSubscriptionPromotionalOfferValidatesInlinePricesBeforeHTTP(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   SubscriptionOfferMode
+		prices []SubscriptionPromotionalOfferPrice
+		want   string
+	}{
+		{name: "missing prices", mode: SubscriptionOfferModePayAsYouGo, want: "at least one price is required"},
+		{name: "empty price", mode: SubscriptionOfferModePayAsYouGo, prices: []SubscriptionPromotionalOfferPrice{{}}, want: "price reference ID or inline relationship is required"},
+		{name: "reference with inline relationships", mode: SubscriptionOfferModePayAsYouGo, prices: []SubscriptionPromotionalOfferPrice{{ID: "price-1", TerritoryID: "USA"}}, want: "price reference ID must not be combined with inline relationships"},
+		{name: "mixed reference and inline prices", mode: SubscriptionOfferModePayAsYouGo, prices: []SubscriptionPromotionalOfferPrice{{ID: "price-1"}, {TerritoryID: "USA"}}, want: "price inputs must not mix existing IDs with inline relationships"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &Client{}
+			_, err := client.CreateSubscriptionPromotionalOffer(
+				context.Background(),
+				"sub-1",
+				SubscriptionPromotionalOfferCreateAttributes{OfferMode: test.mode},
+				test.prices,
+			)
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
 	}
 }
 

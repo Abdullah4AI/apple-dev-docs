@@ -36,8 +36,12 @@ type CiProductAttributes struct {
 
 // CiProductRelationships describes relationships for a CI product.
 type CiProductRelationships struct {
-	App                 *Relationship     `json:"app,omitempty"`
-	PrimaryRepositories *RelationshipList `json:"primaryRepositories,omitempty"`
+	App                    *CiResourceRelationship  `json:"app,omitempty"`
+	BundleID               *Relationship            `json:"bundleId,omitempty"`
+	Workflows              *CiRelationshipLinksOnly `json:"workflows,omitempty"`
+	PrimaryRepositories    *RelationshipList        `json:"primaryRepositories,omitempty"`
+	AdditionalRepositories *CiRelationshipLinksOnly `json:"additionalRepositories,omitempty"`
+	BuildRuns              *CiRelationshipLinksOnly `json:"buildRuns,omitempty"`
 }
 
 // CiProductResource represents a CI product resource.
@@ -72,21 +76,21 @@ type CiProductResponse struct {
 
 // CiWorkflowAttributes describes a CI workflow resource.
 type CiWorkflowAttributes struct {
-	Name                            string                       `json:"name,omitempty"`
-	Description                     string                       `json:"description,omitempty"`
-	BranchStartCondition            *CiBranchStartCondition      `json:"branchStartCondition,omitempty"`
-	TagStartCondition               *CiTagStartCondition         `json:"tagStartCondition,omitempty"`
-	PullRequestStartCondition       *CiPullRequestStartCondition `json:"pullRequestStartCondition,omitempty"`
-	ScheduledStartCondition         *CiScheduledStartCondition   `json:"scheduledStartCondition,omitempty"`
-	ManualBranchStartCondition      *CiManualStartCondition      `json:"manualBranchStartCondition,omitempty"`
-	ManualTagStartCondition         *CiManualStartCondition      `json:"manualTagStartCondition,omitempty"`
-	ManualPullRequestStartCondition *CiManualStartCondition      `json:"manualPullRequestStartCondition,omitempty"`
-	Actions                         []CiAction                   `json:"actions,omitempty"`
-	IsEnabled                       bool                         `json:"isEnabled,omitempty"`
-	IsLockedForEditing              bool                         `json:"isLockedForEditing,omitempty"`
-	Clean                           bool                         `json:"clean,omitempty"`
-	ContainerFilePath               string                       `json:"containerFilePath,omitempty"`
-	LastModifiedDate                string                       `json:"lastModifiedDate,omitempty"`
+	Name                            string                             `json:"name,omitempty"`
+	Description                     string                             `json:"description,omitempty"`
+	BranchStartCondition            *CiBranchStartCondition            `json:"branchStartCondition,omitempty"`
+	TagStartCondition               *CiTagStartCondition               `json:"tagStartCondition,omitempty"`
+	PullRequestStartCondition       *CiPullRequestStartCondition       `json:"pullRequestStartCondition,omitempty"`
+	ScheduledStartCondition         *CiScheduledStartCondition         `json:"scheduledStartCondition,omitempty"`
+	ManualBranchStartCondition      *CiManualStartCondition            `json:"manualBranchStartCondition,omitempty"`
+	ManualTagStartCondition         *CiManualStartCondition            `json:"manualTagStartCondition,omitempty"`
+	ManualPullRequestStartCondition *CiManualPullRequestStartCondition `json:"manualPullRequestStartCondition,omitempty"`
+	Actions                         []CiAction                         `json:"actions,omitempty"`
+	IsEnabled                       bool                               `json:"isEnabled,omitempty"`
+	IsLockedForEditing              bool                               `json:"isLockedForEditing,omitempty"`
+	Clean                           bool                               `json:"clean,omitempty"`
+	ContainerFilePath               string                             `json:"containerFilePath,omitempty"`
+	LastModifiedDate                string                             `json:"lastModifiedDate,omitempty"`
 }
 
 // CiAction describes a build, analyze, test, or archive action in a CI workflow.
@@ -134,6 +138,12 @@ type CiManualStartCondition struct {
 	Source *CiBranchPatterns `json:"source,omitempty"`
 }
 
+// CiManualPullRequestStartCondition describes manual pull request start conditions.
+type CiManualPullRequestStartCondition struct {
+	Source      *CiBranchPatterns `json:"source,omitempty"`
+	Destination *CiBranchPatterns `json:"destination,omitempty"`
+}
+
 // CiBranchPatterns describes branch patterns.
 type CiBranchPatterns struct {
 	Patterns   []CiStartConditionPattern `json:"patterns,omitempty"`
@@ -154,8 +164,15 @@ type CiStartConditionPattern struct {
 
 // CiFilesAndFoldersRule describes files and folders rules.
 type CiFilesAndFoldersRule struct {
-	Mode  string   `json:"mode,omitempty"`
-	Paths []string `json:"paths,omitempty"`
+	Mode     string                        `json:"mode,omitempty"`
+	Matchers []CiStartConditionFileMatcher `json:"matchers,omitempty"`
+}
+
+// CiStartConditionFileMatcher describes a file or directory matcher in a start condition.
+type CiStartConditionFileMatcher struct {
+	Directory     string `json:"directory,omitempty"`
+	FileExtension string `json:"fileExtension,omitempty"`
+	FileName      string `json:"fileName,omitempty"`
 }
 
 // CiSchedule describes a CI schedule.
@@ -180,6 +197,17 @@ type CiWorkflowRelationships struct {
 type CiRelationshipLinks struct {
 	Self    string `json:"self,omitempty"`
 	Related string `json:"related,omitempty"`
+}
+
+// CiRelationshipLinksOnly describes a relationship represented only by links.
+type CiRelationshipLinksOnly struct {
+	Links *CiRelationshipLinks `json:"links,omitempty"`
+}
+
+// CiResourceRelationship describes a to-one response relationship with links and data.
+type CiResourceRelationship struct {
+	Links *CiRelationshipLinks `json:"links,omitempty"`
+	Data  *ResourceData        `json:"data,omitempty"`
 }
 
 // CiWorkflowRepositoryRelationship describes a workflow's repository relationship.

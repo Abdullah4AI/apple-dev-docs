@@ -56,7 +56,7 @@ func UsersListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	email := fs.String("email", "", "Filter by email/username")
-	role := fs.String("role", "", "Filter by role (comma-separated): ADMIN, DEVELOPER, APP_MANAGER, etc.")
+	role := fs.String("role", "", "Filter by UserRole (comma-separated): "+strings.Join(userRoleList(), ", "))
 	output := shared.BindOutputFlags(fs)
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
@@ -84,6 +84,10 @@ Examples:
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("users list: %w", err)
 			}
+			roleValues, err := normalizeUserRoles(*role, "--role")
+			if err != nil {
+				return shared.UsageErrorf("users list: %v", err)
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -95,7 +99,7 @@ Examples:
 
 			opts := []asc.UsersOption{
 				asc.WithUsersEmail(*email),
-				asc.WithUsersRoles(shared.SplitCSV(*role)),
+				asc.WithUsersRoles(roleValues),
 				asc.WithUsersLimit(*limit),
 				asc.WithUsersNextURL(*next),
 			}
@@ -186,7 +190,7 @@ func UsersUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 
 	id := fs.String("id", "", "User ID")
-	roles := fs.String("roles", "", "Comma-separated role IDs")
+	roles := fs.String("roles", "", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
 	visibleApps := fs.String("visible-app", "", "Comma-separated app IDs for visible apps")
 	output := shared.BindOutputFlags(fs)
 
@@ -208,7 +212,10 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			roleValues := shared.SplitCSV(*roles)
+			roleValues, err := normalizeUserRoles(*roles, "--roles")
+			if err != nil {
+				return shared.UsageErrorf("users update: %v", err)
+			}
 			if len(roleValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --roles is required")
 				return shared.MissingRequiredUsageError()
@@ -308,7 +315,7 @@ func UsersInviteCommand() *ffcli.Command {
 	email := fs.String("email", "", "Email address to invite")
 	firstName := fs.String("first-name", "", "First name of the invitee (required)")
 	lastName := fs.String("last-name", "", "Last name of the invitee (required)")
-	roles := fs.String("roles", "", "Comma-separated role IDs")
+	roles := fs.String("roles", "", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
 	allApps := fs.Bool("all-apps", false, "Grant access to all apps")
 	visibleApps := fs.String("visible-app", "", "Comma-separated app IDs for visible apps")
 	output := shared.BindOutputFlags(fs)
@@ -343,7 +350,10 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			roleValues := shared.SplitCSV(*roles)
+			roleValues, err := normalizeUserRoles(*roles, "--roles")
+			if err != nil {
+				return shared.UsageErrorf("users invite: %v", err)
+			}
 			if len(roleValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --roles is required")
 				return shared.MissingRequiredUsageError()

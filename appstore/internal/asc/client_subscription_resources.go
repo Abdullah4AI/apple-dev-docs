@@ -324,21 +324,6 @@ func (c *Client) GetSubscriptionIntroductoryOffers(ctx context.Context, subscrip
 	return &response, nil
 }
 
-// GetSubscriptionIntroductoryOffer retrieves an introductory offer by ID.
-func (c *Client) GetSubscriptionIntroductoryOffer(ctx context.Context, offerID string) (*SubscriptionIntroductoryOfferResponse, error) {
-	path := fmt.Sprintf("/v1/subscriptionIntroductoryOffers/%s", strings.TrimSpace(offerID))
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionIntroductoryOfferResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
 // CreateSubscriptionIntroductoryOffer creates an introductory offer.
 func (c *Client) CreateSubscriptionIntroductoryOffer(ctx context.Context, subscriptionID string, attrs SubscriptionIntroductoryOfferCreateAttributes, territoryID, pricePointID string) (*SubscriptionIntroductoryOfferResponse, error) {
 	subscriptionID = strings.TrimSpace(subscriptionID)
@@ -486,22 +471,70 @@ func (c *Client) GetSubscriptionPromotionalOffer(ctx context.Context, offerID st
 }
 
 // CreateSubscriptionPromotionalOffer creates a promotional offer.
-func (c *Client) CreateSubscriptionPromotionalOffer(ctx context.Context, subscriptionID string, attrs SubscriptionPromotionalOfferCreateAttributes, priceIDs []string) (*SubscriptionPromotionalOfferResponse, error) {
+func (c *Client) CreateSubscriptionPromotionalOffer(ctx context.Context, subscriptionID string, attrs SubscriptionPromotionalOfferCreateAttributes, prices []SubscriptionPromotionalOfferPrice) (*SubscriptionPromotionalOfferResponse, error) {
 	subscriptionID = strings.TrimSpace(subscriptionID)
-	priceIDs = normalizeList(priceIDs)
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscription ID is required")
 	}
-	if len(priceIDs) == 0 {
-		return nil, fmt.Errorf("price IDs are required")
+	if len(prices) == 0 {
+		return nil, fmt.Errorf("at least one price is required")
 	}
 
-	priceData := make([]ResourceData, 0, len(priceIDs))
-	for _, priceID := range priceIDs {
+	priceData := make([]ResourceData, 0, len(prices))
+	included := make([]SubscriptionPromotionalOfferPriceInlineCreate, 0, len(prices))
+	usesReferences := false
+	usesInlinePrices := false
+	for idx, price := range prices {
+		priceID := strings.TrimSpace(price.ID)
+		territoryID := strings.ToUpper(strings.TrimSpace(price.TerritoryID))
+		pricePointID := strings.TrimSpace(price.PricePointID)
+		if priceID != "" {
+			if territoryID != "" || pricePointID != "" {
+				return nil, fmt.Errorf("price reference ID must not be combined with inline relationships")
+			}
+			usesReferences = true
+			priceData = append(priceData, ResourceData{
+				Type: ResourceTypeSubscriptionPromotionalOfferPrices,
+				ID:   priceID,
+			})
+			continue
+		}
+		if territoryID == "" && pricePointID == "" {
+			return nil, fmt.Errorf("price reference ID or inline relationship is required")
+		}
+		usesInlinePrices = true
+
+		priceRelationships := SubscriptionPromotionalOfferPriceRelationships{}
+		if territoryID != "" {
+			priceRelationships.Territory = &Relationship{
+				Data: ResourceData{
+					Type: ResourceTypeTerritories,
+					ID:   territoryID,
+				},
+			}
+		}
+		if pricePointID != "" {
+			priceRelationships.SubscriptionPricePoint = &Relationship{
+				Data: ResourceData{
+					Type: ResourceTypeSubscriptionPricePoints,
+					ID:   pricePointID,
+				},
+			}
+		}
+
+		resourceID := fmt.Sprintf("${local-price-%d}", idx+1)
 		priceData = append(priceData, ResourceData{
 			Type: ResourceTypeSubscriptionPromotionalOfferPrices,
-			ID:   priceID,
+			ID:   resourceID,
 		})
+		included = append(included, SubscriptionPromotionalOfferPriceInlineCreate{
+			Type:          ResourceTypeSubscriptionPromotionalOfferPrices,
+			ID:            resourceID,
+			Relationships: priceRelationships,
+		})
+	}
+	if usesReferences && usesInlinePrices {
+		return nil, fmt.Errorf("price inputs must not mix existing IDs with inline relationships")
 	}
 
 	payload := SubscriptionPromotionalOfferCreateRequest{
@@ -518,6 +551,7 @@ func (c *Client) CreateSubscriptionPromotionalOffer(ctx context.Context, subscri
 				Prices: RelationshipList{Data: priceData},
 			},
 		},
+		Included: included,
 	}
 
 	body, err := BuildRequestBody(payload)

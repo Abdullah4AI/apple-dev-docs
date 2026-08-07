@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -157,20 +158,32 @@ Examples:
 func SubscriptionsIntroductoryOffersGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("introductory-offers view", flag.ExitOnError)
 
+	subscriptionID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
+	appID := addSubscriptionLookupAppFlag(fs)
 	offerID := fs.String("id", "", "Introductory offer ID")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "view",
-		ShortUsage: "asc subscriptions introductory-offers view --id \"OFFER_ID\"",
-		ShortHelp:  "View an introductory offer by ID.",
-		LongHelp: `View an introductory offer by ID.
+		ShortUsage: "asc subscriptions introductory-offers view --subscription-id \"SUB_ID\" --id \"OFFER_ID\"",
+		ShortHelp:  "View an introductory offer by subscription and offer ID.",
+		LongHelp: `View an introductory offer by subscription and offer ID.
+
+The subscription selector accepts a subscription ID, product ID, or exact current name.
+Product IDs and names require --app to resolve the subscription.
 
 Examples:
-  asc subscriptions introductory-offers view --id "OFFER_ID"`,
+  asc subscriptions introductory-offers view --subscription-id "SUB_ID" --id "OFFER_ID"
+  asc subscriptions introductory-offers view --app "APP_ID" --subscription-id "com.example.monthly" --id "OFFER_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			subID := strings.TrimSpace(*subscriptionID)
+			if subID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
+				return shared.MissingRequiredUsageError()
+			}
+
 			id := strings.TrimSpace(*offerID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
@@ -182,10 +195,15 @@ Examples:
 				return fmt.Errorf("subscriptions introductory-offers view: %w", err)
 			}
 
+			subID, err = resolveSubscriptionLookupIDWithTimeout(ctx, client, *appID, subID)
+			if err != nil {
+				return err
+			}
+
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetSubscriptionIntroductoryOffer(requestCtx, id)
+			resp, err := findSubscriptionIntroductoryOffer(requestCtx, client, subID, id)
 			if err != nil {
 				return fmt.Errorf("subscriptions introductory-offers view: failed to fetch: %w", err)
 			}
@@ -193,6 +211,39 @@ Examples:
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func findSubscriptionIntroductoryOffer(ctx context.Context, client *asc.Client, subscriptionID, offerID string) (*asc.SubscriptionIntroductoryOfferResponse, error) {
+	firstPage, err := client.GetSubscriptionIntroductoryOffers(ctx, subscriptionID, asc.WithSubscriptionIntroductoryOffersLimit(200))
+	if err != nil {
+		return nil, err
+	}
+
+	errOfferFound := errors.New("introductory offer found")
+	var found *asc.SubscriptionIntroductoryOfferResponse
+	err = asc.PaginateEach(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return client.GetSubscriptionIntroductoryOffers(ctx, subscriptionID, asc.WithSubscriptionIntroductoryOffersNextURL(nextURL))
+	}, func(page asc.PaginatedResponse) error {
+		resp, ok := page.(*asc.SubscriptionIntroductoryOffersResponse)
+		if !ok {
+			return fmt.Errorf("unexpected page type %T", page)
+		}
+		for _, offer := range resp.Data {
+			if offer.ID == offerID {
+				found = &asc.SubscriptionIntroductoryOfferResponse{Data: offer}
+				return errOfferFound
+			}
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errOfferFound) {
+		return nil, err
+	}
+	if found != nil {
+		return found, nil
+	}
+
+	return nil, fmt.Errorf("introductory offer %q not found for subscription %q: %w", offerID, subscriptionID, asc.ErrNotFound)
 }
 
 // SubscriptionsIntroductoryOffersCreateCommand returns the introductory offers create subcommand.

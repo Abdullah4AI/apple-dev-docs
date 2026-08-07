@@ -1,6 +1,8 @@
 package subscriptions
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -120,5 +122,92 @@ func TestParseSubscriptionOfferCodePrices(t *testing.T) {
 	}
 	if _, err := parseSubscriptionOfferCodePrices("USA:pp-1", asc.SubscriptionOfferModeFreeTrial); err == nil {
 		t.Fatal("expected FREE_TRIAL price point rejection")
+	}
+}
+
+func TestParseSubscriptionPromotionalOfferPricesAutoDetectsLegacyAndInlineInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    []asc.SubscriptionPromotionalOfferPrice
+		wantErr string
+	}{
+		{
+			name:  "legacy price IDs",
+			value: "price-1, price-2",
+			want:  []asc.SubscriptionPromotionalOfferPrice{{ID: "price-1"}, {ID: "price-2"}},
+		},
+		{
+			name:  "territory only inline prices",
+			value: "US, France",
+			want:  []asc.SubscriptionPromotionalOfferPrice{{TerritoryID: "USA"}, {TerritoryID: "FRA"}},
+		},
+		{
+			name:  "compound inline prices",
+			value: "US:pp-1, France:pp-2",
+			want: []asc.SubscriptionPromotionalOfferPrice{
+				{TerritoryID: "USA", PricePointID: "pp-1"},
+				{TerritoryID: "FRA", PricePointID: "pp-2"},
+			},
+		},
+		{
+			name:  "compound and territory-only inline prices",
+			value: "US:pp-1, France",
+			want: []asc.SubscriptionPromotionalOfferPrice{
+				{TerritoryID: "USA", PricePointID: "pp-1"},
+				{TerritoryID: "FRA"},
+			},
+		},
+		{
+			name:  "territory-only before comma-containing compound inline price",
+			value: "France, Moldova, Republic of:pp-1",
+			want: []asc.SubscriptionPromotionalOfferPrice{
+				{TerritoryID: "FRA"},
+				{TerritoryID: "MDA", PricePointID: "pp-1"},
+			},
+		},
+		{
+			name:    "mixed compound and legacy prices",
+			value:   "US:pp-1,price-2",
+			wantErr: "must not mix",
+		},
+		{
+			name:    "compound and invalid territory-only price",
+			value:   "US:pp-1,Atlantis",
+			wantErr: "Atlantis",
+		},
+		{
+			name:    "mixed legacy and compound prices",
+			value:   "price-2,US:pp-1",
+			wantErr: "must not mix",
+		},
+		{
+			name:    "mixed territory-only and legacy prices",
+			value:   "US,price-2",
+			wantErr: "must not mix",
+		},
+		{
+			name:    "mixed legacy and territory-only prices",
+			value:   "price-2,US",
+			wantErr: "must not mix",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseSubscriptionPromotionalOfferPrices(test.value)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse prices: %v", err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("prices = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }

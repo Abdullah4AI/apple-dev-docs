@@ -34,13 +34,23 @@ type CiBuildActionAttributes struct {
 	StartedDate       string                      `json:"startedDate,omitempty"`
 	FinishedDate      string                      `json:"finishedDate,omitempty"`
 	IssueCounts       *CiIssueCounts              `json:"issueCounts,omitempty"`
+	IsRequiredToPass  *bool                       `json:"isRequiredToPass,omitempty"`
+}
+
+// CiBuildActionRelationships describes relationships for a CI build action.
+type CiBuildActionRelationships struct {
+	BuildRun    *CiResourceRelationship  `json:"buildRun,omitempty"`
+	Artifacts   *CiRelationshipLinksOnly `json:"artifacts,omitempty"`
+	Issues      *CiRelationshipLinksOnly `json:"issues,omitempty"`
+	TestResults *CiRelationshipLinksOnly `json:"testResults,omitempty"`
 }
 
 // CiBuildActionResource represents a CI build action resource.
 type CiBuildActionResource struct {
-	Type       ResourceType            `json:"type"`
-	ID         string                  `json:"id"`
-	Attributes CiBuildActionAttributes `json:"attributes"`
+	Type          ResourceType                `json:"type"`
+	ID            string                      `json:"id"`
+	Attributes    CiBuildActionAttributes     `json:"attributes"`
+	Relationships *CiBuildActionRelationships `json:"relationships,omitempty"`
 }
 
 // CiBuildActionsResponse is the response from CI build actions endpoints.

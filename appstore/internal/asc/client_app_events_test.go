@@ -113,7 +113,7 @@ func TestGetAppEvent(t *testing.T) {
 }
 
 func TestCreateAppEvent(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"appEvents","id":"event-1","attributes":{"referenceName":"Launch","badge":"PREMIERE"}}}`)
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"appEvents","id":"event-1","attributes":{"referenceName":"Launch"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", req.Method)
@@ -130,6 +130,9 @@ func TestCreateAppEvent(t *testing.T) {
 		if requireString(t, attrs["referenceName"], "referenceName") != "Launch" {
 			t.Fatalf("unexpected referenceName %v", attrs["referenceName"])
 		}
+		if _, ok := attrs["badge"]; ok {
+			t.Fatalf("expected optional badge to be omitted, got %v", attrs["badge"])
+		}
 		rels := requireMap(t, data["relationships"], "data.relationships")
 		app := requireMap(t, rels["app"], "relationships.app")
 		appData := requireMap(t, app["data"], "app.data")
@@ -139,10 +142,7 @@ func TestCreateAppEvent(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	attrs := AppEventCreateAttributes{
-		ReferenceName: "Launch",
-		Badge:         "PREMIERE",
-	}
+	attrs := AppEventCreateAttributes{ReferenceName: "Launch"}
 	if _, err := client.CreateAppEvent(context.Background(), "app-123", attrs); err != nil {
 		t.Fatalf("CreateAppEvent() error: %v", err)
 	}

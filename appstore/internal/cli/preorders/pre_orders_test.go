@@ -148,6 +148,27 @@ func TestPreOrdersEndCommand_MissingIDs(t *testing.T) {
 	}
 }
 
+func TestPreOrdersEndCommand_RequiresConfirmationBeforeClient(t *testing.T) {
+	clientRequested := false
+	restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientRequested = true
+		return nil, errors.New("client must not be created")
+	})
+	t.Cleanup(restore)
+
+	cmd := PreOrdersEndCommand()
+	if err := cmd.FlagSet.Parse([]string{"--territory-availability", "ta-1"}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when --confirm is missing, got %v", err)
+	}
+	if clientRequested {
+		t.Fatal("expected missing confirmation to fail before client creation")
+	}
+}
+
 func TestPreOrdersCommand_FlagDefinitions(t *testing.T) {
 	getCmd := PreOrdersGetCommand()
 	for _, name := range []string{"app", "output", "pretty"} {
@@ -185,7 +206,7 @@ func TestPreOrdersCommand_FlagDefinitions(t *testing.T) {
 	}
 
 	endCmd := PreOrdersEndCommand()
-	for _, name := range []string{"territory-availability", "output", "pretty"} {
+	for _, name := range []string{"territory-availability", "confirm", "output", "pretty"} {
 		if endCmd.FlagSet.Lookup(name) == nil {
 			t.Errorf("end: expected flag --%s to be defined", name)
 		}

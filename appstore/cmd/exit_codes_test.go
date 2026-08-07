@@ -688,6 +688,38 @@ func TestBuildsExpiredFlagsInvalidBooleanExitCode(t *testing.T) {
 	}
 }
 
+func TestTestFlightExternalTestingInvalidBooleanExitCode(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		flag []string
+	}{
+		{name: "equals", flag: []string{"--external-testing=maybe"}},
+		{name: "space separated", flag: []string{"--external-testing", "maybe"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resetReportFlags(t)
+
+			args := []string{
+				"testflight", "distribution", "edit",
+				"--id", "DETAIL_ID",
+			}
+			args = append(args, test.flag...)
+			stdout, stderr := captureCommandOutput(t, func() {
+				if code := Run(args, "1.0.0"); code != ExitUsage {
+					t.Fatalf("Run() exit code = %d, want %d", code, ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "invalid boolean value") || !strings.Contains(stderr, "external-testing") {
+				t.Fatalf("expected invalid --external-testing boolean diagnostic, got %q", stderr)
+			}
+		})
+	}
+}
+
 func TestPublishAppStoreDryRunInvalidBooleanExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryPath := buildASCBlackboxBinary(t)

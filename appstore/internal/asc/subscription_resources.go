@@ -191,7 +191,28 @@ type SubscriptionPromotionalOfferCreateData struct {
 
 // SubscriptionPromotionalOfferCreateRequest is a request to create a promotional offer.
 type SubscriptionPromotionalOfferCreateRequest struct {
-	Data SubscriptionPromotionalOfferCreateData `json:"data"`
+	Data     SubscriptionPromotionalOfferCreateData          `json:"data"`
+	Included []SubscriptionPromotionalOfferPriceInlineCreate `json:"included,omitempty"`
+}
+
+// SubscriptionPromotionalOfferPrice describes a promotional offer price input.
+type SubscriptionPromotionalOfferPrice struct {
+	ID           string
+	TerritoryID  string
+	PricePointID string
+}
+
+// SubscriptionPromotionalOfferPriceRelationships describes inline promotional offer price relationships.
+type SubscriptionPromotionalOfferPriceRelationships struct {
+	Territory              *Relationship `json:"territory,omitempty"`
+	SubscriptionPricePoint *Relationship `json:"subscriptionPricePoint,omitempty"`
+}
+
+// SubscriptionPromotionalOfferPriceInlineCreate describes an inline promotional offer price resource.
+type SubscriptionPromotionalOfferPriceInlineCreate struct {
+	Type          ResourceType                                   `json:"type"`
+	ID            string                                         `json:"id"`
+	Relationships SubscriptionPromotionalOfferPriceRelationships `json:"relationships"`
 }
 
 // SubscriptionPromotionalOfferUpdateRelationships describes relationships for promotional offer updates.

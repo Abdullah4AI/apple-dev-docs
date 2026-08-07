@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"golang.org/x/term"
 )
 
 func TestCmdtestIsolationEnvSet(t *testing.T) {
@@ -19,5 +21,8 @@ func TestCmdtestIsolationEnvSet(t *testing.T) {
 	}
 	if strings.TrimSpace(os.Getenv("ASC_BYPASS_KEYCHAIN")) != "1" {
 		t.Fatal("ASC_BYPASS_KEYCHAIN must be set to 1 for cmdtest")
+	}
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		t.Fatal("cmdtest stdin must be isolated from the invoking terminal")
 	}
 }

@@ -27,7 +27,7 @@ func TestUsersUpdateWarnsDeprecatedAccessToReportsRole(t *testing.T) {
 		if err := root.Parse([]string{
 			"users", "update",
 			"--id", "user-1",
-			"--roles", "ACCESS_TO_REPORTS",
+			"--roles", "access_to_reports",
 			"--output", "json",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -73,7 +73,7 @@ func TestUsersInviteWarnsDeprecatedAccessToReportsRole(t *testing.T) {
 			"--email", "user@example.com",
 			"--first-name", "Jane",
 			"--last-name", "Doe",
-			"--roles", "ACCESS_TO_REPORTS",
+			"--roles", "access_to_reports",
 			"--all-apps",
 			"--output", "json",
 		}); err != nil {

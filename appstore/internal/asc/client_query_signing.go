@@ -969,7 +969,7 @@ func WithUsersEmail(email string) UsersOption {
 // WithUsersRoles filters users by roles.
 func WithUsersRoles(roles []string) UsersOption {
 	return func(q *usersQuery) {
-		q.roles = normalizeList(roles)
+		q.roles = normalizeUpperList(roles)
 	}
 }
 

@@ -141,8 +141,8 @@ func TestDevicesRegisterCreatesDeviceWhenNoExistingUDIDMatches(t *testing.T) {
 			if req.URL.Path != "/v1/devices" {
 				t.Fatalf("expected devices list path, got %s", req.URL.Path)
 			}
-			if got := req.URL.Query().Get("filter[platform]"); got != "IOS" {
-				t.Fatalf("expected filter[platform]=IOS, got %q", got)
+			if got := req.URL.Query().Get("filter[platform]"); got != "UNIVERSAL" {
+				t.Fatalf("expected filter[platform]=UNIVERSAL, got %q", got)
 			}
 			body := `{"data":[],"links":{"next":""}}`
 			return &http.Response{
@@ -179,10 +179,10 @@ func TestDevicesRegisterCreatesDeviceWhenNoExistingUDIDMatches(t *testing.T) {
 			if payload.Data.Attributes.UDID != "NEW-UDID" {
 				t.Fatalf("expected UDID NEW-UDID, got %q", payload.Data.Attributes.UDID)
 			}
-			if payload.Data.Attributes.Platform != "IOS" {
-				t.Fatalf("expected platform IOS, got %q", payload.Data.Attributes.Platform)
+			if payload.Data.Attributes.Platform != "UNIVERSAL" {
+				t.Fatalf("expected platform UNIVERSAL, got %q", payload.Data.Attributes.Platform)
 			}
-			body := `{"data":{"type":"devices","id":"device-new","attributes":{"name":"New iPhone","platform":"IOS","udid":"NEW-UDID","status":"ENABLED"}}}`
+			body := `{"data":{"type":"devices","id":"device-new","attributes":{"name":"New iPhone","platform":"UNIVERSAL","udid":"NEW-UDID","status":"ENABLED"}}}`
 			return &http.Response{
 				StatusCode: http.StatusCreated,
 				Body:       io.NopCloser(strings.NewReader(body)),
@@ -198,7 +198,7 @@ func TestDevicesRegisterCreatesDeviceWhenNoExistingUDIDMatches(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"devices", "register", "--name", "New iPhone", "--udid", "NEW-UDID", "--platform", "IOS"}); err != nil {
+		if err := root.Parse([]string{"devices", "register", "--name", "New iPhone", "--udid", "NEW-UDID", "--platform", "universal"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

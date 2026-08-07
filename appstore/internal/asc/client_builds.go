@@ -13,14 +13,67 @@ import (
 
 // BuildAttributes describes a build resource.
 type BuildAttributes struct {
-	Version                 string `json:"version"`
-	UploadedDate            string `json:"uploadedDate"`
-	ExpirationDate          string `json:"expirationDate,omitempty"`
-	ProcessingState         string `json:"processingState,omitempty"`
-	MinOSVersion            string `json:"minOsVersion,omitempty"`
-	UsesNonExemptEncryption *bool  `json:"usesNonExemptEncryption,omitempty"`
-	Expired                 bool   `json:"expired,omitempty"`
+	Version                    string            `json:"version"`
+	UploadedDate               string            `json:"uploadedDate"`
+	ExpirationDate             string            `json:"expirationDate,omitempty"`
+	ProcessingState            string            `json:"processingState,omitempty"`
+	MinOSVersion               string            `json:"minOsVersion,omitempty"`
+	LSMinimumSystemVersion     string            `json:"lsMinimumSystemVersion,omitempty"`
+	ComputedMinMacOSVersion    string            `json:"computedMinMacOsVersion,omitempty"`
+	ComputedMinVisionOSVersion string            `json:"computedMinVisionOsVersion,omitempty"`
+	IconAssetToken             *ImageAsset       `json:"iconAssetToken,omitempty"`
+	BuildAudienceType          BuildAudienceType `json:"buildAudienceType,omitempty"`
+	UsesNonExemptEncryption    *bool             `json:"usesNonExemptEncryption,omitempty"`
+	Expired                    bool              `json:"-"`
+	expiredSet                 bool
 }
+
+// UnmarshalJSON records whether the API supplied expired so an explicit false
+// survives subsequent JSON output without changing the public bool field.
+func (a *BuildAttributes) UnmarshalJSON(data []byte) error {
+	type buildAttributesAlias BuildAttributes
+	a.Expired = false
+	a.expiredSet = false
+	aux := struct {
+		*buildAttributesAlias
+		Expired *bool `json:"expired"`
+	}{
+		buildAttributesAlias: (*buildAttributesAlias)(a),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	a.expiredSet = aux.Expired != nil
+	if aux.Expired != nil {
+		a.Expired = *aux.Expired
+	}
+	return nil
+}
+
+// MarshalJSON preserves the distinction between an absent expired attribute
+// and an explicit false value returned by App Store Connect.
+func (a BuildAttributes) MarshalJSON() ([]byte, error) {
+	type buildAttributesAlias BuildAttributes
+	var expired *bool
+	if a.expiredSet || a.Expired {
+		expired = &a.Expired
+	}
+	return json.Marshal(struct {
+		buildAttributesAlias
+		Expired *bool `json:"expired,omitempty"`
+	}{
+		buildAttributesAlias: buildAttributesAlias(a),
+		Expired:              expired,
+	})
+}
+
+// BuildAudienceType represents who can receive a build.
+type BuildAudienceType string
+
+const (
+	BuildAudienceTypeInternalOnly     BuildAudienceType = "INTERNAL_ONLY"
+	BuildAudienceTypeAppStoreEligible BuildAudienceType = "APP_STORE_ELIGIBLE"
+)
 
 // IconAssetType represents the icon type for build icons.
 type IconAssetType string

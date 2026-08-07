@@ -252,7 +252,7 @@ func TestBuildsUploadWithoutWaitSkipsPostCommitVerificationByDefault(t *testing.
 func TestBuildsUploadPostCommitVerificationUsesFreshTimeoutWindow(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
-	t.Setenv("ASC_TIMEOUT", "1ms")
+	t.Setenv("ASC_TIMEOUT", "250ms")
 
 	ipaPath := writeBuildUploadIPA(t, "com.example.demo")
 
@@ -262,16 +262,24 @@ func TestBuildsUploadPostCommitVerificationUsesFreshTimeoutWindow(t *testing.T) 
 	})
 
 	buildUploadChecks := 0
+	initialRequestDeadline := make(chan time.Time, 1)
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789":
+			deadline, ok := req.Context().Deadline()
+			if !ok {
+				t.Fatal("expected initial request context deadline")
+			}
+			initialRequestDeadline <- deadline
 			return jsonResponse(http.StatusOK, `{"data":{"type":"apps","id":"123456789","attributes":{"name":"Demo","bundleId":"com.example.demo"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
 			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleShortVersionString":"1.0.0","cfBundleVersion":"42","platform":"IOS"}}}`)
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploadFiles":
 			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploadFiles","id":"file-1","attributes":{"fileName":"app.ipa","fileSize":4,"uti":"com.apple.itunes.ipa","assetType":"ASSET","uploadOperations":[{"method":"PUT","url":"https://upload.example.com/part-1","length":4,"offset":0,"requestHeaders":[{"name":"Content-Type","value":"application/octet-stream"}]}]}}}`)
 		case req.Method == http.MethodPut && req.URL.Host == "upload.example.com":
-			time.Sleep(5 * time.Millisecond)
+			if delay := time.Until((<-initialRequestDeadline).Add(50 * time.Millisecond)); delay > 0 {
+				time.Sleep(delay)
+			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader("")),
@@ -316,7 +324,7 @@ func TestBuildsUploadPostCommitVerificationUsesFreshTimeoutWindow(t *testing.T) 
 			"--version", "1.0.0",
 			"--build-number", "42",
 			"--poll-interval", "1ms",
-			"--verify-timeout", "10ms",
+			"--verify-timeout", "250ms",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -326,7 +334,7 @@ func TestBuildsUploadPostCommitVerificationUsesFreshTimeoutWindow(t *testing.T) 
 	if runErr != nil {
 		t.Fatalf("expected builds upload to succeed, got %v", runErr)
 	}
-	if !strings.Contains(stderr, "Verifying initial App Store Connect processing for up to 10ms...") {
+	if !strings.Contains(stderr, "Verifying initial App Store Connect processing for up to 250ms...") {
 		t.Fatalf("expected verification progress output, got %q", stderr)
 	}
 	if !strings.Contains(stdout, `"uploadId":"upload-1"`) {

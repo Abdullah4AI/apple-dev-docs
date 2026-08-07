@@ -127,48 +127,6 @@ func TestGetAppSearchKeywords_RequiresAppID(t *testing.T) {
 	}
 }
 
-func TestSetAppSearchKeywords_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, `{}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/apps/app-1/relationships/searchKeywords" {
-			t.Fatalf("expected path /v1/apps/app-1/relationships/searchKeywords, got %s", req.URL.Path)
-		}
-
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("failed to read body: %v", err)
-		}
-		var payload RelationshipRequest
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to decode payload: %v", err)
-		}
-		if len(payload.Data) != 2 {
-			t.Fatalf("expected 2 keywords, got %d", len(payload.Data))
-		}
-		if payload.Data[0].Type != ResourceTypeAppKeywords {
-			t.Fatalf("expected appKeywords type, got %q", payload.Data[0].Type)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.SetAppSearchKeywords(context.Background(), "app-1", []string{"kw-1", "kw-2"}); err != nil {
-		t.Fatalf("SetAppSearchKeywords() error: %v", err)
-	}
-}
-
-func TestSetAppSearchKeywords_ValidationErrors(t *testing.T) {
-	client := newTestClient(t, nil, jsonResponse(http.StatusNoContent, `{}`))
-	if err := client.SetAppSearchKeywords(context.Background(), "", []string{"kw-1"}); err == nil {
-		t.Fatal("expected error for missing app ID")
-	}
-	if err := client.SetAppSearchKeywords(context.Background(), "app-1", nil); err == nil {
-		t.Fatal("expected error for missing keywords")
-	}
-}
-
 func TestGetAppStoreVersionLocalizationSearchKeywords_SendsRequest(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[{"type":"appKeywords","id":"keyword-1"}]}`)
 	client := newTestClient(t, func(req *http.Request) {

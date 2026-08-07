@@ -89,19 +89,16 @@ func TestWebAppsCreateRequiresAppleIDWhenNoCacheAndNoTTY(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	var runErr error
-	var stderr string
-	withNonTTYStdin(t, func() {
-		_, stderr = captureOutput(t, func() {
-			if err := root.Parse([]string{
-				"web", "apps", "create",
-				"--name", "My App",
-				"--bundle-id", "com.example.app",
-				"--sku", "SKU123",
-			}); err != nil {
-				t.Fatalf("parse error: %v", err)
-			}
-			runErr = root.Run(context.Background())
-		})
+	_, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"web", "apps", "create",
+			"--name", "My App",
+			"--bundle-id", "com.example.app",
+			"--sku", "SKU123",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
 	})
 
 	if !errors.Is(runErr, flag.ErrHelp) {

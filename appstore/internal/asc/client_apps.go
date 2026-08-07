@@ -379,37 +379,6 @@ func (c *Client) GetAppSearchKeywords(ctx context.Context, appID string, opts ..
 	return &response, nil
 }
 
-// SetAppSearchKeywords replaces the search keywords for an app.
-func (c *Client) SetAppSearchKeywords(ctx context.Context, appID string, keywords []string) error {
-	appID = strings.TrimSpace(appID)
-	keywords = normalizeList(keywords)
-	if appID == "" {
-		return fmt.Errorf("appID is required")
-	}
-	if len(keywords) == 0 {
-		return fmt.Errorf("keywords are required")
-	}
-
-	payload := RelationshipRequest{
-		Data: make([]RelationshipData, 0, len(keywords)),
-	}
-	for _, keyword := range keywords {
-		payload.Data = append(payload.Data, RelationshipData{
-			Type: ResourceTypeAppKeywords,
-			ID:   keyword,
-		})
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return err
-	}
-
-	path := fmt.Sprintf("/v1/apps/%s/relationships/searchKeywords", appID)
-	_, err = c.do(ctx, "PATCH", path, body)
-	return err
-}
-
 // GetAppCiProduct retrieves the CI product for an app.
 func (c *Client) GetAppCiProduct(ctx context.Context, appID string) (*CiProductResponse, error) {
 	appID = strings.TrimSpace(appID)

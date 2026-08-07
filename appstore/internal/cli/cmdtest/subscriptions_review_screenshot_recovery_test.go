@@ -519,33 +519,32 @@ func TestSubscriptionsReviewScreenshotCreateUsesFreshTimeoutForEachUploadPart(t 
 	}
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = originalTransport })
-	sequence := make([]string, 0, 7)
-	partTwoAttempts := 0
+	sequence := newRequestLog(7)
+	var partTwoAttempts lockedCounter
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/appStoreReviewScreenshot":
-			sequence = append(sequence, "read")
+			sequence.Add("read")
 			return jsonHTTPResponse(http.StatusOK, subscriptionReviewScreenshotResponseWithOperations("shot-1", filepath.Base(path), int64(len(content)), operations)), nil
 		case req.Method == http.MethodPut && req.URL.Host == "upload.example":
 			deadline, ok := req.Context().Deadline()
 			if !ok || time.Until(deadline) < 100*time.Millisecond {
 				t.Fatalf("upload part inherited stale deadline: %s", time.Until(deadline))
 			}
-			sequence = append(sequence, req.URL.Path)
+			sequence.Add(req.URL.Path)
 			if req.URL.Path == "/part-1" {
 				time.Sleep(75 * time.Millisecond)
 				return jsonHTTPResponse(http.StatusOK, ``), nil
 			}
-			partTwoAttempts++
-			if partTwoAttempts == 1 {
+			if partTwoAttempts.Inc() == 1 {
 				return jsonHTTPResponse(http.StatusServiceUnavailable, ``), nil
 			}
 			return jsonHTTPResponse(http.StatusOK, ``), nil
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots/shot-1":
-			sequence = append(sequence, "commit")
+			sequence.Add("commit")
 			return jsonHTTPResponse(http.StatusOK, subscriptionReviewScreenshotResponse("shot-1", filepath.Base(path), int64(len(content)), checksum, "PROCESSING", false)), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionAppStoreReviewScreenshots/shot-1":
-			sequence = append(sequence, "poll")
+			sequence.Add("poll")
 			return jsonHTTPResponse(http.StatusOK, subscriptionReviewScreenshotResponse("shot-1", filepath.Base(path), int64(len(content)), checksum, "COMPLETE", false)), nil
 		default:
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
@@ -554,9 +553,20 @@ func TestSubscriptionsReviewScreenshotCreateUsesFreshTimeoutForEachUploadPart(t 
 	})
 
 	_, _, err := runSubscriptionReviewScreenshotCreate(t, path)
-	want := []string{"read", "/part-1", "/part-2", "/part-2", "commit", "poll"}
-	if err != nil || !reflect.DeepEqual(sequence, want) {
-		t.Fatalf("expected multipart sequence %v, got %v err=%v", want, sequence, err)
+	if err != nil {
+		t.Fatalf("unexpected multipart result: %v", err)
+	}
+	got := sequence.Snapshot()
+	if len(got) != 6 || got[0] != "read" || got[4] != "commit" || got[5] != "poll" {
+		t.Fatalf("unexpected multipart sequence: %v", got)
+	}
+	uploadAttempts := make(map[string]int, 2)
+	for _, step := range got[1:4] {
+		uploadAttempts[step]++
+	}
+	wantUploadAttempts := map[string]int{"/part-1": 1, "/part-2": 2}
+	if !reflect.DeepEqual(uploadAttempts, wantUploadAttempts) {
+		t.Fatalf("upload attempts = %v, want %v", uploadAttempts, wantUploadAttempts)
 	}
 }
 

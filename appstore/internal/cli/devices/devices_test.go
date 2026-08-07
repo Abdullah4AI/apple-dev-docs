@@ -81,6 +81,43 @@ func TestDevicesUpdateCommand_MissingStatus(t *testing.T) {
 	}
 }
 
+func TestDevicePlatformContract(t *testing.T) {
+	if got := strings.Join(devicePlatformList(), ", "); got != "IOS, MAC_OS, UNIVERSAL" {
+		t.Fatalf("devicePlatformList() = %q, want %q", got, "IOS, MAC_OS, UNIVERSAL")
+	}
+
+	tests := []struct {
+		name    string
+		value   string
+		want    string
+		wantErr string
+	}{
+		{name: "iOS", value: " ios ", want: "IOS"},
+		{name: "macOS", value: "mac_os", want: "MAC_OS"},
+		{name: "universal", value: "universal", want: "UNIVERSAL"},
+		{name: "reject tvOS", value: "TV_OS", wantErr: "--platform must be one of: IOS, MAC_OS, UNIVERSAL"},
+		{name: "reject visionOS", value: "VISION_OS", wantErr: "--platform must be one of: IOS, MAC_OS, UNIVERSAL"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeDevicePlatform(tt.value)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("normalizeDevicePlatform(%q) error = %v, want %q", tt.value, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeDevicePlatform(%q) error = %v", tt.value, err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeDevicePlatform(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLocalMacUDID_RejectsNonDarwin(t *testing.T) {
 	prevGOOS := localUDIDGOOS
 	localUDIDGOOS = "linux"

@@ -55,7 +55,8 @@ func TestExtractBuildBundles(t *testing.T) {
 			"id": "bundle-1",
 			"attributes": {
 				"bundleId": "com.example.app",
-				"bundleType": "APP"
+				"bundleType": "APP",
+				"minimumOsVersion": "18.0"
 			}
 		},
 		{
@@ -79,5 +80,8 @@ func TestExtractBuildBundles(t *testing.T) {
 	}
 	if bundles[0].Attributes.BundleType == nil || *bundles[0].Attributes.BundleType != BuildBundleTypeApp {
 		t.Fatalf("expected bundleType APP, got %v", bundles[0].Attributes.BundleType)
+	}
+	if bundles[0].Attributes.MinimumOSVersion == nil || *bundles[0].Attributes.MinimumOSVersion != "18.0" {
+		t.Fatalf("expected minimumOsVersion 18.0, got %v", bundles[0].Attributes.MinimumOSVersion)
 	}
 }

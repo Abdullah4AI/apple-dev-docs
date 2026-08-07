@@ -72,24 +72,28 @@ type AppStoreReviewAttachmentDeleteResult struct {
 
 // GetAppStoreReviewAttachmentsForReviewDetail lists attachments for a review detail.
 func (c *Client) GetAppStoreReviewAttachmentsForReviewDetail(ctx context.Context, reviewDetailID string, opts ...AppStoreReviewAttachmentsOption) (*AppStoreReviewAttachmentsResponse, error) {
-	reviewDetailID = strings.TrimSpace(reviewDetailID)
-	if reviewDetailID == "" {
-		return nil, fmt.Errorf("reviewDetailID is required")
-	}
-
 	query := &appStoreReviewAttachmentsQuery{}
 	for _, opt := range opts {
 		opt(query)
 	}
 
+	reviewDetailID = strings.TrimSpace(reviewDetailID)
 	path := fmt.Sprintf("/v1/appStoreReviewDetails/%s/appStoreReviewAttachments", reviewDetailID)
 	if query.nextURL != "" {
 		if err := validateNextURL(query.nextURL); err != nil {
 			return nil, fmt.Errorf("app-store-review-attachments: %w", err)
 		}
+		if reviewDetailID != "" || buildAppStoreReviewAttachmentsQuery(query) != "" {
+			return nil, fmt.Errorf("app-store-review-attachments: next URL cannot be combined with reviewDetailID or query options")
+		}
 		path = query.nextURL
-	} else if queryString := buildAppStoreReviewAttachmentsQuery(query); queryString != "" {
-		path += "?" + queryString
+	} else {
+		if reviewDetailID == "" {
+			return nil, fmt.Errorf("reviewDetailID is required")
+		}
+		if queryString := buildAppStoreReviewAttachmentsQuery(query); queryString != "" {
+			path += "?" + queryString
+		}
 	}
 
 	data, err := c.do(ctx, http.MethodGet, path, nil)

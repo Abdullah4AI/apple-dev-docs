@@ -43,6 +43,11 @@ Finance reports use Apple fiscal months (`YYYY-MM`), not calendar months.
 - List/get use the v2 API; create/delete use v1 endpoints (may be unavailable on some accounts)
 - Update/clear-history use the v2 API
 
+## TestFlight Distribution
+
+- `asc testflight distribution edit --external-testing` shipped in 0.35.3 but App Store Connect does not allow `externalBuildState` in the build beta detail PATCH request. The flag remains parseable during its deprecation window and fails before HTTP instead of sending an unsupported update.
+- Migrate `--external-testing=true` to `asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm`. Migrate `--external-testing=false` to `asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm`; the old boolean cannot identify which group assignments to remove.
+
 ## Game Center
 
 - Most Game Center endpoints require a Game Center detail ID, resolved via `/v1/apps/{id}/gameCenterDetail`.

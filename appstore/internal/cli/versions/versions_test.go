@@ -133,6 +133,41 @@ func TestSplitCompatAppStoreVersionIncludes(t *testing.T) {
 	}
 }
 
+func TestNormalizeAppStoreVersionReleaseType(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: ""},
+		{input: "manual", want: "MANUAL"},
+		{input: "AFTER_APPROVAL", want: "AFTER_APPROVAL"},
+		{input: " scheduled ", want: "SCHEDULED"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			got, err := normalizeAppStoreVersionReleaseType(test.input)
+			if err != nil {
+				t.Fatalf("normalizeAppStoreVersionReleaseType() error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("normalizeAppStoreVersionReleaseType() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeAppStoreVersionReleaseTypeRejectsUnknown(t *testing.T) {
+	for _, input := range []string{"IMMEDIATE", "   "} {
+		t.Run(input, func(t *testing.T) {
+			_, err := normalizeAppStoreVersionReleaseType(input)
+			if err == nil || !strings.Contains(err.Error(), "--release-type must be one of: MANUAL, AFTER_APPROVAL, SCHEDULED") {
+				t.Fatalf("expected release type error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestAppendAgeRatingDeclarationInclude(t *testing.T) {
 	versionResp := &asc.AppStoreVersionResponse{
 		Data: asc.Resource[asc.AppStoreVersionAttributes]{

@@ -222,8 +222,14 @@ func normalizeSpacedBooleanFlags(root *ffcli.Command, args []string) []string {
 				continue
 			}
 			if index+1 < len(args) {
-				if value, err := strconv.ParseBool(strings.TrimSpace(args[index+1])); err == nil {
+				next := strings.TrimSpace(args[index+1])
+				if value, err := strconv.ParseBool(next); err == nil {
 					normalized = append(normalized, token+"="+strconv.FormatBool(value))
+					index++
+					continue
+				}
+				if len(command.Subcommands) == 0 && !strings.HasPrefix(next, "-") {
+					normalized = append(normalized, token+"="+next)
 					index++
 					continue
 				}

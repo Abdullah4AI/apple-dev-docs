@@ -77,23 +77,13 @@ type PreReleaseVersionAttributes struct {
 }
 
 // PreReleaseVersion represents a pre-release version resource.
-type PreReleaseVersion struct {
-	Type       ResourceType                `json:"type"`
-	ID         string                      `json:"id"`
-	Attributes PreReleaseVersionAttributes `json:"attributes"`
-}
+type PreReleaseVersion = Resource[PreReleaseVersionAttributes]
 
 // PreReleaseVersionsResponse is the response from pre-release versions endpoints.
-type PreReleaseVersionsResponse struct {
-	Data  []PreReleaseVersion `json:"data"`
-	Links Links               `json:"links"`
-}
+type PreReleaseVersionsResponse = Response[PreReleaseVersionAttributes]
 
 // PreReleaseVersionResponse is the response from pre-release version detail.
-type PreReleaseVersionResponse struct {
-	Data  PreReleaseVersion `json:"data"`
-	Links Links             `json:"links"`
-}
+type PreReleaseVersionResponse = SingleResponse[PreReleaseVersionAttributes]
 
 // AppStoreVersionSubmissionCreateData is the data portion of an app store version submission create request.
 type AppStoreVersionSubmissionCreateData struct {

@@ -36,6 +36,7 @@ type BuildBundleAttributes struct {
 	Entitlements                    map[string]map[string]string `json:"entitlements,omitempty"`
 	BADownloadAllowance             *int64                       `json:"baDownloadAllowance,omitempty"`
 	BAMaxInstallSize                *int64                       `json:"baMaxInstallSize,omitempty"`
+	MinimumOSVersion                *string                      `json:"minimumOsVersion,omitempty"`
 }
 
 // BuildBundleFileSizeAttributes describes a build bundle file size resource.

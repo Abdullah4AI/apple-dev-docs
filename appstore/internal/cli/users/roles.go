@@ -1,0 +1,38 @@
+package users
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+func userRoleList() []string {
+	return []string{
+		"ADMIN",
+		"FINANCE",
+		"ACCOUNT_HOLDER",
+		"SALES",
+		"MARKETING",
+		"APP_MANAGER",
+		"DEVELOPER",
+		"ACCESS_TO_REPORTS",
+		"CUSTOMER_SUPPORT",
+		"CREATE_APPS",
+		"CLOUD_MANAGED_DEVELOPER_ID",
+		"CLOUD_MANAGED_APP_DISTRIBUTION",
+		"GENERATE_INDIVIDUAL_KEYS",
+	}
+}
+
+func normalizeUserRoles(value string, flagName string) ([]string, error) {
+	roles := shared.SplitCSVUpper(value)
+	allowed := userRoleList()
+	for _, role := range roles {
+		if !slices.Contains(allowed, role) {
+			return nil, fmt.Errorf("%s must be one of: %s", flagName, strings.Join(allowed, ", "))
+		}
+	}
+	return roles, nil
+}

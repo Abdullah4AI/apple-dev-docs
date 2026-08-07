@@ -80,17 +80,7 @@ func TestGetAppPricePoints_WithTerritory(t *testing.T) {
 }
 
 func TestGetAppPricePoint(t *testing.T) {
-	single := SingleResponse[AppPricePointV3Attributes]{
-		Data: Resource[AppPricePointV3Attributes]{
-			Type: ResourceTypeAppPricePoints,
-			ID:   "pp-1",
-			Attributes: AppPricePointV3Attributes{
-				CustomerPrice: "0.99",
-				Proceeds:      "0.70",
-			},
-		},
-	}
-	body, _ := json.Marshal(single)
+	body := `{"data":{"type":"appPricePoints","id":"pp-1","attributes":{"customerPrice":"0.99","proceeds":"0.70"}},"included":[{"type":"territories","id":"USA","attributes":{"currency":"USD"}}],"links":{"self":"https://api.appstoreconnect.apple.com/v3/appPricePoints/pp-1"}}`
 
 	client := newTestClient(t, func(req *http.Request) {
 		assertAuthorized(t, req)
@@ -100,17 +90,36 @@ func TestGetAppPricePoint(t *testing.T) {
 		if req.URL.Path != "/v3/appPricePoints/pp-1" {
 			t.Fatalf("expected path /v3/appPricePoints/pp-1, got %s", req.URL.Path)
 		}
-	}, jsonResponse(http.StatusOK, string(body)))
+	}, jsonResponse(http.StatusOK, body))
 
 	result, err := client.GetAppPricePoint(context.Background(), "pp-1")
 	if err != nil {
 		t.Fatalf("GetAppPricePoint() error: %v", err)
 	}
-	if len(result.Data) != 1 {
-		t.Fatalf("expected 1 price point, got %d", len(result.Data))
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal app price point response: %v", err)
 	}
-	if result.Data[0].ID != "pp-1" {
-		t.Fatalf("expected price point pp-1, got %q", result.Data[0].ID)
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("unmarshal app price point envelope: %v", err)
+	}
+	var data []map[string]any
+	if err := json.Unmarshal(envelope["data"], &data); err != nil {
+		t.Fatalf("expected one-element data array, got %s: %v", envelope["data"], err)
+	}
+	if len(data) != 1 || data[0]["id"] != "pp-1" {
+		t.Fatalf("expected price point pp-1, got %#v", data)
+	}
+	if len(envelope["included"]) == 0 {
+		t.Fatal("expected included resources to be preserved")
+	}
+	var links Links
+	if err := json.Unmarshal(envelope["links"], &links); err != nil {
+		t.Fatalf("decode links: %v", err)
+	}
+	if links.Self != "https://api.appstoreconnect.apple.com/v3/appPricePoints/pp-1" {
+		t.Fatalf("unexpected self link: %q", links.Self)
 	}
 }
 

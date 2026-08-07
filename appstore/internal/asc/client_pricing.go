@@ -89,8 +89,9 @@ func (c *Client) GetAppPricePoint(ctx context.Context, pricePointID string) (*Ap
 	}
 
 	response := AppPricePointsV3Response{
-		Data:  []Resource[AppPricePointV3Attributes]{single.Data},
-		Links: single.Links,
+		Data:     []Resource[AppPricePointV3Attributes]{single.Data},
+		Links:    single.Links,
+		Included: single.Included,
 	}
 
 	return &response, nil

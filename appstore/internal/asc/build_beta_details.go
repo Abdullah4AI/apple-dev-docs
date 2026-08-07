@@ -15,9 +15,7 @@ type BuildBetaDetailResponse = SingleResponse[BuildBetaDetailAttributes]
 
 // BuildBetaDetailUpdateAttributes describes updateable build beta detail attributes.
 type BuildBetaDetailUpdateAttributes struct {
-	AutoNotifyEnabled  *bool   `json:"autoNotifyEnabled,omitempty"`
-	InternalBuildState *string `json:"internalBuildState,omitempty"`
-	ExternalBuildState *string `json:"externalBuildState,omitempty"`
+	AutoNotifyEnabled *bool `json:"autoNotifyEnabled,omitempty"`
 }
 
 // BuildBetaDetailUpdateData is the data portion of a build beta detail update.

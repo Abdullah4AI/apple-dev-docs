@@ -330,6 +330,11 @@ Examples:
 				}
 			}
 
+			normalizedReleaseType, err := normalizeAppStoreVersionReleaseType(*releaseType)
+			if err != nil {
+				return shared.UsageErrorf("versions create: %v", err)
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("versions create: %w", err)
@@ -345,8 +350,8 @@ Examples:
 			if *copyright != "" {
 				attrs.Copyright = *copyright
 			}
-			if *releaseType != "" {
-				attrs.ReleaseType = strings.ToUpper(*releaseType)
+			if normalizedReleaseType != "" {
+				attrs.ReleaseType = normalizedReleaseType
 			}
 
 			resp, err := client.CreateAppStoreVersion(requestCtx, resolvedAppID, attrs)
@@ -417,8 +422,13 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
+			normalizedReleaseType, err := normalizeAppStoreVersionReleaseType(*releaseType)
+			if err != nil {
+				return shared.UsageErrorf("versions update: %v", err)
+			}
+
 			// Check that at least one update field is provided
-			if *copyright == "" && *releaseType == "" && *earliestReleaseDate == "" && *versionString == "" {
+			if *copyright == "" && normalizedReleaseType == "" && *earliestReleaseDate == "" && *versionString == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one of --copyright, --release-type, --earliest-release-date, or --version is required")
 				return shared.MissingRequiredUsageError()
 			}
@@ -435,9 +445,8 @@ Examples:
 			if *copyright != "" {
 				attrs.Copyright = copyright
 			}
-			if *releaseType != "" {
-				rt := strings.ToUpper(*releaseType)
-				attrs.ReleaseType = &rt
+			if normalizedReleaseType != "" {
+				attrs.ReleaseType = &normalizedReleaseType
 			}
 			if *earliestReleaseDate != "" {
 				attrs.EarliestReleaseDate = earliestReleaseDate
@@ -577,6 +586,21 @@ func fetchOptionalBuild(ctx context.Context, versionID string, fetch func(contex
 		return nil, err
 	}
 	return resp, nil
+}
+
+func normalizeAppStoreVersionReleaseType(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if value != "" && trimmed == "" {
+		return "", fmt.Errorf("--release-type must be one of: MANUAL, AFTER_APPROVAL, SCHEDULED")
+	}
+
+	normalized := strings.ToUpper(trimmed)
+	switch normalized {
+	case "", "MANUAL", "AFTER_APPROVAL", "SCHEDULED":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("--release-type must be one of: MANUAL, AFTER_APPROVAL, SCHEDULED")
+	}
 }
 
 func fetchOptionalSubmission(ctx context.Context, versionID string, fetch func(context.Context, string) (*asc.AppStoreVersionSubmissionResourceResponse, error)) (*asc.AppStoreVersionSubmissionResourceResponse, error) {

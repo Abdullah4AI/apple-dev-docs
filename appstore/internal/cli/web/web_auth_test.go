@@ -153,6 +153,82 @@ func TestReadPasswordFromTerminalFD(t *testing.T) {
 	})
 }
 
+func TestPromptPasswordInteractiveUsesControllingTTYWhenStdinIsNotTerminal(t *testing.T) {
+	origOpenTTY := openTTYFn
+	origIsTerminal := termIsTerminalFn
+	t.Cleanup(func() {
+		openTTYFn = origOpenTTY
+		termIsTerminalFn = origIsTerminal
+	})
+
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty.Open() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ptmx.Close()
+		_ = tty.Close()
+	})
+
+	openTTYFn = func() (*os.File, error) {
+		return tty, nil
+	}
+	termIsTerminalFn = func(fd int) bool {
+		return false
+	}
+
+	promptSeen := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 128)
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 && strings.Contains(string(buf[:n]), "Apple Account password:") {
+				promptSeen <- nil
+				return
+			}
+			if err != nil {
+				promptSeen <- err
+				return
+			}
+		}
+	}()
+
+	type promptResult struct {
+		password string
+		err      error
+	}
+	resultCh := make(chan promptResult, 1)
+	go func() {
+		password, err := promptPasswordInteractive(context.Background())
+		resultCh <- promptResult{password: password, err: err}
+	}()
+
+	select {
+	case err := <-promptSeen:
+		if err != nil {
+			t.Fatalf("failed waiting for password prompt: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for password prompt on controlling TTY")
+	}
+
+	if _, err := ptmx.Write([]byte("tty-secret\r")); err != nil {
+		t.Fatalf("ptmx.Write() error: %v", err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("promptPasswordInteractive() error: %v", result.err)
+		}
+		if result.password != "tty-secret" {
+			t.Fatalf("promptPasswordInteractive() = %q, want %q", result.password, "tty-secret")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for password prompt result")
+	}
+}
+
 func TestReadPasswordFromTerminalPropagatesCtrlCAsInterrupt(t *testing.T) {
 	origSignalProcessInterrupt := signalProcessInterruptFn
 	t.Cleanup(func() {
@@ -406,6 +482,47 @@ func TestPromptTwoFactorCodeInteractiveWithoutTTYReturnsSupportedAutomationHint(
 	}
 	if !strings.Contains(err.Error(), "--"+deprecatedTwoFactorCodeFlagName) {
 		t.Fatalf("expected deprecated compatibility flag hint in error, got %v", err)
+	}
+}
+
+func TestPromptTwoFactorCodeInteractiveUsesControllingTTYWhenStdinIsNotTerminal(t *testing.T) {
+	origOpenTTY := openTTYFn
+	origIsTerminal := termIsTerminalFn
+	origReadPassword := termReadPasswordFn
+	t.Cleanup(func() {
+		openTTYFn = origOpenTTY
+		termIsTerminalFn = origIsTerminal
+		termReadPasswordFn = origReadPassword
+	})
+
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty.Open() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ptmx.Close()
+		_ = tty.Close()
+	})
+
+	openTTYFn = func() (*os.File, error) {
+		return tty, nil
+	}
+	termIsTerminalFn = func(fd int) bool {
+		return false
+	}
+	termReadPasswordFn = func(fd int) ([]byte, error) {
+		if fd != int(tty.Fd()) {
+			t.Fatalf("term.ReadPassword fd = %d, want controlling TTY fd %d", fd, tty.Fd())
+		}
+		return []byte(" 123456 "), nil
+	}
+
+	code, err := promptTwoFactorCodeInteractive()
+	if err != nil {
+		t.Fatalf("promptTwoFactorCodeInteractive() error: %v", err)
+	}
+	if code != "123456" {
+		t.Fatalf("promptTwoFactorCodeInteractive() = %q, want %q", code, "123456")
 	}
 }
 

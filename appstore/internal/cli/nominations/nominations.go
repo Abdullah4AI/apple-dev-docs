@@ -28,7 +28,7 @@ Examples:
   asc nominations list --status DRAFT
   asc nominations view --id "NOMINATION_ID"
   asc nominations create --app "APP_ID" --name "Launch" --type APP_LAUNCH --description "New launch" --submitted=false --publish-start-date "2026-02-01T08:00:00Z"
-  asc nominations update --id "NOMINATION_ID" --notes "Updated notes"
+  asc nominations update --id "NOMINATION_ID" --submitted=false --notes "Updated notes"
   asc nominations delete --id "NOMINATION_ID" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -476,11 +476,11 @@ func NominationsUpdateCommand() *ffcli.Command {
 		ShortHelp:  "Update a featuring nomination.",
 		LongHelp: `Update a featuring nomination.
 
-Note: --submitted or --archived is required by the API.
+Apple's live API requires --submitted or --archived even though its OpenAPI schema does not.
 
 Examples:
-  asc nominations update --id "NOMINATION_ID" --notes "Updated notes"
-  asc nominations update --id "NOMINATION_ID" --type NEW_CONTENT --publish-start-date "2026-03-01T08:00:00Z"
+  asc nominations update --id "NOMINATION_ID" --submitted=false --notes "Updated notes"
+  asc nominations update --id "NOMINATION_ID" --submitted=false --type NEW_CONTENT --publish-start-date "2026-03-01T08:00:00Z"
   asc nominations update --id "NOMINATION_ID" --archived=true`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -517,7 +517,7 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 			if !visited["submitted"] && !visited["archived"] {
-				fmt.Fprintln(os.Stderr, "Error: --submitted or --archived is required")
+				fmt.Fprintln(os.Stderr, "Error: --submitted or --archived is required by Apple's live API")
 				return shared.MissingRequiredUsageError()
 			}
 

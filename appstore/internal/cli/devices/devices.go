@@ -106,7 +106,7 @@ Examples:
 
 			platformValues, err := normalizeDevicePlatforms(shared.SplitCSV(*platform))
 			if err != nil {
-				return fmt.Errorf("devices list: %w", err)
+				return fmt.Errorf("devices list: %w", shared.UsageError(err.Error()))
 			}
 
 			statusValue, err := normalizeDeviceStatus(*status)
@@ -316,7 +316,7 @@ Examples:
 
 			platformValue, err := normalizeDevicePlatform(platformValue)
 			if err != nil {
-				return fmt.Errorf("devices register: %w", err)
+				return fmt.Errorf("devices register: %w", shared.UsageError(err.Error()))
 			}
 
 			client, err := shared.GetASCClient()
@@ -467,11 +467,11 @@ func normalizeDevicePlatform(value string) (string, error) {
 	if trimmed == "" {
 		return "", nil
 	}
-	normalized := strings.ToUpper(trimmed)
-	if slices.Contains(devicePlatformList(), normalized) {
-		return normalized, nil
+	platform, err := shared.NormalizeBundleIDPlatform(trimmed)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("--platform must be one of: %s", strings.Join(devicePlatformList(), ", "))
+	return string(platform), nil
 }
 
 func normalizeDevicePlatforms(values []string) ([]string, error) {
@@ -527,7 +527,7 @@ func normalizeDeviceFields(value string) ([]string, error) {
 }
 
 func devicePlatformList() []string {
-	return []string{"IOS", "MAC_OS", "TV_OS", "VISION_OS"}
+	return shared.BundleIDPlatformList()
 }
 
 func deviceStatusList() []string {

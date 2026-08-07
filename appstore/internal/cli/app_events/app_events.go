@@ -193,6 +193,7 @@ func AppEventsCreateCommand() *ffcli.Command {
 		LongHelp: `Create a new in-app event.
 
 Examples:
+  asc app-events create --app "APP_ID" --name "Summer Challenge"
   asc app-events create --app "APP_ID" --name "Summer Challenge" --event-type CHALLENGE --start "2026-06-01T00:00:00Z" --end "2026-06-30T23:59:59Z"
   asc app-events create --app "APP_ID" --name "Launch Party" --event-type PREMIERE --priority HIGH --purpose ATTRACT_NEW_USERS
   asc app-events create --app "APP_ID" --name "Retro Challenge" --event-type LIVE_EVENT --priority HIGH --purpose APPROPRIATE_FOR_ALL_USERS`,
@@ -211,7 +212,7 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			normalizedBadge, err := normalizeAppEventBadge(*eventType, true)
+			normalizedBadge, err := normalizeAppEventBadge(*eventType)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
 				return flag.ErrHelp
@@ -358,7 +359,7 @@ Examples:
 			}
 
 			if strings.TrimSpace(*eventType) != "" {
-				normalized, err := normalizeAppEventBadge(*eventType, false)
+				normalized, err := normalizeAppEventBadge(*eventType)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Error:", err.Error())
 					return flag.ErrHelp

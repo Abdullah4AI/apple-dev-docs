@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
@@ -55,5 +56,17 @@ func SetSyncAppClipBundleIDCapability(fn func(context.Context, *webcore.Client, 
 	syncAppClipBundleIDCapabilityFn = fn
 	return func() {
 		syncAppClipBundleIDCapabilityFn = prev
+	}
+}
+
+// DisableControllingTTYForTesting prevents tests from opening the process's
+// controlling terminal. The returned function restores the previous behavior.
+func DisableControllingTTYForTesting() func() {
+	previous := openTTYFn
+	openTTYFn = func() (*os.File, error) {
+		return nil, os.ErrNotExist
+	}
+	return func() {
+		openTTYFn = previous
 	}
 }

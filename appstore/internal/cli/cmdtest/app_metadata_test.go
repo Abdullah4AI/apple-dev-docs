@@ -22,21 +22,6 @@ func TestAppsSearchKeywordsValidationErrors(t *testing.T) {
 			args:    []string{"apps", "search-keywords", "list"},
 			wantErr: "--app is required",
 		},
-		{
-			name:    "apps search-keywords set missing app",
-			args:    []string{"apps", "search-keywords", "set", "--keywords", "kw1", "--confirm"},
-			wantErr: "--app is required",
-		},
-		{
-			name:    "apps search-keywords set missing confirm",
-			args:    []string{"apps", "search-keywords", "set", "--app", "123", "--keywords", "kw1"},
-			wantErr: "--confirm is required",
-		},
-		{
-			name:    "apps search-keywords set missing keywords",
-			args:    []string{"apps", "search-keywords", "set", "--app", "123", "--confirm"},
-			wantErr: "--keywords is required",
-		},
 	}
 
 	for _, test := range tests {

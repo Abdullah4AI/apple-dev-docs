@@ -1,18 +1,27 @@
 package asc
 
+// BundleIDPlatform represents the platform of a bundle ID or registered device.
+type BundleIDPlatform string
+
+const (
+	BundleIDPlatformIOS       BundleIDPlatform = "IOS"
+	BundleIDPlatformMacOS     BundleIDPlatform = "MAC_OS"
+	BundleIDPlatformUniversal BundleIDPlatform = "UNIVERSAL"
+)
+
 // BundleIDAttributes describes a bundle ID resource.
 type BundleIDAttributes struct {
-	Name       string   `json:"name"`
-	Identifier string   `json:"identifier"`
-	Platform   Platform `json:"platform"`
-	SeedID     string   `json:"seedId,omitempty"`
+	Name       string           `json:"name"`
+	Identifier string           `json:"identifier"`
+	Platform   BundleIDPlatform `json:"platform"`
+	SeedID     string           `json:"seedId,omitempty"`
 }
 
 // BundleIDCreateAttributes describes attributes for creating a bundle ID.
 type BundleIDCreateAttributes struct {
-	Name       string   `json:"name"`
-	Identifier string   `json:"identifier"`
-	Platform   Platform `json:"platform"`
+	Name       string           `json:"name"`
+	Identifier string           `json:"identifier"`
+	Platform   BundleIDPlatform `json:"platform"`
 }
 
 // BundleIDUpdateAttributes describes attributes for updating a bundle ID.
@@ -57,17 +66,24 @@ type BundleIDCapabilityCreateAttributes struct {
 
 // CapabilitySetting describes a capability setting.
 type CapabilitySetting struct {
-	Key     string             `json:"key"`
-	Name    string             `json:"name,omitempty"`
-	Options []CapabilityOption `json:"options,omitempty"`
+	Key              string             `json:"key"`
+	Name             string             `json:"name,omitempty"`
+	Description      string             `json:"description,omitempty"`
+	EnabledByDefault *bool              `json:"enabledByDefault,omitempty"`
+	Visible          *bool              `json:"visible,omitempty"`
+	AllowedInstances string             `json:"allowedInstances,omitempty"`
+	MinInstances     *int               `json:"minInstances,omitempty"`
+	Options          []CapabilityOption `json:"options,omitempty"`
 }
 
 // CapabilityOption describes a capability option.
 type CapabilityOption struct {
-	Key         string `json:"key"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Enabled     *bool  `json:"enabled,omitempty"`
+	Key              string `json:"key"`
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description,omitempty"`
+	EnabledByDefault *bool  `json:"enabledByDefault,omitempty"`
+	Enabled          *bool  `json:"enabled,omitempty"`
+	SupportsWildcard *bool  `json:"supportsWildcard,omitempty"`
 }
 
 // BundleIDCapabilityRelationships describes relationships for bundle ID capabilities.

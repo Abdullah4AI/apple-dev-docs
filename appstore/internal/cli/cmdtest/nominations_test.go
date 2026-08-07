@@ -77,7 +77,7 @@ func TestNominationsValidationErrors(t *testing.T) {
 		{
 			name:    "nominations update missing submitted or archived",
 			args:    []string{"nominations", "update", "--id", "NOM_ID", "--notes", "Updated"},
-			wantErr: "--submitted or --archived is required",
+			wantErr: "--submitted or --archived is required by Apple's live API",
 		},
 		{
 			name:    "nominations delete missing id",
