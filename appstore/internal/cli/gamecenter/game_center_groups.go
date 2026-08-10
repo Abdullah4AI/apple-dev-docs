@@ -900,7 +900,7 @@ func GameCenterGroupChallengesCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "challenges",
-		ShortUsage: "asc game-center groups challenges set --group-id \"GROUP_ID\" --ids \"CH_1,CH_2\"",
+		ShortUsage: "asc game-center groups challenges <subcommand> [flags]",
 		ShortHelp:  "Manage group challenges relationships.",
 		LongHelp: `Manage group challenges relationships.
 
@@ -995,50 +995,57 @@ Examples:
 	}
 }
 
-// GameCenterGroupChallengesSetCommand returns the group challenges set subcommand.
+// GameCenterGroupChallengesSetCommand preserves the released relationship setter during its deprecation window.
 func GameCenterGroupChallengesSetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 
 	groupID := fs.String("group-id", "", "Game Center group ID")
 	ids := fs.String("ids", "", "Comma-separated challenge IDs")
-	output := shared.BindOutputFlags(fs)
+	shared.BindOutputFlags(fs)
+
+	const guidance = "App Store Connect does not support replacing a group's challenge relationships. To add a challenge to a group, use `asc game-center challenges create --group-id \"GROUP_ID\" ...`."
 
 	return &ffcli.Command{
 		Name:       "set",
 		ShortUsage: "asc game-center groups challenges set --group-id \"GROUP_ID\" --ids \"CH_1,CH_2\"",
-		ShortHelp:  "Replace group challenges relationships.",
-		LongHelp: `Replace group challenges relationships.
+		ShortHelp:  "DEPRECATED: App Store Connect does not support replacing group challenge relationships.",
+		LongHelp: `DEPRECATED: App Store Connect does not support replacing a Game Center group's challenge relationships.
+
+The --group-id and --ids flags remain available during the deprecation window,
+but the operation always exits with migration guidance before authentication or
+an HTTP request. The prior output flags remain registered for parser compatibility
+but are rejected because this command produces no result. To add a challenge to
+a group, create it with --group-id.
 
 Examples:
-  asc game-center groups challenges set --group-id "GROUP_ID" --ids "CH_1,CH_2"`,
+  asc game-center groups challenges set --group-id "GROUP_ID" --ids "CH_1,CH_2"
+  asc game-center challenges create --group-id "GROUP_ID" --reference-name "Weekly" --vendor-id "grp.com.example.weekly" --leaderboard-id "LEADERBOARD_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			id := strings.TrimSpace(*groupID)
-			if id == "" {
+			fmt.Fprintln(os.Stderr, "Warning: `asc game-center groups challenges set` is deprecated and unsupported.")
+
+			if strings.TrimSpace(*groupID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
 				return shared.MissingRequiredUsageError()
 			}
-			idsValue := shared.SplitCSV(*ids)
-			if len(idsValue) == 0 {
+			if len(shared.SplitCSV(*ids)) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
 				return shared.MissingRequiredUsageError()
 			}
 
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("game-center groups challenges set: %w", err)
+			outputFlagUsed := false
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "output" || f.Name == "pretty" {
+					outputFlagUsed = true
+				}
+			})
+			if outputFlagUsed {
+				const outputGuidance = "the deprecated command produces no data output; omit --output and --pretty"
+				return fmt.Errorf("game-center groups challenges set: %w", shared.UsageError(outputGuidance))
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			if err := client.UpdateGameCenterGroupChallenges(requestCtx, id, idsValue); err != nil {
-				return fmt.Errorf("game-center groups challenges set: failed to update: %w", err)
-			}
-
-			result := &asc.LinkagesResponse{Data: resourceDataList(asc.ResourceTypeGameCenterChallenges, idsValue)}
-			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+			return fmt.Errorf("game-center groups challenges set: %w", shared.UsageError(guidance))
 		},
 	}
 }

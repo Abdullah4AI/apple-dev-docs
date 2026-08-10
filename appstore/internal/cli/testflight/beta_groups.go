@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
+
+const buildGroupMembershipTimeout = 5 * time.Minute
 
 // BetaGroupsCommand returns the beta groups command with subcommands.
 func BetaGroupsCommand() *ffcli.Command {
@@ -25,6 +28,7 @@ func BetaGroupsCommand() *ffcli.Command {
 
 Examples:
   asc testflight beta-groups list --app "APP_ID"
+  asc testflight beta-groups list --build-id "BUILD_ID"
   asc testflight beta-groups list --app "APP_ID" --internal
   asc testflight beta-groups list --global --internal
   asc testflight beta-groups create --app "APP_ID" --name "Beta Testers"
@@ -58,6 +62,7 @@ func BetaGroupsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
+	buildID := fs.String("build-id", "", "[experimental] List groups that contain this build ID")
 	global := fs.Bool("global", false, "List beta groups across all apps (top-level endpoint)")
 	internal := fs.Bool("internal", false, "Filter to internal groups only")
 	external := fs.Bool("external", false, "Filter to external groups only")
@@ -72,8 +77,24 @@ func BetaGroupsListCommand() *ffcli.Command {
 		ShortHelp:  "List TestFlight beta groups for an app or globally.",
 		LongHelp: `List TestFlight beta groups for an app or globally.
 
+The --build-id lookup is experimental. It resolves the build's app and
+automatically paginates the app's groups, returning both explicit build
+relationships and groups with all-build access. App Store Connect does not
+expose a build-side GET for beta groups, so the command prefers the documented
+betaGroups build filter. If that filter is rejected, the command falls back to
+the inverse group-to-build relationship.
+All-build groups omitted by the filter are also checked through that inverse
+linkage because Apple can omit their explicit relationships. These checks scan
+linkage IDs only; cost scales with the checked groups and their build page count.
+
+A complete lookup with no memberships prints an empty groups array and exits 0.
+If an inverse relationship cannot be read, available matches and failures are
+printed with complete=false and the command exits nonzero.
+
 Examples:
   asc testflight beta-groups list --app "APP_ID"
+  asc testflight beta-groups list --build-id "BUILD_ID"
+  asc testflight beta-groups list --build-id "BUILD_ID" --internal
   asc testflight beta-groups list --app "APP_ID" --internal
   asc testflight beta-groups list --app "APP_ID" --external
   asc testflight beta-groups list --app "APP_ID" --limit 10
@@ -92,10 +113,81 @@ Examples:
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
+			resolvedBuildID := strings.TrimSpace(*buildID)
 
 			if *internal && *external {
 				fmt.Fprintln(os.Stderr, "Error: --internal and --external are mutually exclusive")
 				return flag.ErrHelp
+			}
+			appIDSet := false
+			buildIDSet := false
+			membershipPageControlSet := false
+			fs.Visit(func(value *flag.Flag) {
+				switch value.Name {
+				case "app":
+					appIDSet = true
+				case "build-id":
+					buildIDSet = true
+				case "global", "limit", "next", "paginate":
+					membershipPageControlSet = true
+				}
+			})
+			if buildIDSet && resolvedBuildID == "" {
+				fmt.Fprintln(os.Stderr, "Error: --build-id cannot be empty")
+				return flag.ErrHelp
+			}
+			if resolvedBuildID != "" && appIDSet && strings.TrimSpace(*appID) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --app cannot be empty when used with --build-id")
+				return flag.ErrHelp
+			}
+			if resolvedBuildID != "" && membershipPageControlSet {
+				fmt.Fprintln(os.Stderr, "Error: --global, --limit, --next, and --paginate cannot be used with --build-id; membership lookup always fetches all required pages")
+				return flag.ErrHelp
+			}
+
+			if resolvedBuildID != "" {
+				expectedAppID := ""
+				if appIDSet {
+					expectedAppID = strings.TrimSpace(*appID)
+				}
+				client, err := shared.GetASCClient()
+				if err != nil {
+					return fmt.Errorf("beta-groups list: %w", err)
+				}
+
+				requestCtx, cancel := contextWithBuildGroupMembershipTimeout(ctx)
+				defer cancel()
+
+				var internalFilter *bool
+				if *internal {
+					value := true
+					internalFilter = &value
+				} else if *external {
+					value := false
+					internalFilter = &value
+				}
+
+				result, usedFallback, lookupErr := lookupBuildGroupMembership(
+					requestCtx,
+					client,
+					resolvedBuildID,
+					expectedAppID,
+					internalFilter,
+				)
+				if usedFallback {
+					fmt.Fprintln(os.Stderr, "Apple rejected the documented betaGroups build filter; falling back to inverse group build relationships (cost scales with groups and build pages)")
+				}
+				if result == nil {
+					return fmt.Errorf("beta-groups list: %w", lookupErr)
+				}
+				if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+					return err
+				}
+				if lookupErr != nil {
+					fmt.Fprintf(os.Stderr, "%d group relationship lookup failed; membership result is incomplete\n", len(result.Failures))
+					return shared.NewReportedError(lookupErr)
+				}
+				return nil
 			}
 
 			// Reject --global + --app combination (check explicit flag, not resolved value)
@@ -247,6 +339,10 @@ Examples:
 			return shared.PrintOutput(groups, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func contextWithBuildGroupMembershipTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithResolvedTimeout(ctx, buildGroupMembershipTimeout)
 }
 
 // BetaGroupsCreateCommand returns the beta groups create subcommand.

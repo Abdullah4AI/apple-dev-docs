@@ -3,6 +3,7 @@ package webhooks
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -21,7 +22,11 @@ func normalizeWebhookEvents(value string) ([]asc.WebhookEventType, error) {
 		if trimmed == "" {
 			continue
 		}
-		normalized = append(normalized, asc.WebhookEventType(strings.ToUpper(trimmed)))
+		normalizedValue := strings.ToUpper(trimmed)
+		if !slices.Contains(asc.ValidWebhookEventTypes, normalizedValue) {
+			return nil, fmt.Errorf("invalid --events value %q; must be one of: %s", trimmed, strings.Join(asc.ValidWebhookEventTypes, ", "))
+		}
+		normalized = append(normalized, asc.WebhookEventType(normalizedValue))
 	}
 
 	if len(normalized) == 0 {

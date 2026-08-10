@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 const analyticsMaxLimit = 200
@@ -30,8 +31,18 @@ func normalizeSalesReportType(value string) (asc.SalesReportType, error) {
 		return asc.SalesReportTypeSubscription, nil
 	case string(asc.SalesReportTypeSubscriptionEvent):
 		return asc.SalesReportTypeSubscriptionEvent, nil
+	case string(asc.SalesReportTypeSubscriber):
+		return asc.SalesReportTypeSubscriber, nil
+	case string(asc.SalesReportTypeSubscriptionOfferCodeRedemption):
+		return asc.SalesReportTypeSubscriptionOfferCodeRedemption, nil
+	case string(asc.SalesReportTypeInstalls):
+		return asc.SalesReportTypeInstalls, nil
+	case string(asc.SalesReportTypeFirstAnnual):
+		return asc.SalesReportTypeFirstAnnual, nil
+	case string(asc.SalesReportTypeWinBackEligibility):
+		return asc.SalesReportTypeWinBackEligibility, nil
 	default:
-		return "", fmt.Errorf("--type must be SALES, PRE_ORDER, NEWSSTAND, SUBSCRIPTION, or SUBSCRIPTION_EVENT")
+		return "", fmt.Errorf("--type must be SALES, PRE_ORDER, NEWSSTAND, SUBSCRIPTION, SUBSCRIPTION_EVENT, SUBSCRIBER, SUBSCRIPTION_OFFER_CODE_REDEMPTION, INSTALLS, FIRST_ANNUAL, or WIN_BACK_ELIGIBILITY")
 	}
 }
 
@@ -42,8 +53,14 @@ func normalizeSalesReportSubType(value string) (asc.SalesReportSubType, error) {
 		return asc.SalesReportSubTypeSummary, nil
 	case string(asc.SalesReportSubTypeDetailed):
 		return asc.SalesReportSubTypeDetailed, nil
+	case string(asc.SalesReportSubTypeSummaryInstallType):
+		return asc.SalesReportSubTypeSummaryInstallType, nil
+	case string(asc.SalesReportSubTypeSummaryTerritory):
+		return asc.SalesReportSubTypeSummaryTerritory, nil
+	case string(asc.SalesReportSubTypeSummaryChannel):
+		return asc.SalesReportSubTypeSummaryChannel, nil
 	default:
-		return "", fmt.Errorf("--subtype must be SUMMARY or DETAILED")
+		return "", fmt.Errorf("--subtype must be SUMMARY, DETAILED, SUMMARY_INSTALL_TYPE, SUMMARY_TERRITORY, or SUMMARY_CHANNEL")
 	}
 }
 
@@ -63,22 +80,87 @@ func normalizeSalesReportFrequency(value string) (asc.SalesReportFrequency, erro
 	}
 }
 
-func normalizeSalesReportVersion(value string, reportType asc.SalesReportType) (asc.SalesReportVersion, error) {
+func normalizeSalesReportVersion(value string, reportType asc.SalesReportType, reportSubType asc.SalesReportSubType, frequency asc.SalesReportFrequency) (asc.SalesReportVersion, error) {
+	allowed, err := allowedSalesReportVersions(reportType, reportSubType, frequency)
+	if err != nil {
+		return "", err
+	}
 	normalized := strings.TrimSpace(value)
 	if normalized == "" {
-		return defaultSalesReportVersion(reportType), nil
+		return defaultSalesReportVersion(reportType, reportSubType, frequency), nil
 	}
 	if !salesReportVersionPattern.MatchString(normalized) {
 		return "", fmt.Errorf("--version must use major_minor format (for example, 1_4)")
 	}
-	return asc.SalesReportVersion(normalized), nil
+	for _, version := range allowed {
+		if normalized == string(version) {
+			return version, nil
+		}
+	}
+	return "", fmt.Errorf("--version %s is not supported for --type %s --subtype %s --frequency %s; allowed: %s", normalized, reportType, reportSubType, frequency, joinSalesReportVersions(allowed))
 }
 
-func defaultSalesReportVersion(reportType asc.SalesReportType) asc.SalesReportVersion {
+func defaultSalesReportVersion(reportType asc.SalesReportType, reportSubType asc.SalesReportSubType, frequency asc.SalesReportFrequency) asc.SalesReportVersion {
 	if reportType == asc.SalesReportTypeSubscription {
+		// Apple currently serves 1_4 in production even though the endpoint table
+		// still lists 1_3. Preserve the live-verified default from PR #1842.
 		return asc.SalesReportVersion1_4
 	}
-	return asc.SalesReportVersion1_0
+	versions, err := allowedSalesReportVersions(reportType, reportSubType, frequency)
+	if err == nil && len(versions) > 0 {
+		return versions[0]
+	}
+	return ""
+}
+
+func validateSalesReportTuple(reportType asc.SalesReportType, reportSubType asc.SalesReportSubType, frequency asc.SalesReportFrequency) error {
+	_, err := allowedSalesReportVersions(reportType, reportSubType, frequency)
+	return err
+}
+
+func allowedSalesReportVersions(reportType asc.SalesReportType, reportSubType asc.SalesReportSubType, frequency asc.SalesReportFrequency) ([]asc.SalesReportVersion, error) {
+	versions := []asc.SalesReportVersion(nil)
+	switch {
+	case reportType == asc.SalesReportTypeFirstAnnual && reportSubType == asc.SalesReportSubTypeDetailed && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypeFirstAnnual && reportSubType == asc.SalesReportSubTypeSummary && frequency == asc.SalesReportFrequencyYearly:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypeInstalls && frequency == asc.SalesReportFrequencyYearly &&
+		(reportSubType == asc.SalesReportSubTypeSummaryChannel || reportSubType == asc.SalesReportSubTypeSummaryInstallType || reportSubType == asc.SalesReportSubTypeSummaryTerritory || reportSubType == asc.SalesReportSubTypeDetailed):
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0, asc.SalesReportVersion1_1}
+	case reportType == asc.SalesReportTypeInstalls && frequency == asc.SalesReportFrequencyMonthly &&
+		(reportSubType == asc.SalesReportSubTypeSummary || reportSubType == asc.SalesReportSubTypeDetailed):
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_2}
+	case reportType == asc.SalesReportTypeNewsstand && reportSubType == asc.SalesReportSubTypeDetailed &&
+		(frequency == asc.SalesReportFrequencyDaily || frequency == asc.SalesReportFrequencyWeekly):
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypePreOrder && reportSubType == asc.SalesReportSubTypeSummary:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypeSales && reportSubType == asc.SalesReportSubTypeSummary:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypeSubscriber && reportSubType == asc.SalesReportSubTypeDetailed && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_3}
+	case reportType == asc.SalesReportTypeSubscription && reportSubType == asc.SalesReportSubTypeSummary && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_3, asc.SalesReportVersion1_4}
+	case reportType == asc.SalesReportTypeSubscriptionEvent && reportSubType == asc.SalesReportSubTypeSummary && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_3}
+	case reportType == asc.SalesReportTypeSubscriptionOfferCodeRedemption && reportSubType == asc.SalesReportSubTypeSummary && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	case reportType == asc.SalesReportTypeWinBackEligibility && reportSubType == asc.SalesReportSubTypeSummary && frequency == asc.SalesReportFrequencyDaily:
+		versions = []asc.SalesReportVersion{asc.SalesReportVersion1_0}
+	}
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("unsupported sales report combination: --type %s --subtype %s --frequency %s", reportType, reportSubType, frequency)
+	}
+	return versions, nil
+}
+
+func joinSalesReportVersions(versions []asc.SalesReportVersion) string {
+	values := make([]string, 0, len(versions))
+	for _, version := range versions {
+		values = append(values, string(version))
+	}
+	return strings.Join(values, ", ")
 }
 
 func normalizeAnalyticsAccessType(value string) (asc.AnalyticsAccessType, error) {
@@ -93,46 +175,69 @@ func normalizeAnalyticsAccessType(value string) (asc.AnalyticsAccessType, error)
 	}
 }
 
-func normalizeAnalyticsRequestState(value string) (asc.AnalyticsReportRequestState, error) {
-	normalized := strings.ToUpper(strings.TrimSpace(value))
-	switch normalized {
-	case string(asc.AnalyticsReportRequestStateProcessing):
-		return asc.AnalyticsReportRequestStateProcessing, nil
-	case string(asc.AnalyticsReportRequestStateCompleted):
-		return asc.AnalyticsReportRequestStateCompleted, nil
-	case string(asc.AnalyticsReportRequestStateFailed):
-		return asc.AnalyticsReportRequestStateFailed, nil
-	default:
-		return "", fmt.Errorf("--state must be PROCESSING, COMPLETED, or FAILED")
-	}
-}
-
-func validateUUIDFlag(flagName, value string) error {
+func validateAnalyticsRequestID(value string) error {
 	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("%s is required", flagName)
+		return fmt.Errorf("--request-id is required")
 	}
 	if !uuidPattern.MatchString(strings.TrimSpace(value)) {
-		return fmt.Errorf("%s must be a valid UUID", flagName)
+		return fmt.Errorf("--request-id must be a valid UUID")
 	}
 	return nil
+}
+
+func analyticsDownloadDefaultOutput(requestID, instanceID string) string {
+	return fmt.Sprintf("analytics_report_%s_%s.csv.gz", strings.TrimSpace(requestID), sanitizeAnalyticsFilenameComponent(instanceID))
+}
+
+func sanitizeAnalyticsFilenameComponent(value string) string {
+	trimmed := strings.TrimSpace(value)
+	var sanitized strings.Builder
+	sanitized.Grow(len(trimmed))
+	for _, r := range trimmed {
+		isASCIIAlpha := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := r >= '0' && r <= '9'
+		switch {
+		case isASCIIAlpha || isDigit || r == '.' || r == '-' || r == '_':
+			sanitized.WriteRune(r)
+		default:
+			sanitized.WriteByte('_')
+		}
+	}
+
+	result := strings.Trim(sanitized.String(), "._-")
+	if result == "" {
+		return "instance"
+	}
+	return result
 }
 
 func normalizeReportDate(value string, frequency asc.SalesReportFrequency) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return "", fmt.Errorf("--date is required")
+		if frequency == asc.SalesReportFrequencyDaily {
+			return "", nil
+		}
+		return "", fmt.Errorf("--date is required for %s reports", frequency)
 	}
 	switch frequency {
 	case asc.SalesReportFrequencyMonthly:
 		parsed, err := time.Parse("2006-01", trimmed)
+		if err == nil {
+			return parsed.Format("2006-01"), nil
+		}
+		parsed, err = time.Parse("2006-01-02", trimmed)
 		if err != nil {
-			return "", fmt.Errorf("--date must be in YYYY-MM format for monthly reports")
+			return "", fmt.Errorf("--date must be in YYYY-MM or YYYY-MM-DD format for monthly reports")
 		}
 		return parsed.Format("2006-01"), nil
 	case asc.SalesReportFrequencyYearly:
 		parsed, err := time.Parse("2006", trimmed)
+		if err == nil {
+			return parsed.Format("2006"), nil
+		}
+		parsed, err = time.Parse("2006-01-02", trimmed)
 		if err != nil {
-			return "", fmt.Errorf("--date must be in YYYY format for yearly reports")
+			return "", fmt.Errorf("--date must be in YYYY or YYYY-MM-DD format for yearly reports")
 		}
 		return parsed.Format("2006"), nil
 	case asc.SalesReportFrequencyWeekly:
@@ -222,7 +327,7 @@ func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID st
 	)
 
 	if strings.TrimSpace(next) != "" {
-		resp, err := client.GetAnalyticsReports(ctx, requestID, asc.WithAnalyticsReportsNextURL(next))
+		resp, err := getAnalyticsReportsPage(ctx, client, requestID, asc.WithAnalyticsReportsNextURL(next))
 		if err != nil {
 			return nil, asc.Links{}, err
 		}
@@ -241,9 +346,9 @@ func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID st
 				return nil, asc.Links{}, fmt.Errorf("analytics view: detected repeated pagination URL")
 			}
 			seen[nextURL] = true
-			resp, err = client.GetAnalyticsReports(ctx, requestID, asc.WithAnalyticsReportsNextURL(nextURL))
+			resp, err = getAnalyticsReportsPage(ctx, client, requestID, asc.WithAnalyticsReportsNextURL(nextURL))
 		} else {
-			resp, err = client.GetAnalyticsReports(ctx, requestID, asc.WithAnalyticsReportsLimit(limit))
+			resp, err = getAnalyticsReportsPage(ctx, client, requestID, asc.WithAnalyticsReportsLimit(limit))
 		}
 		if err != nil {
 			return nil, asc.Links{}, err
@@ -275,12 +380,12 @@ func fetchAnalyticsReportInstances(ctx context.Context, client *asc.Client, repo
 				return nil, fmt.Errorf("analytics view: detected repeated instance pagination URL")
 			}
 			seen[next] = true
-			resp, err = client.GetAnalyticsReportInstances(ctx, reportID, asc.WithAnalyticsReportInstancesNextURL(next))
+			resp, err = getAnalyticsReportInstancesPage(ctx, client, reportID, asc.WithAnalyticsReportInstancesNextURL(next))
 		} else {
 			firstPageOpts := make([]asc.AnalyticsReportInstancesOption, 0, len(opts)+1)
 			firstPageOpts = append(firstPageOpts, asc.WithAnalyticsReportInstancesLimit(analyticsMaxLimit))
 			firstPageOpts = append(firstPageOpts, opts...)
-			resp, err = client.GetAnalyticsReportInstances(ctx, reportID, firstPageOpts...)
+			resp, err = getAnalyticsReportInstancesPage(ctx, client, reportID, firstPageOpts...)
 		}
 		if err != nil {
 			return nil, err
@@ -373,7 +478,11 @@ func generateReportDates(start, end string, freq asc.SalesReportFrequency) ([]st
 		}
 		var dates []string
 		for cur := s; !cur.After(e); cur = cur.AddDate(1, 0, 0) {
-			dates = append(dates, cur.Format("2006"))
+			reportDate, normErr := normalizeReportDate(cur.Format("2006"), asc.SalesReportFrequencyYearly)
+			if normErr != nil {
+				return nil, normErr
+			}
+			dates = append(dates, reportDate)
 		}
 		return dates, nil
 
@@ -388,7 +497,11 @@ func generateReportDates(start, end string, freq asc.SalesReportFrequency) ([]st
 		}
 		var dates []string
 		for cur := s; !cur.After(e); cur = cur.AddDate(0, 1, 0) {
-			dates = append(dates, cur.Format("2006-01"))
+			reportDate, normErr := normalizeReportDate(cur.Format("2006-01"), asc.SalesReportFrequencyMonthly)
+			if normErr != nil {
+				return nil, normErr
+			}
+			dates = append(dates, reportDate)
 		}
 		return dates, nil
 
@@ -442,9 +555,9 @@ func fetchAnalyticsReportSegments(ctx context.Context, client *asc.Client, insta
 				return nil, fmt.Errorf("analytics view: detected repeated segment pagination URL")
 			}
 			seen[next] = true
-			resp, err = client.GetAnalyticsReportSegments(ctx, instanceID, asc.WithAnalyticsReportSegmentsNextURL(next))
+			resp, err = getAnalyticsReportSegmentsPage(ctx, client, instanceID, asc.WithAnalyticsReportSegmentsNextURL(next))
 		} else {
-			resp, err = client.GetAnalyticsReportSegments(ctx, instanceID, asc.WithAnalyticsReportSegmentsLimit(analyticsMaxLimit))
+			resp, err = getAnalyticsReportSegmentsPage(ctx, client, instanceID, asc.WithAnalyticsReportSegmentsLimit(analyticsMaxLimit))
 		}
 		if err != nil {
 			return nil, err
@@ -456,4 +569,39 @@ func fetchAnalyticsReportSegments(ctx context.Context, client *asc.Client, insta
 		next = resp.Links.Next
 	}
 	return all, nil
+}
+
+func getAnalyticsReportsPage(ctx context.Context, client *asc.Client, requestID string, opts ...asc.AnalyticsReportsOption) (*asc.AnalyticsReportsResponse, error) {
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	defer cancel()
+	return client.GetAnalyticsReports(requestCtx, requestID, opts...)
+}
+
+func getAnalyticsReportInstancesPage(ctx context.Context, client *asc.Client, reportID string, opts ...asc.AnalyticsReportInstancesOption) (*asc.AnalyticsReportInstancesResponse, error) {
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	defer cancel()
+	return client.GetAnalyticsReportInstances(requestCtx, reportID, opts...)
+}
+
+func getAnalyticsReportSegmentsPage(ctx context.Context, client *asc.Client, instanceID string, opts ...asc.AnalyticsReportSegmentsOption) (*asc.AnalyticsReportSegmentsResponse, error) {
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	defer cancel()
+	return client.GetAnalyticsReportSegments(requestCtx, instanceID, opts...)
+}
+
+func downloadAnalyticsReportToFile(ctx context.Context, client *asc.Client, downloadURL, outputPath string) (int64, error) {
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	defer cancel()
+
+	download, err := client.DownloadAnalyticsReport(requestCtx, downloadURL)
+	if err != nil {
+		return 0, fmt.Errorf("failed to download report: %w", err)
+	}
+	defer download.Body.Close()
+
+	size, err := shared.WriteStreamToFile(outputPath, download.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write report: %w", err)
+	}
+	return size, nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -63,6 +64,21 @@ func TestStatusDefaultJSONIncludesAllSections(t *testing.T) {
 			query := req.URL.Query()
 			if query.Get("filter[app]") != "app-1" {
 				t.Fatalf("expected filter[app]=app-1, got %q", query.Get("filter[app]"))
+			}
+			if stateFilter := query.Get("filter[betaAppReviewSubmission.betaReviewState]"); stateFilter != "" {
+				if stateFilter != "WAITING_FOR_REVIEW,IN_REVIEW" || query.Get("limit") != "50" || query.Get("include") != "preReleaseVersion" {
+					t.Fatalf("expected bounded active beta review build query, got %s", req.URL.RawQuery)
+				}
+				return statusJSONResponse(`{
+					"data":[{
+						"type":"builds",
+						"id":"build-2",
+						"attributes":{"version":"45","uploadedDate":"2026-02-20T00:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"prv-2"}}}
+					}],
+					"included":[{"type":"preReleaseVersions","id":"prv-2","attributes":{"version":"1.2.3","platform":"IOS"}}],
+					"links":{"next":""}
+				}`), nil
 			}
 			if query.Get("sort") != "-uploadedDate" {
 				t.Fatalf("expected sort=-uploadedDate, got %q", query.Get("sort"))
@@ -239,6 +255,600 @@ func TestStatusDefaultJSONIncludesAllSections(t *testing.T) {
 			t.Fatalf("expected %s section in payload, got %v", key, payload)
 		}
 	}
+}
+
+func TestStatusCorrelatesOlderBetaReviewSubmissionWithItsActualBuild(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/builds":
+			return statusJSONResponse(`{
+				"data":[
+					{
+						"type":"builds",
+						"id":"build-326",
+						"attributes":{"version":"326","uploadedDate":"2026-08-10T02:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+					},
+					{
+						"type":"builds",
+						"id":"build-325",
+						"attributes":{"version":"325","uploadedDate":"2026-08-09T02:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+					}
+				],
+				"included":[
+					{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}
+				],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/builds/build-326/preReleaseVersion":
+			return statusJSONResponse(`{
+				"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}
+			}`), nil
+		case "/v1/buildBetaDetails":
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		case "/v1/betaAppReviewSubmissions":
+			return statusJSONResponse(`{
+				"data":[{
+					"type":"betaAppReviewSubmissions",
+					"id":"review-325",
+					"attributes":{"betaReviewState":"WAITING_FOR_REVIEW","submittedDate":"2026-08-09T03:00:00Z"},
+					"relationships":{"build":{"data":{"type":"builds","id":"build-325"}}}
+				}],
+				"links":{"next":""}
+			}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "6748252780", "--platform", "IOS", "--include", "builds,testflight", "--output", "json", "--pretty"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload struct {
+		Summary struct {
+			Health     string   `json:"health"`
+			NextAction string   `json:"nextAction"`
+			Blockers   []string `json:"blockers"`
+		} `json:"summary"`
+		Builds struct {
+			Latest struct {
+				ID          string `json:"id"`
+				BuildNumber string `json:"buildNumber"`
+			} `json:"latest"`
+		} `json:"builds"`
+		TestFlight struct {
+			BetaReviewState      string `json:"betaReviewState"`
+			SubmittedDate        string `json:"submittedDate"`
+			BetaReviewSubmission struct {
+				ID                    string `json:"id"`
+				State                 string `json:"state"`
+				RelationToLatestBuild string `json:"relationToLatestBuild"`
+				Build                 struct {
+					ID          string `json:"id"`
+					Version     string `json:"version"`
+					BuildNumber string `json:"buildNumber"`
+					Platform    string `json:"platform"`
+				} `json:"build"`
+			} `json:"betaReviewSubmission"`
+		} `json:"testflight"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+
+	if payload.Builds.Latest.ID != "build-326" || payload.Builds.Latest.BuildNumber != "326" {
+		t.Fatalf("expected latest uploaded build 326, got %+v", payload.Builds.Latest)
+	}
+	review := payload.TestFlight.BetaReviewSubmission
+	if payload.TestFlight.BetaReviewState != "WAITING_FOR_REVIEW" || payload.TestFlight.SubmittedDate != "2026-08-09T03:00:00Z" {
+		t.Fatalf("expected additive compatibility fields to remain populated, got %+v", payload.TestFlight)
+	}
+	if review.ID != "review-325" || review.State != "WAITING_FOR_REVIEW" {
+		t.Fatalf("expected review submission 325 identity, got %+v", review)
+	}
+	if review.Build.ID != "build-325" || review.Build.BuildNumber != "325" || review.Build.Version != "1.2.3" || review.Build.Platform != "IOS" {
+		t.Fatalf("expected actual review build context for 325, got %+v", review.Build)
+	}
+	if review.RelationToLatestBuild != "sameVersionTrain" {
+		t.Fatalf("expected sameVersionTrain relation, got %q", review.RelationToLatestBuild)
+	}
+	if payload.Summary.Health != "red" {
+		t.Fatalf("expected blocked health=red, got %q", payload.Summary.Health)
+	}
+	if len(payload.Summary.Blockers) != 1 || !strings.Contains(payload.Summary.Blockers[0], "build 325") || !strings.Contains(payload.Summary.Blockers[0], "build 326") {
+		t.Fatalf("expected blocker naming review build 325 and latest build 326, got %v", payload.Summary.Blockers)
+	}
+	if !strings.Contains(payload.Summary.NextAction, "build 325") || !strings.Contains(payload.Summary.NextAction, "build 326") {
+		t.Fatalf("expected actionable next step naming both builds, got %q", payload.Summary.NextAction)
+	}
+}
+
+func TestStatusResolvesMissingActiveBetaReviewBuildBeforeSelection(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	relatedBuildCalls := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/builds":
+			return statusJSONResponse(`{
+				"data":[
+					{
+						"type":"builds",
+						"id":"build-326",
+						"attributes":{"version":"326","uploadedDate":"2026-08-10T02:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+					},
+					{
+						"type":"builds",
+						"id":"build-325",
+						"attributes":{"version":"325","uploadedDate":"2026-08-09T02:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+					}
+				],
+				"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/buildBetaDetails":
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		case "/v1/betaAppReviewSubmissions":
+			if req.URL.Query().Get("include") != "build" {
+				t.Fatalf("expected include=build, got %q", req.URL.Query().Get("include"))
+			}
+			return statusJSONResponse(`{
+				"data":[
+					{
+						"type":"betaAppReviewSubmissions",
+						"id":"approved-326",
+						"attributes":{"betaReviewState":"APPROVED","submittedDate":"2026-08-10T05:00:00Z"},
+						"relationships":{"build":{"data":{"type":"builds","id":"build-326"}}}
+					},
+					{
+						"type":"betaAppReviewSubmissions",
+						"id":"waiting-325",
+						"attributes":{"betaReviewState":"WAITING_FOR_REVIEW","submittedDate":"2026-08-09T03:00:00Z"}
+					}
+				],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/betaAppReviewSubmissions/waiting-325/build":
+			relatedBuildCalls++
+			return statusJSONResponse(`{
+				"data":{"type":"builds","id":"build-325","attributes":{"version":"325","uploadedDate":"2026-08-09T02:00:00Z","processingState":"VALID"}}
+			}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "6748252780", "--platform", "IOS", "--include", "builds,testflight", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload struct {
+		Summary struct {
+			Health   string   `json:"health"`
+			Blockers []string `json:"blockers"`
+		} `json:"summary"`
+		TestFlight struct {
+			BetaReviewSubmission struct {
+				ID                    string `json:"id"`
+				RelationToLatestBuild string `json:"relationToLatestBuild"`
+				Build                 struct {
+					ID          string `json:"id"`
+					Version     string `json:"version"`
+					BuildNumber string `json:"buildNumber"`
+					Platform    string `json:"platform"`
+				} `json:"build"`
+			} `json:"betaReviewSubmission"`
+		} `json:"testflight"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+
+	review := payload.TestFlight.BetaReviewSubmission
+	if relatedBuildCalls != 1 {
+		t.Fatalf("expected one bounded related-build fallback, got %d", relatedBuildCalls)
+	}
+	if review.ID != "waiting-325" || review.RelationToLatestBuild != "sameVersionTrain" {
+		t.Fatalf("expected active same-train review to win selection, got %+v", review)
+	}
+	if review.Build.ID != "build-325" || review.Build.BuildNumber != "325" || review.Build.Version != "1.2.3" || review.Build.Platform != "IOS" {
+		t.Fatalf("expected resolved review build context, got %+v", review.Build)
+	}
+	if payload.Summary.Health != "red" || len(payload.Summary.Blockers) != 1 {
+		t.Fatalf("expected older active review to block latest build, got %+v", payload.Summary)
+	}
+}
+
+func TestStatusResolvesSelectedActiveBetaReviewBeyondPrefetchCap(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	reviewSubmissions := make([]map[string]any, 0, 6)
+	for index := 1; index <= 6; index++ {
+		reviewSubmissions = append(reviewSubmissions, map[string]any{
+			"type": "betaAppReviewSubmissions",
+			"id":   fmt.Sprintf("waiting-%d", index),
+			"attributes": map[string]any{
+				"betaReviewState": "WAITING_FOR_REVIEW",
+				"submittedDate":   fmt.Sprintf("2026-08-09T%02d:00:00Z", 7-index),
+			},
+		})
+	}
+	reviewResponse, err := json.Marshal(map[string]any{
+		"data":  reviewSubmissions,
+		"links": map[string]any{"next": ""},
+	})
+	if err != nil {
+		t.Fatalf("marshal review response: %v", err)
+	}
+
+	relatedBuildCalls := 0
+	preReleaseCalls := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.URL.Path == "/v1/builds":
+			return statusJSONResponse(`{
+				"data":[{
+					"type":"builds",
+					"id":"build-326",
+					"attributes":{"version":"326","uploadedDate":"2026-08-10T02:00:00Z","processingState":"VALID"},
+					"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+				}],
+				"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
+				"links":{"next":""}
+			}`), nil
+		case req.URL.Path == "/v1/buildBetaDetails":
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		case req.URL.Path == "/v1/betaAppReviewSubmissions":
+			return statusJSONResponse(string(reviewResponse)), nil
+		case strings.HasPrefix(req.URL.Path, "/v1/betaAppReviewSubmissions/waiting-") && strings.HasSuffix(req.URL.Path, "/build"):
+			relatedBuildCalls++
+			submissionID := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/v1/betaAppReviewSubmissions/"), "/build")
+			buildNumber := "400"
+			if submissionID == "waiting-6" {
+				buildNumber = "325"
+			}
+			return statusJSONResponse(fmt.Sprintf(`{
+				"data":{"type":"builds","id":"review-build-%s","attributes":{"version":"%s","uploadedDate":"2026-08-09T02:00:00Z","processingState":"VALID"}}
+			}`, submissionID, buildNumber)), nil
+		case strings.HasPrefix(req.URL.Path, "/v1/builds/review-build-waiting-") && strings.HasSuffix(req.URL.Path, "/preReleaseVersion"):
+			preReleaseCalls++
+			version := "2.0.0"
+			if strings.Contains(req.URL.Path, "waiting-6") {
+				version = "1.2.3"
+			}
+			return statusJSONResponse(fmt.Sprintf(`{
+				"data":{"type":"preReleaseVersions","id":"train-%s-ios","attributes":{"version":"%s","platform":"IOS"}}
+			}`, version, version)), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "6748252780", "--platform", "IOS", "--include", "builds,testflight", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload struct {
+		Summary struct {
+			Health     string   `json:"health"`
+			Blockers   []string `json:"blockers"`
+			NextAction string   `json:"nextAction"`
+		} `json:"summary"`
+		TestFlight struct {
+			BetaReviewSubmission struct {
+				ID                    string                 `json:"id"`
+				RelationToLatestBuild string                 `json:"relationToLatestBuild"`
+				Build                 betaReviewBuildPayload `json:"build"`
+			} `json:"betaReviewSubmission"`
+		} `json:"testflight"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+
+	review := payload.TestFlight.BetaReviewSubmission
+	if relatedBuildCalls != 6 || preReleaseCalls != 6 {
+		t.Fatalf("expected exactly six bounded fallback contexts (12 requests), got related=%d preRelease=%d", relatedBuildCalls, preReleaseCalls)
+	}
+	if review.ID != "waiting-6" || review.RelationToLatestBuild != "sameVersionTrain" {
+		t.Fatalf("expected selected sixth active review to resolve as same train, got %+v", review)
+	}
+	if review.Build.ID != "review-build-waiting-6" || review.Build.BuildNumber != "325" || review.Build.Version != "1.2.3" || review.Build.Platform != "IOS" {
+		t.Fatalf("expected resolved selected review build, got %+v", review.Build)
+	}
+	if payload.Summary.Health != "red" || len(payload.Summary.Blockers) != 1 {
+		t.Fatalf("expected selected older active review to block latest build, got %+v", payload.Summary)
+	}
+	if !strings.Contains(payload.Summary.NextAction, "build 325") || !strings.Contains(payload.Summary.NextAction, "build 326") {
+		t.Fatalf("expected actionable next step naming review and latest builds, got %q", payload.Summary.NextAction)
+	}
+}
+
+func TestStatusEnrichesLinkedActiveReviewBuildOutsideSnapshot(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/builds":
+			return statusJSONResponse(`{
+				"data":[{
+					"type":"builds",
+					"id":"build-326",
+					"attributes":{"version":"326","uploadedDate":"2026-08-10T02:00:00Z","processingState":"VALID"},
+					"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+				}],
+				"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/buildBetaDetails":
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		case "/v1/betaAppReviewSubmissions":
+			return statusJSONResponse(`{
+				"data":[{
+					"type":"betaAppReviewSubmissions",
+					"id":"waiting-325",
+					"attributes":{"betaReviewState":"WAITING_FOR_REVIEW","submittedDate":"2026-08-09T03:00:00Z"},
+					"relationships":{"build":{"data":{"type":"builds","id":"build-325"}}}
+				}],
+				"links":{"next":""}
+			}`), nil
+		case "/v1/betaAppReviewSubmissions/waiting-325/build":
+			return statusJSONResponse(`{
+				"data":{"type":"builds","id":"build-325","attributes":{"version":"325","uploadedDate":"2026-08-09T02:00:00Z","processingState":"VALID"}}
+			}`), nil
+		case "/v1/builds/build-325/preReleaseVersion":
+			return statusJSONResponse(`{
+				"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}
+			}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "6748252780", "--platform", "IOS", "--include", "builds,testflight", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload struct {
+		Summary struct {
+			Health   string   `json:"health"`
+			Blockers []string `json:"blockers"`
+		} `json:"summary"`
+		TestFlight struct {
+			BetaReviewSubmission struct {
+				RelationToLatestBuild string                 `json:"relationToLatestBuild"`
+				Build                 betaReviewBuildPayload `json:"build"`
+			} `json:"betaReviewSubmission"`
+		} `json:"testflight"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+
+	review := payload.TestFlight.BetaReviewSubmission
+	if review.RelationToLatestBuild != "sameVersionTrain" {
+		t.Fatalf("expected enriched sameVersionTrain relation, got %+v", review)
+	}
+	if review.Build.ID != "build-325" || review.Build.BuildNumber != "325" || review.Build.Version != "1.2.3" || review.Build.Platform != "IOS" {
+		t.Fatalf("expected full review build identity outside snapshot, got %+v", review.Build)
+	}
+	if payload.Summary.Health != "red" || len(payload.Summary.Blockers) != 1 {
+		t.Fatalf("expected enriched older active review to block latest build, got %+v", payload.Summary)
+	}
+}
+
+func TestStatusFindsActiveBetaReviewBeyondFiftyBuildSnapshot(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	buildPageCalls := 0
+	reviewSubmissionCalls := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/builds":
+			buildPageCalls++
+			if got := req.URL.Query().Get("filter[betaAppReviewSubmission.betaReviewState]"); got != "" {
+				if got != "WAITING_FOR_REVIEW,IN_REVIEW" {
+					t.Fatalf("expected active beta review build filter, got %q", got)
+				}
+				if req.URL.Query().Get("filter[app]") != "6748252780" || req.URL.Query().Get("filter[preReleaseVersion.platform]") != "IOS" {
+					t.Fatalf("expected active review builds scoped to the explicit app and platform, got %s", req.URL.RawQuery)
+				}
+				if req.URL.Query().Get("include") != "preReleaseVersion" || req.URL.Query().Get("limit") != "50" {
+					t.Fatalf("expected bounded active review build context query, got %s", req.URL.RawQuery)
+				}
+				if req.URL.Query().Get("cursor") == "active-older" {
+					return statusJSONResponse(`{
+						"data":[{
+							"type":"builds",
+							"id":"build-325",
+							"attributes":{"version":"325","uploadedDate":"2026-08-08T02:00:00Z","processingState":"VALID"},
+							"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+						}],
+						"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
+						"links":{"next":""}
+					}`), nil
+				}
+				return statusJSONResponse(`{
+					"data":[{
+						"type":"builds",
+						"id":"build-376",
+						"attributes":{"version":"376","uploadedDate":"2026-08-10T02:00:00Z","processingState":"VALID"},
+						"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+					}],
+					"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
+					"links":{"next":"https://api.appstoreconnect.apple.com/v1/builds?cursor=active-older&filter%5Bapp%5D=6748252780&filter%5BbetaAppReviewSubmission.betaReviewState%5D=WAITING_FOR_REVIEW%2CIN_REVIEW&filter%5BpreReleaseVersion.platform%5D=IOS&include=preReleaseVersion&limit=50"}
+				}`), nil
+			}
+
+			builds := make([]map[string]any, 0, 50)
+			for buildNumber := 376; buildNumber >= 327; buildNumber-- {
+				builds = append(builds, map[string]any{
+					"type": "builds",
+					"id":   fmt.Sprintf("build-%d", buildNumber),
+					"attributes": map[string]any{
+						"version":         fmt.Sprintf("%d", buildNumber),
+						"uploadedDate":    "2026-08-10T02:00:00Z",
+						"processingState": "VALID",
+					},
+					"relationships": map[string]any{
+						"preReleaseVersion": map[string]any{
+							"data": map[string]any{"type": "preReleaseVersions", "id": "train-1.2.3-ios"},
+						},
+					},
+				})
+			}
+			body, err := json.Marshal(map[string]any{
+				"data": builds,
+				"included": []map[string]any{{
+					"type": "preReleaseVersions", "id": "train-1.2.3-ios",
+					"attributes": map[string]any{"version": "1.2.3", "platform": "IOS"},
+				}},
+				"links": map[string]any{"next": "https://api.appstoreconnect.apple.com/v1/builds?cursor=older"},
+			})
+			if err != nil {
+				t.Fatalf("marshal builds response: %v", err)
+			}
+			return statusJSONResponse(string(body)), nil
+		case "/v1/buildBetaDetails":
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		case "/v1/betaAppReviewSubmissions":
+			reviewSubmissionCalls++
+			buildFilter := req.URL.Query().Get("filter[build]")
+			if strings.Contains(buildFilter, "build-325") {
+				return statusJSONResponse(`{
+					"data":[{
+						"type":"betaAppReviewSubmissions",
+						"id":"waiting-325",
+						"attributes":{"betaReviewState":"WAITING_FOR_REVIEW","submittedDate":"2026-08-09T03:00:00Z"},
+						"relationships":{"build":{"data":{"type":"builds","id":"build-325"}}}
+					}],
+					"links":{"next":""}
+				}`), nil
+			}
+			return statusJSONResponse(`{"data":[],"links":{"next":""}}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"status", "--app", "6748252780", "--platform", "IOS", "--include", "builds,testflight", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload struct {
+		Summary struct {
+			Health     string   `json:"health"`
+			Blockers   []string `json:"blockers"`
+			NextAction string   `json:"nextAction"`
+		} `json:"summary"`
+		TestFlight struct {
+			BetaReviewSubmission struct {
+				ID                    string                 `json:"id"`
+				RelationToLatestBuild string                 `json:"relationToLatestBuild"`
+				Build                 betaReviewBuildPayload `json:"build"`
+			} `json:"betaReviewSubmission"`
+		} `json:"testflight"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+
+	review := payload.TestFlight.BetaReviewSubmission
+	if buildPageCalls != 3 || reviewSubmissionCalls != 2 {
+		t.Fatalf("expected one snapshot plus two active-review build pages and two batched review queries, got builds=%d reviews=%d", buildPageCalls, reviewSubmissionCalls)
+	}
+	if review.ID != "waiting-325" || review.RelationToLatestBuild != "sameVersionTrain" {
+		t.Fatalf("expected active review beyond snapshot to match the latest train, got %+v", review)
+	}
+	if review.Build.ID != "build-325" || review.Build.BuildNumber != "325" || review.Build.Version != "1.2.3" || review.Build.Platform != "IOS" {
+		t.Fatalf("expected full older review build identity, got %+v", review.Build)
+	}
+	if payload.Summary.Health != "red" || len(payload.Summary.Blockers) != 1 {
+		t.Fatalf("expected older active review to block instead of reporting green, got %+v", payload.Summary)
+	}
+	if !strings.Contains(payload.Summary.NextAction, "build 325") || !strings.Contains(payload.Summary.NextAction, "build 376") {
+		t.Fatalf("expected action naming review build 325 and latest build 376, got %q", payload.Summary.NextAction)
+	}
+}
+
+type betaReviewBuildPayload struct {
+	ID          string `json:"id"`
+	Version     string `json:"version"`
+	BuildNumber string `json:"buildNumber"`
+	Platform    string `json:"platform"`
 }
 
 func TestStatusPlatformFiltersPlatformScopedSections(t *testing.T) {
@@ -1073,7 +1683,13 @@ func TestStatusTestFlightHandlesMissingBuildRelationship(t *testing.T) {
 			}`), nil
 		case "/v1/builds":
 			return statusJSONResponse(`{
-				"data":[{"type":"builds","id":"build-2","attributes":{"version":"45","uploadedDate":"2026-02-20T00:00:00Z","processingState":"VALID"}}],
+				"data":[{
+					"type":"builds",
+					"id":"build-2",
+					"attributes":{"version":"45","uploadedDate":"2026-02-20T00:00:00Z","processingState":"VALID"},
+					"relationships":{"preReleaseVersion":{"data":{"type":"preReleaseVersions","id":"train-1.2.3-ios"}}}
+				}],
+				"included":[{"type":"preReleaseVersions","id":"train-1.2.3-ios","attributes":{"version":"1.2.3","platform":"IOS"}}],
 				"links":{"next":""}
 			}`), nil
 		case "/v1/buildBetaDetails":

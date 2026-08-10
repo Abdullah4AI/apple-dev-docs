@@ -200,6 +200,8 @@ func GameCenterLeaderboardSetsV2CreateCommand() *ffcli.Command {
 		ShortHelp:  "Create a new Game Center leaderboard set (v2).",
 		LongHelp: `Create a new Game Center leaderboard set (v2).
 
+Creates the required initial leaderboard set version inline.
+
 Examples:
   asc game-center leaderboard-sets v2 create --app "APP_ID" --reference-name "Season 1" --vendor-id "com.example.season1"
   asc game-center leaderboard-sets v2 create --group-id "GROUP_ID" --reference-name "Group Season" --vendor-id "grp.com.example.groupseason"`,

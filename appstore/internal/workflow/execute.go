@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -36,8 +35,20 @@ type StepResult struct {
 	ParentWorkflow string            `json:"parent_workflow,omitempty"`
 	Status         string            `json:"status"`
 	DurationMS     int64             `json:"duration_ms"`
+	FailureReason  string            `json:"failure_reason,omitempty"`
 	Error          string            `json:"error,omitempty"`
+	Attempts       []AttemptResult   `json:"attempts,omitempty"`
 	Outputs        map[string]string `json:"outputs,omitempty"`
+}
+
+// AttemptResult records one configured run-step attempt.
+type AttemptResult struct {
+	Invocation    int    `json:"invocation"`
+	Attempt       int    `json:"attempt"`
+	Status        string `json:"status"`
+	DurationMS    int64  `json:"duration_ms"`
+	FailureReason string `json:"failure_reason,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // HookResult records execution of a hook command (before_all/after_all/error).
@@ -62,19 +73,21 @@ type ResumeInfo struct {
 
 // RunResult is the structured output of a workflow execution.
 type RunResult struct {
-	Workflow    string                       `json:"workflow"`
-	Status      string                       `json:"status"`
-	Error       string                       `json:"error,omitempty"`
-	FailedStep  string                       `json:"failed_step,omitempty"`
-	Recoverable bool                         `json:"recoverable,omitempty"`
-	RunID       string                       `json:"run_id,omitempty"`
-	RunFile     string                       `json:"run_file,omitempty"`
-	Resumed     bool                         `json:"resumed,omitempty"`
-	Resume      *ResumeInfo                  `json:"resume,omitempty"`
-	Outputs     map[string]map[string]string `json:"outputs,omitempty"`
-	Hooks       *HooksResult                 `json:"hooks,omitempty"`
-	Steps       []StepResult                 `json:"steps"`
-	DurationMS  int64                        `json:"duration_ms"`
+	Workflow       string                       `json:"workflow"`
+	Status         string                       `json:"status"`
+	Error          string                       `json:"error,omitempty"`
+	FailedStep     string                       `json:"failed_step,omitempty"`
+	Recoverable    bool                         `json:"recoverable,omitempty"`
+	Terminal       bool                         `json:"terminal,omitempty"`
+	TerminalReason string                       `json:"terminal_reason,omitempty"`
+	RunID          string                       `json:"run_id,omitempty"`
+	RunFile        string                       `json:"run_file,omitempty"`
+	Resumed        bool                         `json:"resumed,omitempty"`
+	Resume         *ResumeInfo                  `json:"resume,omitempty"`
+	Outputs        map[string]map[string]string `json:"outputs,omitempty"`
+	Hooks          *HooksResult                 `json:"hooks,omitempty"`
+	Steps          []StepResult                 `json:"steps"`
+	DurationMS     int64                        `json:"duration_ms"`
 }
 
 type runner struct {
@@ -252,7 +265,10 @@ func newRunner(def *Definition, opts RunOptions, result *RunResult) (*runner, er
 }
 
 func (r *runner) validateResumeState(state *persistedRunState) error {
+	terminalReason := terminalReasonForState(state)
 	switch {
+	case terminalReason != "":
+		return fmt.Errorf("workflow: resume run %q cannot be resumed: %s", state.RunID, terminalReason)
 	case state.Workflow != r.opts.WorkflowName:
 		return fmt.Errorf("workflow: resume run %q belongs to workflow %q, not %q", state.RunID, state.Workflow, r.opts.WorkflowName)
 	case state.WorkflowFile != r.opts.WorkflowFile:
@@ -261,6 +277,8 @@ func (r *runner) validateResumeState(state *persistedRunState) error {
 		return fmt.Errorf("workflow: resume run %q does not match the current workflow definition", state.RunID)
 	case !maps.Equal(state.Params, r.opts.Params):
 		return fmt.Errorf("workflow: resume run %q does not match the current workflow parameters", state.RunID)
+	case !stateHasResumeCheckpoint(state):
+		return fmt.Errorf("workflow: resume run %q cannot be resumed: no successful checkpoint or retry-enabled failed step", state.RunID)
 	default:
 		return nil
 	}
@@ -273,7 +291,7 @@ func (r *runner) outputsFromState(state *persistedRunState) map[string]map[strin
 	}
 	for _, stepKey := range slices.Sorted(maps.Keys(state.Steps)) {
 		step := state.Steps[stepKey]
-		if strings.TrimSpace(step.Name) == "" || len(step.Outputs) == 0 {
+		if step.Status != "ok" || strings.TrimSpace(step.Name) == "" || len(step.Outputs) == 0 {
 			continue
 		}
 		outputs[step.Name] = cloneStringMap(step.Outputs)
@@ -357,6 +375,16 @@ func (r *runner) executeSteps(ctx context.Context, workflowName string, steps []
 		}
 
 		if ref := sr.Workflow; ref != "" {
+			if step.Retry != nil || step.Timeout != nil {
+				err := fmt.Errorf("workflow: %s step %d: retry and timeout are only supported on run steps", workflowName, idx)
+				sr.Status = "error"
+				sr.FailureReason = "invalid_policy"
+				sr.Error = "retry and timeout are only supported on run steps"
+				sr.DurationMS = time.Since(stepStart).Milliseconds()
+				r.result.Steps = append(r.result.Steps, sr)
+				r.result.FailedStep = failedStepName(step.Name, stepKey)
+				return err
+			}
 			if depth+1 > MaxCallDepth {
 				err := fmt.Errorf("workflow: %s step %d: max call depth %d exceeded", workflowName, idx, MaxCallDepth)
 				sr.Status = "error"
@@ -408,6 +436,7 @@ func (r *runner) executeSteps(ctx context.Context, workflowName string, steps []
 			if persisted, ok := r.state.Steps[stepKey]; ok && persisted.Status == "ok" {
 				sr.Status = "resumed"
 				sr.Outputs = cloneStringMap(persisted.Outputs)
+				sr.Attempts = cloneAttemptResults(persisted.Attempts)
 				sr.DurationMS = 0
 				r.result.Steps = append(r.result.Steps, sr)
 				if strings.TrimSpace(persisted.Name) != "" && len(persisted.Outputs) > 0 {
@@ -437,64 +466,42 @@ func (r *runner) executeSteps(ctx context.Context, workflowName string, steps []
 			return wrapped
 		}
 
-		stdout := r.opts.Stdout
-		var captured bytes.Buffer
-		if len(step.Outputs) > 0 {
-			stdout = io.MultiWriter(r.opts.Stdout, &captured)
-		}
-
-		if err := runShellCommand(ctx, command, env, stdout, r.opts.Stderr); err != nil {
-			wrapped := fmt.Errorf("workflow: %s step %d: %w", workflowName, idx, err)
-			sr.Status = "error"
-			sr.Error = err.Error()
+		if err := r.executeRunStep(ctx, workflowName, idx, stepKey, step, command, env, &sr); err != nil {
 			sr.DurationMS = time.Since(stepStart).Milliseconds()
 			r.result.Steps = append(r.result.Steps, sr)
 			r.result.FailedStep = failedStepName(step.Name, stepKey)
-			return wrapped
-		}
-
-		if len(step.Outputs) > 0 {
-			extracted, err := extractDeclaredOutputs(step.Outputs, captured.Bytes())
-			if err != nil {
-				wrapped := fmt.Errorf("workflow: %s step %d: %w", workflowName, idx, err)
-				sr.Status = "error"
-				sr.Error = err.Error()
-				sr.DurationMS = time.Since(stepStart).Milliseconds()
-				r.result.Steps = append(r.result.Steps, sr)
-				r.result.FailedStep = failedStepName(step.Name, stepKey)
-				return wrapped
-			}
-			sr.Outputs = extracted
-			if strings.TrimSpace(step.Name) != "" {
-				r.outputs[step.Name] = cloneStringMap(extracted)
-				r.result.Outputs = cloneNestedStringMap(r.outputs)
-			}
-		}
-
-		sr.Status = "ok"
-		sr.DurationMS = time.Since(stepStart).Milliseconds()
-		r.result.Steps = append(r.result.Steps, sr)
-
-		if err := r.persistStep(stepKey, sr); err != nil {
-			r.result.FailedStep = failedStepName(step.Name, stepKey)
 			return err
 		}
+
+		sr.DurationMS = time.Since(stepStart).Milliseconds()
+		r.result.Steps = append(r.result.Steps, sr)
 	}
 	return nil
 }
 
-func (r *runner) persistStep(stepKey string, sr StepResult) error {
-	if r.state == nil || sr.Status != "ok" {
+func (r *runner) persistStep(stepKey string, sr StepResult, retryEnabled bool) error {
+	if r.state == nil {
 		return nil
 	}
 	r.state.Steps[stepKey] = persistedStepState{
 		Name:           sr.Name,
 		Workflow:       sr.Workflow,
 		ParentWorkflow: sr.ParentWorkflow,
-		Status:         "ok",
+		Status:         sr.Status,
+		FailureReason:  sr.FailureReason,
+		Error:          sr.Error,
+		RetryEnabled:   retryEnabled,
+		Attempts:       cloneAttemptResults(sr.Attempts),
 		Outputs:        cloneStringMap(sr.Outputs),
 	}
 	return saveRunState(r.statePath, *r.state)
+}
+
+func cloneAttemptResults(in []AttemptResult) []AttemptResult {
+	if len(in) == 0 {
+		return nil
+	}
+	return slices.Clone(in)
 }
 
 func (r *runner) finishSuccess() error {
@@ -515,10 +522,24 @@ func (r *runner) markFailure(err error, failedStep string) {
 		r.result.FailedStep = failedStep
 	}
 
+	terminalReason := terminalReasonForState(r.state)
+	if terminalReason == "" {
+		terminalReason = terminalReasonForResult(r.result)
+	}
+	if terminalReason != "" {
+		r.result.Terminal = true
+		r.result.TerminalReason = terminalReason
+	}
+
 	if r.state == nil {
 		return
 	}
-	r.state.Status = "error"
+	if terminalReason != "" {
+		r.state.Status = "terminal"
+		r.state.TerminalReason = terminalReason
+	} else {
+		r.state.Status = "error"
+	}
 	r.state.FailedStep = r.result.FailedStep
 	_ = saveRunState(r.statePath, *r.state)
 
@@ -528,14 +549,91 @@ func (r *runner) markFailure(err error, failedStep string) {
 	}
 }
 
+func (r *runner) setTerminalReason(reason string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	r.result.Terminal = true
+	r.result.TerminalReason = reason
+	if r.state != nil {
+		r.state.Status = "terminal"
+		r.state.TerminalReason = reason
+	}
+}
+
 func (r *runner) hasRecoverableState() bool {
 	if r.state == nil {
 		return false
 	}
-	if len(r.state.Steps) > 0 {
-		return true
+	if r.result != nil && r.result.Terminal {
+		return false
 	}
-	return r.state.Hooks != nil && r.state.Hooks.BeforeAll != nil && r.state.Hooks.BeforeAll.Status == "ok"
+	if terminalReasonForState(r.state) != "" {
+		return false
+	}
+	return stateHasResumeCheckpoint(r.state)
+}
+
+func stateHasResumeCheckpoint(state *persistedRunState) bool {
+	if state == nil {
+		return false
+	}
+	for _, step := range state.Steps {
+		if step.Status == "ok" || step.RetryEnabled {
+			return true
+		}
+	}
+	return state.Hooks != nil && state.Hooks.BeforeAll != nil && state.Hooks.BeforeAll.Status == "ok"
+}
+
+func terminalReasonForResult(result *RunResult) string {
+	if result == nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(result.TerminalReason); reason != "" {
+		return reason
+	}
+	for _, step := range result.Steps {
+		if step.FailureReason != "output_error" {
+			continue
+		}
+		label := strings.TrimSpace(step.Name)
+		if label == "" {
+			label = fmt.Sprintf("%d", step.Index)
+		}
+		return terminalOutputReason(label)
+	}
+	return ""
+}
+
+func terminalReasonForState(state *persistedRunState) string {
+	if state == nil {
+		return ""
+	}
+	if strings.TrimSpace(state.TerminalReason) != "" {
+		return state.TerminalReason
+	}
+	for _, stepKey := range slices.Sorted(maps.Keys(state.Steps)) {
+		step := state.Steps[stepKey]
+		if step.FailureReason != "output_error" {
+			continue
+		}
+		label := strings.TrimSpace(step.Name)
+		if label == "" {
+			label = stepKey
+		}
+		return terminalOutputReason(label)
+	}
+	return ""
+}
+
+func terminalOutputReason(label string) string {
+	return fmt.Sprintf("step %q command completed but output extraction failed; automatic resume is disabled to avoid repeating possible side effects", label)
+}
+
+func terminalTimeoutReason(label string) string {
+	return fmt.Sprintf("step %q timed out without retry; automatic resume is disabled because the command may have completed remotely", label)
 }
 
 func (r *runner) resumeCommand() string {

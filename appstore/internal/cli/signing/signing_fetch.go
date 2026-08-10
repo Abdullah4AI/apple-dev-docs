@@ -70,6 +70,12 @@ Examples:
 			if outputDir == "" {
 				outputDir = "./signing"
 			}
+			prepareOutputDir := onceAfterSuccess(func() error {
+				if err := os.MkdirAll(outputDir, 0o755); err != nil {
+					return fmt.Errorf("create output dir: %w", err)
+				}
+				return nil
+			})
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -98,30 +104,28 @@ Examples:
 			}
 			result.BundleIDResource = bundleIDResp.Data.ID
 
-			certs, err := findCertificates(requestCtx, client, profType, *certType)
-			if err != nil {
-				return fmt.Errorf("signing fetch: %w", err)
-			}
-			result.CertificateIDs = extractIDs(certs.Data)
-
-			profile, created, err := findOrCreateProfile(
+			profile, certs, created, err := resolveSigningAssets(
 				requestCtx,
 				client,
-				bundleIDResp.Data.ID,
-				bundle,
-				profType,
-				result.CertificateIDs,
-				shared.SplitCSV(*deviceIDs),
-				*createMissing,
+				signingAssetsOptions{
+					BundleIDResourceID: bundleIDResp.Data.ID,
+					BundleIdentifier:   bundle,
+					ProfileType:        profType,
+					CertificateType:    *certType,
+					DeviceIDs:          shared.SplitCSV(*deviceIDs),
+					CreateMissing:      *createMissing,
+					BeforeCreate:       prepareOutputDir,
+				},
 			)
 			if err != nil {
 				return fmt.Errorf("signing fetch: %w", err)
 			}
+			result.CertificateIDs = extractIDs(certs.Data)
 			result.ProfileID = profile.Data.ID
 			result.Created = created
 
-			if err := os.MkdirAll(outputDir, 0o755); err != nil {
-				return fmt.Errorf("signing fetch: create output dir: %w", err)
+			if err := prepareOutputDir(); err != nil {
+				return fmt.Errorf("signing fetch: %w", err)
 			}
 
 			profileName := safeFileName(profile.Data.Attributes.Name, profile.Data.ID)
@@ -212,7 +216,188 @@ func findCertificates(ctx context.Context, client *asc.Client, profileType, cert
 	return &asc.CertificatesResponse{Data: all, Links: links}, nil
 }
 
-func findOrCreateProfile(ctx context.Context, client *asc.Client, bundleIDResourceID, bundleIdentifier, profileType string, certIDs, deviceIDs []string, createMissing bool) (*asc.ProfileResponse, bool, error) {
+type signingAssetsOptions struct {
+	BundleIDResourceID string
+	BundleIdentifier   string
+	ProfileType        string
+	CertificateType    string
+	DeviceIDs          []string
+	CreateMissing      bool
+	BeforeCreate       func() error
+	CreateContext      func() (context.Context, context.CancelFunc)
+}
+
+var errNoMatchingProfileCertificates = errors.New("profile has no matching associated certificates")
+
+var supportedSigningCertificateTypes = map[string]struct{}{
+	"APPLE_PAY":                   {},
+	"APPLE_PAY_MERCHANT_IDENTITY": {},
+	"APPLE_PAY_PSP_IDENTITY":      {},
+	"APPLE_PAY_RSA":               {},
+	"DEVELOPER_ID_KEXT":           {},
+	"DEVELOPER_ID_KEXT_G2":        {},
+	"DEVELOPER_ID_APPLICATION":    {},
+	"DEVELOPER_ID_APPLICATION_G2": {},
+	"DEVELOPMENT":                 {},
+	"DISTRIBUTION":                {},
+	"IDENTITY_ACCESS":             {},
+	"IOS_DEVELOPMENT":             {},
+	"IOS_DISTRIBUTION":            {},
+	"MAC_APP_DISTRIBUTION":        {},
+	"MAC_INSTALLER_DISTRIBUTION":  {},
+	"MAC_APP_DEVELOPMENT":         {},
+	"PASS_TYPE_ID":                {},
+	"PASS_TYPE_ID_WITH_NFC":       {},
+}
+
+func resolveSigningAssets(ctx context.Context, client *asc.Client, options signingAssetsOptions) (*asc.ProfileResponse, *asc.CertificatesResponse, bool, error) {
+	certificateType, err := resolveSigningCertificateTypes(options.ProfileType, options.CertificateType)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	profiles, err := findActiveProfiles(ctx, client, options.BundleIDResourceID, options.ProfileType)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	var certificateMatchErr error
+	for _, profileResource := range profiles {
+		profile := &asc.ProfileResponse{Data: profileResource}
+		certificates, err := findProfileCertificates(ctx, client, profile.Data.ID, certificateType)
+		if err == nil {
+			return profile, certificates, false, nil
+		}
+		if !errors.Is(err, errNoMatchingProfileCertificates) {
+			return nil, nil, false, err
+		}
+		certificateMatchErr = err
+	}
+
+	if !options.CreateMissing {
+		if certificateMatchErr != nil {
+			return nil, nil, false, certificateMatchErr
+		}
+		return nil, nil, false, fmt.Errorf(
+			"no active %s profile found for bundle ID %s; use --create-missing to create one",
+			options.ProfileType,
+			options.BundleIdentifier,
+		)
+	}
+
+	certificates, err := findCertificates(ctx, client, options.ProfileType, certificateType)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	certificates.Data = certificatesForProfileCreation(certificates.Data, options.ProfileType, time.Now())
+	if len(certificates.Data) == 0 {
+		return nil, nil, false, fmt.Errorf(
+			"no active, unexpired certificates available to create %s profile",
+			options.ProfileType,
+		)
+	}
+	if options.BeforeCreate != nil {
+		if err := options.BeforeCreate(); err != nil {
+			return nil, nil, false, fmt.Errorf("preflight before creating profile: %w", err)
+		}
+	}
+
+	createCtx := ctx
+	cancelCreate := func() {}
+	if options.CreateContext != nil {
+		createCtx, cancelCreate = options.CreateContext()
+		if createCtx == nil {
+			return nil, nil, false, fmt.Errorf("profile create context is nil")
+		}
+	}
+	profile, err := createProfile(
+		createCtx,
+		client,
+		options.BundleIDResourceID,
+		options.ProfileType,
+		extractIDs(certificates.Data),
+		options.DeviceIDs,
+	)
+	cancelCreate()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return profile, certificates, true, nil
+}
+
+func certificatesForProfileCreation(certificates []asc.Resource[asc.CertificateAttributes], profileType string, now time.Time) []asc.Resource[asc.CertificateAttributes] {
+	type candidate struct {
+		certificate asc.Resource[asc.CertificateAttributes]
+		expiresAt   time.Time
+	}
+
+	candidates := make([]candidate, 0, len(certificates))
+	for _, certificate := range certificates {
+		activated := certificate.Attributes.Activated
+		if activated != nil && !*activated {
+			continue
+		}
+		expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(certificate.Attributes.ExpirationDate))
+		if err != nil || !expiresAt.After(now) {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			certificate: certificate,
+			expiresAt:   expiresAt,
+		})
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+	if !isSingleCertificateProfile(profileType) {
+		eligible := make([]asc.Resource[asc.CertificateAttributes], 0, len(candidates))
+		for _, candidate := range candidates {
+			eligible = append(eligible, candidate.certificate)
+		}
+		return eligible
+	}
+
+	selected := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.expiresAt.After(selected.expiresAt) ||
+			(candidate.expiresAt.Equal(selected.expiresAt) && candidate.certificate.ID < selected.certificate.ID) {
+			selected = candidate
+		}
+	}
+	return []asc.Resource[asc.CertificateAttributes]{selected.certificate}
+}
+
+func isSingleCertificateProfile(profileType string) bool {
+	switch strings.ToUpper(strings.TrimSpace(profileType)) {
+	case "IOS_APP_STORE", "IOS_APP_ADHOC", "IOS_APP_INHOUSE",
+		"TVOS_APP_STORE", "TVOS_APP_ADHOC", "TVOS_APP_INHOUSE",
+		"MAC_APP_STORE", "MAC_CATALYST_APP_STORE":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveSigningCertificateTypes(profileType, raw string) (string, error) {
+	certificateTypes := shared.SplitCSVUpper(raw)
+	if len(certificateTypes) == 0 {
+		inferred, err := inferCertificateType(profileType)
+		if err != nil {
+			return "", err
+		}
+		certificateTypes = shared.SplitCSVUpper(inferred)
+	}
+
+	for _, certificateType := range certificateTypes {
+		if _, ok := supportedSigningCertificateTypes[certificateType]; !ok {
+			return "", fmt.Errorf("unsupported certificate type %s", certificateType)
+		}
+	}
+	return strings.Join(certificateTypes, ","), nil
+}
+
+func findActiveProfiles(ctx context.Context, client *asc.Client, bundleIDResourceID, profileType string) ([]asc.Resource[asc.ProfileAttributes], error) {
+	var matches []asc.Resource[asc.ProfileAttributes]
 	next := ""
 	for {
 		profiles, err := client.GetBundleIDProfiles(
@@ -221,7 +406,7 @@ func findOrCreateProfile(ctx context.Context, client *asc.Client, bundleIDResour
 			asc.WithBundleIDProfilesNextURL(next),
 		)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 
 		for _, profile := range profiles.Data {
@@ -229,31 +414,73 @@ func findOrCreateProfile(ctx context.Context, client *asc.Client, bundleIDResour
 				continue
 			}
 			if strings.EqualFold(strings.TrimSpace(profile.Attributes.ProfileType), profileType) {
-				return &asc.ProfileResponse{Data: profile}, false, nil
+				matches = append(matches, profile)
 			}
 		}
 
 		if strings.TrimSpace(profiles.Links.Next) == "" {
-			break
+			return matches, nil
 		}
 		next = profiles.Links.Next
 	}
+}
 
-	if !createMissing {
-		return nil, false, fmt.Errorf("no active %s profile found for bundle ID %s; use --create-missing to create one", profileType, bundleIdentifier)
+func findProfileCertificates(ctx context.Context, client *asc.Client, profileID, certificateType string) (*asc.CertificatesResponse, error) {
+	var (
+		all   []asc.Resource[asc.CertificateAttributes]
+		links asc.Links
+		next  string
+	)
+	for {
+		response, err := client.GetProfileCertificates(
+			ctx,
+			profileID,
+			asc.WithProfileCertificatesNextURL(next),
+		)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, response.Data...)
+		links = response.Links
+		if strings.TrimSpace(response.Links.Next) == "" {
+			break
+		}
+		next = response.Links.Next
 	}
+
+	requestedTypes := shared.SplitCSVUpper(certificateType)
+	if len(requestedTypes) > 0 {
+		requestedTypeSet := make(map[string]struct{}, len(requestedTypes))
+		for _, requestedType := range requestedTypes {
+			requestedTypeSet[requestedType] = struct{}{}
+		}
+		filtered := make([]asc.Resource[asc.CertificateAttributes], 0, len(all))
+		for _, certificate := range all {
+			certificateType := strings.ToUpper(strings.TrimSpace(certificate.Attributes.CertificateType))
+			if _, matches := requestedTypeSet[certificateType]; matches {
+				filtered = append(filtered, certificate)
+			}
+		}
+		all = filtered
+	}
+	if len(all) == 0 {
+		if len(requestedTypes) > 0 {
+			return nil, fmt.Errorf("profile %s has no associated certificates of type %s: %w", profileID, strings.Join(requestedTypes, ","), errNoMatchingProfileCertificates)
+		}
+		return nil, fmt.Errorf("profile %s has no associated certificates: %w", profileID, errNoMatchingProfileCertificates)
+	}
+	return &asc.CertificatesResponse{Data: all, Links: links}, nil
+}
+
+func createProfile(ctx context.Context, client *asc.Client, bundleIDResourceID, profileType string, certIDs, deviceIDs []string) (*asc.ProfileResponse, error) {
 	if len(certIDs) == 0 {
-		return nil, false, fmt.Errorf("no certificates available to create profile")
+		return nil, fmt.Errorf("no certificates available to create profile")
 	}
 	name := fmt.Sprintf("%s-%s", profileType, time.Now().Format("20060102"))
-	profile, err := client.CreateProfile(ctx, asc.ProfileCreateAttributes{
+	return client.CreateProfile(ctx, asc.ProfileCreateAttributes{
 		Name:        name,
 		ProfileType: profileType,
 	}, bundleIDResourceID, certIDs, deviceIDs)
-	if err != nil {
-		return nil, false, err
-	}
-	return profile, true, nil
 }
 
 func isDevelopmentProfile(profileType string) bool {
@@ -268,27 +495,27 @@ func inferCertificateType(profileType string) (string, error) {
 
 	switch {
 	case strings.Contains(normalized, "IOS_APP_DEVELOPMENT"):
-		return "IOS_DEVELOPMENT", nil
+		return "IOS_DEVELOPMENT,DEVELOPMENT", nil
 	case strings.Contains(normalized, "IOS_APP_STORE"),
 		strings.Contains(normalized, "IOS_APP_ADHOC"),
 		strings.Contains(normalized, "IOS_APP_INHOUSE"):
-		return "IOS_DISTRIBUTION", nil
+		return "IOS_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "TVOS_APP_DEVELOPMENT"):
-		return "TVOS_DEVELOPMENT", nil
+		return "IOS_DEVELOPMENT,DEVELOPMENT", nil
 	case strings.Contains(normalized, "TVOS_APP_STORE"),
 		strings.Contains(normalized, "TVOS_APP_ADHOC"),
 		strings.Contains(normalized, "TVOS_APP_INHOUSE"):
-		return "TVOS_DISTRIBUTION", nil
+		return "IOS_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "MAC_CATALYST_APP_DEVELOPMENT"):
-		return "IOS_DEVELOPMENT", nil
+		return "MAC_APP_DEVELOPMENT,DEVELOPMENT", nil
 	case strings.Contains(normalized, "MAC_CATALYST_APP_STORE"):
-		return "MAC_APP_DISTRIBUTION", nil
+		return "MAC_APP_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "MAC_CATALYST_APP_DIRECT"):
 		return "DEVELOPER_ID_APPLICATION", nil
 	case strings.Contains(normalized, "MAC_APP_DEVELOPMENT"):
-		return "MAC_APP_DEVELOPMENT", nil
+		return "MAC_APP_DEVELOPMENT,DEVELOPMENT", nil
 	case strings.Contains(normalized, "MAC_APP_STORE"):
-		return "MAC_APP_DISTRIBUTION", nil
+		return "MAC_APP_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "MAC_APP_DIRECT"):
 		return "DEVELOPER_ID_APPLICATION", nil
 	default:

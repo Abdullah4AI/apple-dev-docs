@@ -19,11 +19,11 @@ require (
 	github.com/tidwall/jsonc v0.3.3
 	github.com/zalando/go-keyring v0.2.6
 	go.mozilla.org/pkcs7 v0.10.0
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.54.0
 	golang.org/x/mod v0.38.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	golang.org/x/text v0.39.0
+	golang.org/x/text v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9
 )
@@ -51,7 +51,7 @@ require (
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
-	github.com/bitrise-io/go-utils/v2 v2.0.0-alpha.35
+	github.com/bitrise-io/go-utils/v2 v2.0.0-alpha.36
 	github.com/bitrise-io/go-xcode v1.3.4
 	github.com/bitrise-io/go-xcode/v2 v2.0.0-alpha.84.0.20260710143042-ba29d6757432
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect

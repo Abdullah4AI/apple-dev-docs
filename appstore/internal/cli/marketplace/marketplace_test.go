@@ -99,6 +99,22 @@ func TestMarketplaceSearchDetailsDeleteCommand_MissingConfirm(t *testing.T) {
 	}
 }
 
+func TestMarketplaceWebhooksCommandIncludesView(t *testing.T) {
+	command := MarketplaceWebhooksCommand()
+	for _, subcommand := range command.Subcommands {
+		if subcommand.Name == "view" {
+			if subcommand.ShortUsage != `asc marketplace webhooks view --webhook-id "WEBHOOK_ID" [flags]` {
+				t.Fatalf("unexpected view usage: %q", subcommand.ShortUsage)
+			}
+			if subcommand.UsageFunc == nil {
+				t.Fatal("expected view UsageFunc")
+			}
+			return
+		}
+	}
+	t.Fatal("expected marketplace webhooks view subcommand")
+}
+
 func TestMarketplaceWebhooksGetCommand_MissingID(t *testing.T) {
 	cmd := MarketplaceWebhooksGetCommand()
 	if err := cmd.FlagSet.Parse([]string{}); err != nil {

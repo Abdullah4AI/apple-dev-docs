@@ -301,17 +301,19 @@ func TestAnalyticsViewDeprecatedDateConflictsWithProcessingDate(t *testing.T) {
 	}
 }
 
-func TestAnalyticsViewNoFiltersPreservesInstanceAndSegmentBehavior(t *testing.T) {
-	setupAuth(t)
-	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+func TestAnalyticsViewAcceptsPrefixedInstanceAndPreservesSegmentBehavior(t *testing.T) {
+	setupAnalyticsResourceIDAuth(t)
 
-	const instanceID = "22222222-2222-2222-2222-222222222222"
+	const instanceID = "r39-example-instance"
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = originalTransport })
 
 	requestCount := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requestCount++
+		if req.Header.Get("Authorization") == "" {
+			t.Fatal("expected Authorization header")
+		}
 		switch requestCount {
 		case 1:
 			if req.URL.Path != "/v1/analyticsReportRequests/"+analyticsViewRequestID+"/reports" || req.URL.RawQuery != "limit=200" {
@@ -363,7 +365,7 @@ func TestAnalyticsViewNoFiltersPreservesInstanceAndSegmentBehavior(t *testing.T)
 			"name":"App Sessions",
 			"granularity":"DAILY",
 			"instances":[{
-				"id":"22222222-2222-2222-2222-222222222222",
+				"id":"r39-example-instance",
 				"reportDate":"2024-01-19",
 				"processingDate":"2024-01-20",
 				"granularity":"DAILY",

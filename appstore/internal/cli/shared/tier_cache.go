@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -119,7 +120,14 @@ func saveTierCacheAtPath(path string, cache tierCacheFile) error {
 	if err != nil {
 		return fmt.Errorf("marshal cache: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	_, err = WriteFileNoSymlinkOverwrite(
+		path,
+		bytes.NewReader(data),
+		0o600,
+		".asc-tier-cache-*",
+		".asc-tier-cache-backup-*",
+	)
+	return err
 }
 
 // LoadTierCache loads cached tier data. Returns an error if the cache is missing or expired.

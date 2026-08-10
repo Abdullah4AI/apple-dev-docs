@@ -19,21 +19,23 @@ type SalesReportResult struct {
 
 // AnalyticsReportRequestResult represents CLI output for created requests.
 type AnalyticsReportRequestResult struct {
-	RequestID   string `json:"requestId"`
-	AppID       string `json:"appId"`
-	AccessType  string `json:"accessType"`
-	State       string `json:"state,omitempty"`
-	CreatedDate string `json:"createdDate,omitempty"`
+	RequestID              string `json:"requestId"`
+	AppID                  string `json:"appId"`
+	AccessType             string `json:"accessType"`
+	State                  string `json:"state,omitempty"`       // Deprecated: retained for output compatibility.
+	CreatedDate            string `json:"createdDate,omitempty"` // Deprecated: retained for output compatibility.
+	StoppedDueToInactivity *bool  `json:"stoppedDueToInactivity,omitempty"`
 }
 
 // AnalyticsReportRequestReuseResult represents CLI output for reused or created requests.
 type AnalyticsReportRequestReuseResult struct {
-	RequestID   string `json:"requestId"`
-	AppID       string `json:"appId"`
-	AccessType  string `json:"accessType"`
-	State       string `json:"state,omitempty"`
-	CreatedDate string `json:"createdDate,omitempty"`
-	Created     bool   `json:"created"`
+	RequestID              string `json:"requestId"`
+	AppID                  string `json:"appId"`
+	AccessType             string `json:"accessType"`
+	State                  string `json:"state,omitempty"`       // Deprecated: retained for output compatibility.
+	CreatedDate            string `json:"createdDate,omitempty"` // Deprecated: retained for output compatibility.
+	StoppedDueToInactivity *bool  `json:"stoppedDueToInactivity,omitempty"`
+	Created                bool   `json:"created"`
 }
 
 // AnalyticsReportRequestDeleteResult represents CLI output for deleted requests.
@@ -108,19 +110,20 @@ func salesReportResultRows(result *SalesReportResult) ([]string, [][]string) {
 }
 
 func analyticsReportRequestResultRows(result *AnalyticsReportRequestResult) ([]string, [][]string) {
-	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date"}
-	rows := [][]string{{result.RequestID, result.AppID, result.AccessType, result.State, result.CreatedDate}}
+	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity"}
+	rows := [][]string{{result.RequestID, result.AppID, result.AccessType, result.State, result.CreatedDate, formatAnalyticsOptionalBool(result.StoppedDueToInactivity)}}
 	return headers, rows
 }
 
 func analyticsReportRequestReuseResultRows(result *AnalyticsReportRequestReuseResult) ([]string, [][]string) {
-	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date", "Created"}
+	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity", "Created"}
 	rows := [][]string{{
 		result.RequestID,
 		result.AppID,
 		result.AccessType,
 		result.State,
 		result.CreatedDate,
+		formatAnalyticsOptionalBool(result.StoppedDueToInactivity),
 		fmt.Sprintf("%t", result.Created),
 	}}
 	return headers, rows
@@ -133,7 +136,7 @@ func analyticsReportRequestDeleteResultRows(result *AnalyticsReportRequestDelete
 }
 
 func analyticsReportRequestsRows(resp *AnalyticsReportRequestsResponse) ([]string, [][]string) {
-	headers := []string{"ID", "Access Type", "State", "Created Date", "App ID"}
+	headers := []string{"ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity", "App ID"}
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		appID := ""
@@ -145,10 +148,18 @@ func analyticsReportRequestsRows(resp *AnalyticsReportRequestsResponse) ([]strin
 			string(item.Attributes.AccessType),
 			string(item.Attributes.State),
 			item.Attributes.CreatedDate,
+			formatAnalyticsOptionalBool(item.Attributes.StoppedDueToInactivity),
 			appID,
 		})
 	}
 	return headers, rows
+}
+
+func formatAnalyticsOptionalBool(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%t", *value)
 }
 
 func analyticsReportDownloadResultRows(result *AnalyticsReportDownloadResult) ([]string, [][]string) {

@@ -768,6 +768,141 @@ func TestShotsFrame_WatchWithoutInputOrConfig(t *testing.T) {
 	}
 }
 
+func TestShotsFrame_RejectsInvalidWatchOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name: "review directory without watch",
+			args: []string{
+				"--watch-review-dir", "/tmp/review",
+			},
+			wantStderr: "--watch-review-dir requires --watch",
+		},
+		{
+			name: "debounce without watch",
+			args: []string{
+				"--watch-debounce", "750ms",
+			},
+			wantStderr: "--watch-debounce requires --watch",
+		},
+		{
+			name: "raw directory without watch",
+			args: []string{
+				"--watch-raw-dir", "/tmp/raw",
+			},
+			wantStderr: "--watch-raw-dir requires --watch",
+		},
+		{
+			name: "raw directory without review regeneration",
+			args: []string{
+				"--watch",
+				"--watch-raw-dir", "/tmp/raw",
+			},
+			wantStderr: "--watch-raw-dir requires --watch-review-dir",
+		},
+		{
+			name: "zero debounce",
+			args: []string{
+				"--watch",
+				"--watch-debounce", "0s",
+			},
+			wantStderr: "--watch-debounce must be greater than 0",
+		},
+		{
+			name: "negative debounce",
+			args: []string{
+				"--watch",
+				"--watch-debounce", "-1s",
+			},
+			wantStderr: "--watch-debounce must be greater than 0",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			configPath := filepath.Join(t.TempDir(), "missing-frame.yaml")
+			args := []string{"screenshots", "frame", "--config", configPath}
+			args = append(args, test.args...)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected ErrHelp, got %v", err)
+				}
+				if err.Error() != test.wantStderr {
+					t.Fatalf("error = %q, want %q", err, test.wantStderr)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantStderr) {
+				t.Fatalf("expected stderr to contain %q, got %q", test.wantStderr, stderr)
+			}
+		})
+	}
+}
+
+func TestShotsFrame_AcceptsValidWatchOptions(t *testing.T) {
+	frameCommand := shots.ShotsFrameCommand()
+	debounceFlag := frameCommand.FlagSet.Lookup("watch-debounce")
+	if debounceFlag == nil || debounceFlag.DefValue != "500ms" {
+		t.Fatalf("watch debounce default = %v, want 500ms", debounceFlag)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "omitted options keep defaults"},
+		{
+			name: "explicit valid options",
+			args: []string{
+				"--watch-debounce", "750ms",
+				"--watch-review-dir", "/tmp/review",
+				"--watch-raw-dir", "/tmp/raw",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			configPath := filepath.Join(t.TempDir(), "missing-frame.yaml")
+			args := []string{"screenshots", "frame", "--config", configPath, "--watch"}
+			args = append(args, test.args...)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if err == nil || errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), "config file not found") {
+					t.Fatalf("expected valid options to reach watcher, got %v", err)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+		})
+	}
+}
+
 func installMockFrame(t *testing.T, fn func(context.Context, screenshots.FrameRequest) (*screenshots.FrameResult, error)) {
 	t.Helper()
 

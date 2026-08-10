@@ -134,15 +134,9 @@ func appClipDefaultExperienceLocalizationDeleteResultRows(result *AppClipDefault
 	return headers, rows
 }
 
-func appClipAdvancedExperienceDeleteResultRows(result *AppClipAdvancedExperienceDeleteResult) ([]string, [][]string) {
-	headers := []string{"ID", "Deleted"}
-	rows := [][]string{{result.ID, fmt.Sprintf("%t", result.Deleted)}}
-	return headers, rows
-}
-
-func appClipAdvancedExperienceImageDeleteResultRows(result *AppClipAdvancedExperienceImageDeleteResult) ([]string, [][]string) {
-	headers := []string{"ID", "Deleted"}
-	rows := [][]string{{result.ID, fmt.Sprintf("%t", result.Deleted)}}
+func appClipAdvancedExperienceRemoveResultRows(result *AppClipAdvancedExperienceRemoveResult) ([]string, [][]string) {
+	headers := []string{"ID", "Removed"}
+	rows := [][]string{{result.ID, fmt.Sprintf("%t", result.Removed)}}
 	return headers, rows
 }
 

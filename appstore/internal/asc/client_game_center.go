@@ -1683,8 +1683,14 @@ func (c *Client) GetGameCenterAchievementV2(ctx context.Context, achievementID s
 
 // CreateGameCenterAchievementV2 creates a new v2 Game Center achievement.
 func (c *Client) CreateGameCenterAchievementV2(ctx context.Context, gcDetailID string, groupID string, attrs GameCenterAchievementCreateAttributes) (*GameCenterAchievementResponse, error) {
-	relationships := &GameCenterAchievementV2Relationships{}
-	hasRelationship := false
+	const initialVersionID = "${achVer1}"
+
+	relationships := &GameCenterAchievementV2Relationships{
+		Versions: &RelationshipList{Data: []ResourceData{{
+			Type: ResourceTypeGameCenterAchievementVersions,
+			ID:   initialVersionID,
+		}}},
+	}
 
 	if strings.TrimSpace(gcDetailID) != "" {
 		relationships.GameCenterDetail = &Relationship{
@@ -1693,7 +1699,6 @@ func (c *Client) CreateGameCenterAchievementV2(ctx context.Context, gcDetailID s
 				ID:   strings.TrimSpace(gcDetailID),
 			},
 		}
-		hasRelationship = true
 	}
 	if strings.TrimSpace(groupID) != "" {
 		relationships.GameCenterGroup = &Relationship{
@@ -1702,10 +1707,6 @@ func (c *Client) CreateGameCenterAchievementV2(ctx context.Context, gcDetailID s
 				ID:   strings.TrimSpace(groupID),
 			},
 		}
-		hasRelationship = true
-	}
-	if !hasRelationship {
-		relationships = nil
 	}
 
 	payload := GameCenterAchievementV2CreateRequest{
@@ -1714,6 +1715,10 @@ func (c *Client) CreateGameCenterAchievementV2(ctx context.Context, gcDetailID s
 			Attributes:    attrs,
 			Relationships: relationships,
 		},
+		Included: []GameCenterAchievementVersionInlineCreate{{
+			Type: ResourceTypeGameCenterAchievementVersions,
+			ID:   initialVersionID,
+		}},
 	}
 
 	body, err := BuildRequestBody(payload)
@@ -1788,8 +1793,14 @@ func (c *Client) GetGameCenterLeaderboardV2(ctx context.Context, leaderboardID s
 
 // CreateGameCenterLeaderboardV2 creates a new v2 Game Center leaderboard.
 func (c *Client) CreateGameCenterLeaderboardV2(ctx context.Context, gcDetailID string, groupID string, attrs GameCenterLeaderboardCreateAttributes) (*GameCenterLeaderboardResponse, error) {
-	relationships := &GameCenterLeaderboardV2Relationships{}
-	hasRelationship := false
+	const initialVersionID = "${lbVer1}"
+
+	relationships := &GameCenterLeaderboardV2Relationships{
+		Versions: &RelationshipList{Data: []ResourceData{{
+			Type: ResourceTypeGameCenterLeaderboardVersions,
+			ID:   initialVersionID,
+		}}},
+	}
 
 	if strings.TrimSpace(gcDetailID) != "" {
 		relationships.GameCenterDetail = &Relationship{
@@ -1798,7 +1809,6 @@ func (c *Client) CreateGameCenterLeaderboardV2(ctx context.Context, gcDetailID s
 				ID:   strings.TrimSpace(gcDetailID),
 			},
 		}
-		hasRelationship = true
 	}
 	if strings.TrimSpace(groupID) != "" {
 		relationships.GameCenterGroup = &Relationship{
@@ -1807,10 +1817,6 @@ func (c *Client) CreateGameCenterLeaderboardV2(ctx context.Context, gcDetailID s
 				ID:   strings.TrimSpace(groupID),
 			},
 		}
-		hasRelationship = true
-	}
-	if !hasRelationship {
-		relationships = nil
 	}
 
 	payload := GameCenterLeaderboardV2CreateRequest{
@@ -1819,6 +1825,10 @@ func (c *Client) CreateGameCenterLeaderboardV2(ctx context.Context, gcDetailID s
 			Attributes:    attrs,
 			Relationships: relationships,
 		},
+		Included: []GameCenterLeaderboardVersionInlineCreate{{
+			Type: ResourceTypeGameCenterLeaderboardVersions,
+			ID:   initialVersionID,
+		}},
 	}
 
 	body, err := BuildRequestBody(payload)

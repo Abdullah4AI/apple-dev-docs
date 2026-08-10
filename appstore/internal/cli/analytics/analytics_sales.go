@@ -18,12 +18,12 @@ func AnalyticsSalesCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("sales", flag.ExitOnError)
 
 	vendor := fs.String("vendor", "", "Vendor number (or ASC_VENDOR_NUMBER/ASC_ANALYTICS_VENDOR_NUMBER env)")
-	reportType := fs.String("type", "", "Report type: SALES, PRE_ORDER, NEWSSTAND, SUBSCRIPTION, SUBSCRIPTION_EVENT")
-	reportSubType := fs.String("subtype", "", "Report subtype: SUMMARY, DETAILED")
+	reportType := fs.String("type", "", "Report type: SALES, PRE_ORDER, NEWSSTAND, SUBSCRIPTION, SUBSCRIPTION_EVENT, SUBSCRIBER, SUBSCRIPTION_OFFER_CODE_REDEMPTION, INSTALLS, FIRST_ANNUAL, WIN_BACK_ELIGIBILITY")
+	reportSubType := fs.String("subtype", "", "Report subtype: SUMMARY, DETAILED, SUMMARY_INSTALL_TYPE, SUMMARY_TERRITORY, SUMMARY_CHANNEL")
 	frequency := fs.String("frequency", "", "Frequency: DAILY, WEEKLY, MONTHLY, YEARLY")
-	date := fs.String("date", "", "Report date: daily YYYY-MM-DD, weekly Monday(start) or Sunday(end) YYYY-MM-DD, monthly YYYY-MM, yearly YYYY")
-	version := fs.String("version", "", "Report format version in major_minor format (defaults to 1_4 for SUBSCRIPTION and 1_0 otherwise)")
-	output := fs.String("output", "", "Output file path (default: sales_report_{date}_{type}.tsv.gz)")
+	date := fs.String("date", "", "Report date: daily/weekly YYYY-MM-DD, monthly YYYY-MM or YYYY-MM-DD, yearly YYYY or YYYY-MM-DD (optional for DAILY)")
+	version := fs.String("version", "", "Report format version allowed for the selected type, subtype, and frequency")
+	output := fs.String("output", "", "Output file path (default: sales_report_{date|latest}_{type}.tsv.gz)")
 	decompress := fs.Bool("decompress", false, "Decompress gzip output to .tsv")
 	outputFlags := shared.BindMetadataOutputFlags(fs)
 
@@ -35,8 +35,9 @@ func AnalyticsSalesCommand() *ffcli.Command {
 
 Examples:
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20"
+  asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency WEEKLY --date "2024-01-15" # Monday start accepted
-  asc analytics sales --vendor "12345678" --type SUBSCRIPTION --subtype DETAILED --frequency MONTHLY --date "2024-01"
+  asc analytics sales --vendor "12345678" --type SUBSCRIBER --subtype DETAILED --frequency DAILY
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20" --decompress
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20" --output "reports/daily_sales.tsv.gz"`,
 		FlagSet:   fs,
@@ -59,33 +60,32 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --frequency is required")
 				return shared.MissingRequiredUsageError()
 			}
-			if strings.TrimSpace(*date) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --date is required")
-				return shared.MissingRequiredUsageError()
-			}
-
 			salesType, err := normalizeSalesReportType(*reportType)
 			if err != nil {
-				return fmt.Errorf("analytics sales: %w", err)
+				return shared.UsageError(fmt.Sprintf("analytics sales: %v", err))
 			}
 			subType, err := normalizeSalesReportSubType(*reportSubType)
 			if err != nil {
-				return fmt.Errorf("analytics sales: %w", err)
+				return shared.UsageError(fmt.Sprintf("analytics sales: %v", err))
 			}
 			freq, err := normalizeSalesReportFrequency(*frequency)
 			if err != nil {
-				return fmt.Errorf("analytics sales: %w", err)
+				return shared.UsageError(fmt.Sprintf("analytics sales: %v", err))
 			}
 			reportDate, err := normalizeReportDate(*date, freq)
 			if err != nil {
-				return fmt.Errorf("analytics sales: %w", err)
+				return shared.UsageError(fmt.Sprintf("analytics sales: %v", err))
 			}
-			reportVersion, err := normalizeSalesReportVersion(*version, salesType)
+			reportVersion, err := normalizeSalesReportVersion(*version, salesType, subType, freq)
 			if err != nil {
-				return fmt.Errorf("analytics sales: %w", err)
+				return shared.UsageError(fmt.Sprintf("analytics sales: %v", err))
 			}
 
-			defaultOutput := fmt.Sprintf("sales_report_%s_%s.tsv.gz", reportDate, string(salesType))
+			outputDate := reportDate
+			if outputDate == "" {
+				outputDate = "latest"
+			}
+			defaultOutput := fmt.Sprintf("sales_report_%s_%s.tsv.gz", outputDate, string(salesType))
 			compressedPath, decompressedPath := shared.ResolveReportOutputPaths(*output, defaultOutput, ".tsv", *decompress)
 
 			client, err := shared.GetASCClient()

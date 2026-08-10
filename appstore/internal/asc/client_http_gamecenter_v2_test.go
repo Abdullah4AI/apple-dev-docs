@@ -789,6 +789,15 @@ func TestCreateGameCenterLeaderboardSetV2_WithDetail(t *testing.T) {
 		if payload.Data.Relationships.GameCenterDetail.Data.ID != "gc-detail-1" {
 			t.Fatalf("expected gc-detail-1, got %s", payload.Data.Relationships.GameCenterDetail.Data.ID)
 		}
+		if payload.Data.Relationships.Versions == nil || len(payload.Data.Relationships.Versions.Data) != 1 {
+			t.Fatalf("expected one initial version relationship, got %+v", payload.Data.Relationships.Versions)
+		}
+		if got := payload.Data.Relationships.Versions.Data[0]; got.Type != ResourceTypeGameCenterLeaderboardSetVersions || got.ID != "${lbsetVer1}" {
+			t.Fatalf("unexpected initial version relationship: %+v", got)
+		}
+		if len(payload.Included) != 1 || payload.Included[0].Type != ResourceTypeGameCenterLeaderboardSetVersions || payload.Included[0].ID != "${lbsetVer1}" {
+			t.Fatalf("unexpected included initial version: %+v", payload.Included)
+		}
 		assertAuthorized(t, req)
 	}, response)
 
@@ -819,6 +828,15 @@ func TestCreateGameCenterLeaderboardSetV2_WithGroup(t *testing.T) {
 		}
 		if payload.Data.Relationships.GameCenterGroup.Data.ID != "group-1" {
 			t.Fatalf("expected group-1, got %s", payload.Data.Relationships.GameCenterGroup.Data.ID)
+		}
+		if payload.Data.Relationships.Versions == nil || len(payload.Data.Relationships.Versions.Data) != 1 {
+			t.Fatalf("expected one initial version relationship, got %+v", payload.Data.Relationships.Versions)
+		}
+		if got := payload.Data.Relationships.Versions.Data[0]; got.Type != ResourceTypeGameCenterLeaderboardSetVersions || got.ID != "${lbsetVer1}" {
+			t.Fatalf("unexpected initial version relationship: %+v", got)
+		}
+		if len(payload.Included) != 1 || payload.Included[0].Type != ResourceTypeGameCenterLeaderboardSetVersions || payload.Included[0].ID != "${lbsetVer1}" {
+			t.Fatalf("unexpected included initial version: %+v", payload.Included)
 		}
 		assertAuthorized(t, req)
 	}, response)

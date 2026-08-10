@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
@@ -52,9 +54,15 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if strings.TrimSpace(*segmentID) == "" {
+			id := strings.TrimSpace(*segmentID)
+			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --segment-id is required")
 				return shared.MissingRequiredUsageError()
+			}
+			var err error
+			id, err = asc.ValidateResourcePathSegment(id)
+			if err != nil {
+				return fmt.Errorf("analytics segments view: --segment-id: %w", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -65,7 +73,7 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetAnalyticsReportSegment(requestCtx, strings.TrimSpace(*segmentID))
+			resp, err := client.GetAnalyticsReportSegment(requestCtx, id)
 			if err != nil {
 				return fmt.Errorf("analytics segments view: failed to fetch: %w", err)
 			}

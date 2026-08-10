@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestGameCenterLeaderboardsListValidationErrors(t *testing.T) {
@@ -144,6 +146,28 @@ func TestGameCenterLeaderboardsCreateValidationErrors(t *testing.T) {
 
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+		})
+	}
+}
+
+func TestGameCenterLeaderboardsCreateRejectsInvalidFormatter(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+
+	for _, formatter := range []string{"ELAPSED_TIME_MILLISECOND", "MONEY_WHOLE", "MONEY_POINT_2_PLACE"} {
+		t.Run(formatter, func(t *testing.T) {
+			stdout, stderr := captureOutput(t, func() {
+				args := []string{"game-center", "leaderboards", "create", "--app", "APP_ID", "--reference-name", "Test", "--vendor-id", "com.test", "--formatter", formatter, "--sort", "DESC", "--submission-type", "BEST_SCORE"}
+				if exitCode := rootcmd.Run(args, "1.2.3"); exitCode != rootcmd.ExitUsage {
+					t.Fatalf("expected exit code %d, got %d", rootcmd.ExitUsage, exitCode)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "Error: --formatter must be one of:") {
+				t.Fatalf("expected formatter validation error, got %q", stderr)
 			}
 		})
 	}

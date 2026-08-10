@@ -118,12 +118,9 @@ Examples:
 				return fmt.Errorf("beta-testers export: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			var groupResolver *betaGroupResolver
 			if strings.TrimSpace(*group) != "" || *includeGroups {
-				groupResolver, err = newBetaGroupResolver(requestCtx, client, resolvedAppID)
+				groupResolver, err = newBetaGroupResolver(ctx, client, resolvedAppID)
 				if err != nil {
 					return fmt.Errorf("beta-testers export: %w", err)
 				}
@@ -144,13 +141,17 @@ Examples:
 				opts = append(opts, asc.WithBetaTestersGroupIDs([]string{id}))
 			}
 
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			firstPage, err := client.GetBetaTesters(requestCtx, resolvedAppID, opts...)
+			cancel()
 			if err != nil {
 				return fmt.Errorf("beta-testers export: failed to fetch: %w", err)
 			}
 
-			all, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-				return client.GetBetaTesters(ctx, resolvedAppID, asc.WithBetaTestersNextURL(nextURL))
+			all, err := asc.PaginateAll(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+				requestCtx, cancel := shared.ContextWithTimeout(ctx)
+				defer cancel()
+				return client.GetBetaTesters(requestCtx, resolvedAppID, asc.WithBetaTestersNextURL(nextURL))
 			})
 			if err != nil {
 				return fmt.Errorf("beta-testers export: %w", err)
@@ -163,7 +164,7 @@ Examples:
 
 			var groupMembership map[string][]string
 			if *includeGroups {
-				groupMembership, err = fetchTesterGroupMemberships(requestCtx, client, groupResolver)
+				groupMembership, err = fetchTesterGroupMemberships(ctx, client, groupResolver)
 				if err != nil {
 					return fmt.Errorf("beta-testers export: %w", err)
 				}
@@ -316,9 +317,6 @@ Examples:
 				return fmt.Errorf("beta-testers import: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			parsedRows, err := readBetaTestersCSV(inputValue)
 			if err != nil {
 				return fmt.Errorf("beta-testers import: %w", err)
@@ -338,7 +336,7 @@ Examples:
 			var groupResolver *betaGroupResolver
 			appliedGroupID := ""
 			if needsGroups {
-				groupResolver, err = newBetaGroupResolver(requestCtx, client, resolvedAppID)
+				groupResolver, err = newBetaGroupResolver(ctx, client, resolvedAppID)
 				if err != nil {
 					return fmt.Errorf("beta-testers import: %w", err)
 				}
@@ -352,7 +350,7 @@ Examples:
 				}
 			}
 
-			existingByEmail, err := fetchExistingTestersByEmail(requestCtx, client, resolvedAppID)
+			existingByEmail, err := fetchExistingTestersByEmail(ctx, client, resolvedAppID)
 			if err != nil {
 				return fmt.Errorf("beta-testers import: %w", err)
 			}
@@ -445,9 +443,14 @@ Examples:
 						continue
 					}
 
-					if err := client.AddBetaTesterToGroups(requestCtx, testerID, groupIDs); err != nil {
-						if errors.Is(err, asc.ErrConflict) {
-							// Relationship already exists; treat as idempotent success.
+					requestCtx, cancel := shared.ContextWithTimeout(ctx)
+					err := client.AddBetaTesterToGroups(requestCtx, testerID, groupIDs)
+					cancel()
+					if err != nil {
+						alreadySatisfied, verificationErr := betaTesterGroupConflictAlreadySatisfied(ctx, client, testerID, groupIDs, err)
+						if verificationErr != nil {
+							err = fmt.Errorf("%w (failed to verify beta group membership: %w)", err, verificationErr)
+						} else if alreadySatisfied {
 							summary.Updated++
 							continue
 						}
@@ -471,7 +474,9 @@ Examples:
 					continue
 				}
 
+				requestCtx, cancel := shared.ContextWithTimeout(ctx)
 				created, err := client.CreateBetaTester(requestCtx, emailValue, row.firstName, row.lastName, groupIDs)
+				cancel()
 				if err != nil {
 					summary.Failed++
 					summary.Failures = append(summary.Failures, betaTestersImportFailure{
@@ -502,7 +507,9 @@ Examples:
 				existingByEmail[emailLower] = testerID
 
 				if *invite {
+					requestCtx, cancel := shared.ContextWithTimeout(ctx)
 					invitation, err := client.CreateBetaTesterInvitation(requestCtx, resolvedAppID, testerID)
+					cancel()
 					if err != nil {
 						summary.Failed++
 						summary.Failures = append(summary.Failures, betaTestersImportFailure{
@@ -607,12 +614,16 @@ func newBetaGroupResolver(ctx context.Context, client *asc.Client, appID string)
 		return nil, fmt.Errorf("app ID is required")
 	}
 
-	firstPage, err := client.GetBetaGroups(ctx, appID, asc.WithBetaGroupsLimit(200))
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	firstPage, err := client.GetBetaGroups(requestCtx, appID, asc.WithBetaGroupsLimit(200))
+	cancel()
 	if err != nil {
 		return nil, err
 	}
 	all, err := asc.PaginateAll(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		return client.GetBetaGroups(ctx, appID, asc.WithBetaGroupsNextURL(nextURL))
+		requestCtx, cancel := shared.ContextWithTimeout(ctx)
+		defer cancel()
+		return client.GetBetaGroups(requestCtx, appID, asc.WithBetaGroupsNextURL(nextURL))
 	})
 	if err != nil {
 		return nil, err
@@ -711,12 +722,16 @@ func (r *betaGroupResolver) exportValueForID(groupID string) string {
 }
 
 func fetchExistingTestersByEmail(ctx context.Context, client *asc.Client, appID string) (map[string]string, error) {
-	first, err := client.GetBetaTesters(ctx, appID, asc.WithBetaTestersLimit(200))
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	first, err := client.GetBetaTesters(requestCtx, appID, asc.WithBetaTestersLimit(200))
+	cancel()
 	if err != nil {
 		return nil, err
 	}
 	all, err := asc.PaginateAll(ctx, first, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		return client.GetBetaTesters(ctx, appID, asc.WithBetaTestersNextURL(nextURL))
+		requestCtx, cancel := shared.ContextWithTimeout(ctx)
+		defer cancel()
+		return client.GetBetaTesters(requestCtx, appID, asc.WithBetaTestersNextURL(nextURL))
 	})
 	if err != nil {
 		return nil, err
@@ -741,6 +756,57 @@ func fetchExistingTestersByEmail(ctx context.Context, client *asc.Client, appID 
 	return byEmail, nil
 }
 
+func betaTesterGroupConflictAlreadySatisfied(
+	ctx context.Context,
+	client *asc.Client,
+	testerID string,
+	groupIDs []string,
+	requestErr error,
+) (bool, error) {
+	if !errors.Is(requestErr, asc.ErrConflict) {
+		return false, nil
+	}
+
+	requestedGroupIDs := uniqueSortedStrings(groupIDs)
+	if len(requestedGroupIDs) == 0 {
+		return false, nil
+	}
+
+	requestCtx, cancel := shared.ContextWithTimeout(ctx)
+	first, err := client.GetBetaTesterBetaGroupsRelationships(requestCtx, testerID, asc.WithLinkagesLimit(200))
+	cancel()
+	if err != nil {
+		return false, err
+	}
+
+	all, err := asc.PaginateAll(ctx, first, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		requestCtx, cancel := shared.ContextWithTimeout(ctx)
+		defer cancel()
+		return client.GetBetaTesterBetaGroupsRelationships(requestCtx, testerID, asc.WithLinkagesNextURL(nextURL))
+	})
+	if err != nil {
+		return false, err
+	}
+	resp, ok := all.(*asc.LinkagesResponse)
+	if !ok || resp == nil {
+		return false, fmt.Errorf("unexpected beta tester group relationships response type")
+	}
+
+	presentGroupIDs := make(map[string]struct{}, len(resp.Data))
+	for _, linkage := range resp.Data {
+		groupID := strings.TrimSpace(linkage.ID)
+		if groupID != "" {
+			presentGroupIDs[groupID] = struct{}{}
+		}
+	}
+	for _, groupID := range requestedGroupIDs {
+		if _, ok := presentGroupIDs[groupID]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func fetchTesterGroupMemberships(ctx context.Context, client *asc.Client, resolver *betaGroupResolver) (map[string][]string, error) {
 	if client == nil {
 		return nil, fmt.Errorf("client is required")
@@ -753,12 +819,16 @@ func fetchTesterGroupMemberships(ctx context.Context, client *asc.Client, resolv
 	for _, groupID := range resolver.sortedGroupIDs {
 		exportValue := resolver.exportValueForID(groupID)
 
-		firstPage, err := client.GetBetaGroupTesters(ctx, groupID, asc.WithBetaGroupTestersLimit(200))
+		requestCtx, cancel := shared.ContextWithTimeout(ctx)
+		firstPage, err := client.GetBetaGroupTesters(requestCtx, groupID, asc.WithBetaGroupTestersLimit(200))
+		cancel()
 		if err != nil {
 			return nil, err
 		}
 		all, err := asc.PaginateAll(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-			return client.GetBetaGroupTesters(ctx, groupID, asc.WithBetaGroupTestersNextURL(nextURL))
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
+			return client.GetBetaGroupTesters(requestCtx, groupID, asc.WithBetaGroupTestersNextURL(nextURL))
 		})
 		if err != nil {
 			return nil, err

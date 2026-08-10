@@ -72,6 +72,7 @@ type screenshotUploadConfig[T any] struct {
 	Client         *asc.Client
 	LocalizationID string
 	DisplayType    string
+	RootPath       string
 	Files          []string
 	SkipExisting   bool
 	Replace        bool
@@ -314,9 +315,8 @@ Examples:
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			setsResp, err := client.GetAppScreenshotSets(requestCtx, locID)
+			cancel()
 			if err != nil {
 				return fmt.Errorf("screenshots list: failed to fetch sets: %w", err)
 			}
@@ -327,7 +327,9 @@ Examples:
 			}
 
 			for _, set := range setsResp.Data {
+				requestCtx, cancel := shared.ContextWithTimeout(ctx)
 				screenshots, err := client.GetAppScreenshots(requestCtx, set.ID)
+				cancel()
 				if err != nil {
 					return fmt.Errorf("screenshots list: failed to fetch screenshots for set %s: %w", set.ID, err)
 				}
@@ -608,6 +610,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 			Client:         client,
 			LocalizationID: locID,
 			DisplayType:    apiDisplayType,
+			RootPath:       pathValue,
 			Files:          files,
 			SkipExisting:   opts.SkipExisting,
 			Replace:        opts.Replace,

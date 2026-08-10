@@ -71,13 +71,19 @@ func (c *Client) generateJWT() (string, error) {
 
 // GenerateJWT generates a JWT for ASC API authentication.
 func GenerateJWT(keyID, issuerID string, privateKey *ecdsa.PrivateKey) (string, error) {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return "", ErrMissingKeyID
+	}
+	issuerID = strings.TrimSpace(issuerID)
+
 	now := time.Now()
 	claims := jwt.RegisteredClaims{
 		Audience:  jwt.ClaimStrings{"appstoreconnect-v1"},
 		IssuedAt:  jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(now.Add(tokenLifetime)),
 	}
-	if strings.TrimSpace(issuerID) == "" {
+	if issuerID == "" {
 		claims.Subject = "user"
 	} else {
 		claims.Issuer = issuerID

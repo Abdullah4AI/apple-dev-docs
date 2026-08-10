@@ -3,8 +3,10 @@ package asc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -180,20 +182,143 @@ func TestGetMarketplaceWebhooks_WithFields(t *testing.T) {
 	}
 }
 
-func TestGetMarketplaceWebhook_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"marketplaceWebhooks","id":"wh-1","attributes":{"endpointUrl":"https://example.com/webhook"}}}`)
+func TestGetMarketplaceWebhook_FindsExactIDOnFirstCollectionPage(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-10","attributes":{"endpointUrl":"https://example.com/wrong"}},{"type":"marketplaceWebhooks","id":"wh-1","attributes":{"endpointUrl":"https://example.com/target"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/marketplaceWebhooks?cursor=unused"}}`)
+	requests := 0
 	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
+		requests++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/marketplaceWebhooks" {
+			t.Fatalf("expected collection GET, got %s %s", req.Method, req.URL.String())
 		}
-		if req.URL.Path != "/v1/marketplaceWebhooks/wh-1" {
-			t.Fatalf("expected path /v1/marketplaceWebhooks/wh-1, got %s", req.URL.Path)
+		if req.URL.Query().Get("limit") != "200" {
+			t.Fatalf("expected limit=200, got %q", req.URL.Query().Get("limit"))
 		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetMarketplaceWebhook(context.Background(), "wh-1"); err != nil {
+	webhook, err := client.GetMarketplaceWebhook(context.Background(), " wh-1 ")
+	if err != nil {
 		t.Fatalf("GetMarketplaceWebhook() error: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected one request, got %d", requests)
+	}
+	if webhook.Data.ID != "wh-1" || webhook.Data.Attributes.EndpointURL != "https://example.com/target" {
+		t.Fatalf("unexpected webhook: %+v", webhook.Data)
+	}
+}
+
+func TestGetMarketplaceWebhook_FindsExactIDOnSecondCollectionPage(t *testing.T) {
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/marketplaceWebhooks?cursor=page-2"
+	first := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-other","attributes":{"endpointUrl":"https://example.com/other"}}],"links":{"next":"`+nextURL+`"}}`)
+	second := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-target","attributes":{"endpointUrl":"https://example.com/target"}}],"links":{}}`)
+	requests := 0
+	client := newTestClient(t, func(req *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			if req.URL.Path != "/v1/marketplaceWebhooks" || req.URL.Query().Get("limit") != "200" {
+				t.Fatalf("unexpected first request: %s %s", req.Method, req.URL.String())
+			}
+		case 2:
+			if req.URL.String() != nextURL {
+				t.Fatalf("expected next URL %q, got %q", nextURL, req.URL.String())
+			}
+		default:
+			t.Fatalf("unexpected request %d: %s", requests, req.URL.String())
+		}
+		assertAuthorized(t, req)
+	}, first, second)
+
+	webhook, err := client.GetMarketplaceWebhook(context.Background(), "wh-target")
+	if err != nil {
+		t.Fatalf("GetMarketplaceWebhook() error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected two requests, got %d", requests)
+	}
+	if webhook.Data.ID != "wh-target" {
+		t.Fatalf("expected wh-target, got %+v", webhook.Data)
+	}
+}
+
+func TestGetMarketplaceWebhook_RejectsRepeatedNextURL(t *testing.T) {
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/marketplaceWebhooks?cursor=repeated"
+	first := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-1"}],"links":{"next":"`+nextURL+`"}}`)
+	second := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-2"}],"links":{"next":"`+nextURL+`"}}`)
+	requests := 0
+	client := newTestClient(t, func(req *http.Request) {
+		requests++
+		assertAuthorized(t, req)
+	}, first, second)
+
+	_, err := client.GetMarketplaceWebhook(context.Background(), "wh-missing")
+	if !errors.Is(err, ErrRepeatedPaginationURL) {
+		t.Fatalf("expected ErrRepeatedPaginationURL, got %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected two requests before repeated-next failure, got %d", requests)
+	}
+}
+
+func TestGetMarketplaceWebhook_NotFoundAfterAllCollectionPages(t *testing.T) {
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/marketplaceWebhooks?cursor=page-2"
+	first := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-1"}],"links":{"next":"`+nextURL+`"}}`)
+	second := jsonResponse(http.StatusOK, `{"data":[{"type":"marketplaceWebhooks","id":"wh-2"}],"links":{}}`)
+	requests := 0
+	client := newTestClient(t, func(req *http.Request) {
+		requests++
+		assertAuthorized(t, req)
+	}, first, second)
+
+	_, err := client.GetMarketplaceWebhook(context.Background(), "wh-missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), `marketplace webhook "wh-missing" not found`) {
+		t.Fatalf("expected contextual not-found error, got %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected all pages to be fetched, got %d requests", requests)
+	}
+}
+
+func TestGetMarketplaceWebhook_EmptyCollectionIsNotFound(t *testing.T) {
+	client := newTestClient(t, nil, jsonResponse(http.StatusOK, `{"data":[],"links":{}}`))
+
+	_, err := client.GetMarketplaceWebhook(context.Background(), "wh-missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetMarketplaceWebhook_PropagatesCollectionAPIError(t *testing.T) {
+	requests := 0
+	client := newTestClient(t, func(req *http.Request) {
+		requests++
+		if req.URL.Path != "/v1/marketplaceWebhooks" {
+			t.Fatalf("expected collection path, got %s", req.URL.Path)
+		}
+	}, jsonResponse(http.StatusBadRequest, `{"errors":[{"status":"400","code":"INVALID_REQUEST","title":"Invalid Request","detail":"request rejected"}]}`))
+
+	_, err := client.GetMarketplaceWebhook(context.Background(), "wh-1")
+	if err == nil || !strings.Contains(err.Error(), "request rejected") {
+		t.Fatalf("expected API error, got %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 APIError, got %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected one request, got %d", requests)
+	}
+}
+
+func TestGetMarketplaceWebhook_RequiresID(t *testing.T) {
+	client := &Client{}
+	_, err := client.GetMarketplaceWebhook(context.Background(), " ")
+	if err == nil || err.Error() != "webhookID is required" {
+		t.Fatalf("expected webhookID validation error, got %v", err)
 	}
 }
 

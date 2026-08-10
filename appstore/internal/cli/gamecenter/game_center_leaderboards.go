@@ -338,7 +338,7 @@ func GameCenterLeaderboardsCreateCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	referenceName := fs.String("reference-name", "", "Reference name for the leaderboard")
 	vendorID := fs.String("vendor-id", "", "Vendor identifier (e.g., com.example.leaderboard)")
-	formatter := fs.String("formatter", "", "Score formatter: INTEGER, DECIMAL_POINT_1_PLACE, DECIMAL_POINT_2_PLACE, DECIMAL_POINT_3_PLACE, ELAPSED_TIME_MILLISECOND, ELAPSED_TIME_SECOND, ELAPSED_TIME_MINUTE, MONEY_WHOLE, MONEY_POINT_2_PLACE")
+	formatter := fs.String("formatter", "", "Score formatter: "+strings.Join(asc.ValidLeaderboardFormatters, ", "))
 	sortType := fs.String("sort", "", "Score sort type: ASC, DESC")
 	submissionType := fs.String("submission-type", "", "Submission type: BEST_SCORE, MOST_RECENT_SCORE")
 	scoreRangeStart := fs.String("score-range-start", "", "Score range start (optional)")
@@ -353,9 +353,11 @@ func GameCenterLeaderboardsCreateCommand() *ffcli.Command {
 		ShortHelp:  "Create a new Game Center leaderboard.",
 		LongHelp: `Create a new Game Center leaderboard.
 
+V2 creates the required initial leaderboard version inline.
+
 Examples:
   asc game-center leaderboards create --app "APP_ID" --reference-name "High Score" --vendor-id "com.example.highscore" --formatter INTEGER --sort DESC --submission-type BEST_SCORE
-  asc game-center leaderboards create --app "APP_ID" --reference-name "Time Trial" --vendor-id "com.example.timetrial" --formatter ELAPSED_TIME_MILLISECOND --sort ASC --submission-type BEST_SCORE
+  asc game-center leaderboards create --app "APP_ID" --reference-name "Time Trial" --vendor-id "com.example.timetrial" --formatter ELAPSED_TIME_CENTISECOND --sort ASC --submission-type BEST_SCORE
   asc game-center leaderboards create --group-id "GROUP_ID" --reference-name "Group Score" --vendor-id "grp.com.example.groupscore" --formatter INTEGER --sort DESC --submission-type BEST_SCORE --v2`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,

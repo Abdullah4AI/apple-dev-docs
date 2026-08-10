@@ -50,12 +50,15 @@ type publishLocalBuildFlagValues struct {
 	scheme               *string
 	configuration        *string
 	exportOptionsPath    *string
+	signingStyle         *string
+	teamID               *string
 	archivePath          *string
 	ipaPath              *string
 	clean                *bool
 	initialBuildNumber   *int
 	archiveXcodebuildArg shared.MultiStringFlag
 	exportXcodebuildArg  shared.MultiStringFlag
+	generationFlagsSet   bool
 }
 
 type publishLocalBuildConfig struct {
@@ -64,6 +67,8 @@ type publishLocalBuildConfig struct {
 	Scheme                string
 	Configuration         string
 	ExportOptionsPath     string
+	SigningStyle          string
+	TeamID                string
 	ArchivePath           string
 	IPAPath               string
 	Clean                 bool
@@ -87,6 +92,8 @@ func bindPublishLocalBuildFlags(fs *flag.FlagSet) *publishLocalBuildFlagValues {
 	values.scheme = fs.String("scheme", "", "Xcode scheme name for local-build mode")
 	values.configuration = fs.String("configuration", "", "Build configuration for local-build mode (defaults to Release)")
 	values.exportOptionsPath = fs.String("export-options", "", "Path to ExportOptions.plist for local-build mode")
+	values.signingStyle = fs.String("signing-style", "automatic", "Signing style for generated local-build options: automatic or manual")
+	values.teamID = fs.String("team-id", "", "Apple Developer team ID for generated local-build options (overrides archive metadata)")
 	values.archivePath = fs.String("archive-path", "", "Destination path for the .xcarchive output in local-build mode")
 	values.ipaPath = fs.String("ipa-path", "", "Destination path for the .ipa output in local-build mode")
 	values.clean = fs.Bool("clean", false, "Run clean before local-build archive")
@@ -129,6 +136,8 @@ func validateLocalBuildFlagUsage(localBuildMode bool, setFlags map[string]bool) 
 		"archive-path",
 		"ipa-path",
 		"export-options",
+		"signing-style",
+		"team-id",
 		"configuration",
 		"clean",
 		"initial-build-number",
@@ -140,6 +149,28 @@ func validateLocalBuildFlagUsage(localBuildMode bool, setFlags map[string]bool) 
 			return shared.UsageErrorf("--%s requires --workspace or --project", flagName)
 		}
 	}
+	return nil
+}
+
+func validatePublishExportOptionsFlags(values *publishLocalBuildFlagValues, setFlags map[string]bool) error {
+	signingStyleSet := setFlags["signing-style"]
+	teamIDSet := setFlags["team-id"]
+	values.generationFlagsSet = signingStyleSet || teamIDSet
+	if signingStyleSet && strings.TrimSpace(*values.signingStyle) == "" {
+		return shared.UsageError("--signing-style must be one of: automatic, manual")
+	}
+	if teamIDSet && strings.TrimSpace(*values.teamID) == "" {
+		return shared.UsageError("--team-id must not be empty")
+	}
+	if strings.TrimSpace(*values.exportOptionsPath) != "" && values.generationFlagsSet {
+		return shared.UsageError("--export-options cannot be combined with --signing-style or --team-id")
+	}
+	style, err := localxcode.NormalizeExportOptionsSigningStyle(*values.signingStyle)
+	if err != nil {
+		return shared.UsageError(err.Error())
+	}
+	*values.signingStyle = style
+	*values.teamID = strings.TrimSpace(*values.teamID)
 	return nil
 }
 
@@ -170,12 +201,21 @@ func resolveLocalBuildConfig(values *publishLocalBuildFlagValues, platform, vers
 		Clean:                 values.clean != nil && *values.clean,
 		ArchiveXcodebuildArgs: append([]string(nil), values.archiveXcodebuildArg...),
 		ExportXcodebuildArgs:  append([]string(nil), values.exportXcodebuildArg...),
+		SigningStyle:          strings.TrimSpace(*values.signingStyle),
+		TeamID:                strings.TrimSpace(*values.teamID),
 	}
 	if trimmedConfiguration := strings.TrimSpace(*values.configuration); trimmedConfiguration != "" {
 		config.Configuration = trimmedConfiguration
 	}
 
-	exportOptionsPath, err := resolvePublishExportOptionsPath(strings.TrimSpace(*values.exportOptionsPath))
+	explicitExportOptionsPath := strings.TrimSpace(*values.exportOptionsPath)
+	exportOptionsPath := ""
+	var err error
+	if !values.generationFlagsSet {
+		exportOptionsPath, err = resolvePublishExportOptionsPath(explicitExportOptionsPath)
+	} else {
+		exportOptionsPath = explicitExportOptionsPath
+	}
 	if err != nil {
 		return publishLocalBuildConfig{}, err
 	}
@@ -219,6 +259,14 @@ func resolvePublishBuildNumber(ctx context.Context, client *asc.Client, appID, v
 }
 
 func runPublishLocalBuild(ctx context.Context, client *asc.Client, appID, platform, version, buildNumber string, pollInterval, timeout time.Duration, timeoutOverride bool, config publishLocalBuildConfig) (*publishLocalBuildExecutionResult, error) {
+	if strings.TrimSpace(config.SigningStyle) == "" {
+		config.SigningStyle = "automatic"
+	}
+	signingStyle, err := localxcode.NormalizeExportOptionsSigningStyle(config.SigningStyle)
+	if err != nil {
+		return nil, shared.UsageError(err.Error())
+	}
+	config.SigningStyle = signingStyle
 	if err := localxcode.ValidateExportDestination(config.IPAPath, true, false); err != nil {
 		if localxcode.IsExportDestinationUsageError(err) {
 			return nil, shared.UsageError(err.Error())
@@ -259,7 +307,8 @@ func runPublishLocalBuild(ctx context.Context, client *asc.Client, appID, platfo
 			ArchivePath:  archiveResult.ArchivePath,
 			OutputPath:   generatedPath,
 			Destination:  "export",
-			SigningStyle: "automatic",
+			SigningStyle: config.SigningStyle,
+			TeamID:       config.TeamID,
 			Overwrite:    false,
 		})
 		if err != nil {

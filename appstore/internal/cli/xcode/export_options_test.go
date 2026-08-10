@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -92,6 +93,11 @@ func TestXcodeExportOptionsGenerateRejectsInvalidValues(t *testing.T) {
 		{
 			name:    "signing style",
 			args:    []string{"--archive-path", "Demo.xcarchive", "--signing-style", "heuristic"},
+			message: "Error: --signing-style must be one of: automatic, manual",
+		},
+		{
+			name:    "empty signing style",
+			args:    []string{"--archive-path", "Demo.xcarchive", "--signing-style", ""},
 			message: "Error: --signing-style must be one of: automatic, manual",
 		},
 	}
@@ -199,6 +205,160 @@ func TestXcodeExportGeneratesOptionsWhenPathIsOmitted(t *testing.T) {
 	}
 	if string(preserved) != string(deterministicContents) {
 		t.Fatalf("implicit generation overwrote deterministic export options: %q", preserved)
+	}
+}
+
+func TestXcodeExportThreadsManualSigningOptionsToImplicitGeneration(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	archivePath := writeXcodeExportOptionsTestArchive(t)
+	wantErr := errors.New("stop after generation")
+	var generatedOptions localxcode.ExportOptionsGenerateOptions
+	runGenerateExportOptions = func(_ context.Context, opts localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+		generatedOptions = opts
+		return &localxcode.ExportOptionsGenerateResult{Path: opts.OutputPath}, nil
+	}
+	runExport = func(_ context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		return nil, wantErr
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", archivePath,
+		"--ipa-path", filepath.Join(t.TempDir(), "Demo.ipa"),
+		"--signing-style", "manual",
+		"--team-id", "TEAM123456",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	runErr := cmd.Exec(context.Background(), nil)
+	if !errors.Is(runErr, wantErr) {
+		t.Fatalf("expected export sentinel, got %v", runErr)
+	}
+	if generatedOptions.SigningStyle != "manual" {
+		t.Fatalf("expected manual signing style, got %q", generatedOptions.SigningStyle)
+	}
+	if generatedOptions.TeamID != "TEAM123456" {
+		t.Fatalf("expected team ID passthrough, got %q", generatedOptions.TeamID)
+	}
+}
+
+func TestXcodeExportRejectsGenerationFlagsWithExplicitOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "signing style", args: []string{"--signing-style", "automatic"}},
+		{name: "team ID", args: []string{"--team-id", "TEAM123456"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := overrideXcodeCommandTestHooks(t)
+			defer restore()
+
+			runXcodeExportPreflight = func(context.Context) error {
+				t.Fatal("preflight must not run for conflicting generation flags")
+				return nil
+			}
+			runGenerateExportOptions = func(context.Context, localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+				t.Fatal("generator must not run for conflicting generation flags")
+				return nil, nil
+			}
+			runExport = func(context.Context, localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+				t.Fatal("export must not run for conflicting generation flags")
+				return nil, nil
+			}
+
+			args := []string{
+				"--archive-path", "Demo.xcarchive",
+				"--ipa-path", filepath.Join(t.TempDir(), "Demo.ipa"),
+				"--export-options", "ExportOptions.plist",
+			}
+			args = append(args, tc.args...)
+			cmd := XcodeExportCommand()
+			cmd.FlagSet.SetOutput(io.Discard)
+			if err := cmd.FlagSet.Parse(args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			runErr := cmd.Exec(context.Background(), nil)
+			if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--export-options cannot be combined with --signing-style or --team-id") {
+				t.Fatalf("expected explicit-options conflict usage error, got %v", runErr)
+			}
+		})
+	}
+}
+
+func TestXcodeExportRejectsInvalidSigningStyleBeforeSideEffects(t *testing.T) {
+	for _, signingStyle := range []string{"heuristic", ""} {
+		t.Run(fmt.Sprintf("value=%q", signingStyle), func(t *testing.T) {
+			restore := overrideXcodeCommandTestHooks(t)
+			defer restore()
+
+			runXcodeExportPreflight = func(context.Context) error {
+				t.Fatal("preflight must not run for an invalid signing style")
+				return nil
+			}
+			runGenerateExportOptions = func(context.Context, localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+				t.Fatal("generator must not run for an invalid signing style")
+				return nil, nil
+			}
+
+			cmd := XcodeExportCommand()
+			cmd.FlagSet.SetOutput(io.Discard)
+			if err := cmd.FlagSet.Parse([]string{
+				"--archive-path", "Demo.xcarchive",
+				"--ipa-path", filepath.Join(t.TempDir(), "Demo.ipa"),
+				"--signing-style", signingStyle,
+			}); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			runErr := cmd.Exec(context.Background(), nil)
+			if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--signing-style must be one of: automatic, manual") {
+				t.Fatalf("expected invalid signing-style usage error, got %v", runErr)
+			}
+		})
+	}
+}
+
+func TestXcodeExportRejectsExplicitlyEmptyTeamIDBeforeSideEffects(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	runXcodeExportPreflight = func(context.Context) error {
+		t.Fatal("preflight must not run for an empty team ID")
+		return nil
+	}
+	runGenerateExportOptions = func(context.Context, localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+		t.Fatal("generator must not run for an empty team ID")
+		return nil, nil
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--ipa-path", filepath.Join(t.TempDir(), "Demo.ipa"),
+		"--team-id", "",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	runErr := cmd.Exec(context.Background(), nil)
+	if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--team-id must not be empty") {
+		t.Fatalf("expected empty team-id usage error, got %v", runErr)
+	}
+}
+
+func TestXcodeExportSigningFlagsAreDiscoverable(t *testing.T) {
+	cmd := XcodeExportCommand()
+	for _, name := range []string{"signing-style", "team-id"} {
+		if cmd.FlagSet.Lookup(name) == nil {
+			t.Fatalf("expected --%s in xcode export help", name)
+		}
 	}
 }
 

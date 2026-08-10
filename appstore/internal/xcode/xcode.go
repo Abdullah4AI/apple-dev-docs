@@ -3,6 +3,7 @@ package xcode
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,9 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"howett.net/plist"
 
@@ -26,6 +30,11 @@ var (
 	commandContextFn     = exec.CommandContext
 	activeDeveloperDirFn = activeDeveloperDir
 	altoolHelpOutputFn   = readAltoolHelpOutput
+
+	altoolValidationErrorPrefixes = [...]*regexp.Regexp{
+		regexp.MustCompile(`(?i)^[[:space:]]*\*{3}[[:space:]]*error:[[:space:]]*`),
+		regexp.MustCompile(`(?i)^[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?[[:space:]]+error:[[:space:]]*`),
+	}
 )
 
 const xcodebuildErrorTailLimit = 64 * 1024
@@ -755,8 +764,185 @@ func runXcodebuild(ctx context.Context, args []string, logWriter io.Writer) erro
 	return runCommandWithTail(ctx, "xcodebuild", args, logWriter, summarizeAction(args), "xcodebuild")
 }
 
+func runXcodebuildForBuild(ctx context.Context, args []string, logWriter io.Writer) error {
+	return runCommandWithTailMode(ctx, "xcodebuild", args, logWriter, summarizeAction(args), "xcodebuild", true)
+}
+
 func runAltoolValidate(ctx context.Context, args []string, logWriter io.Writer) error {
-	return runCommandWithTail(ctx, "xcrun", args, logWriter, "validate", "xcrun altool")
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := commandContextFn(ctx, "xcrun", args...)
+	outputTail := newTailBuffer(xcodebuildErrorTailLimit)
+	combinedOutput := io.Writer(outputTail)
+	if logWriter != nil {
+		combinedOutput = io.MultiWriter(logWriter, outputTail)
+	}
+	serializedOutput := &synchronizedWriter{writer: combinedOutput}
+	stdoutOutput := newAltoolValidationOutputWriter(serializedOutput)
+	stderrOutput := newAltoolValidationOutputWriter(serializedOutput)
+	cmd.Stdout = stdoutOutput
+	cmd.Stderr = stderrOutput
+	if err := runXcodeCommand(cmd); err != nil {
+		return formatCommandTailError(ctx, err, outputTail, "validate", "xcrun altool", false)
+	}
+
+	details := append(stdoutOutput.Details(), stderrOutput.Details()...)
+	details = UniqueDiagnosticDetails(details)
+	details = boundDiagnosticDetails(details, xcodebuildErrorTailLimit)
+	if len(details) == 0 {
+		return nil
+	}
+	return fmt.Errorf("xcrun altool validate failed: %s", strings.Join(details, "; "))
+}
+
+func boundDiagnosticDetails(details []string, maxBytes int) []string {
+	if maxBytes <= 0 {
+		return nil
+	}
+
+	bounded := make([]string, 0, len(details))
+	usedBytes := 0
+	for _, detail := range details {
+		separatorBytes := 0
+		if len(bounded) > 0 {
+			separatorBytes = len("; ")
+		}
+		remaining := maxBytes - usedBytes - separatorBytes
+		if remaining <= 0 {
+			break
+		}
+
+		boundedDetail := truncateUTF8Prefix(detail, remaining)
+		if boundedDetail == "" {
+			break
+		}
+		bounded = append(bounded, boundedDetail)
+		usedBytes += separatorBytes + len(boundedDetail)
+		if len(boundedDetail) < len(detail) {
+			break
+		}
+	}
+	return bounded
+}
+
+type altoolValidationOutputWriter struct {
+	logWriter   io.Writer
+	line        []byte
+	details     []string
+	seen        map[string]struct{}
+	detailBytes int
+}
+
+type synchronizedWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *synchronizedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
+}
+
+func newAltoolValidationOutputWriter(logWriter io.Writer) *altoolValidationOutputWriter {
+	return &altoolValidationOutputWriter{
+		logWriter: logWriter,
+		seen:      make(map[string]struct{}),
+	}
+}
+
+func (w *altoolValidationOutputWriter) Write(p []byte) (int, error) {
+	written := len(p)
+	var err error
+	if w.logWriter != nil {
+		written, err = w.logWriter.Write(p)
+	}
+	w.consume(p[:written])
+	return written, err
+}
+
+func (w *altoolValidationOutputWriter) Details() []string {
+	if len(w.line) > 0 {
+		w.recordLine()
+	}
+	return append([]string(nil), w.details...)
+}
+
+func (w *altoolValidationOutputWriter) consume(p []byte) {
+	for len(p) > 0 {
+		newline := bytes.IndexByte(p, '\n')
+		if newline < 0 {
+			w.appendLine(p)
+			return
+		}
+		w.appendLine(p[:newline])
+		w.recordLine()
+		p = p[newline+1:]
+	}
+}
+
+func (w *altoolValidationOutputWriter) appendLine(fragment []byte) {
+	remaining := xcodebuildErrorTailLimit - len(w.line)
+	if remaining <= 0 {
+		return
+	}
+	if len(fragment) > remaining {
+		fragment = fragment[:remaining]
+	}
+	w.line = append(w.line, fragment...)
+}
+
+func (w *altoolValidationOutputWriter) recordLine() {
+	detail, ok := parseAltoolValidationErrorLine(string(w.line))
+	w.line = w.line[:0]
+	if !ok {
+		return
+	}
+
+	separatorBytes := 0
+	if len(w.details) > 0 {
+		separatorBytes = len("; ")
+	}
+	remaining := xcodebuildErrorTailLimit - w.detailBytes - separatorBytes
+	if remaining <= 0 {
+		return
+	}
+	detail = truncateUTF8Prefix(detail, remaining)
+	if detail == "" {
+		return
+	}
+	if _, exists := w.seen[detail]; exists {
+		return
+	}
+	w.seen[detail] = struct{}{}
+	w.details = append(w.details, detail)
+	w.detailBytes += separatorBytes + len(detail)
+}
+
+func parseAltoolValidationErrorLine(line string) (string, bool) {
+	for _, pattern := range altoolValidationErrorPrefixes {
+		if match := pattern.FindStringIndex(line); match != nil {
+			detail := strings.TrimSpace(line[match[1]:])
+			if detail == "" {
+				detail = "altool reported an unspecified validation error"
+			}
+			return detail, true
+		}
+	}
+	return "", false
+}
+
+func truncateUTF8Prefix(value string, limit int) string {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= limit {
+		return value
+	}
+	prefix := []byte(value[:limit])
+	for len(prefix) > 0 && !utf8.Valid(prefix) {
+		prefix = prefix[:len(prefix)-1]
+	}
+	return string(prefix)
 }
 
 func runAltoolAndCapture(ctx context.Context, args []string, logWriter io.Writer, action string) (string, error) {
@@ -1062,6 +1248,10 @@ func parseBuildStatusMetadataField(line string) (string, string, bool) {
 }
 
 func runCommandWithTail(ctx context.Context, name string, args []string, logWriter io.Writer, action string, commandLabel string) error {
+	return runCommandWithTailMode(ctx, name, args, logWriter, action, commandLabel, false)
+}
+
+func runCommandWithTailMode(ctx context.Context, name string, args []string, logWriter io.Writer, action string, commandLabel string, preserveProcessError bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1074,38 +1264,55 @@ func runCommandWithTail(ctx context.Context, name string, args []string, logWrit
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	if err := runXcodeCommand(cmd); err != nil {
-		detail := strings.TrimSpace(outputTail.String())
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			if detail != "" {
-				if outputTail.Truncated() {
-					return fmt.Errorf(
-						"%s %s timed out or was canceled (showing last %d bytes): %s: %w",
-						commandLabel,
-						action,
-						xcodebuildErrorTailLimit,
-						detail,
-						ctxErr,
-					)
-				}
-				return fmt.Errorf("%s %s timed out or was canceled: %s: %w", commandLabel, action, detail, ctxErr)
-			}
-			return fmt.Errorf("%s %s timed out or was canceled: %w", commandLabel, action, ctxErr)
-		}
+		return formatCommandTailError(ctx, err, outputTail, action, commandLabel, preserveProcessError)
+	}
+	return nil
+}
+
+func formatCommandTailError(ctx context.Context, err error, outputTail *tailBuffer, action string, commandLabel string, preserveProcessError bool) error {
+	detail := strings.TrimSpace(outputTail.String())
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		if detail != "" {
 			if outputTail.Truncated() {
 				return fmt.Errorf(
-					"%s %s failed (showing last %d bytes): %s",
+					"%s %s timed out or was canceled (showing last %d bytes): %s: %w",
 					commandLabel,
 					action,
 					xcodebuildErrorTailLimit,
 					detail,
+					ctxErr,
 				)
 			}
-			return fmt.Errorf("%s %s failed: %s", commandLabel, action, detail)
+			return fmt.Errorf("%s %s timed out or was canceled: %s: %w", commandLabel, action, detail, ctxErr)
 		}
-		return fmt.Errorf("%s %s failed: %w", commandLabel, action, err)
+		return fmt.Errorf("%s %s timed out or was canceled: %w", commandLabel, action, ctxErr)
 	}
-	return nil
+	if detail != "" {
+		if outputTail.Truncated() {
+			if preserveProcessError {
+				return fmt.Errorf(
+					"%s %s failed (showing last %d bytes): %s: %w",
+					commandLabel,
+					action,
+					xcodebuildErrorTailLimit,
+					detail,
+					err,
+				)
+			}
+			return fmt.Errorf(
+				"%s %s failed (showing last %d bytes): %s",
+				commandLabel,
+				action,
+				xcodebuildErrorTailLimit,
+				detail,
+			)
+		}
+		if preserveProcessError {
+			return fmt.Errorf("%s %s failed: %s: %w", commandLabel, action, detail, err)
+		}
+		return fmt.Errorf("%s %s failed: %s", commandLabel, action, detail)
+	}
+	return fmt.Errorf("%s %s failed: %w", commandLabel, action, err)
 }
 
 type tailBuffer struct {
@@ -1142,7 +1349,13 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *tailBuffer) String() string {
-	return string(b.data)
+	data := b.data
+	if b.truncated {
+		for len(data) > 0 && !utf8.RuneStart(data[0]) {
+			data = data[1:]
+		}
+	}
+	return string(data)
 }
 
 func (b *tailBuffer) Truncated() bool {
@@ -1158,6 +1371,9 @@ func summarizeAction(args []string) string {
 	}
 	if containsArg(args, "archive") {
 		return "archive"
+	}
+	if containsArg(args, "build") {
+		return "build"
 	}
 	return "command"
 }

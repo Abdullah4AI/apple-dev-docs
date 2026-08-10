@@ -98,6 +98,7 @@ type AuthSession struct {
 	Client           *http.Client
 	ProviderID       int64
 	PublicProviderID string
+	ProviderName     string
 	TeamID           string
 	UserEmail        string
 
@@ -153,6 +154,13 @@ const (
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
+
+	developerSessionMu sync.Mutex
+	developerCSRF      string
+	developerCSRFTS    string
+	developerTeamID    string
+	publicProviderID   string
+	providerName       string
 
 	// Requests are intentionally throttled to reduce pressure on fragile, unofficial
 	// web-session endpoints and avoid bursty behavior against user accounts.
@@ -250,11 +258,7 @@ func extractAppleRequestID(headers http.Header) string {
 	if len(headers) == 0 {
 		return ""
 	}
-	requestID := strings.TrimSpace(headers.Get("X-Apple-Request-Uuid"))
-	if requestID == "" {
-		requestID = strings.TrimSpace(headers.Get("X-Apple-Request-UUID"))
-	}
-	return requestID
+	return headerValueCaseInsensitive(headers, "X-Apple-Request-UUID")
 }
 
 func sanitizeWebAuthURLForLog(rawURL string) string {
@@ -427,6 +431,8 @@ func NewClient(session *AuthSession) *Client {
 	return &Client{
 		httpClient:         session.Client,
 		baseURL:            irisV1BaseURL,
+		publicProviderID:   strings.TrimSpace(session.PublicProviderID),
+		providerName:       strings.TrimSpace(session.ProviderName),
 		minRequestInterval: resolveWebMinRequestInterval(),
 	}
 }
@@ -469,6 +475,7 @@ func applySessionInfo(session *AuthSession, info *sessionInfo) {
 	}
 	session.ProviderID = info.Provider.ProviderID
 	session.PublicProviderID = strings.TrimSpace(info.Provider.PublicProviderID)
+	session.ProviderName = strings.TrimSpace(info.Provider.Name)
 	session.TeamID = fmt.Sprintf("%d", info.Provider.ProviderID)
 	session.UserEmail = strings.TrimSpace(info.User.EmailAddress)
 }
@@ -1443,7 +1450,24 @@ func SubmitTwoFactorCode(ctx context.Context, session *AuthSession, code string)
 }
 
 func extractServiceErrorCodes(respBody []byte) []string {
-	return appleauth.ExtractServiceErrorCodes(respBody)
+	if codes := appleauth.ExtractServiceErrorCodes(respBody); len(codes) > 0 {
+		return codes
+	}
+	var payload struct {
+		Errors []struct {
+			Code string `json:"code"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		return nil
+	}
+	codes := make([]string, 0, len(payload.Errors))
+	for _, responseError := range payload.Errors {
+		if code := strings.TrimSpace(responseError.Code); code != "" {
+			codes = append(codes, code)
+		}
+	}
+	return codes
 }
 
 // Apple currently returns -20101 when signin/complete rejects SRP credentials.

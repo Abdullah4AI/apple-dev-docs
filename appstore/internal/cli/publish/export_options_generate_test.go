@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	localxcode "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/xcode"
@@ -72,6 +76,41 @@ func TestPublishLocalBuildExportOptionsPrecedence(t *testing.T) {
 				t.Fatalf("expected export options path %q, got %q", tc.wantPath, config.ExportOptionsPath)
 			}
 		})
+	}
+}
+
+func TestPublishLocalBuildGenerationFlagsBypassConventionalOptions(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(defaultPublishExportOptionsPath), 0o755); err != nil {
+		t.Fatalf("create default export-options directory: %v", err)
+	}
+	if err := os.WriteFile(defaultPublishExportOptionsPath, []byte("checked-in plist"), 0o600); err != nil {
+		t.Fatalf("write default export options: %v", err)
+	}
+
+	fs := flag.NewFlagSet("publish signing precedence", flag.ContinueOnError)
+	values := bindPublishLocalBuildFlags(fs)
+	if err := fs.Parse([]string{
+		"--workspace", "Demo.xcworkspace",
+		"--scheme", "Demo",
+		"--signing-style", "manual",
+		"--team-id", "TEAM123456",
+	}); err != nil {
+		t.Fatalf("parse local-build flags: %v", err)
+	}
+	setFlags := collectSetFlags(fs)
+	if err := validatePublishExportOptionsFlags(values, setFlags); err != nil {
+		t.Fatalf("validatePublishExportOptionsFlags() error: %v", err)
+	}
+	config, err := resolveLocalBuildConfig(values, "IOS", "1.2.3", "42")
+	if err != nil {
+		t.Fatalf("resolveLocalBuildConfig() error: %v", err)
+	}
+	if config.ExportOptionsPath != "" {
+		t.Fatalf("generation flags must bypass conventional options, got %q", config.ExportOptionsPath)
+	}
+	if config.SigningStyle != "manual" || config.TeamID != "TEAM123456" {
+		t.Fatalf("unexpected generated signing config: style=%q team=%q", config.SigningStyle, config.TeamID)
 	}
 }
 
@@ -187,6 +226,219 @@ func TestPublishLocalBuildGeneratesExportOptionsAfterArchive(t *testing.T) {
 	}
 	if string(preserved) != string(deterministicContents) {
 		t.Fatalf("implicit generation overwrote deterministic export options: %q", preserved)
+	}
+}
+
+func TestPublishLocalBuildThreadsManualSigningOptionsAfterArchive(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	wantErr := errors.New("stop after generation")
+	archivePath := filepath.Join(t.TempDir(), "Demo.xcarchive")
+	var generatedOptions localxcode.ExportOptionsGenerateOptions
+	runPublishArchiveFn = func(_ context.Context, _ localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+		return &localxcode.ArchiveResult{ArchivePath: archivePath}, nil
+	}
+	generatePublishExportOptionsFn = func(_ context.Context, opts localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+		generatedOptions = opts
+		return nil, wantErr
+	}
+	runPublishExportFn = func(context.Context, localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		t.Fatal("export must not run after the generation sentinel")
+		return nil, nil
+	}
+
+	_, err := runPublishLocalBuild(
+		context.Background(), nil, "app-123", "IOS", "1.2.3", "42",
+		5*time.Second, time.Minute, false,
+		publishLocalBuildConfig{
+			WorkspacePath: "Demo.xcworkspace",
+			Scheme:        "Demo",
+			ArchivePath:   archivePath,
+			IPAPath:       filepath.Join(t.TempDir(), "Demo.ipa"),
+			SigningStyle:  "manual",
+			TeamID:        "TEAM123456",
+		},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected generation sentinel, got %v", err)
+	}
+	if generatedOptions.SigningStyle != "manual" {
+		t.Fatalf("expected manual signing style, got %q", generatedOptions.SigningStyle)
+	}
+	if generatedOptions.TeamID != "TEAM123456" {
+		t.Fatalf("expected team ID passthrough, got %q", generatedOptions.TeamID)
+	}
+}
+
+func TestPublishSigningFlagsAreDiscoverable(t *testing.T) {
+	for _, command := range []struct {
+		name string
+		cmd  func() *ffcli.Command
+	}{
+		{name: "testflight", cmd: PublishTestFlightCommand},
+		{name: "appstore", cmd: PublishAppStoreCommand},
+	} {
+		t.Run(command.name, func(t *testing.T) {
+			cmd := command.cmd()
+			for _, name := range []string{"signing-style", "team-id"} {
+				if cmd.FlagSet.Lookup(name) == nil {
+					t.Fatalf("expected --%s in publish %s help", name, command.name)
+				}
+			}
+		})
+	}
+}
+
+func TestPublishRejectsExplicitOptionsWithGenerationFlagsBeforeSideEffects(t *testing.T) {
+	for _, command := range []struct {
+		name     string
+		cmd      func() *ffcli.Command
+		baseArgs []string
+	}{
+		{
+			name: "testflight",
+			cmd:  PublishTestFlightCommand,
+			baseArgs: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--group", "group-1", "--export-options", "ExportOptions.plist",
+			},
+		},
+		{
+			name: "appstore",
+			cmd:  PublishAppStoreCommand,
+			baseArgs: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--export-options", "ExportOptions.plist",
+			},
+		},
+	} {
+		for _, generationFlag := range [][]string{
+			{"--signing-style", "automatic"},
+			{"--team-id", "TEAM123456"},
+		} {
+			t.Run(command.name+" "+generationFlag[0], func(t *testing.T) {
+				restore := overridePublishCommandTestHooks(t)
+				defer restore()
+
+				getPublishASCClientFn = func(time.Duration) (*asc.Client, error) {
+					t.Fatal("ASC client must not be created for conflicting export-options flags")
+					return nil, nil
+				}
+				cmd := command.cmd()
+				cmd.FlagSet.SetOutput(io.Discard)
+				if err := cmd.FlagSet.Parse(append(append([]string(nil), command.baseArgs...), generationFlag...)); err != nil {
+					t.Fatalf("parse flags: %v", err)
+				}
+
+				runErr := cmd.Exec(context.Background(), nil)
+				if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--export-options cannot be combined with --signing-style or --team-id") {
+					t.Fatalf("expected explicit-options conflict usage error, got %v", runErr)
+				}
+			})
+		}
+	}
+}
+
+func TestPublishRejectsInvalidSigningStyleBeforeSideEffects(t *testing.T) {
+	for _, command := range []struct {
+		name string
+		cmd  func() *ffcli.Command
+		args []string
+	}{
+		{
+			name: "testflight",
+			cmd:  PublishTestFlightCommand,
+			args: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--group", "group-1", "--signing-style", "heuristic",
+			},
+		},
+		{
+			name: "appstore",
+			cmd:  PublishAppStoreCommand,
+			args: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--signing-style", "heuristic",
+			},
+		},
+	} {
+		for _, signingStyle := range []string{"heuristic", ""} {
+			t.Run(command.name+fmt.Sprintf(" value=%q", signingStyle), func(t *testing.T) {
+				restore := overridePublishCommandTestHooks(t)
+				defer restore()
+
+				getPublishASCClientFn = func(time.Duration) (*asc.Client, error) {
+					t.Fatal("ASC client must not be created for an invalid signing style")
+					return nil, nil
+				}
+				cmd := command.cmd()
+				cmd.FlagSet.SetOutput(io.Discard)
+				args := append([]string(nil), command.args...)
+				args[len(args)-1] = signingStyle
+				if err := cmd.FlagSet.Parse(args); err != nil {
+					t.Fatalf("parse flags: %v", err)
+				}
+
+				runErr := cmd.Exec(context.Background(), nil)
+				if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--signing-style must be one of: automatic, manual") {
+					t.Fatalf("expected invalid signing-style usage error, got %v", runErr)
+				}
+			})
+		}
+	}
+}
+
+func TestPublishRejectsExplicitlyEmptyTeamIDBeforeSideEffects(t *testing.T) {
+	for _, command := range []struct {
+		name string
+		cmd  func() *ffcli.Command
+		args []string
+	}{
+		{
+			name: "testflight",
+			cmd:  PublishTestFlightCommand,
+			args: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--group", "group-1", "--team-id", "",
+			},
+		},
+		{
+			name: "appstore",
+			cmd:  PublishAppStoreCommand,
+			args: []string{
+				"--app", "app-123", "--workspace", "Demo.xcworkspace", "--scheme", "Demo",
+				"--version", "1.2.3", "--team-id", "",
+			},
+		},
+	} {
+		t.Run(command.name, func(t *testing.T) {
+			restore := overridePublishCommandTestHooks(t)
+			defer restore()
+			workDir := t.TempDir()
+			t.Chdir(workDir)
+			if err := os.MkdirAll(filepath.Dir(defaultPublishExportOptionsPath), 0o755); err != nil {
+				t.Fatalf("create conventional export-options directory: %v", err)
+			}
+			if err := os.WriteFile(defaultPublishExportOptionsPath, []byte("conventional"), 0o600); err != nil {
+				t.Fatalf("write conventional export-options plist: %v", err)
+			}
+
+			getPublishASCClientFn = func(time.Duration) (*asc.Client, error) {
+				t.Fatal("ASC client must not be created for an empty team ID")
+				return nil, nil
+			}
+			cmd := command.cmd()
+			cmd.FlagSet.SetOutput(io.Discard)
+			if err := cmd.FlagSet.Parse(command.args); err != nil {
+				t.Fatalf("parse flags: %v", err)
+			}
+
+			runErr := cmd.Exec(context.Background(), nil)
+			if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(runErr.Error(), "--team-id must not be empty") {
+				t.Fatalf("expected empty team-id usage error, got %v", runErr)
+			}
+		})
 	}
 }
 

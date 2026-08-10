@@ -25,6 +25,19 @@ func TestXcodeCommandExists(t *testing.T) {
 	if strings.HasPrefix(xcodeCmd.ShortHelp, "[experimental]") {
 		t.Fatalf("expected xcode command not to be experimental, got %q", xcodeCmd.ShortHelp)
 	}
+	buildCmd := findSubcommand(root, "xcode", "build")
+	if buildCmd == nil {
+		t.Fatal("expected xcode build command")
+		return
+	}
+	if !strings.HasPrefix(buildCmd.ShortHelp, "[experimental]") {
+		t.Fatalf("expected xcode build to be introduced as experimental, got %q", buildCmd.ShortHelp)
+	}
+	for _, name := range []string{"project", "workspace", "scheme", "configuration", "destination", "derived-data-path", "result-bundle-path", "clean", "no-code-signing", "xcodebuild-flag", "output"} {
+		if buildCmd.FlagSet.Lookup(name) == nil {
+			t.Fatalf("expected xcode build to expose --%s", name)
+		}
+	}
 	if findSubcommand(root, "xcode", "archive") == nil {
 		t.Fatal("expected xcode archive command")
 	}
@@ -107,6 +120,14 @@ func TestXcodeCommandExists(t *testing.T) {
 	if findSubcommand(root, "xcode", "version", "set") != nil {
 		t.Fatal("expected xcode version set command to be absent")
 	}
+}
+
+func TestXcodeBuildRejectsBlankPassthroughValue(t *testing.T) {
+	assertUsageExit(
+		t,
+		[]string{"xcode", "build", "--project", "Demo.xcodeproj", "--scheme", "Demo", "--xcodebuild-flag="},
+		`invalid value "" for flag -xcodebuild-flag: value cannot be empty`,
+	)
 }
 
 func TestXcodeVersionHelpShowsCanonicalSubcommands(t *testing.T) {

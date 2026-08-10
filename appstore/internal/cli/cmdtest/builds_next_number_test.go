@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestBuildsNextBuildNumberUsesUploadsAndBuilds(t *testing.T) {
@@ -139,6 +142,104 @@ func TestBuildsNextBuildNumberRejectsInvalidInitialBuildNumber(t *testing.T) {
 	}
 	if strings.Contains(stderr, "missing authentication") {
 		t.Fatalf("expected validation before auth resolution, got %q", stderr)
+	}
+}
+
+func TestBuildsNextBuildNumberExplainsUnavailableUploadHistory(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		responseBody string
+		paginate     bool
+		wantCause    error
+		wantExitCode int
+	}{
+		{
+			name:         "initial request forbidden",
+			status:       http.StatusForbidden,
+			responseBody: `{"errors":[{"status":"403","code":"FORBIDDEN","title":"Forbidden"}]}`,
+			wantCause:    asc.ErrForbidden,
+			wantExitCode: cmd.ExitAuth,
+		},
+		{
+			name:         "initial request not found",
+			status:       http.StatusNotFound,
+			responseBody: `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`,
+			wantCause:    asc.ErrNotFound,
+			wantExitCode: cmd.ExitNotFound,
+		},
+		{
+			name:         "next page forbidden",
+			status:       http.StatusForbidden,
+			responseBody: `{"errors":[{"status":"403","code":"FORBIDDEN","title":"Forbidden"}]}`,
+			paginate:     true,
+			wantCause:    asc.ErrForbidden,
+			wantExitCode: cmd.ExitAuth,
+		},
+		{
+			name:         "next page not found",
+			status:       http.StatusNotFound,
+			responseBody: `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`,
+			paginate:     true,
+			wantCause:    asc.ErrNotFound,
+			wantExitCode: cmd.ExitNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupAuth(t)
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+			originalTransport := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = originalTransport })
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/builds":
+					return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"builds","id":"build-1","attributes":{"version":"100","uploadedDate":"2026-02-01T00:00:00Z"}}]}`), nil
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/100000001/buildUploads" && tt.paginate && req.URL.Query().Get("cursor") == "":
+					return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{"next":"https://api.appstoreconnect.apple.com/v1/apps/100000001/buildUploads?cursor=next-page"}}`), nil
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/100000001/buildUploads":
+					return jsonHTTPResponse(tt.status, tt.responseBody), nil
+				default:
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					return nil, nil
+				}
+			})
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			var runErr error
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse([]string{"builds", "next-build-number", "--app", "100000001"}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if runErr == nil {
+				t.Fatal("expected unavailable upload history to fail")
+			}
+			if !errors.Is(runErr, tt.wantCause) {
+				t.Fatalf("expected %v in error chain, got %v", tt.wantCause, runErr)
+			}
+			if got := cmd.ExitCodeFromError(runErr); got != tt.wantExitCode {
+				t.Fatalf("exit code = %d, want %d", got, tt.wantExitCode)
+			}
+			for _, want := range []string{
+				`build upload history is unavailable for app "100000001"`,
+				"refusing to guess because an in-flight upload may already use the next number",
+				`asc builds uploads list --app "100000001" --paginate`,
+			} {
+				if !strings.Contains(runErr.Error(), want) {
+					t.Fatalf("expected error to contain %q, got %v", want, runErr)
+				}
+			}
+			if stdout != "" || stderr != "" {
+				t.Fatalf("expected no partial output, got stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
 	}
 }
 

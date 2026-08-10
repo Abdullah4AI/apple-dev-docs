@@ -57,6 +57,24 @@ func TestGenerateExportOptions_AutomaticInfersArchiveTeamAndWritesPlist(t *testi
 	}
 }
 
+func TestNormalizeExportOptionsSigningStyle(t *testing.T) {
+	for _, tc := range []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "", want: "", wantErr: true},
+		{input: " automatic ", want: "automatic"},
+		{input: "manual", want: "manual"},
+		{input: "heuristic", want: "heuristic", wantErr: true},
+	} {
+		got, err := NormalizeExportOptionsSigningStyle(tc.input)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Fatalf("NormalizeExportOptionsSigningStyle(%q) = %q, %v; want %q, error=%v", tc.input, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
 func TestGenerateExportOptions_ExplicitTeamOverridesArchiveTeam(t *testing.T) {
 	archivePath := writeExportOptionsTestArchive(t, "ARCHIVE123")
 	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")

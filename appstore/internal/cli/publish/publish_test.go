@@ -20,6 +20,17 @@ func TestPublishAppStoreTimeoutHelpMatchesScope(t *testing.T) {
 	}
 }
 
+func TestPublishTestFlightUploadOnlyHelpIsDiscoverable(t *testing.T) {
+	uploadOnlyFlag := PublishTestFlightCommand().FlagSet.Lookup("upload-only")
+	if uploadOnlyFlag == nil {
+		t.Fatal("expected --upload-only flag")
+	}
+	want := "[experimental] Upload the build without adding it to beta groups or submitting beta review"
+	if uploadOnlyFlag.Usage != want {
+		t.Fatalf("expected upload-only help %q, got %q", want, uploadOnlyFlag.Usage)
+	}
+}
+
 func TestValidateIPAPathRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.ipa")

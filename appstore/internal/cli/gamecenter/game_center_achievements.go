@@ -225,6 +225,8 @@ func GameCenterAchievementsCreateCommand() *ffcli.Command {
 		ShortHelp:  "Create a new Game Center achievement.",
 		LongHelp: `Create a new Game Center achievement.
 
+V2 creates the required initial achievement version inline.
+
 Examples:
   asc game-center achievements create --app "APP_ID" --reference-name "First Win" --vendor-id "com.example.firstwin" --points 10
   asc game-center achievements create --app "APP_ID" --reference-name "Master" --vendor-id "com.example.master" --points 100 --repeatable

@@ -2,13 +2,17 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
+
+var shellWaitDelay = 5 * time.Second
 
 var (
 	lookPathFn       = exec.LookPath
@@ -116,10 +120,19 @@ func runShellCommand(ctx context.Context, command string, env map[string]string,
 	args := append(append([]string{}, flags...), command)
 
 	cmd := commandContextFn(ctx, shell, args...)
+	configureProcessTree(cmd)
+	cmd.WaitDelay = shellWaitDelay
 	cmd.Env = buildEnvSlice(env)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return cmd.Run()
+	err = cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+		// The shell exited successfully, but a background descendant retained a
+		// captured output pipe. WaitDelay closed the pipe to bound cleanup; do not
+		// turn that completed command into a retryable failure.
+		return nil
+	}
+	return err
 }
 
 func resolveShell() (string, []string, error) {

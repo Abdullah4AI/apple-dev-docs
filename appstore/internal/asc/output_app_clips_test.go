@@ -155,6 +155,18 @@ func TestPrintTable_AppClipAdvancedExperiences_Empty(t *testing.T) {
 	}
 }
 
+func TestPrintTable_AppClipAdvancedExperienceRemoveResult(t *testing.T) {
+	result := &AppClipAdvancedExperienceRemoveResult{ID: "adv-1", Removed: true}
+
+	output := captureStdout(t, func() error {
+		return PrintTable(result)
+	})
+
+	if !strings.Contains(output, "adv-1") || !strings.Contains(output, "Removed") || !strings.Contains(output, "true") {
+		t.Fatalf("expected truthful removal output, got %q", output)
+	}
+}
+
 func TestPrintMarkdown_BetaAppClipInvocationLocalizations(t *testing.T) {
 	resp := &BetaAppClipInvocationLocalizationsResponse{
 		Data: []Resource[BetaAppClipInvocationLocalizationAttributes]{

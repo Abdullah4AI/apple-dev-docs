@@ -3,9 +3,11 @@ package assets
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,7 +15,69 @@ import (
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
+
+func TestUploadScreenshotsReplaceValidatesRootBeforeDeletingExistingScreenshots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeAssetsTestPNG(t, outside, "01-home.png")
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Fatalf("create source symlink: %v", err)
+	}
+	filePath := filepath.Join(root, "linked", "01-home.png")
+
+	deleted := false
+	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"existing-1","attributes":{"fileName":"old.png"}}],"links":{}}`)
+		case req.Method == http.MethodDelete && req.URL.Path == "/v1/appScreenshots/existing-1":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+	}))
+
+	_, err := uploadScreenshots(context.Background(), client, "LOC_123", "APP_IPHONE_65", []string{filePath}, false, true, false)
+	if !errors.Is(err, rootfs.ErrSymlink) {
+		t.Fatalf("uploadScreenshots() error = %v, want rootfs.ErrSymlink", err)
+	}
+	if deleted {
+		t.Fatal("existing screenshot was deleted before the upload source root was validated")
+	}
+}
+
+func TestUploadScreenshotsDryRunValidatesSourceRootBeforePreview(t *testing.T) {
+	rootDir := t.TempDir()
+	outsideDir := filepath.Join(t.TempDir(), "nested")
+	if err := os.Mkdir(outsideDir, 0o700); err != nil {
+		t.Fatalf("create outside directory: %v", err)
+	}
+	writeAssetsTestPNG(t, outsideDir, "01-home.png")
+	linkDir := filepath.Join(rootDir, "linked")
+	if err := os.Symlink(filepath.Dir(outsideDir), linkDir); err != nil {
+		t.Fatalf("create source symlink: %v", err)
+	}
+	filePath := filepath.Join(linkDir, filepath.Base(outsideDir), "01-home.png")
+
+	requests := 0
+	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests++
+		writeAssetsTestJSON(w, http.StatusOK, `{"data":[],"links":{}}`)
+	}))
+
+	_, err := uploadScreenshots(context.Background(), client, "LOC_123", "APP_IPHONE_65", []string{filePath}, false, false, true)
+	if !errors.Is(err, rootfs.ErrSymlink) {
+		t.Fatalf("uploadScreenshots() error = %v, want rootfs.ErrSymlink", err)
+	}
+	if requests != 0 {
+		t.Fatalf("expected source validation before API lookup, got %d requests", requests)
+	}
+}
 
 func TestUploadScreenshotsSkipExistingStartsUploadTimeoutAfterChecksumFiltering(t *testing.T) {
 	t.Setenv("ASC_TIMEOUT", "200ms")

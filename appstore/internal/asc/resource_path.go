@@ -13,13 +13,13 @@ import (
 // pre-encoded sequence, and "\" is normalized inconsistently across platforms.
 const reservedPathSegmentCharacters = `/?#%\`
 
-// validateResourcePathSegment trims an identifier and confirms it occupies
+// ValidateResourcePathSegment trims an identifier and confirms it occupies
 // exactly one path segment.
 //
 // Reserved delimiters are rejected rather than percent-encoded. Encoding would
 // silently turn an operator mistake into a request for a resource that does not
 // exist, and validateAPIPath rejects "%" in outbound paths anyway.
-func validateResourcePathSegment(id string) (string, error) {
+func ValidateResourcePathSegment(id string) (string, error) {
 	segment := strings.TrimSpace(id)
 	if segment == "" {
 		return "", errors.New("resource identifier is required")
@@ -48,7 +48,7 @@ func resourcePath(template string, ids ...string) (string, error) {
 	}
 	args := make([]any, 0, len(ids))
 	for _, id := range ids {
-		segment, err := validateResourcePathSegment(id)
+		segment, err := ValidateResourcePathSegment(id)
 		if err != nil {
 			return "", err
 		}

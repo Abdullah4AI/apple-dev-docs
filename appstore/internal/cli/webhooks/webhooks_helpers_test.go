@@ -1,6 +1,9 @@
 package webhooks
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeWebhookEvents(t *testing.T) {
 	values, err := normalizeWebhookEvents("build_upload_state_updated, build_beta_detail_external_build_state_updated")
@@ -12,6 +15,16 @@ func TestNormalizeWebhookEvents(t *testing.T) {
 	}
 	if string(values[0]) != "BUILD_UPLOAD_STATE_UPDATED" {
 		t.Fatalf("expected normalized event, got %q", values[0])
+	}
+}
+
+func TestNormalizeWebhookEventsRejectsUnknownValue(t *testing.T) {
+	_, err := normalizeWebhookEvents("SUBSCRIPTION.CREATED")
+	if err == nil || !strings.Contains(err.Error(), "invalid --events value") {
+		t.Fatalf("normalizeWebhookEvents() error = %v, want invalid value guidance", err)
+	}
+	if !strings.Contains(err.Error(), "BUILD_UPLOAD_STATE_UPDATED") {
+		t.Fatalf("normalizeWebhookEvents() error = %v, want allowed values", err)
 	}
 }
 

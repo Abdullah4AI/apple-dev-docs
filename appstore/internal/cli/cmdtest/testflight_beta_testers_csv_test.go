@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func readCSVRecords(t *testing.T, path string) [][]string {
@@ -207,6 +208,85 @@ func TestTestFlightBetaTestersExport_IncludeGroupsAddsColumn(t *testing.T) {
 		{"email", "first_name", "last_name", "groups"},
 		{"a@example.com", "A", "Aye", "Alpha;Beta"},
 		{"b@example.com", "B", "Bee", "Beta"},
+	}
+	if got := strings.TrimSpace(csvRecordsToString(records)); got != strings.TrimSpace(csvRecordsToString(want)) {
+		t.Fatalf("CSV records mismatch\nwant:\n%s\ngot:\n%s", csvRecordsToString(want), csvRecordsToString(records))
+	}
+}
+
+func TestTestFlightBetaTestersExport_IncludeGroupsRenewsRequestTimeout(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_TIMEOUT", "500ms")
+	t.Setenv("ASC_TIMEOUT_SECONDS", "")
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	const requestDelay = 300 * time.Millisecond
+	callCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-1/betaGroups" {
+				t.Fatalf("unexpected request 1: %s %s", req.Method, req.URL.Path)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"Alpha"}},{"type":"betaGroups","id":"group-2","attributes":{"name":"Beta"}}]}`), nil
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/betaTesters" {
+				t.Fatalf("unexpected request 2: %s %s", req.Method, req.URL.Path)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"betaTesters","id":"tester-1","attributes":{"email":"a@example.com","firstName":"A","lastName":"Aye"}}]}`), nil
+		case 3, 4:
+			groupID := "group-1"
+			if callCount == 4 {
+				groupID = "group-2"
+			}
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/betaGroups/"+groupID+"/betaTesters" {
+				t.Fatalf("unexpected request %d: %s %s", callCount, req.Method, req.URL.Path)
+			}
+			select {
+			case <-time.After(requestDelay):
+				return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"betaTesters","id":"tester-1"}]}`), nil
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		default:
+			t.Fatalf("unexpected request count %d", callCount)
+			return nil, nil
+		}
+	})
+
+	outPath := filepath.Join(t.TempDir(), "testers.csv")
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"testflight", "testers", "export", "--app", "app-1", "--output", outPath, "--include-groups"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, `"includeGroups":true`) {
+		t.Fatalf("expected includeGroups true in summary, got %q", stdout)
+	}
+	if callCount != 4 {
+		t.Fatalf("expected four HTTP requests, got %d", callCount)
+	}
+
+	records := readCSVRecords(t, outPath)
+	want := [][]string{
+		{"email", "first_name", "last_name", "groups"},
+		{"a@example.com", "A", "Aye", "Alpha;Beta"},
 	}
 	if got := strings.TrimSpace(csvRecordsToString(records)); got != strings.TrimSpace(csvRecordsToString(want)) {
 		t.Fatalf("CSV records mismatch\nwant:\n%s\ngot:\n%s", csvRecordsToString(want), csvRecordsToString(records))
@@ -431,6 +511,86 @@ func TestTestFlightBetaTestersImport_CreateAssignAndInvite(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"created":1`) || !strings.Contains(stdout, `"invited":1`) {
 		t.Fatalf("expected created=1 and invited=1, got %q", stdout)
+	}
+}
+
+func TestTestFlightBetaTestersImport_RenewsRequestTimeoutForEachMutation(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_TIMEOUT", "500ms")
+	t.Setenv("ASC_TIMEOUT_SECONDS", "")
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	const requestDelay = 300 * time.Millisecond
+	callCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/betaTesters" {
+				t.Fatalf("unexpected request 1: %s %s", req.Method, req.URL.Path)
+			}
+			return jsonHTTPResponse(http.StatusOK, `{"data":[]}`), nil
+		case 2, 3:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/betaTesters" {
+				t.Fatalf("unexpected request %d: %s %s", callCount, req.Method, req.URL.Path)
+			}
+			select {
+			case <-time.After(requestDelay):
+				testerID := "tester-1"
+				if callCount == 3 {
+					testerID = "tester-2"
+				}
+				return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"betaTesters","id":"`+testerID+`"}}`), nil
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		default:
+			t.Fatalf("unexpected request count %d", callCount)
+			return nil, nil
+		}
+	})
+
+	csvPath := filepath.Join(t.TempDir(), "input.csv")
+	if err := os.WriteFile(csvPath, []byte("email\none@example.com\ntwo@example.com\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	type importSummary struct {
+		Total   int `json:"total"`
+		Created int `json:"created"`
+		Failed  int `json:"failed"`
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"testflight", "testers", "import", "--app", "app-1", "--input", csvPath, "--confirm"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if callCount != 3 {
+		t.Fatalf("expected three HTTP requests, got %d", callCount)
+	}
+
+	var summary importSummary
+	if err := json.Unmarshal([]byte(stdout), &summary); err != nil {
+		t.Fatalf("failed to parse JSON summary: %v (stdout=%q)", err, stdout)
+	}
+	if summary.Total != 2 || summary.Created != 2 || summary.Failed != 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
 	}
 }
 

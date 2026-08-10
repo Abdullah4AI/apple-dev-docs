@@ -326,16 +326,53 @@ func executeScreenshotReviewPlan(ctx context.Context, opts screenshotReviewPlanO
 			continue
 		}
 
+		canonicalDisplayTypes := make([]string, 0, len(entry.DisplayTypes))
+		seenDisplayTypes := make(map[string]struct{}, len(entry.DisplayTypes))
+		displayTypesValid := true
+		for _, displayType := range entry.DisplayTypes {
+			rawDisplayType := strings.TrimSpace(displayType)
+			if rawDisplayType == "" {
+				appendScreenshotReviewIssue(
+					result,
+					"error",
+					entry.Key,
+					locale,
+					displayType,
+					"approved review entry contains an empty screenshot display type",
+					"Regenerate the review manifest with a supported App Store screenshot size.",
+				)
+				displayTypesValid = false
+				continue
+			}
+			displayValue := asc.CanonicalScreenshotDisplayTypeForAPI(rawDisplayType)
+			if !asc.IsValidScreenshotDisplayType(displayValue) {
+				appendScreenshotReviewIssue(
+					result,
+					"error",
+					entry.Key,
+					locale,
+					rawDisplayType,
+					fmt.Sprintf("approved review entry contains unsupported screenshot display type %q", rawDisplayType),
+					"Regenerate the review manifest with a supported App Store screenshot size.",
+				)
+				displayTypesValid = false
+				continue
+			}
+			if _, exists := seenDisplayTypes[displayValue]; exists {
+				continue
+			}
+			seenDisplayTypes[displayValue] = struct{}{}
+			canonicalDisplayTypes = append(canonicalDisplayTypes, displayValue)
+		}
+		if !displayTypesValid || len(canonicalDisplayTypes) == 0 {
+			continue
+		}
+
 		result.ApprovedReadyEntries++
 		if coverageByLocale[locale] == nil {
 			coverageByLocale[locale] = make(map[string]bool)
 		}
-
-		for _, displayType := range entry.DisplayTypes {
-			displayValue := strings.TrimSpace(displayType)
-			if displayValue == "" {
-				continue
-			}
+		for _, displayValue := range canonicalDisplayTypes {
 			groupKey := screenshotGroupKey{
 				locale:         locale,
 				localizationID: localizationID,

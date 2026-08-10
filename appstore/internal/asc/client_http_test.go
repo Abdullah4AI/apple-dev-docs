@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -431,6 +432,65 @@ func TestGetApps_RetryExhaustedExposesHTTPStatus(t *testing.T) {
 	var statusErr interface{ HTTPStatusCode() int }
 	if !errors.As(err, &statusErr) || statusErr.HTTPStatusCode() != http.StatusServiceUnavailable {
 		t.Fatalf("expected HTTPStatusCode() to report %d, got %v", http.StatusServiceUnavailable, err)
+	}
+}
+
+func TestClientDo_ConflictStatusMatchesSentinelAndPreservesDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/apps" {
+			t.Fatalf("expected path /v1/apps, got %s", req.URL.Path)
+		}
+		assertAuthorized(t, req)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{
+			"errors": [{
+				"status": "409",
+				"code": "STATE_ERROR.ENTITY_STATE_INVALID",
+				"title": "The resource is not in a valid state",
+				"detail": "Resolve the conflicting state before retrying."
+			}]
+		}`)
+	}))
+	t.Cleanup(server.Close)
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	client := &Client{
+		httpClient: server.Client(),
+		keyID:      "KEY123",
+		issuerID:   "ISS456",
+		privateKey: key,
+	}
+
+	_, err = client.do(context.Background(), http.MethodPost, server.URL+"/v1/apps", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.StatusCode != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, apiErr.StatusCode)
+	}
+	if apiErr.Code != "STATE_ERROR.ENTITY_STATE_INVALID" {
+		t.Fatalf("expected structured code to be preserved, got %q", apiErr.Code)
+	}
+	if apiErr.Title != "The resource is not in a valid state" {
+		t.Fatalf("expected structured title to be preserved, got %q", apiErr.Title)
+	}
+	if apiErr.Detail != "Resolve the conflicting state before retrying." {
+		t.Fatalf("expected structured detail to be preserved, got %q", apiErr.Detail)
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected HTTP 409 to match ErrConflict, got %v", err)
 	}
 }
 
@@ -1407,6 +1467,34 @@ func TestGetBuilds_WithProcessingStateFilter(t *testing.T) {
 	}
 	if builds.Data[0].ID != "build-processing" {
 		t.Fatalf("expected build ID build-processing, got %s", builds.Data[0].ID)
+	}
+}
+
+func TestGetBuilds_WithBetaReviewStateFilter(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"builds","id":"build-review","attributes":{"version":"42"}}]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/builds" {
+			t.Fatalf("expected path /v1/builds, got %s", req.URL.Path)
+		}
+		values := req.URL.Query()
+		if values.Get("filter[app]") != "123" {
+			t.Fatalf("expected filter[app]=123, got %q", values.Get("filter[app]"))
+		}
+		if got := values.Get("filter[betaAppReviewSubmission.betaReviewState]"); got != "WAITING_FOR_REVIEW,IN_REVIEW" {
+			t.Fatalf("expected active beta review states, got %q", got)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	builds, err := client.GetBuilds(context.Background(), "123", WithBuildsBetaReviewStates([]string{"waiting_for_review", "IN_REVIEW"}))
+	if err != nil {
+		t.Fatalf("GetBuilds() error: %v", err)
+	}
+	if len(builds.Data) != 1 || builds.Data[0].ID != "build-review" {
+		t.Fatalf("expected active review build, got %+v", builds.Data)
 	}
 }
 
@@ -9720,7 +9808,15 @@ func TestUpdateBetaAppReviewDetail_SendsRequest(t *testing.T) {
 }
 
 func TestGetBetaAppReviewSubmissions_WithBuildFilter(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":[{"type":"betaAppReviewSubmissions","id":"submission-1","attributes":{"betaReviewState":"IN_REVIEW"}}]}`)
+	response := jsonResponse(http.StatusOK, `{
+		"data":[{
+			"type":"betaAppReviewSubmissions",
+			"id":"submission-1",
+			"attributes":{"betaReviewState":"IN_REVIEW"},
+			"relationships":{"build":{"data":{"type":"builds","id":"build-1"}}}
+		}],
+		"included":[{"type":"builds","id":"build-1","attributes":{"version":"42"}}]
+	}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
@@ -9732,11 +9828,38 @@ func TestGetBetaAppReviewSubmissions_WithBuildFilter(t *testing.T) {
 		if values.Get("filter[build]") != "build-1" {
 			t.Fatalf("expected filter[build]=build-1, got %q", values.Get("filter[build]"))
 		}
+		if values.Get("include") != "build" {
+			t.Fatalf("expected include=build, got %q", values.Get("include"))
+		}
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetBetaAppReviewSubmissions(context.Background(), WithBetaAppReviewSubmissionsBuildIDs([]string{"build-1"})); err != nil {
+	submissions, err := client.GetBetaAppReviewSubmissions(
+		context.Background(),
+		WithBetaAppReviewSubmissionsBuildIDs([]string{"build-1"}),
+		WithBetaAppReviewSubmissionsIncludeBuild(),
+	)
+	if err != nil {
 		t.Fatalf("GetBetaAppReviewSubmissions() error: %v", err)
+	}
+	if len(submissions.Data) != 1 {
+		t.Fatalf("expected one submission, got %d", len(submissions.Data))
+	}
+	var relationships struct {
+		Build Relationship `json:"build"`
+	}
+	if err := json.Unmarshal(submissions.Data[0].Relationships, &relationships); err != nil {
+		t.Fatalf("decode build relationship: %v", err)
+	}
+	if relationships.Build.Data.Type != ResourceTypeBuilds || relationships.Build.Data.ID != "build-1" {
+		t.Fatalf("expected build-1 relationship, got %+v", relationships.Build.Data)
+	}
+	var included []Resource[BuildAttributes]
+	if err := json.Unmarshal(submissions.Included, &included); err != nil {
+		t.Fatalf("decode included build: %v", err)
+	}
+	if len(included) != 1 || included[0].ID != "build-1" || included[0].Attributes.Version != "42" {
+		t.Fatalf("expected included build-1 version 42, got %+v", included)
 	}
 }
 

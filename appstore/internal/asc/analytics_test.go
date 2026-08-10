@@ -55,6 +55,27 @@ func TestBuildSalesReportQuery(t *testing.T) {
 	}
 }
 
+func TestBuildSalesReportQuerySupportsDocumentedInstallsSubtype(t *testing.T) {
+	query := buildSalesReportQuery(SalesReportParams{
+		VendorNumber:  "12345678",
+		ReportType:    SalesReportTypeInstalls,
+		ReportSubType: SalesReportSubTypeSummaryChannel,
+		Frequency:     SalesReportFrequencyYearly,
+		ReportDate:    "2024-12-31",
+		Version:       SalesReportVersion1_0,
+	})
+	values, err := url.ParseQuery(query)
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if got := values.Get("filter[reportType]"); got != "INSTALLS" {
+		t.Fatalf("expected reportType INSTALLS, got %q", got)
+	}
+	if got := values.Get("filter[reportSubType]"); got != "SUMMARY_CHANNEL" {
+		t.Fatalf("expected reportSubType SUMMARY_CHANNEL, got %q", got)
+	}
+}
+
 func TestGetSalesReport_SendsRequest(t *testing.T) {
 	response := rawResponse("gzdata")
 	client := newTestClient(t, func(req *http.Request) {
@@ -137,7 +158,7 @@ func TestCreateAnalyticsReportRequest_SendsRequest(t *testing.T) {
 	}
 }
 
-func TestGetAnalyticsReportRequests_WithFilters(t *testing.T) {
+func TestGetAnalyticsReportRequests_WithAccessTypeFilter(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[]}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
@@ -147,8 +168,8 @@ func TestGetAnalyticsReportRequests_WithFilters(t *testing.T) {
 			t.Fatalf("expected path /v1/apps/app-1/analyticsReportRequests, got %s", req.URL.Path)
 		}
 		values := req.URL.Query()
-		if values.Get("filter[state]") != "COMPLETED" {
-			t.Fatalf("expected filter[state]=COMPLETED, got %q", values.Get("filter[state]"))
+		if values.Get("filter[accessType]") != "ONGOING" {
+			t.Fatalf("expected filter[accessType]=ONGOING, got %q", values.Get("filter[accessType]"))
 		}
 		if values.Get("limit") != "10" {
 			t.Fatalf("expected limit=10, got %q", values.Get("limit"))
@@ -160,9 +181,51 @@ func TestGetAnalyticsReportRequests_WithFilters(t *testing.T) {
 		context.Background(),
 		"app-1",
 		WithAnalyticsReportRequestsLimit(10),
-		WithAnalyticsReportRequestsState("COMPLETED"),
+		WithAnalyticsReportRequestsAccessType(AnalyticsAccessTypeOngoing),
 	); err != nil {
 		t.Fatalf("GetAnalyticsReportRequests() error: %v", err)
+	}
+}
+
+func TestGetAnalyticsReportRequests_DeprecatedStateFailsBeforeHTTP(t *testing.T) {
+	requestCount := 0
+	client := newTestClient(t, func(_ *http.Request) {
+		requestCount++
+	}, jsonResponse(http.StatusOK, `{"data":[]}`))
+
+	_, err := client.GetAnalyticsReportRequests(
+		context.Background(),
+		"app-1",
+		WithAnalyticsReportRequestsState("COMPLETED"),
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "state filtering is unsupported") ||
+		!strings.Contains(err.Error(), "use WithAnalyticsReportRequestsAccessType") {
+		t.Fatalf("expected migration error, got %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("request count = %d, want 0", requestCount)
+	}
+}
+
+func TestGetAnalyticsReportRequests_EmptyDeprecatedStateFailsBeforeHTTP(t *testing.T) {
+	requestCount := 0
+	client := newTestClient(t, func(_ *http.Request) {
+		requestCount++
+	}, jsonResponse(http.StatusOK, `{"data":[]}`))
+
+	_, err := client.GetAnalyticsReportRequests(
+		context.Background(),
+		"app-1",
+		WithAnalyticsReportRequestsState(""),
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "state filtering is unsupported") ||
+		!strings.Contains(err.Error(), "use WithAnalyticsReportRequestsAccessType") {
+		t.Fatalf("expected migration error, got %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("request count = %d, want 0", requestCount)
 	}
 }
 
@@ -399,6 +462,59 @@ func TestGetAnalyticsReportInstance_SendsRequest(t *testing.T) {
 
 	if _, err := client.GetAnalyticsReportInstance(context.Background(), "inst-1"); err != nil {
 		t.Fatalf("GetAnalyticsReportInstance() error: %v", err)
+	}
+}
+
+func TestAnalyticsResourceEndpointsRejectIDsThatEscapePathSegment(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{
+			name: "GetAnalyticsReportInstance",
+			call: func(client *Client) error {
+				_, err := client.GetAnalyticsReportInstance(context.Background(), "inst-1/relationships/reports")
+				return err
+			},
+		},
+		{
+			name: "GetAnalyticsReportInstanceSegmentsRelationships",
+			call: func(client *Client) error {
+				_, err := client.GetAnalyticsReportInstanceSegmentsRelationships(context.Background(), "inst-1/relationships/reports")
+				return err
+			},
+		},
+		{
+			name: "GetAnalyticsReportSegments",
+			call: func(client *Client) error {
+				_, err := client.GetAnalyticsReportSegments(context.Background(), "inst-1/relationships/reports")
+				return err
+			},
+		},
+		{
+			name: "GetAnalyticsReportSegment",
+			call: func(client *Client) error {
+				_, err := client.GetAnalyticsReportSegment(context.Background(), "seg-1/relationships/report")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requestCount := 0
+			client := newTestClient(t, func(_ *http.Request) {
+				requestCount++
+			}, jsonResponse(http.StatusOK, `{}`))
+
+			err := tt.call(client)
+			if err == nil || !strings.Contains(err.Error(), "single path segment") {
+				t.Fatalf("error = %v, want path-segment rejection", err)
+			}
+			if requestCount != 0 {
+				t.Fatalf("request count = %d, want 0", requestCount)
+			}
+		})
 	}
 }
 

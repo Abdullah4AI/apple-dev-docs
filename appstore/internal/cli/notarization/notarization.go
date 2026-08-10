@@ -13,6 +13,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/secureopen"
 )
 
 // NotarizationCommand returns the notarization command group.
@@ -91,16 +92,37 @@ Examples:
 				return fmt.Errorf("notarization submit: --timeout must be a valid positive duration (e.g. 30m, 1h)")
 			}
 
-			// Validate file
-			info, err := os.Lstat(pathValue)
+			// Preserve the explicit symlink error while relying on the no-follow
+			// open below for the actual security boundary.
+			pathInfo, err := os.Lstat(pathValue)
 			if err != nil {
 				return fmt.Errorf("notarization submit: %w", err)
 			}
-			if info.Mode()&os.ModeSymlink != 0 {
+			if pathInfo.Mode()&os.ModeSymlink != 0 {
 				return fmt.Errorf("notarization submit: refusing to read symlink %q", pathValue)
+			}
+			if pathInfo.IsDir() {
+				return fmt.Errorf("notarization submit: %q is a directory", pathValue)
+			}
+			if !pathInfo.Mode().IsRegular() {
+				return fmt.Errorf("notarization submit: %q is not a regular file", pathValue)
+			}
+
+			fileHandle, err := secureopen.OpenExistingNoFollow(pathValue)
+			if err != nil {
+				return fmt.Errorf("notarization submit: failed to open file: %w", err)
+			}
+			defer fileHandle.Close()
+
+			info, err := fileHandle.Stat()
+			if err != nil {
+				return fmt.Errorf("notarization submit: failed to stat opened file: %w", err)
 			}
 			if info.IsDir() {
 				return fmt.Errorf("notarization submit: %q is a directory", pathValue)
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("notarization submit: %q is not a regular file", pathValue)
 			}
 			if info.Size() <= 0 {
 				return fmt.Errorf("notarization submit: file must not be empty")
@@ -115,7 +137,7 @@ Examples:
 			if shared.ProgressEnabled() {
 				fmt.Fprintf(os.Stderr, "Computing SHA-256 hash of %s...\n", pathValue)
 			}
-			sha256Hash, err := asc.ComputeFileSHA256(pathValue)
+			sha256Hash, err := asc.ComputeFileSHA256(fileHandle)
 			if err != nil {
 				return fmt.Errorf("notarization submit: failed to compute SHA-256: %w", err)
 			}
@@ -148,12 +170,6 @@ Examples:
 			if shared.ProgressEnabled() {
 				fmt.Fprintf(os.Stderr, "Uploading %s to Apple...\n", submissionName)
 			}
-
-			fileHandle, err := os.Open(pathValue)
-			if err != nil {
-				return fmt.Errorf("notarization submit: failed to open file: %w", err)
-			}
-			defer fileHandle.Close()
 
 			uploadCtx, uploadCancel := shared.ContextWithUploadTimeout(ctx)
 			defer uploadCancel()

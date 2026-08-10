@@ -299,6 +299,9 @@ func TestBuildCrashQueryIncludeBuildAndTester(t *testing.T) {
 func TestBuildBetaGroupsQuery(t *testing.T) {
 	query := &betaGroupsQuery{}
 	WithBetaGroupsLimit(10)(query)
+	WithBetaGroupsApps([]string{" app-1 ", "app-2"})(query)
+	WithBetaGroupsBuilds([]string{"build-1"})(query)
+	WithBetaGroupsFields([]string{"name", "isInternalGroup", "hasAccessToAllBuilds"})(query)
 
 	values, err := url.ParseQuery(buildBetaGroupsQuery(query))
 	if err != nil {
@@ -306,6 +309,15 @@ func TestBuildBetaGroupsQuery(t *testing.T) {
 	}
 	if got := values.Get("limit"); got != "10" {
 		t.Fatalf("expected limit=10, got %q", got)
+	}
+	if got := values.Get("filter[app]"); got != "app-1,app-2" {
+		t.Fatalf("expected filter[app]=app-1,app-2, got %q", got)
+	}
+	if got := values.Get("filter[builds]"); got != "build-1" {
+		t.Fatalf("expected filter[builds]=build-1, got %q", got)
+	}
+	if got := values.Get("fields[betaGroups]"); got != "name,isInternalGroup,hasAccessToAllBuilds" {
+		t.Fatalf("unexpected beta group fields %q", got)
 	}
 }
 

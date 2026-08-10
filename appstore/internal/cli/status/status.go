@@ -68,10 +68,27 @@ type latestBuild struct {
 }
 
 type testFlightSection struct {
-	LatestDistributedBuildID string `json:"latestDistributedBuildId,omitempty"`
-	BetaReviewState          string `json:"betaReviewState,omitempty"`
-	ExternalBuildState       string `json:"externalBuildState,omitempty"`
-	SubmittedDate            string `json:"submittedDate,omitempty"`
+	LatestDistributedBuildID string                      `json:"latestDistributedBuildId,omitempty"`
+	BetaReviewState          string                      `json:"betaReviewState,omitempty"`
+	ExternalBuildState       string                      `json:"externalBuildState,omitempty"`
+	SubmittedDate            string                      `json:"submittedDate,omitempty"`
+	BetaReviewSubmission     *betaReviewSubmissionStatus `json:"betaReviewSubmission,omitempty"`
+	latestBuild              *betaReviewBuildStatus
+}
+
+type betaReviewSubmissionStatus struct {
+	ID                    string                 `json:"id"`
+	State                 string                 `json:"state,omitempty"`
+	SubmittedDate         string                 `json:"submittedDate,omitempty"`
+	RelationToLatestBuild string                 `json:"relationToLatestBuild"`
+	Build                 *betaReviewBuildStatus `json:"build,omitempty"`
+}
+
+type betaReviewBuildStatus struct {
+	ID          string `json:"id"`
+	Version     string `json:"version,omitempty"`
+	BuildNumber string `json:"buildNumber,omitempty"`
+	Platform    string `json:"platform,omitempty"`
 }
 
 type appStoreSection struct {
@@ -128,6 +145,8 @@ var allowedIncludes = []string{
 	"phased-release",
 	"links",
 }
+
+const maxBetaReviewBuildPrefetches = 5
 
 // StatusCommand returns the root status dashboard command.
 func StatusCommand() *ffcli.Command {
@@ -498,7 +517,11 @@ func runTasks(tasks []sectionTask, limit int) error {
 }
 
 func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, resp *dashboardResponse) error {
-	buildOpts := []asc.BuildsOption{asc.WithBuildsSort("-uploadedDate"), asc.WithBuildsLimit(50)}
+	buildOpts := []asc.BuildsOption{
+		asc.WithBuildsSort("-uploadedDate"),
+		asc.WithBuildsLimit(50),
+		asc.WithBuildsInclude([]string{"preReleaseVersion"}),
+	}
 	if platform != "" {
 		buildOpts = append(buildOpts, asc.WithBuildsPreReleaseVersionPlatforms([]string{platform}))
 	}
@@ -511,25 +534,40 @@ func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID stri
 	if len(buildsResp.Data) > 0 {
 		latest = &buildsResp.Data[0]
 	}
-
-	if includes.builds {
-		section := &buildsSection{}
-		if latest != nil {
-			entry := &latestBuild{
-				ID:              latest.ID,
-				BuildNumber:     latest.Attributes.Version,
-				ProcessingState: latest.Attributes.ProcessingState,
-				UploadedDate:    latest.Attributes.UploadedDate,
+	buildsByID := buildReviewContexts(buildsResp)
+	var latestContext *betaReviewBuildStatus
+	if latest != nil {
+		latestContext = buildsByID[latest.ID]
+		if latestContext == nil {
+			latestContext = &betaReviewBuildStatus{
+				ID:          latest.ID,
+				BuildNumber: latest.Attributes.Version,
 			}
-
+			buildsByID[latest.ID] = latestContext
+		}
+		if latestContext.Version == "" || latestContext.Platform == "" {
 			preRelease, preErr := client.GetBuildPreReleaseVersion(ctx, latest.ID)
 			if preErr != nil {
 				if !asc.IsNotFound(preErr) {
 					return preErr
 				}
 			} else {
-				entry.Version = preRelease.Data.Attributes.Version
-				entry.Platform = string(preRelease.Data.Attributes.Platform)
+				latestContext.Version = preRelease.Data.Attributes.Version
+				latestContext.Platform = string(preRelease.Data.Attributes.Platform)
+			}
+		}
+	}
+
+	if includes.builds {
+		section := &buildsSection{}
+		if latest != nil {
+			entry := &latestBuild{
+				ID:              latest.ID,
+				Version:         latestContext.Version,
+				BuildNumber:     latest.Attributes.Version,
+				ProcessingState: latest.Attributes.ProcessingState,
+				UploadedDate:    latest.Attributes.UploadedDate,
+				Platform:        latestContext.Platform,
 			}
 			section.Latest = entry
 		}
@@ -540,7 +578,7 @@ func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID stri
 		return nil
 	}
 
-	section := &testFlightSection{}
+	section := &testFlightSection{latestBuild: latestContext}
 	if len(buildsResp.Data) == 0 {
 		resp.TestFlight = section
 		return nil
@@ -570,22 +608,169 @@ func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID stri
 		}
 	}
 
-	reviewSubmissions, err := client.GetBetaAppReviewSubmissions(
-		ctx,
-		asc.WithBetaAppReviewSubmissionsBuildIDs(buildIDs),
-		asc.WithBetaAppReviewSubmissionsLimit(200),
-	)
+	reviewSubmissions, err := fetchBetaReviewSubmissionsForStatus(ctx, client, appID, platform, buildsResp, buildsByID)
 	if err != nil {
 		return err
 	}
-	latestReviewSubmission := selectLatestBetaReviewSubmission(reviewSubmissions.Data)
+	reviewBuildsBySubmissionID := make(map[string]*betaReviewBuildStatus, len(reviewSubmissions.Data))
+	missingActiveBuilds := make([]asc.Resource[asc.BetaAppReviewSubmissionAttributes], 0)
+	attemptedBuildFallbacks := make(map[string]struct{}, maxBetaReviewBuildPrefetches)
+	for _, submission := range reviewSubmissions.Data {
+		reviewBuild := reviewBuildForSubmission(submission, buildsByID)
+		if reviewBuild != nil {
+			reviewBuildsBySubmissionID[submission.ID] = reviewBuild
+		}
+		if isInProgressBetaReviewState(submission.Attributes.BetaReviewState) && betaReviewBuildContextIncomplete(reviewBuild) {
+			missingActiveBuilds = append(missingActiveBuilds, submission)
+		}
+	}
+	// include=build is the normal correlation path. Prefetch at most five partial
+	// active contexts, then reserve one final fallback for the selected submission.
+	// This caps resolution at six contexts and at most twelve related API requests.
+	sortBetaReviewSubmissionsLatestFirst(missingActiveBuilds)
+	for index, submission := range missingActiveBuilds {
+		if index >= maxBetaReviewBuildPrefetches {
+			break
+		}
+		attemptedBuildFallbacks[submission.ID] = struct{}{}
+		if reviewBuild := resolveBetaReviewBuildContext(ctx, client, submission, buildsByID); reviewBuild != nil {
+			reviewBuildsBySubmissionID[submission.ID] = reviewBuild
+		}
+	}
+
+	latestReviewSubmission := selectBetaReviewSubmissionForLatestBuild(reviewSubmissions.Data, latestContext, buildsByID, reviewBuildsBySubmissionID)
 	if latestReviewSubmission != nil {
+		reviewBuild := reviewBuildsBySubmissionID[latestReviewSubmission.ID]
+		_, fallbackAttempted := attemptedBuildFallbacks[latestReviewSubmission.ID]
+		if betaReviewBuildContextIncomplete(reviewBuild) && !fallbackAttempted {
+			if resolvedBuild := resolveBetaReviewBuildContext(ctx, client, *latestReviewSubmission, buildsByID); resolvedBuild != nil {
+				reviewBuildsBySubmissionID[latestReviewSubmission.ID] = resolvedBuild
+			}
+			latestReviewSubmission = selectBetaReviewSubmissionForLatestBuild(reviewSubmissions.Data, latestContext, buildsByID, reviewBuildsBySubmissionID)
+			reviewBuild = reviewBuildsBySubmissionID[latestReviewSubmission.ID]
+		}
+
 		section.BetaReviewState = latestReviewSubmission.Attributes.BetaReviewState
 		section.SubmittedDate = latestReviewSubmission.Attributes.SubmittedDate
+		section.BetaReviewSubmission = &betaReviewSubmissionStatus{
+			ID:                    latestReviewSubmission.ID,
+			State:                 latestReviewSubmission.Attributes.BetaReviewState,
+			SubmittedDate:         latestReviewSubmission.Attributes.SubmittedDate,
+			RelationToLatestBuild: betaReviewBuildRelation(latestContext, reviewBuild),
+			Build:                 reviewBuild,
+		}
 	}
 
 	resp.TestFlight = section
 	return nil
+}
+
+func fetchBetaReviewSubmissionsForStatus(
+	ctx context.Context,
+	client *asc.Client,
+	appID string,
+	platform string,
+	latestBuilds *asc.BuildsResponse,
+	buildsByID map[string]*betaReviewBuildStatus,
+) (*asc.BetaAppReviewSubmissionsResponse, error) {
+	result := &asc.BetaAppReviewSubmissionsResponse{}
+	seenSubmissions := make(map[string]struct{})
+	appendSubmissions := func(firstPage *asc.BetaAppReviewSubmissionsResponse) error {
+		paginated, err := asc.PaginateAll(ctx, firstPage, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+			return client.GetBetaAppReviewSubmissions(pageCtx, asc.WithBetaAppReviewSubmissionsNextURL(nextURL))
+		})
+		if err != nil {
+			return err
+		}
+		all, ok := paginated.(*asc.BetaAppReviewSubmissionsResponse)
+		if !ok {
+			return fmt.Errorf("unexpected beta review submissions response type %T", paginated)
+		}
+		for _, submission := range all.Data {
+			if submission.ID != "" {
+				if _, exists := seenSubmissions[submission.ID]; exists {
+					continue
+				}
+				seenSubmissions[submission.ID] = struct{}{}
+			}
+			result.Data = append(result.Data, submission)
+		}
+		return nil
+	}
+
+	latestBuildIDs := make(map[string]struct{}, len(latestBuilds.Data))
+	buildIDs := make([]string, 0, len(latestBuilds.Data))
+	for _, build := range latestBuilds.Data {
+		latestBuildIDs[build.ID] = struct{}{}
+		buildIDs = append(buildIDs, build.ID)
+	}
+	if len(buildIDs) > 0 {
+		firstPage, err := client.GetBetaAppReviewSubmissions(
+			ctx,
+			asc.WithBetaAppReviewSubmissionsBuildIDs(buildIDs),
+			asc.WithBetaAppReviewSubmissionsIncludeBuild(),
+			asc.WithBetaAppReviewSubmissionsLimit(200),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := appendSubmissions(firstPage); err != nil {
+			return nil, err
+		}
+	}
+
+	activeBuildOpts := []asc.BuildsOption{
+		asc.WithBuildsBetaReviewStates([]string{"WAITING_FOR_REVIEW", "IN_REVIEW"}),
+		asc.WithBuildsLimit(50),
+		asc.WithBuildsInclude([]string{"preReleaseVersion"}),
+	}
+	if platform != "" {
+		activeBuildOpts = append(activeBuildOpts, asc.WithBuildsPreReleaseVersionPlatforms([]string{platform}))
+	}
+	activeBuilds, err := client.GetBuilds(ctx, appID, activeBuildOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	err = asc.PaginateEach(ctx, activeBuilds, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return client.GetBuilds(pageCtx, appID, asc.WithBuildsNextURL(nextURL))
+	}, func(page asc.PaginatedResponse) error {
+		buildPage, ok := page.(*asc.BuildsResponse)
+		if !ok {
+			return fmt.Errorf("unexpected active beta review builds response type %T", page)
+		}
+		for buildID, buildContext := range buildReviewContexts(buildPage) {
+			if existing := buildsByID[buildID]; existing == nil || betaReviewBuildContextIncomplete(existing) {
+				buildsByID[buildID] = buildContext
+			}
+		}
+
+		olderActiveBuildIDs := make([]string, 0, len(buildPage.Data))
+		for _, build := range buildPage.Data {
+			if _, alreadyQueried := latestBuildIDs[build.ID]; !alreadyQueried {
+				olderActiveBuildIDs = append(olderActiveBuildIDs, build.ID)
+			}
+		}
+		if len(olderActiveBuildIDs) == 0 {
+			return nil
+		}
+
+		firstPage, err := client.GetBetaAppReviewSubmissions(
+			ctx,
+			asc.WithBetaAppReviewSubmissionsBuildIDs(olderActiveBuildIDs),
+			asc.WithBetaAppReviewSubmissionsIncludeBuild(),
+			asc.WithBetaAppReviewSubmissionsLimit(200),
+		)
+		if err != nil {
+			return err
+		}
+		return appendSubmissions(firstPage)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func buildExternalStatesByBuildID(buildIDs []string, betaDetails *asc.BuildBetaDetailsResponse) map[string]string {
@@ -635,6 +820,113 @@ func optionalRelationshipResourceID(relationships json.RawMessage, key string) (
 	}
 
 	return id, true
+}
+
+func buildReviewContexts(builds *asc.BuildsResponse) map[string]*betaReviewBuildStatus {
+	contexts := make(map[string]*betaReviewBuildStatus)
+	if builds == nil {
+		return contexts
+	}
+
+	preReleaseVersions := make(map[string]asc.PreReleaseVersionAttributes)
+	if len(builds.Included) > 0 {
+		var included []asc.Resource[asc.PreReleaseVersionAttributes]
+		if err := json.Unmarshal(builds.Included, &included); err == nil {
+			for _, resource := range included {
+				if resource.Type == asc.ResourceTypePreReleaseVersions {
+					preReleaseVersions[resource.ID] = resource.Attributes
+				}
+			}
+		}
+	}
+
+	for _, build := range builds.Data {
+		context := &betaReviewBuildStatus{
+			ID:          build.ID,
+			BuildNumber: build.Attributes.Version,
+		}
+		if preReleaseID, ok := optionalRelationshipResourceID(build.Relationships, "preReleaseVersion"); ok {
+			if preRelease, found := preReleaseVersions[preReleaseID]; found {
+				context.Version = preRelease.Version
+				context.Platform = string(preRelease.Platform)
+			}
+		}
+		contexts[build.ID] = context
+	}
+
+	return contexts
+}
+
+func reviewBuildForSubmission(submission asc.Resource[asc.BetaAppReviewSubmissionAttributes], buildsByID map[string]*betaReviewBuildStatus) *betaReviewBuildStatus {
+	buildID, ok := optionalRelationshipResourceID(submission.Relationships, "build")
+	if !ok {
+		return nil
+	}
+	if build := buildsByID[buildID]; build != nil {
+		return build
+	}
+	return &betaReviewBuildStatus{ID: buildID}
+}
+
+func resolveBetaReviewBuildContext(
+	ctx context.Context,
+	client *asc.Client,
+	submission asc.Resource[asc.BetaAppReviewSubmissionAttributes],
+	buildsByID map[string]*betaReviewBuildStatus,
+) *betaReviewBuildStatus {
+	reviewBuild := reviewBuildForSubmission(submission, buildsByID)
+	if reviewBuild == nil || reviewBuild.BuildNumber == "" {
+		relatedBuild, err := client.GetBetaAppReviewSubmissionBuild(ctx, submission.ID)
+		if err != nil || relatedBuild == nil || strings.TrimSpace(relatedBuild.Data.ID) == "" {
+			return reviewBuild
+		}
+		reviewBuild = buildsByID[relatedBuild.Data.ID]
+		if reviewBuild == nil {
+			reviewBuild = &betaReviewBuildStatus{ID: relatedBuild.Data.ID}
+			buildsByID[relatedBuild.Data.ID] = reviewBuild
+		}
+		if reviewBuild.BuildNumber == "" {
+			reviewBuild.BuildNumber = relatedBuild.Data.Attributes.Version
+		}
+	}
+
+	if reviewBuild.Version == "" || reviewBuild.Platform == "" {
+		if preRelease, err := client.GetBuildPreReleaseVersion(ctx, reviewBuild.ID); err == nil && preRelease != nil {
+			reviewBuild.Version = preRelease.Data.Attributes.Version
+			reviewBuild.Platform = string(preRelease.Data.Attributes.Platform)
+		}
+	}
+	return reviewBuild
+}
+
+func betaReviewBuildContextIncomplete(build *betaReviewBuildStatus) bool {
+	return build == nil || build.BuildNumber == "" || build.Version == "" || build.Platform == ""
+}
+
+func betaReviewBuildRelation(latest, review *betaReviewBuildStatus) string {
+	if latest == nil || review == nil || strings.TrimSpace(review.ID) == "" {
+		return "unknown"
+	}
+	if latest.ID == review.ID {
+		return "sameBuild"
+	}
+	if sameBetaReviewVersionTrain(latest, review) {
+		return "sameVersionTrain"
+	}
+	if latest.Version != "" && latest.Platform != "" && review.Version != "" && review.Platform != "" {
+		return "differentVersionTrain"
+	}
+	return "unknown"
+}
+
+func sameBetaReviewVersionTrain(first, second *betaReviewBuildStatus) bool {
+	if first == nil || second == nil {
+		return false
+	}
+	return strings.TrimSpace(first.Version) != "" &&
+		strings.EqualFold(first.Version, second.Version) &&
+		strings.TrimSpace(first.Platform) != "" &&
+		strings.EqualFold(first.Platform, second.Platform)
 }
 
 func fillAppStoreAndPhasedRelease(ctx context.Context, client *asc.Client, appID string, platform string, includes includeSet, resp *dashboardResponse) error {
@@ -825,6 +1117,70 @@ func selectLatestBetaReviewSubmission(submissions []asc.Resource[asc.BetaAppRevi
 	return &best
 }
 
+func selectBetaReviewSubmissionForLatestBuild(
+	submissions []asc.Resource[asc.BetaAppReviewSubmissionAttributes],
+	latestBuild *betaReviewBuildStatus,
+	buildsByID map[string]*betaReviewBuildStatus,
+	reviewBuildsBySubmissionID map[string]*betaReviewBuildStatus,
+) *asc.Resource[asc.BetaAppReviewSubmissionAttributes] {
+	if len(submissions) == 0 {
+		return nil
+	}
+
+	relevantActive := make([]asc.Resource[asc.BetaAppReviewSubmissionAttributes], 0)
+	unknownActive := make([]asc.Resource[asc.BetaAppReviewSubmissionAttributes], 0)
+	relevantTerminal := make([]asc.Resource[asc.BetaAppReviewSubmissionAttributes], 0)
+	for _, submission := range submissions {
+		reviewBuild := reviewBuildsBySubmissionID[submission.ID]
+		if reviewBuild == nil {
+			reviewBuild = reviewBuildForSubmission(submission, buildsByID)
+		}
+		relation := betaReviewBuildRelation(latestBuild, reviewBuild)
+		if relation == "unknown" && isInProgressBetaReviewState(submission.Attributes.BetaReviewState) {
+			unknownActive = append(unknownActive, submission)
+			continue
+		}
+		if relation != "sameBuild" && relation != "sameVersionTrain" {
+			continue
+		}
+		if isInProgressBetaReviewState(submission.Attributes.BetaReviewState) {
+			relevantActive = append(relevantActive, submission)
+		} else {
+			relevantTerminal = append(relevantTerminal, submission)
+		}
+	}
+
+	if selected := selectLatestBetaReviewSubmission(relevantActive); selected != nil {
+		return selected
+	}
+	if selected := selectLatestBetaReviewSubmission(unknownActive); selected != nil {
+		return selected
+	}
+	if selected := selectLatestBetaReviewSubmission(relevantTerminal); selected != nil {
+		return selected
+	}
+	return selectLatestBetaReviewSubmission(submissions)
+}
+
+func sortBetaReviewSubmissionsLatestFirst(submissions []asc.Resource[asc.BetaAppReviewSubmissionAttributes]) {
+	slices.SortFunc(submissions, func(first, second asc.Resource[asc.BetaAppReviewSubmissionAttributes]) int {
+		dateOrder := shared.CompareRFC3339DateStrings(first.Attributes.SubmittedDate, second.Attributes.SubmittedDate)
+		if dateOrder != 0 {
+			return -dateOrder
+		}
+		return -strings.Compare(first.ID, second.ID)
+	})
+}
+
+func isInProgressBetaReviewState(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "WAITING_FOR_REVIEW", "IN_REVIEW":
+		return true
+	default:
+		return false
+	}
+}
+
 func isDistributedState(state string) bool {
 	switch strings.ToUpper(strings.TrimSpace(state)) {
 	case "IN_BETA_TESTING", "READY_FOR_TESTING":
@@ -888,6 +1244,9 @@ func collectBlockers(resp *dashboardResponse) []string {
 	if resp.Builds != nil && resp.Builds.Latest == nil {
 		blockers = append(blockers, "No builds found for this app")
 	}
+	if blocker := betaReviewBlocker(resp); blocker != "" {
+		blockers = append(blockers, blocker)
+	}
 
 	slices.Sort(blockers)
 	return slices.Compact(blockers)
@@ -910,12 +1269,24 @@ func resolveHealth(resp *dashboardResponse, blockers []string) string {
 	if resp.AppStore != nil && isInProgressAppStoreState(resp.AppStore.State) {
 		return "yellow"
 	}
+	if resp.TestFlight != nil && resp.TestFlight.BetaReviewSubmission != nil {
+		review := resp.TestFlight.BetaReviewSubmission
+		if isInProgressBetaReviewState(review.State) && (review.RelationToLatestBuild == "sameBuild" || review.RelationToLatestBuild == "unknown") {
+			return "yellow"
+		}
+		if strings.EqualFold(strings.TrimSpace(review.State), "REJECTED") && (review.RelationToLatestBuild == "sameBuild" || review.RelationToLatestBuild == "sameVersionTrain") {
+			return "yellow"
+		}
+	}
 
 	return "green"
 }
 
 func resolveNextAction(resp *dashboardResponse, blockers []string) string {
 	if len(blockers) > 0 {
+		if action := betaReviewBlockerNextAction(resp); action != "" && len(blockers) == 1 {
+			return action
+		}
 		return fmt.Sprintf("Resolve blocker: %s", blockers[0])
 	}
 	if resp == nil {
@@ -927,6 +1298,20 @@ func resolveNextAction(resp *dashboardResponse, blockers []string) string {
 	}
 	if resp.Review != nil && isInProgressReviewState(resp.Review.State) {
 		return "Monitor App Store review progress."
+	}
+	if resp.TestFlight != nil && resp.TestFlight.BetaReviewSubmission != nil {
+		review := resp.TestFlight.BetaReviewSubmission
+		if isInProgressBetaReviewState(review.State) {
+			switch review.RelationToLatestBuild {
+			case "sameBuild":
+				return fmt.Sprintf("Wait for Beta App Review of %s to finish.", betaReviewBuildLabel(review.Build))
+			case "unknown":
+				return fmt.Sprintf("Inspect Beta App Review submission %s to identify its build.", review.ID)
+			}
+		}
+		if strings.EqualFold(strings.TrimSpace(review.State), "REJECTED") && (review.RelationToLatestBuild == "sameBuild" || review.RelationToLatestBuild == "sameVersionTrain") {
+			return fmt.Sprintf("Review Beta App Review feedback for %s before the next external testing submission.", betaReviewBuildLabel(review.Build))
+		}
 	}
 	if resp.AppStore != nil {
 		state := strings.ToUpper(strings.TrimSpace(resp.AppStore.State))
@@ -945,6 +1330,56 @@ func resolveNextAction(resp *dashboardResponse, blockers []string) string {
 	}
 
 	return "Review release status."
+}
+
+func betaReviewBlocker(resp *dashboardResponse) string {
+	if resp == nil || resp.TestFlight == nil || resp.TestFlight.BetaReviewSubmission == nil {
+		return ""
+	}
+	review := resp.TestFlight.BetaReviewSubmission
+	latest := resp.TestFlight.latestBuild
+	if review.RelationToLatestBuild != "sameVersionTrain" || !isInProgressBetaReviewState(review.State) || review.Build == nil || latest == nil || review.Build.ID == latest.ID {
+		return ""
+	}
+	if resp.TestFlight.LatestDistributedBuildID == latest.ID {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Beta App Review for %s is %s and blocks external testing for latest %s",
+		betaReviewBuildLabel(review.Build),
+		strings.ToUpper(strings.TrimSpace(review.State)),
+		betaReviewBuildLabel(latest),
+	)
+}
+
+func betaReviewBlockerNextAction(resp *dashboardResponse) string {
+	if betaReviewBlocker(resp) == "" {
+		return ""
+	}
+	review := resp.TestFlight.BetaReviewSubmission
+	return fmt.Sprintf(
+		"Wait for Beta App Review of %s to finish before submitting %s for external testing.",
+		betaReviewBuildLabel(review.Build),
+		betaReviewBuildLabel(resp.TestFlight.latestBuild),
+	)
+}
+
+func betaReviewBuildLabel(build *betaReviewBuildStatus) string {
+	if build == nil {
+		return "unknown build"
+	}
+	identifier := strings.TrimSpace(build.BuildNumber)
+	if identifier == "" {
+		identifier = strings.TrimSpace(build.ID)
+	}
+	if identifier == "" {
+		return "unknown build"
+	}
+	label := "build " + identifier
+	if strings.TrimSpace(build.Version) != "" {
+		label += " (version " + strings.TrimSpace(build.Version) + ")"
+	}
+	return label
 }
 
 func isInProgressReviewState(state string) bool {
@@ -1036,12 +1471,38 @@ func renderDashboard(resp *dashboardResponse, markdown bool) {
 	}
 
 	if resp.TestFlight != nil {
-		shared.RenderSection("TestFlight", []string{"field", "value"}, [][]string{
+		rows := [][]string{
 			{"latestDistributedBuildId", shared.OrNA(resp.TestFlight.LatestDistributedBuildID)},
-			{"betaReviewState", prefixedState(resp.TestFlight.BetaReviewState)},
 			{"externalBuildState", prefixedState(resp.TestFlight.ExternalBuildState)},
-			{"submittedDate", formatDateWithRelative(resp.TestFlight.SubmittedDate)},
-		}, markdown)
+		}
+		if review := resp.TestFlight.BetaReviewSubmission; review != nil {
+			rows = append(
+				rows,
+				[]string{"betaReviewSubmission.id", shared.OrNA(review.ID)},
+				[]string{"betaReviewSubmission.state", prefixedState(review.State)},
+				[]string{"betaReviewSubmission.submittedDate", formatDateWithRelative(review.SubmittedDate)},
+				[]string{"betaReviewSubmission.relationToLatestBuild", shared.OrNA(review.RelationToLatestBuild)},
+			)
+			if review.Build == nil {
+				rows = append(rows, []string{"betaReviewSubmission.build", "[-] unknown"})
+			} else {
+				rows = append(
+					rows,
+					[]string{"betaReviewSubmission.build.id", shared.OrNA(review.Build.ID)},
+					[]string{"betaReviewSubmission.build.version", shared.OrNA(review.Build.Version)},
+					[]string{"betaReviewSubmission.build.buildNumber", shared.OrNA(review.Build.BuildNumber)},
+					[]string{"betaReviewSubmission.build.platform", shared.OrNA(review.Build.Platform)},
+				)
+			}
+		} else {
+			rows = append(rows, []string{"betaReviewSubmission", "[-] none"})
+		}
+		rows = append(
+			rows,
+			[]string{"betaReviewState", prefixedState(resp.TestFlight.BetaReviewState)},
+			[]string{"submittedDate", formatDateWithRelative(resp.TestFlight.SubmittedDate)},
+		)
+		shared.RenderSection("TestFlight", []string{"field", "value"}, rows, markdown)
 	}
 
 	if resp.AppStore != nil {

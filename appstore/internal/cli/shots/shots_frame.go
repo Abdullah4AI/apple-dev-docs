@@ -60,6 +60,19 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 		Exec: func(ctx context.Context, args []string) error {
 			configVal := strings.TrimSpace(*configPath)
 			inputVal := strings.TrimSpace(*inputPath)
+			watchDebounceSet := false
+			watchReviewDirSet := false
+			watchRawDirSet := false
+			fs.Visit(func(flagValue *flag.Flag) {
+				switch flagValue.Name {
+				case "watch-debounce":
+					watchDebounceSet = true
+				case "watch-review-dir":
+					watchReviewDirSet = true
+				case "watch-raw-dir":
+					watchRawDirSet = true
+				}
+			})
 			if configVal == "" && inputVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --input is required when --config is not set")
 				return shared.MissingRequiredUsageError()
@@ -71,6 +84,22 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 			if *watch && configVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --watch requires --config")
 				return flag.ErrHelp
+			}
+			if !*watch {
+				switch {
+				case watchDebounceSet:
+					return shared.UsageError("--watch-debounce requires --watch")
+				case watchReviewDirSet:
+					return shared.UsageError("--watch-review-dir requires --watch")
+				case watchRawDirSet:
+					return shared.UsageError("--watch-raw-dir requires --watch")
+				}
+			}
+			if watchRawDirSet && strings.TrimSpace(*watchReviewDir) == "" {
+				return shared.UsageError("--watch-raw-dir requires --watch-review-dir")
+			}
+			if watchDebounceSet && *watchDebounce <= 0 {
+				return shared.UsageError("--watch-debounce must be greater than 0")
 			}
 			if configVal != "" {
 				absConfig, err := filepath.Abs(configVal)

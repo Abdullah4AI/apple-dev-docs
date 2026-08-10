@@ -20,21 +20,6 @@ func TestGameCenterDetailListEndpoints_WithLimit(t *testing.T) {
 		call     func(*testing.T, *Client)
 	}{
 		{
-			name:     "GetGameCenterDetails",
-			path:     "/v1/gameCenterDetails",
-			limit:    "25",
-			response: `{"data":[{"type":"gameCenterDetails","id":"detail-1","attributes":{"arcadeEnabled":true}}]}`,
-			call: func(t *testing.T, c *Client) {
-				resp, err := c.GetGameCenterDetails(ctx, WithGCDetailsLimit(25))
-				if err != nil {
-					t.Fatalf("GetGameCenterDetails() error: %v", err)
-				}
-				if len(resp.Data) != 1 || resp.Data[0].ID != "detail-1" {
-					t.Fatalf("expected decoded game center detail, got %+v", resp.Data)
-				}
-			},
-		},
-		{
 			name:     "GetGameCenterGroupGameCenterDetails",
 			path:     "/v1/gameCenterGroups/group-1/gameCenterDetails",
 			limit:    "30",
@@ -170,20 +155,6 @@ func TestGameCenterDetailListEndpoints_UseNextURL(t *testing.T) {
 		response string
 		call     func(*testing.T, *Client, string)
 	}{
-		{
-			name:     "GetGameCenterDetails",
-			next:     "https://api.appstoreconnect.apple.com/v1/gameCenterDetails?cursor=next",
-			response: `{"data":[{"type":"gameCenterDetails","id":"detail-1","attributes":{"arcadeEnabled":true}}]}`,
-			call: func(t *testing.T, c *Client, next string) {
-				resp, err := c.GetGameCenterDetails(ctx, WithGCDetailsNextURL(next))
-				if err != nil {
-					t.Fatalf("GetGameCenterDetails() error: %v", err)
-				}
-				if len(resp.Data) != 1 || resp.Data[0].ID != "detail-1" {
-					t.Fatalf("expected decoded next-url game center detail, got %+v", resp.Data)
-				}
-			},
-		},
 		{
 			name:     "GetGameCenterGroupGameCenterDetails",
 			next:     "https://api.appstoreconnect.apple.com/v1/gameCenterGroups/group-1/gameCenterDetails?cursor=next",

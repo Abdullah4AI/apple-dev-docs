@@ -464,7 +464,7 @@ func TestInsightsWeeklyAnalyticsJSON(t *testing.T) {
 					{
 						"type":"analyticsReportRequests",
 						"id":"req-1",
-						"attributes":{"createdDate":"2026-02-16T10:00:00Z","state":"COMPLETED"}
+						"attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}
 					}
 				],
 				"links":{"next":""}
@@ -479,8 +479,8 @@ func TestInsightsWeeklyAnalyticsJSON(t *testing.T) {
 		case "/v1/analyticsReports/report-1/instances":
 			return insightsJSONResponse(`{
 				"data":[
-					{"type":"analyticsReportInstances","id":"inst-1","attributes":{"reportDate":"2026-02-18","processingDate":"2026-02-19T00:00:00Z"}},
-					{"type":"analyticsReportInstances","id":"inst-2","attributes":{"reportDate":"2026-02-10","processingDate":"2026-02-11T00:00:00Z"}}
+					{"type":"analyticsReportInstances","id":"inst-1","attributes":{"granularity":"DAILY","processingDate":"2026-02-18"}},
+					{"type":"analyticsReportInstances","id":"inst-2","attributes":{"granularity":"DAILY","processingDate":"2026-02-10"}}
 				],
 				"links":{"next":""}
 			}`), nil

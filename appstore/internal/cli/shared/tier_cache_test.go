@@ -10,6 +10,23 @@ import (
 	"time"
 )
 
+func useTierCacheDirForTest(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	tierCacheDirOverrideMu.Lock()
+	previous := tierCacheDirOverride
+	tierCacheDirOverride = dir
+	tierCacheDirOverrideMu.Unlock()
+
+	t.Cleanup(func() {
+		tierCacheDirOverrideMu.Lock()
+		tierCacheDirOverride = previous
+		tierCacheDirOverrideMu.Unlock()
+	})
+	return dir
+}
+
 func TestTierCacheRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -35,6 +52,46 @@ func TestTierCacheRoundTrip(t *testing.T) {
 	}
 	if loaded[1].CustomerPrice != "1.99" {
 		t.Fatalf("expected 1.99, got %s", loaded[1].CustomerPrice)
+	}
+}
+
+func TestTierCacheSaveRejectsSymlinkAndPreservesTarget(t *testing.T) {
+	cacheDir := useTierCacheDirForTest(t)
+
+	sentinelPath := filepath.Join(t.TempDir(), "sentinel.txt")
+	const sentinel = "keep this content"
+	if err := os.WriteFile(sentinelPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	cachePath := filepath.Join(cacheDir, "tiers-app123-USA.json")
+	if err := os.Symlink(sentinelPath, cachePath); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+
+	err := SaveTierCache("app123", "USA", []TierEntry{{
+		Tier:          1,
+		PricePointID:  "pp-1",
+		CustomerPrice: "0.99",
+	}})
+	if err == nil {
+		t.Error("SaveTierCache() error = nil, want symlink rejection")
+	}
+
+	linkTarget, readlinkErr := os.Readlink(cachePath)
+	if readlinkErr != nil {
+		t.Fatalf("read cache symlink: %v", readlinkErr)
+	}
+	if linkTarget != sentinelPath {
+		t.Errorf("cache symlink target = %q, want %q", linkTarget, sentinelPath)
+	}
+
+	got, readErr := os.ReadFile(sentinelPath)
+	if readErr != nil {
+		t.Fatalf("read sentinel: %v", readErr)
+	}
+	if string(got) != sentinel {
+		t.Errorf("sentinel content = %q, want %q", got, sentinel)
 	}
 }
 

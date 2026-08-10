@@ -1,0 +1,295 @@
+package cmdtest
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+)
+
+func TestAnalyticsInstancesLinksAcceptsPrefixedInstanceID(t *testing.T) {
+	setupAnalyticsResourceIDAuth(t)
+
+	const (
+		instanceID = "r39-example-instance"
+		segmentID  = "s39-example-segment"
+	)
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requestCount++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/analyticsReportInstances/"+instanceID+"/relationships/segments" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+		if req.URL.RawQuery != "" {
+			t.Fatalf("unexpected query: %q", req.URL.RawQuery)
+		}
+		if req.Header.Get("Authorization") == "" {
+			t.Fatal("expected Authorization header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"type":"analyticsReportSegments","id":"`+segmentID+`"}],"links":{}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newReviewTestServerClient(t, server)
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) { return client, nil }))
+
+	stdout, stderr, runErr := runCommand(t, []string{
+		"analytics", "instances", "links",
+		"--instance-id", instanceID,
+		"--output", "json",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want 1", requestCount)
+	}
+	var response struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("parse output: %v\nstdout=%s", err, stdout)
+	}
+	if len(response.Data) != 1 || response.Data[0].ID != segmentID {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
+func TestAnalyticsDownloadAcceptsPrefixedInstanceID(t *testing.T) {
+	runAnalyticsDownloadIDCase(t, "r39-example-instance", "33333333-3333-3333-3333-333333333333")
+}
+
+func TestAnalyticsDownloadAcceptsPrefixedSegmentID(t *testing.T) {
+	runAnalyticsDownloadIDCase(t, "22222222-2222-2222-2222-222222222222", "s39-example-segment")
+}
+
+func TestAnalyticsRequestIDValidationRemainsBeforeClientConstruction(t *testing.T) {
+	setupAnalyticsResourceIDAuth(t)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "view",
+			args: []string{"analytics", "view", "--request-id", "r39-not-a-request-uuid"},
+		},
+		{
+			name: "download",
+			args: []string{
+				"analytics", "download",
+				"--request-id", "r39-not-a-request-uuid",
+				"--instance-id", "r39-example-instance",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientFactoryCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientFactoryCalls++
+				return nil, errors.New("client construction should not be attempted")
+			}))
+
+			stdout, stderr, runErr := runCommand(t, test.args)
+			if runErr == nil || !strings.Contains(runErr.Error(), "--request-id must be a valid UUID") {
+				t.Fatalf("run error = %v, want request UUID validation", runErr)
+			}
+			if stdout != "" || stderr != "" {
+				t.Fatalf("expected empty output, got stdout=%q stderr=%q", stdout, stderr)
+			}
+			if clientFactoryCalls != 0 {
+				t.Fatalf("client factory calls = %d, want 0", clientFactoryCalls)
+			}
+		})
+	}
+}
+
+func TestAnalyticsResourcePathValidationRemainsBeforeClientConstruction(t *testing.T) {
+	setupAnalyticsResourceIDAuth(t)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "instances view",
+			args: []string{
+				"analytics", "instances", "view",
+				"--instance-id", "r39/escaped-instance",
+			},
+		},
+		{
+			name: "instances links",
+			args: []string{
+				"analytics", "instances", "links",
+				"--instance-id", "r39/escaped-instance",
+			},
+		},
+		{
+			name: "view filter",
+			args: []string{
+				"analytics", "view",
+				"--request-id", analyticsViewRequestID,
+				"--instance-id", "r39/escaped-instance",
+			},
+		},
+		{
+			name: "segments view",
+			args: []string{
+				"analytics", "segments", "view",
+				"--segment-id", "s39/escaped-segment",
+			},
+		},
+		{
+			name: "download",
+			args: []string{
+				"analytics", "download",
+				"--request-id", analyticsViewRequestID,
+				"--instance-id", "r39/escaped-instance",
+			},
+		},
+		{
+			name: "download segment",
+			args: []string{
+				"analytics", "download",
+				"--request-id", analyticsViewRequestID,
+				"--instance-id", "r39-example-instance",
+				"--segment-id", "s39/escaped-segment",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientFactoryCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientFactoryCalls++
+				return nil, errors.New("client construction should not be attempted")
+			}))
+
+			stdout, stderr, runErr := runCommand(t, test.args)
+			if runErr == nil || !strings.Contains(runErr.Error(), "single path segment") {
+				t.Fatalf("run error = %v, want resource path-segment validation", runErr)
+			}
+			if stdout != "" || stderr != "" {
+				t.Fatalf("expected empty output, got stdout=%q stderr=%q", stdout, stderr)
+			}
+			if clientFactoryCalls != 0 {
+				t.Fatalf("client factory calls = %d, want 0", clientFactoryCalls)
+			}
+		})
+	}
+}
+
+func runAnalyticsDownloadIDCase(t *testing.T, instanceID, segmentID string) {
+	t.Helper()
+	setupAnalyticsResourceIDAuth(t)
+
+	const reportPayload = "analytics-report-data"
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			assertAnalyticsResourceIDRequest(t, req, "/v1/analyticsReportRequests/"+analyticsViewRequestID+"/reports", "limit=200", true)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"type":"analyticsReports","id":"r39-example-report"}],"links":{}}`)
+		case 2:
+			assertAnalyticsResourceIDRequest(t, req, "/v1/analyticsReports/r39-example-report/instances", "limit=200", true)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"type":"analyticsReportInstances","id":"`+instanceID+`"}],"links":{}}`)
+		case 3:
+			assertAnalyticsResourceIDRequest(t, req, "/v1/analyticsReportInstances/"+instanceID+"/segments", "limit=200", true)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"type":"analyticsReportSegments","id":"`+segmentID+`","attributes":{"url":"https://mzstatic.com/report.gz"}}],"links":{}}`)
+		case 4:
+			assertAnalyticsResourceIDRequest(t, req, "/report.gz", "", false)
+			w.Header().Set("Content-Type", "application/a-gzip")
+			_, _ = io.WriteString(w, reportPayload)
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newReviewTestServerClient(t, server)
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) { return client, nil }))
+
+	outputPath := filepath.Join(t.TempDir(), "analytics-report.csv.gz")
+	stdout, stderr, runErr := runCommand(t, []string{
+		"analytics", "download",
+		"--request-id", analyticsViewRequestID,
+		"--instance-id", instanceID,
+		"--segment-id", segmentID,
+		"--output", outputPath,
+		"--output-format", "json",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 4 {
+		t.Fatalf("request count = %d, want 4", requestCount)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if !bytes.Equal(data, []byte(reportPayload)) {
+		t.Fatalf("report data = %q, want %q", data, reportPayload)
+	}
+	var result struct {
+		RequestID  string `json:"requestId"`
+		InstanceID string `json:"instanceId"`
+		SegmentID  string `json:"segmentId"`
+		FilePath   string `json:"filePath"`
+		FileSize   int64  `json:"fileSize"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse output: %v\nstdout=%s", err, stdout)
+	}
+	if result.RequestID != analyticsViewRequestID || result.InstanceID != instanceID || result.SegmentID != segmentID || result.FilePath != outputPath || result.FileSize != int64(len(reportPayload)) {
+		t.Fatalf("unexpected output: %+v", result)
+	}
+}
+
+func setupAnalyticsResourceIDAuth(t *testing.T) {
+	t.Helper()
+	setupAuth(t)
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+}
+
+func assertAnalyticsResourceIDRequest(t *testing.T, req *http.Request, wantPath, wantQuery string, wantAuth bool) {
+	t.Helper()
+	if req.Method != http.MethodGet || req.URL.Path != wantPath {
+		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+	}
+	if req.URL.RawQuery != wantQuery {
+		t.Fatalf("query = %q, want %q", req.URL.RawQuery, wantQuery)
+	}
+	if got := req.Header.Get("Authorization"); wantAuth && got == "" {
+		t.Fatal("expected Authorization header")
+	} else if !wantAuth && got != "" {
+		t.Fatalf("unexpected Authorization header on report download: %q", got)
+	}
+}

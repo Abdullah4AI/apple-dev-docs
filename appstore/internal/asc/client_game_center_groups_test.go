@@ -236,30 +236,6 @@ func TestUpdateGameCenterGroupLeaderboardsV2(t *testing.T) {
 	}
 }
 
-func TestUpdateGameCenterGroupChallenges(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, "")
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/gameCenterGroups/group-1/relationships/gameCenterChallenges" {
-			t.Fatalf("expected path /v1/gameCenterGroups/group-1/relationships/gameCenterChallenges, got %s", req.URL.Path)
-		}
-		var payload RelationshipRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		if len(payload.Data) != 1 || payload.Data[0].ID != "ch-1" {
-			t.Fatalf("unexpected payload: %+v", payload.Data)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.UpdateGameCenterGroupChallenges(context.Background(), "group-1", []string{"ch-1"}); err != nil {
-		t.Fatalf("UpdateGameCenterGroupChallenges() error: %v", err)
-	}
-}
-
 func TestGCGroupsOptions(t *testing.T) {
 	query := &gcGroupsQuery{}
 	WithGCGroupsLimit(10)(query)

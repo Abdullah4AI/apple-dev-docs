@@ -72,6 +72,20 @@ func resolvePassword(flagValue string) (string, error) {
 	return "", shared.UsageError("--password is required (or set ASC_MATCH_PASSWORD)")
 }
 
+func onceAfterSuccess(operation func() error) func() error {
+	done := false
+	return func() error {
+		if done {
+			return nil
+		}
+		if err := operation(); err != nil {
+			return err
+		}
+		done = true
+		return nil
+	}
+}
+
 func syncPushCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("push", flag.ExitOnError)
 
@@ -133,26 +147,6 @@ func syncPushCommand() *ffcli.Command {
 				return fmt.Errorf("signing sync push: %w", err)
 			}
 
-			certs, err := findCertificates(requestCtx, client, profType, *certType)
-			if err != nil {
-				return fmt.Errorf("signing sync push: %w", err)
-			}
-
-			profile, created, err := findOrCreateProfile(
-				requestCtx, client,
-				bundleIDResp.Data.ID, bundle, profType,
-				extractIDs(certs.Data),
-				shared.SplitCSV(*deviceIDs),
-				*createMissing,
-			)
-			if err != nil {
-				return fmt.Errorf("signing sync push: %w", err)
-			}
-			if created {
-				fmt.Fprintln(os.Stderr, "Created new profile")
-			}
-
-			// Clone git repo.
 			tmpDir, err := os.MkdirTemp("", "asc-signing-sync-*")
 			if err != nil {
 				return fmt.Errorf("signing sync push: create temp dir: %w", err)
@@ -165,8 +159,37 @@ func syncPushCommand() *ffcli.Command {
 			}
 			defer func() { _ = store.Cleanup() }()
 
-			fmt.Fprintln(os.Stderr, "Cloning signing repo...")
-			if err := store.Clone(ctx, true); err != nil {
+			prepareRepository := onceAfterSuccess(func() error {
+				fmt.Fprintln(os.Stderr, "Cloning signing repo...")
+				if err := store.Clone(ctx, true); err != nil {
+					return err
+				}
+				return nil
+			})
+
+			profile, certs, created, err := resolveSigningAssets(
+				requestCtx,
+				client,
+				signingAssetsOptions{
+					BundleIDResourceID: bundleIDResp.Data.ID,
+					BundleIdentifier:   bundle,
+					ProfileType:        profType,
+					CertificateType:    *certType,
+					DeviceIDs:          shared.SplitCSV(*deviceIDs),
+					CreateMissing:      *createMissing,
+					BeforeCreate:       prepareRepository,
+					CreateContext: func() (context.Context, context.CancelFunc) {
+						return shared.ContextWithTimeout(ctx)
+					},
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("signing sync push: %w", err)
+			}
+			if created {
+				fmt.Fprintln(os.Stderr, "Created new profile")
+			}
+			if err := prepareRepository(); err != nil {
 				return fmt.Errorf("signing sync push: %w", err)
 			}
 

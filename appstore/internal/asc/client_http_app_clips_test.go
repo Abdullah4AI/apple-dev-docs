@@ -451,11 +451,29 @@ func TestCreateAppClipAdvancedExperience(t *testing.T) {
 		if payload.Data.Relationships.AppClip.Data.ID != "clip-1" {
 			t.Fatalf("expected appClip id clip-1, got %s", payload.Data.Relationships.AppClip.Data.ID)
 		}
+		if payload.Data.Relationships.AppClip.Data.Type != ResourceTypeAppClips {
+			t.Fatalf("expected appClip type %s, got %s", ResourceTypeAppClips, payload.Data.Relationships.AppClip.Data.Type)
+		}
 		if payload.Data.Relationships.HeaderImage.Data.ID != "img-1" {
 			t.Fatalf("expected headerImage id img-1, got %s", payload.Data.Relationships.HeaderImage.Data.ID)
 		}
+		if payload.Data.Relationships.HeaderImage.Data.Type != ResourceTypeAppClipAdvancedExperienceImages {
+			t.Fatalf("expected headerImage type %s, got %s", ResourceTypeAppClipAdvancedExperienceImages, payload.Data.Relationships.HeaderImage.Data.Type)
+		}
 		if len(payload.Data.Relationships.Localizations.Data) != 2 {
 			t.Fatalf("expected 2 localizations, got %d", len(payload.Data.Relationships.Localizations.Data))
+		}
+		wantLocalizationIDs := []string{"loc-1", "loc-2"}
+		for i, localization := range payload.Data.Relationships.Localizations.Data {
+			if localization.Type != ResourceTypeAppClipAdvancedExperienceLocalizations {
+				t.Fatalf("expected localization type %s, got %s", ResourceTypeAppClipAdvancedExperienceLocalizations, localization.Type)
+			}
+			if localization.ID != wantLocalizationIDs[i] {
+				t.Fatalf("expected localization id %s, got %s", wantLocalizationIDs[i], localization.ID)
+			}
+		}
+		if len(payload.Included) != 0 {
+			t.Fatalf("expected no included localizations, got %d", len(payload.Included))
 		}
 		assertAuthorized(t, req)
 	}, response)
@@ -465,8 +483,110 @@ func TestCreateAppClipAdvancedExperience(t *testing.T) {
 		DefaultLanguage: AppClipAdvancedExperienceLanguageEN,
 		IsPoweredBy:     true,
 	}
-	if _, err := client.CreateAppClipAdvancedExperience(context.Background(), "clip-1", attrs, "img-1", []string{"loc-1", "loc-2"}); err != nil {
+	if _, err := client.CreateAppClipAdvancedExperience(context.Background(), "clip-1", attrs, "img-1", []string{"loc-1", "loc-2"}, nil); err != nil {
 		t.Fatalf("CreateAppClipAdvancedExperience() error: %v", err)
+	}
+}
+
+func TestCreateAppClipAdvancedExperienceWithInlineLocalization(t *testing.T) {
+	response := jsonResponse(http.StatusCreated, `{"data":{"type":"appClipAdvancedExperiences","id":"adv-1","attributes":{"link":"https://example.com"}},"links":{}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/appClipAdvancedExperiences" {
+			t.Fatalf("expected path /v1/appClipAdvancedExperiences, got %s", req.URL.Path)
+		}
+
+		var payload AppClipAdvancedExperienceCreateRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Data.Relationships.AppClip.Data.Type != ResourceTypeAppClips || payload.Data.Relationships.AppClip.Data.ID != "clip-1" {
+			t.Fatalf("unexpected app clip linkage: %#v", payload.Data.Relationships.AppClip.Data)
+		}
+		if payload.Data.Relationships.HeaderImage.Data.Type != ResourceTypeAppClipAdvancedExperienceImages || payload.Data.Relationships.HeaderImage.Data.ID != "img-1" {
+			t.Fatalf("unexpected header image linkage: %#v", payload.Data.Relationships.HeaderImage.Data)
+		}
+		if len(payload.Data.Relationships.Localizations.Data) != 1 {
+			t.Fatalf("expected one localization relationship, got %d", len(payload.Data.Relationships.Localizations.Data))
+		}
+		localizationLinkage := payload.Data.Relationships.Localizations.Data[0]
+		if localizationLinkage.Type != ResourceTypeAppClipAdvancedExperienceLocalizations || localizationLinkage.ID != "${localization-1}" {
+			t.Fatalf("unexpected inline localization linkage: %#v", localizationLinkage)
+		}
+		if len(payload.Included) != 1 {
+			t.Fatalf("expected one included localization, got %d", len(payload.Included))
+		}
+		included := payload.Included[0]
+		if included.Type != ResourceTypeAppClipAdvancedExperienceLocalizations || included.ID != localizationLinkage.ID {
+			t.Fatalf("included localization must match linkage: %#v", included)
+		}
+		if included.Attributes.Language != AppClipAdvancedExperienceLanguageEN || included.Attributes.Title != "Order ahead" || included.Attributes.Subtitle != "Ready when you arrive" {
+			t.Fatalf("unexpected included localization attributes: %#v", included.Attributes)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	attrs := AppClipAdvancedExperienceCreateAttributes{
+		Link:            "https://example.com",
+		DefaultLanguage: AppClipAdvancedExperienceLanguageEN,
+		IsPoweredBy:     true,
+	}
+	inline := []AppClipAdvancedExperienceLocalizationCreateAttributes{{
+		Language: AppClipAdvancedExperienceLanguageEN,
+		Title:    "Order ahead",
+		Subtitle: "Ready when you arrive",
+	}}
+	if _, err := client.CreateAppClipAdvancedExperience(context.Background(), "clip-1", attrs, "img-1", nil, inline); err != nil {
+		t.Fatalf("CreateAppClipAdvancedExperience() error: %v", err)
+	}
+}
+
+func TestCreateAppClipAdvancedExperienceRequiresCreateRelationships(t *testing.T) {
+	attrs := AppClipAdvancedExperienceCreateAttributes{
+		Link:            "https://example.com",
+		DefaultLanguage: AppClipAdvancedExperienceLanguageEN,
+		IsPoweredBy:     true,
+	}
+
+	tests := []struct {
+		name                string
+		headerImageID       string
+		localizationIDs     []string
+		inlineLocalizations []AppClipAdvancedExperienceLocalizationCreateAttributes
+		want                string
+	}{
+		{name: "header image", localizationIDs: []string{"loc-1"}, want: "headerImageID is required"},
+		{name: "localizations", headerImageID: "img-1", want: "at least one localization is required"},
+		{name: "blank localizations", headerImageID: "img-1", localizationIDs: []string{" ", ""}, want: "at least one localization is required"},
+		{
+			name:                "inline localization language",
+			headerImageID:       "img-1",
+			inlineLocalizations: []AppClipAdvancedExperienceLocalizationCreateAttributes{{Title: "Order ahead"}},
+			want:                "inline localization 1: language is required",
+		},
+		{
+			name:          "inline localization title",
+			headerImageID: "img-1",
+			inlineLocalizations: []AppClipAdvancedExperienceLocalizationCreateAttributes{{
+				Language: AppClipAdvancedExperienceLanguageEN,
+			}},
+			want: "inline localization 1: title is required",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newTestClient(t, func(req *http.Request) {
+				t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			}, jsonResponse(http.StatusCreated, `{}`))
+
+			_, err := client.CreateAppClipAdvancedExperience(context.Background(), "clip-1", attrs, test.headerImageID, test.localizationIDs, test.inlineLocalizations)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("CreateAppClipAdvancedExperience() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -500,13 +620,26 @@ func TestUpdateAppClipAdvancedExperience(t *testing.T) {
 }
 
 func TestDeleteAppClipAdvancedExperience(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, "")
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"appClipAdvancedExperiences","id":"adv-1","attributes":{"status":"REMOVED"}},"links":{}}`)
 	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodDelete {
-			t.Fatalf("expected DELETE, got %s", req.Method)
+		if req.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", req.Method)
 		}
 		if req.URL.Path != "/v1/appClipAdvancedExperiences/adv-1" {
 			t.Fatalf("expected path /v1/appClipAdvancedExperiences/adv-1, got %s", req.URL.Path)
+		}
+		var payload AppClipAdvancedExperienceUpdateRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Data.Attributes == nil || payload.Data.Attributes.Removed == nil || !*payload.Data.Attributes.Removed {
+			t.Fatalf("expected removed=true, got %#v", payload.Data.Attributes)
+		}
+		if payload.Data.Type != ResourceTypeAppClipAdvancedExperiences || payload.Data.ID != "adv-1" {
+			t.Fatalf("expected advanced experience adv-1, got type=%s id=%s", payload.Data.Type, payload.Data.ID)
+		}
+		if payload.Data.Relationships != nil {
+			t.Fatalf("expected no relationships, got %#v", payload.Data.Relationships)
 		}
 		assertAuthorized(t, req)
 	}, response)

@@ -27,7 +27,7 @@ Examples:
   asc app-clips list --app "APP_ID"
   asc app-clips view --id "CLIP_ID"
   asc app-clips default-experiences list --app-clip-id "CLIP_ID"
-  asc app-clips advanced-experiences create --app "APP_ID" --bundle-id "com.example.clip" --link "https://example.com" --default-language EN --is-powered-by
+  asc app-clips advanced-experiences create --app "APP_ID" --bundle-id "com.example.clip" --link "https://example.com" --default-language EN --is-powered-by --header-image-id "IMAGE_ID" --localization-id "LOCALIZATION_ID"
   asc app-clips invocations list --build-bundle-id "BUILD_BUNDLE_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.VisibleUsageFunc,

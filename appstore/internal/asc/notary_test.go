@@ -1,6 +1,7 @@
 package asc
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -8,12 +9,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -55,6 +55,49 @@ func TestGenerateNotaryJWT(t *testing.T) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		t.Fatalf("expected 3 token parts, got %d", len(parts))
+	}
+}
+
+func TestGenerateNotaryJWT_NormalizesIdentifiers(t *testing.T) {
+	privateKey := testJWTPrivateKey(t)
+
+	tokenString, err := GenerateNotaryJWT("  KEY123\n", "\tISS456  ", privateKey)
+	if err != nil {
+		t.Fatalf("GenerateNotaryJWT() error: %v", err)
+	}
+
+	token, claims := parseJWT(t, tokenString, privateKey)
+	if claims.Issuer != "ISS456" {
+		t.Fatalf("issuer claim = %q, want ISS456", claims.Issuer)
+	}
+	if keyID, ok := token.Header["kid"].(string); !ok || keyID != "KEY123" {
+		t.Fatalf("key ID header = %#v, want KEY123", token.Header["kid"])
+	}
+}
+
+func TestGenerateNotaryJWT_WhitespaceIssuerUsesUserSubjectClaim(t *testing.T) {
+	privateKey := testJWTPrivateKey(t)
+
+	tokenString, err := GenerateNotaryJWT("KEY123", " \t\n ", privateKey)
+	if err != nil {
+		t.Fatalf("GenerateNotaryJWT() error: %v", err)
+	}
+
+	_, claims := parseJWT(t, tokenString, privateKey)
+	if claims.Issuer != "" {
+		t.Fatalf("issuer claim = %q, want empty", claims.Issuer)
+	}
+	if claims.Subject != "user" {
+		t.Fatalf("subject claim = %q, want user", claims.Subject)
+	}
+}
+
+func TestGenerateNotaryJWT_RejectsWhitespaceKeyID(t *testing.T) {
+	privateKey := testJWTPrivateKey(t)
+
+	_, err := GenerateNotaryJWT(" \t\n ", "ISS456", privateKey)
+	if !errors.Is(err, ErrMissingKeyID) {
+		t.Fatalf("GenerateNotaryJWT() error = %v, want ErrMissingKeyID", err)
 	}
 }
 
@@ -360,15 +403,9 @@ func TestListNotarizations_ErrorResponse(t *testing.T) {
 }
 
 func TestComputeFileSHA256(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-
 	content := []byte("hello world")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	got, err := ComputeFileSHA256(path)
+	file := bytes.NewReader(content)
+	got, err := ComputeFileSHA256(file)
 	if err != nil {
 		t.Fatalf("ComputeFileSHA256() error: %v", err)
 	}
@@ -380,24 +417,17 @@ func TestComputeFileSHA256(t *testing.T) {
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}
-}
-
-func TestComputeFileSHA256_FileNotFound(t *testing.T) {
-	_, err := ComputeFileSHA256("/nonexistent/file.txt")
-	if err == nil {
-		t.Fatal("expected error for nonexistent file")
+	replayed, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("read rewound file: %v", err)
+	}
+	if !bytes.Equal(replayed, content) {
+		t.Fatalf("rewound contents = %q, want %q", replayed, content)
 	}
 }
 
 func TestComputeFileSHA256_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "empty.txt")
-
-	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	got, err := ComputeFileSHA256(path)
+	got, err := ComputeFileSHA256(bytes.NewReader(nil))
 	if err != nil {
 		t.Fatalf("ComputeFileSHA256() error: %v", err)
 	}
@@ -519,6 +549,146 @@ func TestUploadToS3_Validation(t *testing.T) {
 	}, strings.NewReader("data"), "hash", 0, "application/octet-stream")
 	if err == nil {
 		t.Fatal("expected error for invalid content length")
+	}
+}
+
+func TestCompleteMultipartUploadClassifiesResponseBody(t *testing.T) {
+	const diagnosticLimit = 200
+	const omittedMarker = "OMITTED-DIAGNOSTIC-MARKER"
+
+	tests := []struct {
+		name            string
+		body            string
+		wantErrorPrefix string
+		checkDiagnostic bool
+	}{
+		{
+			name: "embedded error after keepalive whitespace and prolog",
+			body: " \r\n\t<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+				"<Error><Code>InternalError</Code><Message>retry the upload</Message></Error>" +
+				"\x1b" + strings.Repeat("x", diagnosticLimit) + omittedMarker,
+			wantErrorPrefix: "complete multipart upload failed: ",
+			checkDiagnostic: true,
+		},
+		{
+			name: "normal completion result",
+			body: "\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+				"<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">" +
+				"<Bucket>example</Bucket><Key>archive.zip</Key><ETag>\"etag\"</ETag>" +
+				"</CompleteMultipartUploadResult>\n<!-- completed -->\n ",
+		},
+		{
+			name:            "unexpected response root",
+			body:            "<?xml version=\"1.0\"?><UnexpectedResult><Message>unknown</Message></UnexpectedResult>",
+			wantErrorPrefix: "unexpected complete multipart upload response: ",
+		},
+		{
+			name: "truncated completion result",
+			body: "<?xml version=\"1.0\"?>" +
+				"<CompleteMultipartUploadResult><Bucket>example</Bucket>",
+			wantErrorPrefix: "parse complete multipart upload response: ",
+		},
+		{
+			name: "second root after completion result",
+			body: "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>" +
+				"<Error><Code>InternalError</Code></Error>",
+			wantErrorPrefix: "parse complete multipart upload response: ",
+		},
+		{
+			name: "non-whitespace data after completion result",
+			body: "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>" +
+				"unexpected trailing data",
+			wantErrorPrefix: "parse complete multipart upload response: ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method != http.MethodPost {
+					t.Fatalf("method = %s, want POST", req.Method)
+				}
+				if req.URL.Path != "/archive.zip" {
+					t.Fatalf("path = %q, want /archive.zip", req.URL.Path)
+				}
+				if req.URL.Query().Get("uploadId") != "upload-123" {
+					t.Fatalf("uploadId = %q, want upload-123", req.URL.Query().Get("uploadId"))
+				}
+				mustWriteBody(t, w, tt.body)
+			}))
+			t.Cleanup(server.Close)
+			serverURL, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatalf("parse test server URL: %v", err)
+			}
+
+			err = completeMultipartUploadWithClient(
+				context.Background(),
+				server.Client(),
+				serverURL.Host,
+				"/archive.zip",
+				S3Credentials{AccessKeyID: "key", SecretAccessKey: "secret"},
+				"upload-123",
+				[]s3CompletedPart{{PartNumber: 1, ETag: "\"etag\""}},
+			)
+			if tt.wantErrorPrefix == "" {
+				if err != nil {
+					t.Fatalf("completeMultipartUpload() error = %v, want nil", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("completeMultipartUpload() error = nil, want response classification error")
+			}
+			if !strings.HasPrefix(err.Error(), tt.wantErrorPrefix) {
+				t.Fatalf("error = %q, want prefix %q", err, tt.wantErrorPrefix)
+			}
+			if !tt.checkDiagnostic {
+				return
+			}
+
+			const errorPrefix = "complete multipart upload failed: "
+			diagnostic := strings.TrimPrefix(err.Error(), errorPrefix)
+			if !strings.Contains(diagnostic, "<Code>InternalError</Code>") || !strings.Contains(diagnostic, "<Message>retry the upload</Message>") {
+				t.Fatalf("diagnostic = %q, want S3 code and message", diagnostic)
+			}
+			if strings.Contains(diagnostic, "\x1b") {
+				t.Fatalf("diagnostic contains control character: %q", diagnostic)
+			}
+			if strings.Contains(diagnostic, omittedMarker) {
+				t.Fatalf("diagnostic contains content beyond limit: %q", diagnostic)
+			}
+			if len(diagnostic) > diagnosticLimit {
+				t.Fatalf("diagnostic length = %d, want <= %d", len(diagnostic), diagnosticLimit)
+			}
+		})
+	}
+}
+
+func TestCompleteMultipartUploadReportsPartialBodyReadError(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "128")
+		w.WriteHeader(http.StatusBadGateway)
+		mustWriteBody(t, w, "<Error><Code>InternalError</Code>")
+	}))
+	t.Cleanup(server.Close)
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+
+	err = completeMultipartUploadWithClient(
+		context.Background(),
+		server.Client(),
+		serverURL.Host,
+		"/archive.zip",
+		S3Credentials{AccessKeyID: "key", SecretAccessKey: "secret"},
+		"upload-123",
+		[]s3CompletedPart{{PartNumber: 1, ETag: "\"etag\""}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "read complete multipart upload response") {
+		t.Fatalf("completeMultipartUpload() error = %v, want response read error", err)
 	}
 }
 

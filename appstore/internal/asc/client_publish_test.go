@@ -69,8 +69,12 @@ func TestWaitForBuildProcessing_InvalidReturnsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	if _, err := client.WaitForBuildProcessing(ctx, "build-1", 1*time.Millisecond); err == nil {
+	build, err := client.WaitForBuildProcessing(ctx, "build-1", 1*time.Millisecond)
+	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+	if build == nil || build.Data.Attributes.ProcessingState != BuildProcessingStateInvalid {
+		t.Fatalf("expected terminal INVALID build response, got %#v", build)
 	}
 }
 
@@ -95,11 +99,14 @@ func TestWaitForBuildProcessing_FailedReturnsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err = client.WaitForBuildProcessing(ctx, "build-1", 1*time.Millisecond)
+	build, err := client.WaitForBuildProcessing(ctx, "build-1", 1*time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), BuildProcessingStateFailed) {
 		t.Fatalf("expected FAILED error, got %v", err)
+	}
+	if build == nil || build.Data.Attributes.ProcessingState != BuildProcessingStateFailed {
+		t.Fatalf("expected terminal FAILED build response, got %#v", build)
 	}
 }

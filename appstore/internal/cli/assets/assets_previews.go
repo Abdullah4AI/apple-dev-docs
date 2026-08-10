@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"mime"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,9 +50,8 @@ Examples:
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			setsResp, err := client.GetAppPreviewSets(requestCtx, locID)
+			cancel()
 			if err != nil {
 				return fmt.Errorf("video-previews list: failed to fetch sets: %w", err)
 			}
@@ -64,7 +62,9 @@ Examples:
 			}
 
 			for _, set := range setsResp.Data {
+				requestCtx, cancel := shared.ContextWithTimeout(ctx)
 				previews, err := client.GetAppPreviews(requestCtx, set.ID)
+				cancel()
 				if err != nil {
 					return fmt.Errorf("video-previews list: failed to fetch previews for set %s: %w", set.ID, err)
 				}
@@ -79,8 +79,22 @@ Examples:
 	}
 }
 
+type previewUploadDependencies struct {
+	GetClient func() (*asc.Client, error)
+}
+
 // AssetsPreviewsUploadCommand returns the previews upload subcommand.
 func AssetsPreviewsUploadCommand() *ffcli.Command {
+	return assetsPreviewsUploadCommandWithDependencies(previewUploadDependencies{
+		GetClient: shared.GetASCClient,
+	})
+}
+
+func assetsPreviewsUploadCommandWithDependencies(deps previewUploadDependencies) *ffcli.Command {
+	if deps.GetClient == nil {
+		deps.GetClient = shared.GetASCClient
+	}
+
 	fs := flag.NewFlagSet("upload", flag.ExitOnError)
 
 	localizationID := fs.String("version-localization", "", "App Store version localization ID")
@@ -140,8 +154,11 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("video-previews upload: %w", err)
 			}
+			if err := validatePreviewFiles(files); err != nil {
+				return fmt.Errorf("video-previews upload: %w", err)
+			}
 
-			client, err := shared.GetASCClient()
+			client, err := deps.GetClient()
 			if err != nil {
 				return fmt.Errorf("video-previews upload: %w", err)
 			}
@@ -773,19 +790,36 @@ func detectPreviewMimeType(path string) (string, error) {
 	if ext == "" {
 		return "", fmt.Errorf("preview file %q is missing an extension", path)
 	}
-	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		return "", fmt.Errorf("unsupported preview file extension %q", ext)
+	switch ext {
+	case ".mov":
+		return "video/quicktime", nil
+	case ".m4v":
+		return "video/x-m4v", nil
+	case ".mp4":
+		return "video/mp4", nil
+	default:
+		return "", fmt.Errorf("unsupported preview file extension %q; supported extensions are .mov, .m4v, and .mp4", ext)
 	}
-	if idx := strings.Index(mimeType, ";"); idx > 0 {
-		mimeType = mimeType[:idx]
+}
+
+func validatePreviewFiles(files []string) error {
+	for _, filePath := range files {
+		if err := asc.ValidateImageFile(filePath); err != nil {
+			return err
+		}
+		if _, err := detectPreviewMimeType(filePath); err != nil {
+			return err
+		}
 	}
-	return mimeType, nil
+	return nil
 }
 
 func uploadPreviews(ctx context.Context, client *asc.Client, localizationID, previewType string, files []string, skipExisting, replace, dryRun bool) (asc.AppPreviewUploadResult, error) {
 	if client == nil {
 		return asc.AppPreviewUploadResult{}, fmt.Errorf("client is required")
+	}
+	if err := validatePreviewFiles(files); err != nil {
+		return asc.AppPreviewUploadResult{}, err
 	}
 
 	requestCtx, reqCancel := shared.ContextWithTimeout(ctx)

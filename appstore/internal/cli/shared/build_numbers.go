@@ -497,7 +497,7 @@ func findLatestBuildUploadNumber(ctx context.Context, client *asc.Client, appID,
 
 	uploads, err := client.GetBuildUploads(ctx, appID, opts...)
 	if err != nil {
-		return buildNumber{}, nil, false, fmt.Errorf("failed to fetch build uploads: %w", err)
+		return buildNumber{}, nil, false, buildUploadHistoryError(appID, "failed to fetch build uploads", err)
 	}
 
 	var latestUploadValue buildNumber
@@ -533,10 +533,23 @@ func findLatestBuildUploadNumber(ctx context.Context, client *asc.Client, appID,
 		return processPage(resp)
 	})
 	if err != nil {
-		return buildNumber{}, nil, false, fmt.Errorf("failed to paginate build uploads: %w", err)
+		return buildNumber{}, nil, false, buildUploadHistoryError(appID, "failed to paginate build uploads", err)
 	}
 
 	return latestUploadValue, latestUploadNumber, hasUpload, nil
+}
+
+func buildUploadHistoryError(appID, operation string, err error) error {
+	if !errors.Is(err, asc.ErrForbidden) && !asc.IsNotFound(err) {
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+
+	return fmt.Errorf(
+		"build upload history is unavailable for app %q; refusing to guess because an in-flight upload may already use the next number. Verify access with asc builds uploads list --app %q --paginate: %w",
+		appID,
+		appID,
+		err,
+	)
 }
 
 func isNonPositiveNumericBuildNumber(raw string) bool {

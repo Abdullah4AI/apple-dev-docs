@@ -14,6 +14,7 @@ type buildsQuery struct {
 	processingStates     []string
 	preReleasePlatforms  []string
 	preReleaseVersionIDs []string
+	betaReviewStates     []string
 	expired              *bool
 	include              []string
 }
@@ -203,6 +204,16 @@ func WithBuildsPreReleaseVersionPlatforms(platforms []string) BuildsOption {
 		normalized := normalizeUpperList(platforms)
 		if len(normalized) > 0 {
 			q.preReleasePlatforms = normalized
+		}
+	}
+}
+
+// WithBuildsBetaReviewStates filters builds by their beta app review submission state.
+func WithBuildsBetaReviewStates(states []string) BuildsOption {
+	return func(q *buildsQuery) {
+		normalized := normalizeUpperList(states)
+		if len(normalized) > 0 {
+			q.betaReviewStates = normalized
 		}
 	}
 }

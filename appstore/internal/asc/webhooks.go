@@ -18,6 +18,22 @@ const (
 	WebhookEventBuildUploadStateUpdated                               WebhookEventType = "BUILD_UPLOAD_STATE_UPDATED"
 )
 
+// ValidWebhookEventTypes lists the event types accepted by webhook create and update requests.
+var ValidWebhookEventTypes = []string{
+	string(WebhookEventAlternativeDistributionPackageAvailableUpdated),
+	string(WebhookEventAlternativeDistributionPackageVersionCreated),
+	string(WebhookEventAlternativeDistributionTerritoryAvailabilityUpdated),
+	string(WebhookEventAppStoreVersionStateUpdated),
+	string(WebhookEventBackgroundAssetVersionAppStoreReleaseStateUpdated),
+	string(WebhookEventBackgroundAssetVersionExternalBetaReleaseStateUpdated),
+	string(WebhookEventBackgroundAssetVersionInternalBetaReleaseCreated),
+	string(WebhookEventBackgroundAssetVersionStateUpdated),
+	string(WebhookEventBetaFeedbackCrashSubmissionCreated),
+	string(WebhookEventBetaFeedbackScreenshotSubmissionCreated),
+	string(WebhookEventBuildBetaDetailExternalBuildStateUpdated),
+	string(WebhookEventBuildUploadStateUpdated),
+}
+
 // WebhookAttributes describes a webhook resource.
 type WebhookAttributes struct {
 	Enabled    bool               `json:"enabled,omitempty"`

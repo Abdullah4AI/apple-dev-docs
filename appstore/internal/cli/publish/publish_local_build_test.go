@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,714 @@ func TestPublishTestFlightLocalBuildJSONIncludesNestedStages(t *testing.T) {
 	}
 	if strings.Contains(stdout, `"archive_path"`) || strings.Contains(stdout, `"export_options_path"`) {
 		t.Fatalf("expected no snake_case nested keys, got %s", stdout)
+	}
+}
+
+func TestPublishTestFlightLocalBuildRetriesPostUploadBuildPropagationWithoutRepeatingBuildStages(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+		return "app-123", nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+
+	archiveCalls := 0
+	runPublishArchiveFn = func(_ context.Context, _ localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+		archiveCalls++
+		return &localxcode.ArchiveResult{
+			ArchivePath:   ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+			BundleID:      "com.example.demo",
+			Version:       "1.2.3",
+			BuildNumber:   "42",
+			Scheme:        "Demo",
+			Configuration: "Release",
+		}, nil
+	}
+
+	exportCalls := 0
+	runPublishExportFn = func(_ context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		exportCalls++
+		return &localxcode.ExportResult{
+			ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+			IPAPath:     ".asc/artifacts/Demo-IOS-1.2.3-42.ipa",
+			BundleID:    "com.example.demo",
+			Version:     "1.2.3",
+			BuildNumber: "42",
+		}, nil
+	}
+
+	uploadCalls := 0
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		uploadCalls++
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{
+				Data: asc.Resource[asc.BuildAttributes]{
+					ID: "build-123",
+					Attributes: asc.BuildAttributes{
+						Version:         buildNumber,
+						ProcessingState: asc.BuildProcessingStateValid,
+					},
+				},
+			},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	requestCount := 0
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/builds/build-123/relationships/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"The specified resource does not exist","detail":"There is no resource of type 'builds' with id 'build-123'"}]}`)
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":{"type":"builds","id":"build-123","attributes":{"version":"42","processingState":"VALID"}}}`)
+		case 4:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/builds/build-123/relationships/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNoContent, "")
+		default:
+			t.Fatalf("unexpected request count %d", requestCount)
+			return nil, nil
+		}
+	})
+
+	cmd := PublishTestFlightCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-123",
+		"--workspace", "Demo.xcworkspace",
+		"--scheme", "Demo",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--group", "External",
+		"--export-options", "ExportOptions.plist",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr != nil {
+		t.Fatalf("Exec() error: %v", runErr)
+	}
+	if archiveCalls != 1 || exportCalls != 1 || uploadCalls != 1 {
+		t.Fatalf("build stage calls = archive:%d export:%d upload:%d, want each exactly once", archiveCalls, exportCalls, uploadCalls)
+	}
+	if requestCount != 4 {
+		t.Fatalf("request count = %d, want 4", requestCount)
+	}
+	if !strings.Contains(stdout, `"buildId":"build-123"`) {
+		t.Fatalf("expected uploaded build ID in output, got %q", stdout)
+	}
+	if strings.Contains(stdout, "still propagating") {
+		t.Fatalf("retry diagnostics must not be written to stdout, got %q", stdout)
+	}
+	wantDiagnostic := "Uploaded TestFlight build build-123 is still propagating; retrying beta-group assignment (attempt 2/7) immediately.\n"
+	if stderr != wantDiagnostic {
+		t.Fatalf("stderr = %q, want retry diagnostic %q", stderr, wantDiagnostic)
+	}
+}
+
+func TestPublishTestFlightLocalBuildReportsStructuredRecoveryResultAfterNotificationFailure(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+		return "app-123", nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+
+	archiveCalls := 0
+	runPublishArchiveFn = func(_ context.Context, _ localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+		archiveCalls++
+		return &localxcode.ArchiveResult{
+			ArchivePath:   ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+			BundleID:      "com.example.demo",
+			Version:       "1.2.3",
+			BuildNumber:   "42",
+			Scheme:        "Demo",
+			Configuration: "Release",
+		}, nil
+	}
+
+	exportCalls := 0
+	runPublishExportFn = func(_ context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		exportCalls++
+		return &localxcode.ExportResult{
+			ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+			IPAPath:     ".asc/artifacts/Demo-IOS-1.2.3-42.ipa",
+			BundleID:    "com.example.demo",
+			Version:     "1.2.3",
+			BuildNumber: "42",
+		}, nil
+	}
+
+	uploadCalls := 0
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		uploadCalls++
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{
+				Data: asc.Resource[asc.BuildAttributes]{
+					ID: "build-123",
+					Attributes: asc.BuildAttributes{
+						Version:         buildNumber,
+						ProcessingState: asc.BuildProcessingStateValid,
+					},
+				},
+			},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	requestCount := 0
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/builds/build-123/relationships/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNoContent, "")
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123/buildBetaDetail" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"The specified resource does not exist","detail":"There is no resource of type 'builds' with id 'build-123'"}]}`)
+		default:
+			t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	cmd := PublishTestFlightCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-123",
+		"--workspace", "Demo.xcworkspace",
+		"--scheme", "Demo",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--group", "External",
+		"--notify",
+		"--export-options", "ExportOptions.plist",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), `beta groups were added to build "build-123", but checking notification state failed`) {
+		t.Fatalf("expected notification partial error, got %v", runErr)
+	}
+	if archiveCalls != 1 || exportCalls != 1 || uploadCalls != 1 {
+		t.Fatalf("build stage calls = archive:%d export:%d upload:%d, want each exactly once", archiveCalls, exportCalls, uploadCalls)
+	}
+
+	var result asc.TestFlightPublishResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode partial publish result: %v\nstdout=%s", err, stdout)
+	}
+	if result.Status != publishPartialStatus || result.FailureStage != publishFailureStageNotification {
+		t.Fatalf("unexpected partial status: status=%q stage=%q", result.Status, result.FailureStage)
+	}
+	if result.BuildID != "build-123" || !result.Uploaded {
+		t.Fatalf("expected recoverable uploaded build, got buildId=%q uploaded=%t", result.BuildID, result.Uploaded)
+	}
+	wantCompleted := []string{publishCompletedStageArchive, publishCompletedStageExport, publishCompletedStageUpload, publishCompletedStageBetaDistribution}
+	if !slices.Equal(result.CompletedStages, wantCompleted) {
+		t.Fatalf("completed stages = %v, want %v", result.CompletedStages, wantCompleted)
+	}
+	if result.Archive == nil || result.Export == nil || result.Publish == nil {
+		t.Fatalf("expected completed local stage details, got archive=%#v export=%#v publish=%#v", result.Archive, result.Export, result.Publish)
+	}
+	if result.Publish.BuildID != "build-123" || !result.Publish.Uploaded {
+		t.Fatalf("unexpected nested publish recovery result: %#v", result.Publish)
+	}
+	if strings.Contains(stderr, "still propagating") {
+		t.Fatalf("notification follow-up failure must not enter relationship retry path, stderr=%q", stderr)
+	}
+}
+
+func TestPublishTestFlightUploadReportsStructuredRecoveryResultAfterBetaReviewFailure(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+		return "app-123", nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+	uploadCalls := 0
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		uploadCalls++
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{
+				Data: asc.Resource[asc.BuildAttributes]{
+					ID: "build-123",
+					Attributes: asc.BuildAttributes{
+						Version:         buildNumber,
+						ProcessingState: asc.BuildProcessingStateValid,
+					},
+				},
+			},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	requestCount := 0
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+		case 2:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/builds/build-123/relationships/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNoContent, "")
+		case 3:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123/buildBetaDetail" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":false}}}`)
+		case 4:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/buildBetaNotifications" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusCreated, `{"data":{"type":"buildBetaNotifications","id":"notification-1"}}`)
+		case 5:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123/betaAppReviewSubmission" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"Not Found"}]}`)
+		case 6:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/betaAppReviewSubmissions" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusUnprocessableEntity, `{"errors":[{"status":"422","code":"STATE_ERROR","title":"Submission rejected","detail":"review state is not ready"}]}`)
+		default:
+			t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	cmd := PublishTestFlightCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-123",
+		"--ipa", "Demo.ipa",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--group", "External",
+		"--notify",
+		"--submit",
+		"--confirm",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, _ := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "Submission rejected: review state is not ready") {
+		t.Fatalf("expected beta review error, got %v", runErr)
+	}
+	if uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", uploadCalls)
+	}
+
+	var result asc.TestFlightPublishResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode partial publish result: %v\nstdout=%s", err, stdout)
+	}
+	if result.Status != publishPartialStatus || result.FailureStage != publishFailureStageBetaReview {
+		t.Fatalf("unexpected partial status: status=%q stage=%q", result.Status, result.FailureStage)
+	}
+	if result.BuildID != "build-123" || !result.Uploaded {
+		t.Fatalf("expected recoverable uploaded build, got buildId=%q uploaded=%t", result.BuildID, result.Uploaded)
+	}
+	wantCompleted := []string{publishCompletedStageUpload, publishCompletedStageBetaDistribution}
+	if !slices.Equal(result.CompletedStages, wantCompleted) {
+		t.Fatalf("completed stages = %v, want %v", result.CompletedStages, wantCompleted)
+	}
+	if result.Notified == nil || !*result.Notified || result.NotificationAction != asc.BuildBetaGroupsNotificationActionManual {
+		t.Fatalf("notification result = notified:%v action:%q, want true/%q", result.Notified, result.NotificationAction, asc.BuildBetaGroupsNotificationActionManual)
+	}
+}
+
+func TestPublishTestFlightUploadReportsTerminalProcessingStateAfterWaitFailure(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+		return "app-123", nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+				ID: "build-123",
+				Attributes: asc.BuildAttributes{
+					Version:         buildNumber,
+					ProcessingState: asc.BuildProcessingStateProcessing,
+				},
+			}},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+	waitForPublishBuildProcessingFn = func(context.Context, *asc.Client, string, time.Duration) (*asc.BuildResponse, error) {
+		return &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+			ID: "build-123",
+			Attributes: asc.BuildAttributes{
+				Version:         "42",
+				ProcessingState: asc.BuildProcessingStateFailed,
+			},
+		}}, errors.New("build processing failed: FAILED")
+	}
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+		return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+	})
+
+	cmd := PublishTestFlightCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-123",
+		"--ipa", "Demo.ipa",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--group", "External",
+		"--wait",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, _ := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "build processing failed: FAILED") {
+		t.Fatalf("expected build processing failure, got %v", runErr)
+	}
+
+	var result asc.TestFlightPublishResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode partial publish result: %v\nstdout=%s", err, stdout)
+	}
+	if result.ProcessingState != asc.BuildProcessingStateFailed {
+		t.Fatalf("processingState = %q, want %q", result.ProcessingState, asc.BuildProcessingStateFailed)
+	}
+	if result.FailureStage != publishFailureStageBuildProcessing {
+		t.Fatalf("failureStage = %q, want %q", result.FailureStage, publishFailureStageBuildProcessing)
+	}
+	if !slices.Equal(result.CompletedStages, []string{publishCompletedStageUpload}) {
+		t.Fatalf("completedStages = %v, want [%s]", result.CompletedStages, publishCompletedStageUpload)
+	}
+}
+
+func TestPublishTestFlightLocalBuildStopsPropagationRetryForTerminalProcessingState(t *testing.T) {
+	for _, state := range []string{asc.BuildProcessingStateFailed, asc.BuildProcessingStateInvalid} {
+		t.Run(state, func(t *testing.T) {
+			restore := overridePublishCommandTestHooks(t)
+			defer restore()
+
+			getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+			resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+				return "app-123", nil
+			}
+			validatePublishIPAPathFn = func(string) (os.FileInfo, error) { return newPublishTestFileInfo(t) }
+
+			archiveCalls := 0
+			runPublishArchiveFn = func(_ context.Context, _ localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+				archiveCalls++
+				return &localxcode.ArchiveResult{
+					ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+					Version:     "1.2.3",
+					BuildNumber: "42",
+				}, nil
+			}
+			exportCalls := 0
+			runPublishExportFn = func(_ context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+				exportCalls++
+				return &localxcode.ExportResult{
+					ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+					IPAPath:     ".asc/artifacts/Demo-IOS-1.2.3-42.ipa",
+					Version:     "1.2.3",
+					BuildNumber: "42",
+				}, nil
+			}
+			uploadCalls := 0
+			uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+				uploadCalls++
+				return &publishUploadResult{
+					Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+						ID: "build-123",
+						Attributes: asc.BuildAttributes{
+							Version:         buildNumber,
+							ProcessingState: asc.BuildProcessingStateProcessing,
+						},
+					}},
+					Version:     version,
+					BuildNumber: buildNumber,
+				}, nil
+			}
+
+			originalTransport := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = originalTransport })
+			requestCount := 0
+			http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requestCount++
+				switch requestCount {
+				case 1:
+					if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+						t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+					}
+					return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+				case 2:
+					if req.Method != http.MethodPost || req.URL.Path != "/v1/builds/build-123/relationships/betaGroups" {
+						t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+					}
+					return publishCommandJSONResponse(http.StatusNotFound, `{"errors":[{"status":"404","code":"NOT_FOUND","title":"The specified resource does not exist","detail":"There is no resource of type 'builds' with id 'build-123'"}]}`)
+				case 3:
+					if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123" {
+						t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+					}
+					return publishCommandJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":{"type":"builds","id":"build-123","attributes":{"version":"42","processingState":%q}}}`, state))
+				default:
+					t.Fatalf("unexpected retry request %d: %s %s", requestCount, req.Method, req.URL.String())
+					return nil, nil
+				}
+			})
+
+			cmd := PublishTestFlightCommand()
+			cmd.FlagSet.SetOutput(io.Discard)
+			if err := cmd.FlagSet.Parse([]string{
+				"--app", "app-123",
+				"--workspace", "Demo.xcworkspace",
+				"--scheme", "Demo",
+				"--version", "1.2.3",
+				"--build-number", "42",
+				"--group", "External",
+				"--export-options", "ExportOptions.plist",
+				"--output", "json",
+			}); err != nil {
+				t.Fatalf("parse flags: %v", err)
+			}
+
+			var runErr error
+			stdout, stderr := capturePublishCommandOutput(t, func() error {
+				runErr = cmd.Exec(context.Background(), nil)
+				return runErr
+			})
+			if runErr == nil || !strings.Contains(runErr.Error(), "build processing failed: "+state) {
+				t.Fatalf("expected terminal processing failure, got %v", runErr)
+			}
+			if archiveCalls != 1 || exportCalls != 1 || uploadCalls != 1 {
+				t.Fatalf("build stage calls = archive:%d export:%d upload:%d, want each exactly once", archiveCalls, exportCalls, uploadCalls)
+			}
+			if requestCount != 3 {
+				t.Fatalf("request count = %d, want 3", requestCount)
+			}
+			if strings.Contains(stderr, "still propagating") {
+				t.Fatalf("terminal processing failure must not wait or retry, stderr=%q", stderr)
+			}
+
+			var result asc.TestFlightPublishResult
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("decode partial publish result: %v\nstdout=%s", err, stdout)
+			}
+			if result.ProcessingState != state {
+				t.Fatalf("processingState = %q, want %q", result.ProcessingState, state)
+			}
+			if result.FailureStage != publishFailureStageBuildProcessing {
+				t.Fatalf("failureStage = %q, want %q", result.FailureStage, publishFailureStageBuildProcessing)
+			}
+			wantCompleted := []string{publishCompletedStageArchive, publishCompletedStageExport, publishCompletedStageUpload}
+			if !slices.Equal(result.CompletedStages, wantCompleted) {
+				t.Fatalf("completedStages = %v, want %v", result.CompletedStages, wantCompleted)
+			}
+		})
+	}
+}
+
+func TestPublishTestFlightLocalBuildStagesRunOnceWhenDistributionRetriesFail(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{
+			name: "retry exhaustion",
+			err:  fmt.Errorf("beta-group relationship still reported uploaded build missing: %w", postUploadBuildMissingError("build-123")),
+			want: asc.ErrNotFound,
+		},
+		{
+			name: "retry cancellation",
+			err:  context.Canceled,
+			want: context.Canceled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restore := overridePublishCommandTestHooks(t)
+			defer restore()
+
+			getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+			resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+				return "app-123", nil
+			}
+			validatePublishIPAPathFn = func(string) (os.FileInfo, error) { return newPublishTestFileInfo(t) }
+
+			archiveCalls := 0
+			runPublishArchiveFn = func(_ context.Context, _ localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+				archiveCalls++
+				return &localxcode.ArchiveResult{
+					ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+					Version:     "1.2.3",
+					BuildNumber: "42",
+				}, nil
+			}
+			exportCalls := 0
+			runPublishExportFn = func(_ context.Context, _ localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+				exportCalls++
+				return &localxcode.ExportResult{
+					ArchivePath: ".asc/artifacts/Demo-IOS-1.2.3-42.xcarchive",
+					IPAPath:     ".asc/artifacts/Demo-IOS-1.2.3-42.ipa",
+					Version:     "1.2.3",
+					BuildNumber: "42",
+				}, nil
+			}
+			uploadCalls := 0
+			uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+				uploadCalls++
+				return &publishUploadResult{
+					Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+						ID: "build-123",
+						Attributes: asc.BuildAttributes{
+							Version:         buildNumber,
+							ProcessingState: asc.BuildProcessingStateValid,
+						},
+					}},
+					Version:     version,
+					BuildNumber: buildNumber,
+				}, nil
+			}
+			addCalls := 0
+			addUploadedBuildBetaGroupsFn = func(context.Context, postUploadBuildDistributionClient, string, []shared.ResolvedBetaGroup, shared.AddBuildBetaGroupsOptions) (*shared.AddBuildBetaGroupsResult, error) {
+				addCalls++
+				return nil, tt.err
+			}
+
+			originalTransport := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = originalTransport })
+			http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+				}
+				return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+			})
+
+			cmd := PublishTestFlightCommand()
+			cmd.FlagSet.SetOutput(io.Discard)
+			if err := cmd.FlagSet.Parse([]string{
+				"--app", "app-123",
+				"--workspace", "Demo.xcworkspace",
+				"--scheme", "Demo",
+				"--version", "1.2.3",
+				"--build-number", "42",
+				"--group", "External",
+				"--export-options", "ExportOptions.plist",
+				"--output", "json",
+			}); err != nil {
+				t.Fatalf("parse flags: %v", err)
+			}
+
+			var runErr error
+			stdout, _ := capturePublishCommandOutput(t, func() error {
+				runErr = cmd.Exec(context.Background(), nil)
+				return runErr
+			})
+			if !errors.Is(runErr, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, runErr)
+			}
+			if archiveCalls != 1 || exportCalls != 1 || uploadCalls != 1 || addCalls != 1 {
+				t.Fatalf("calls = archive:%d export:%d upload:%d add:%d, want each exactly once", archiveCalls, exportCalls, uploadCalls, addCalls)
+			}
+			var result asc.TestFlightPublishResult
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("decode partial result: %v\nstdout=%s", err, stdout)
+			}
+			wantCompleted := []string{publishCompletedStageArchive, publishCompletedStageExport, publishCompletedStageUpload}
+			if !slices.Equal(result.CompletedStages, wantCompleted) {
+				t.Fatalf("completed stages = %v, want %v", result.CompletedStages, wantCompleted)
+			}
+		})
 	}
 }
 
@@ -1530,6 +2239,7 @@ func overridePublishCommandTestHooks(t *testing.T) func() {
 	originalResolveAppID := resolvePublishAppIDWithLookupFn
 	originalWaitForProcessing := waitForPublishBuildProcessingFn
 	originalMetadataApply := applyPublishVersionMetadataFn
+	originalAddUploadedBuildBetaGroups := addUploadedBuildBetaGroupsFn
 	preflightPublishXcodeFn = func(context.Context) error { return nil }
 
 	return func() {
@@ -1544,6 +2254,7 @@ func overridePublishCommandTestHooks(t *testing.T) func() {
 		resolvePublishAppIDWithLookupFn = originalResolveAppID
 		waitForPublishBuildProcessingFn = originalWaitForProcessing
 		applyPublishVersionMetadataFn = originalMetadataApply
+		addUploadedBuildBetaGroupsFn = originalAddUploadedBuildBetaGroups
 	}
 }
 

@@ -59,20 +59,105 @@ func TestGetGameCenterLeaderboardSetMemberLocalizations_UsesNextURL(t *testing.T
 	}
 }
 
-func TestGetGameCenterLeaderboardSetMemberLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboardSetMemberLocalizations","id":"loc-1","attributes":{"name":"Seasonal","locale":"en-US"}}}`)
+func TestGetGameCenterLeaderboardSetMemberLocalization_CompositeLookupFindsExactIDOnSecondPage(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v1/gameCenterLeaderboardSetMemberLocalizations?cursor=page-2"
+	responses := []*http.Response{
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboards","id":"lb-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboardSets","id":"set-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"gameCenterLeaderboardSetMemberLocalizations","id":"loc-other","attributes":{"name":"Other","locale":"en-US"}}],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"gameCenterLeaderboardSetMemberLocalizations","id":"loc-2","attributes":{"name":"Seasonal","locale":"en-GB"}}],"links":{}}`),
+	}
+
+	requestCount := 0
 	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/gameCenterLeaderboardSetMemberLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/gameCenterLeaderboardSetMemberLocalizations/loc-1, got %s", req.URL.Path)
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.URL.Path != "/v1/gameCenterLeaderboardSetMemberLocalizations/loc-2/gameCenterLeaderboard" {
+				t.Fatalf("request 1 path = %q", req.URL.Path)
+			}
+		case 2:
+			if req.URL.Path != "/v1/gameCenterLeaderboardSetMemberLocalizations/loc-2/gameCenterLeaderboardSet" {
+				t.Fatalf("request 2 path = %q", req.URL.Path)
+			}
+		case 3:
+			if req.URL.Path != "/v1/gameCenterLeaderboardSetMemberLocalizations" {
+				t.Fatalf("request 3 path = %q", req.URL.Path)
+			}
+			query := req.URL.Query()
+			if got := query.Get("filter[gameCenterLeaderboard]"); got != "lb-1" {
+				t.Fatalf("leaderboard filter = %q, want lb-1", got)
+			}
+			if got := query.Get("filter[gameCenterLeaderboardSet]"); got != "set-1" {
+				t.Fatalf("leaderboard set filter = %q, want set-1", got)
+			}
+			if got := query.Get("limit"); got != "200" {
+				t.Fatalf("limit = %q, want 200", got)
+			}
+		case 4:
+			if got := req.URL.String(); got != next {
+				t.Fatalf("request 4 URL = %q, want %q", got, next)
+			}
+		default:
+			t.Fatalf("unexpected request %d: %s", requestCount, req.URL.String())
 		}
 		assertAuthorized(t, req)
-	}, response)
+	}, responses...)
 
-	if _, err := client.GetGameCenterLeaderboardSetMemberLocalization(context.Background(), "loc-1"); err != nil {
+	resp, err := client.GetGameCenterLeaderboardSetMemberLocalization(context.Background(), " loc-2 ")
+	if err != nil {
 		t.Fatalf("GetGameCenterLeaderboardSetMemberLocalization() error: %v", err)
+	}
+	if requestCount != 4 {
+		t.Fatalf("request count = %d, want 4", requestCount)
+	}
+	if resp.Data.ID != "loc-2" || resp.Data.Attributes.Name != "Seasonal" || resp.Data.Attributes.Locale != "en-GB" {
+		t.Fatalf("unexpected response: %+v", resp.Data)
+	}
+}
+
+func TestGetGameCenterLeaderboardSetMemberLocalization_CompositeLookupNotFound(t *testing.T) {
+	requestCount := 0
+	client := newTestClient(
+		t, func(req *http.Request) {
+			requestCount++
+		},
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboards","id":"lb-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboardSets","id":"set-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":[{"type":"gameCenterLeaderboardSetMemberLocalizations","id":"loc-other","attributes":{"name":"Other","locale":"en-US"}}],"links":{}}`),
+	)
+
+	_, err := client.GetGameCenterLeaderboardSetMemberLocalization(context.Background(), "loc-missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+	if !strings.Contains(err.Error(), `member localization "loc-missing"`) {
+		t.Fatalf("error = %v, want localization ID", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("request count = %d, want 3", requestCount)
+	}
+}
+
+func TestGetGameCenterLeaderboardSetMemberLocalization_CompositeLookupRejectsRepeatedNextURL(t *testing.T) {
+	next := "https://api.appstoreconnect.apple.com/v1/gameCenterLeaderboardSetMemberLocalizations?cursor=repeat"
+	requestCount := 0
+	client := newTestClient(
+		t, func(req *http.Request) {
+			requestCount++
+		},
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboards","id":"lb-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":{"type":"gameCenterLeaderboardSets","id":"set-1","attributes":{}}}`),
+		jsonResponse(http.StatusOK, `{"data":[],"links":{"next":"`+next+`"}}`),
+		jsonResponse(http.StatusOK, `{"data":[],"links":{"next":"`+next+`"}}`),
+	)
+
+	_, err := client.GetGameCenterLeaderboardSetMemberLocalization(context.Background(), "loc-missing")
+	if !errors.Is(err, ErrRepeatedPaginationURL) {
+		t.Fatalf("error = %v, want ErrRepeatedPaginationURL", err)
+	}
+	if requestCount != 4 {
+		t.Fatalf("request count = %d, want 4", requestCount)
 	}
 }
 

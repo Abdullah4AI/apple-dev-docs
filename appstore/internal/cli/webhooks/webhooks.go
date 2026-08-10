@@ -28,12 +28,12 @@ func WebhooksCommand() *ffcli.Command {
 Examples:
   asc webhooks list --app "APP_ID"
   asc webhooks view --webhook-id "WEBHOOK_ID"
-  asc webhooks create --app "APP_ID" --name "Build Updates" --url "https://example.com/webhook" --secret "secret123" --events "SUBSCRIPTION.CREATED,SUBSCRIPTION.UPDATED" --enabled true
+  asc webhooks create --app "APP_ID" --name "Build Updates" --url "https://example.com/webhook" --secret "secret123" --events "BUILD_UPLOAD_STATE_UPDATED" --enabled true
   asc webhooks update --webhook-id "WEBHOOK_ID" --url "https://new-url.com/webhook" --enabled false
   asc webhooks delete --webhook-id "WEBHOOK_ID" --confirm
   asc webhooks serve --port 8787 --dir ./webhook-events
   asc webhooks deliveries --webhook-id "WEBHOOK_ID"
-  asc webhooks deliveries relationships --webhook-id "WEBHOOK_ID"
+  asc webhooks deliveries links --webhook-id "WEBHOOK_ID"
   asc webhooks deliveries redeliver --delivery-id "DELIVERY_ID"
   asc webhooks ping --webhook-id "WEBHOOK_ID"`,
 		FlagSet:   fs,
@@ -193,7 +193,7 @@ func WebhooksCreateCommand() *ffcli.Command {
 		LongHelp: `Create a webhook.
 
 Examples:
-  asc webhooks create --app "APP_ID" --name "Build Updates" --url "https://example.com/webhook" --secret "secret123" --events "SUBSCRIPTION.CREATED,SUBSCRIPTION.UPDATED" --enabled true`,
+  asc webhooks create --app "APP_ID" --name "Build Updates" --url "https://example.com/webhook" --secret "secret123" --events "BUILD_UPLOAD_STATE_UPDATED" --enabled true`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -225,7 +225,7 @@ Examples:
 
 			eventTypes, err := normalizeWebhookEvents(*events)
 			if err != nil {
-				return fmt.Errorf("webhooks create: %w", err)
+				return fmt.Errorf("webhooks create: %w", shared.UsageError(err.Error()))
 			}
 
 			client, err := shared.GetASCClient()
@@ -306,7 +306,7 @@ Examples:
 			if strings.TrimSpace(*events) != "" {
 				eventTypes, err := normalizeWebhookEvents(*events)
 				if err != nil {
-					return fmt.Errorf("webhooks update: %w", err)
+					return fmt.Errorf("webhooks update: %w", shared.UsageError(err.Error()))
 				}
 				attrs.EventTypes = eventTypes
 				hasUpdate = true
@@ -406,7 +406,9 @@ func WebhookDeliveriesCommand() *ffcli.Command {
 		LongHelp: `List webhook deliveries.
 
 Examples:
+  asc webhooks deliveries --webhook-id "WEBHOOK_ID"
   asc webhooks deliveries --webhook-id "WEBHOOK_ID" --created-after "2026-01-01T00:00:00Z"
+  asc webhooks deliveries --webhook-id "WEBHOOK_ID" --created-after "2026-01-01T00:00:00Z" --created-before "2026-01-02T00:00:00Z"
   asc webhooks deliveries --webhook-id "WEBHOOK_ID" --limit 10
   asc webhooks deliveries --webhook-id "WEBHOOK_ID" --paginate`,
 		FlagSet:   fs,
@@ -421,23 +423,6 @@ Examples:
 			if trimmedID == "" && trimmedNext == "" {
 				fmt.Fprintln(os.Stderr, "Error: --webhook-id is required")
 				return shared.MissingRequiredUsageError()
-			}
-			filterCount := 0
-			if strings.TrimSpace(*createdAfter) != "" {
-				filterCount++
-			}
-			if strings.TrimSpace(*createdBefore) != "" {
-				filterCount++
-			}
-			if trimmedNext == "" {
-				if filterCount == 0 {
-					fmt.Fprintln(os.Stderr, "Error: --created-after or --created-before is required")
-					return shared.MissingRequiredUsageError()
-				}
-				if filterCount > 1 {
-					fmt.Fprintln(os.Stderr, "Error: only one of --created-after or --created-before can be used")
-					return flag.ErrHelp
-				}
 			}
 			if *limit != 0 && (*limit < 1 || *limit > webhooksMaxLimit) {
 				return fmt.Errorf("webhooks deliveries: --limit must be between 1 and %d", webhooksMaxLimit)

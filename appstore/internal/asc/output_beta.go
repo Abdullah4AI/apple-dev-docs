@@ -48,6 +48,36 @@ type AppBetaTestersUpdateResult struct {
 	Action    string   `json:"action"`
 }
 
+// BuildBetaGroupMembershipResult describes the TestFlight groups that give a
+// build access, including explicit relationship membership and all-build access.
+type BuildBetaGroupMembershipResult struct {
+	BuildID      string                            `json:"buildId"`
+	AppID        string                            `json:"appId"`
+	Complete     bool                              `json:"complete"`
+	LookupMethod string                            `json:"lookupMethod"`
+	GroupCount   int                               `json:"groupCount"`
+	Groups       []BuildBetaGroupMembershipGroup   `json:"groups"`
+	Failures     []BuildBetaGroupMembershipFailure `json:"failures,omitempty"`
+}
+
+// BuildBetaGroupMembershipGroup is one group that contains or implicitly
+// receives a build.
+type BuildBetaGroupMembershipGroup struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Type                 string `json:"type"`
+	Membership           string `json:"membership"`
+	HasAccessToAllBuilds bool   `json:"hasAccessToAllBuilds"`
+}
+
+// BuildBetaGroupMembershipFailure records an inverse relationship lookup that
+// could not be completed.
+type BuildBetaGroupMembershipFailure struct {
+	GroupID   string `json:"groupId"`
+	GroupName string `json:"groupName,omitempty"`
+	Error     string `json:"error"`
+}
+
 // BetaFeedbackSubmissionDeleteResult represents CLI output for beta feedback deletions.
 type BetaFeedbackSubmissionDeleteResult struct {
 	ID      string `json:"id"`
@@ -79,6 +109,38 @@ func betaGroupsRows(resp *BetaGroupsResponse) ([]string, [][]string) {
 			fmt.Sprintf("%t", item.Attributes.IsInternalGroup),
 			fmt.Sprintf("%t", item.Attributes.PublicLinkEnabled),
 			item.Attributes.PublicLink,
+		})
+	}
+	return headers, rows
+}
+
+func buildBetaGroupMembershipRows(result *BuildBetaGroupMembershipResult) ([]string, [][]string) {
+	headers := []string{"Build ID", "App ID", "Group ID", "Name", "Type", "Membership", "All Builds", "Complete", "Error"}
+	rows := make([][]string, 0, len(result.Groups)+len(result.Failures))
+	for _, group := range result.Groups {
+		rows = append(rows, []string{
+			result.BuildID,
+			result.AppID,
+			group.ID,
+			compactWhitespace(group.Name),
+			group.Type,
+			group.Membership,
+			fmt.Sprintf("%t", group.HasAccessToAllBuilds),
+			fmt.Sprintf("%t", result.Complete),
+			"",
+		})
+	}
+	for _, failure := range result.Failures {
+		rows = append(rows, []string{
+			result.BuildID,
+			result.AppID,
+			failure.GroupID,
+			compactWhitespace(failure.GroupName),
+			"",
+			"error",
+			"",
+			"false",
+			compactWhitespace(failure.Error),
 		})
 	}
 	return headers, rows

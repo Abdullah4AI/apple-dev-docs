@@ -3,6 +3,7 @@ package asc
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 )
@@ -13,6 +14,7 @@ var (
 	ErrForbidden             = errors.New("forbidden")
 	ErrBadRequest            = errors.New("bad request")
 	ErrConflict              = errors.New("resource conflict")
+	ErrMissingKeyID          = errors.New("key ID is required")
 	ErrRepeatedPaginationURL = errors.New("detected repeated pagination URL")
 )
 
@@ -161,7 +163,7 @@ func (e *APIError) Is(target error) bool {
 	case ErrBadRequest:
 		return strings.EqualFold(e.Code, "BAD_REQUEST")
 	case ErrConflict:
-		return strings.EqualFold(e.Code, "CONFLICT")
+		return strings.EqualFold(e.Code, "CONFLICT") || e.StatusCode == http.StatusConflict
 	default:
 		return false
 	}

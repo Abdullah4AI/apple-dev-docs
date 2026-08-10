@@ -432,18 +432,3 @@ func (c *Client) UpdateGameCenterGroupLeaderboardsV2(ctx context.Context, groupI
 	_, err = c.do(ctx, http.MethodPatch, path, body)
 	return err
 }
-
-// UpdateGameCenterGroupChallenges replaces the group's challenges.
-func (c *Client) UpdateGameCenterGroupChallenges(ctx context.Context, groupID string, challengeIDs []string) error {
-	payload := RelationshipRequest{
-		Data: buildRelationshipData(ResourceTypeGameCenterChallenges, challengeIDs),
-	}
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return err
-	}
-
-	path := fmt.Sprintf("/v1/gameCenterGroups/%s/relationships/gameCenterChallenges", strings.TrimSpace(groupID))
-	_, err = c.do(ctx, http.MethodPatch, path, body)
-	return err
-}

@@ -1157,7 +1157,7 @@ Examples:
 	}
 }
 
-// GameCenterLeaderboardSetMemberLocalizationsGetCommand returns the member localization get subcommand.
+// GameCenterLeaderboardSetMemberLocalizationsGetCommand returns the member localization view subcommand.
 func GameCenterLeaderboardSetMemberLocalizationsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("view", flag.ExitOnError)
 
@@ -1169,6 +1169,10 @@ func GameCenterLeaderboardSetMemberLocalizationsGetCommand() *ffcli.Command {
 		ShortUsage: "asc game-center leaderboard-sets member-localizations view --id \"LOCALIZATION_ID\"",
 		ShortHelp:  "View a leaderboard set member localization by ID.",
 		LongHelp: `View a leaderboard set member localization by ID.
+
+App Store Connect does not expose a direct instance GET. This command resolves
+the localization's leaderboard and leaderboard set, then searches their member
+localizations for the exact ID.
 
 Examples:
   asc game-center leaderboard-sets member-localizations view --id "LOCALIZATION_ID"`,

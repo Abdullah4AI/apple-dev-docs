@@ -5,17 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 type screenshotUploadFailureArtifact struct {
 	VersionLocalizationID string                       `json:"versionLocalizationId"`
 	Path                  string                       `json:"path,omitempty"`
+	RootPath              string                       `json:"rootPath,omitempty"`
 	DeviceType            string                       `json:"deviceType,omitempty"`
 	DisplayType           string                       `json:"displayType,omitempty"`
 	SkipExisting          bool                         `json:"skipExisting,omitempty"`
@@ -24,10 +28,19 @@ type screenshotUploadFailureArtifact struct {
 	Files                 []string                     `json:"files,omitempty"`
 	OrderedIDs            []string                     `json:"orderedIds,omitempty"`
 	PendingFiles          []string                     `json:"pendingFiles,omitempty"`
+	PendingAssets         []screenshotPendingAsset     `json:"pendingAssets,omitempty"`
 	Results               []asc.AssetUploadResultItem  `json:"results,omitempty"`
 	Failures              []asc.AssetUploadFailureItem `json:"failures,omitempty"`
 	Error                 string                       `json:"error,omitempty"`
 	GeneratedAt           string                       `json:"generatedAt"`
+}
+
+type screenshotPendingAsset struct {
+	FileName string `json:"fileName"`
+	FilePath string `json:"filePath"`
+	AssetID  string `json:"assetId"`
+	Checksum string `json:"checksum"`
+	State    string `json:"state"`
 }
 
 type screenshotUploadPreparedState struct {
@@ -201,6 +214,13 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 	if cfg.UploadContext == nil {
 		cfg.UploadContext = contextWithAssetUploadTimeout
 	}
+	if len(cfg.Files) > 0 {
+		sourceRootPath, err := resolveScreenshotUploadRoot(cfg.RootPath, cfg.Files)
+		if err != nil {
+			return asc.AppScreenshotUploadResult{}, fmt.Errorf("resolve screenshot source root: %w", err)
+		}
+		cfg.RootPath = sourceRootPath
+	}
 	prepared, err := prepareAppScreenshotUpload(ctx, cfg)
 	if err != nil {
 		return asc.AppScreenshotUploadResult{}, err
@@ -231,7 +251,7 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 	uploadCtx, cancel := cfg.UploadContext(ctx)
 	defer cancel()
 
-	progress, uploadErr := uploadScreenshotsWithOrderState(uploadCtx, cfg.Client, prepared.Set.ID, prepared.OrderedIDs, prepared.Files, false, true)
+	progress, uploadErr := uploadScreenshotsWithOrderState(uploadCtx, cfg.Client, prepared.Set.ID, prepared.OrderedIDs, prepared.Files, cfg.RootPath, false, true)
 	if uploadErr == nil && cfg.SkipExisting && len(prepared.SkippedResults) > 0 {
 		desiredIDs, err := syncSkippedScreenshotOrder(uploadCtx, cfg.Client, prepared.Set.ID, cfg.Files, prepared.SkippedResults, progress.Results)
 		if err != nil {
@@ -265,6 +285,7 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 	artifact := screenshotUploadFailureArtifact{
 		VersionLocalizationID: cfg.LocalizationID,
 		Path:                  artifactPath,
+		RootPath:              cfg.RootPath,
 		DeviceType:            strings.TrimPrefix(cfg.DisplayType, "APP_"),
 		DisplayType:           cfg.DisplayType,
 		SkipExisting:          cfg.SkipExisting,
@@ -273,6 +294,7 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 		Files:                 append([]string(nil), cfg.Files...),
 		OrderedIDs:            orderedIDs,
 		PendingFiles:          append([]string(nil), progress.PendingFiles...),
+		PendingAssets:         append([]screenshotPendingAsset(nil), progress.PendingAssets...),
 		Results:               append([]asc.AssetUploadResultItem(nil), result.Results...),
 		Failures:              append([]asc.AssetUploadFailureItem(nil), result.Failures...),
 		Error:                 uploadErr.Error(),
@@ -307,7 +329,14 @@ func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifact
 	defer cancel()
 
 	syncAfterUpload := !artifact.SkipExisting || len(artifact.Files) == 0
-	progress, uploadErr := uploadScreenshotsWithOrderState(uploadCtx, client, artifact.SetID, artifact.OrderedIDs, artifact.PendingFiles, true, syncAfterUpload)
+	sourceRootPath := strings.TrimSpace(artifact.RootPath)
+	if screenshotArtifactNeedsSourceFiles(artifact) {
+		sourceRootPath, err = resolveScreenshotUploadRoot(artifact.RootPath, screenshotArtifactSourcePaths(artifact))
+		if err != nil {
+			return asc.AppScreenshotUploadResult{}, fmt.Errorf("resolve resume source root: %w", err)
+		}
+	}
+	progress, uploadErr := resumeScreenshotsWithOrderState(uploadCtx, client, artifact.SetID, artifact.OrderedIDs, artifact.PendingFiles, artifact.PendingAssets, sourceRootPath, true, syncAfterUpload)
 
 	result := asc.AppScreenshotUploadResult{
 		VersionLocalizationID: artifact.VersionLocalizationID,
@@ -345,6 +374,7 @@ func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifact
 	nextArtifact := screenshotUploadFailureArtifact{
 		VersionLocalizationID: artifact.VersionLocalizationID,
 		Path:                  artifactPath,
+		RootPath:              sourceRootPath,
 		DeviceType:            artifact.DeviceType,
 		DisplayType:           artifact.DisplayType,
 		SkipExisting:          artifact.SkipExisting,
@@ -353,6 +383,7 @@ func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifact
 		Files:                 append([]string(nil), artifact.Files...),
 		OrderedIDs:            append([]string(nil), progress.OrderedIDs...),
 		PendingFiles:          append([]string(nil), progress.PendingFiles...),
+		PendingAssets:         append([]screenshotPendingAsset(nil), progress.PendingAssets...),
 		Results:               append([]asc.AssetUploadResultItem(nil), result.Results...),
 		Failures:              append([]asc.AssetUploadFailureItem(nil), result.Failures...),
 		Error:                 uploadErr.Error(),
@@ -421,6 +452,14 @@ func normalizeScreenshotUploadFailureArtifactPaths(artifact screenshotUploadFail
 		artifact.PendingFiles[i] = normalized
 	}
 
+	for i := range artifact.PendingAssets {
+		normalized, err := normalizeScreenshotUploadArtifactFilePath(artifact.PendingAssets[i].FilePath)
+		if err != nil {
+			return screenshotUploadFailureArtifact{}, err
+		}
+		artifact.PendingAssets[i].FilePath = normalized
+	}
+
 	for i := range artifact.Results {
 		normalized, err := normalizeScreenshotUploadArtifactFilePath(artifact.Results[i].FilePath)
 		if err != nil {
@@ -437,7 +476,187 @@ func normalizeScreenshotUploadFailureArtifactPaths(artifact screenshotUploadFail
 		artifact.Failures[i].FilePath = normalized
 	}
 
+	if screenshotArtifactNeedsSourceFiles(artifact) {
+		rootPath, err := resolveScreenshotUploadRoot(artifact.RootPath, screenshotArtifactSourcePaths(artifact))
+		if err != nil {
+			return screenshotUploadFailureArtifact{}, err
+		}
+		artifact.RootPath = rootPath
+	} else if strings.TrimSpace(artifact.RootPath) != "" {
+		rootPath, err := filepath.Abs(artifact.RootPath)
+		if err != nil {
+			return screenshotUploadFailureArtifact{}, err
+		}
+		artifact.RootPath = filepath.Clean(rootPath)
+	}
+
 	return artifact, nil
+}
+
+func screenshotArtifactNeedsSourceFiles(artifact screenshotUploadFailureArtifact) bool {
+	return len(artifact.PendingFiles) > 0 || len(artifact.PendingAssets) > 0
+}
+
+func screenshotArtifactSourcePaths(artifact screenshotUploadFailureArtifact) []string {
+	paths := make([]string, 0, len(artifact.Files)+len(artifact.PendingFiles)+len(artifact.PendingAssets))
+	paths = append(paths, artifact.Files...)
+	paths = append(paths, artifact.PendingFiles...)
+	for _, pending := range artifact.PendingAssets {
+		paths = append(paths, pending.FilePath)
+	}
+	return paths
+}
+
+func resolveScreenshotUploadRoot(rootPath string, filePaths []string) (string, error) {
+	if err := validateScreenshotSourceAncestry(filePaths); err != nil {
+		return "", err
+	}
+
+	rootPath = strings.TrimSpace(rootPath)
+	if rootPath != "" {
+		absolute, err := filepath.Abs(rootPath)
+		if err != nil {
+			return "", err
+		}
+		absolute = filepath.Clean(absolute)
+		for _, filePath := range filePaths {
+			fileAbsolute, err := filepath.Abs(strings.TrimSpace(filePath))
+			if err != nil {
+				return "", err
+			}
+			if filepath.Clean(fileAbsolute) == absolute {
+				absolute = filepath.Dir(absolute)
+				break
+			}
+		}
+		root, err := rootfs.New(absolute)
+		if err != nil {
+			return "", err
+		}
+		if err := root.CheckContained("."); err != nil {
+			return "", err
+		}
+		for _, filePath := range filePaths {
+			if strings.TrimSpace(filePath) == "" {
+				continue
+			}
+			fileAbsolute, err := filepath.Abs(filePath)
+			if err != nil {
+				return "", err
+			}
+			if err := root.CheckContained(fileAbsolute); err != nil {
+				return "", err
+			}
+		}
+		return root.Path(), nil
+	}
+
+	cleaned := make([]string, 0, len(filePaths))
+	for _, filePath := range filePaths {
+		filePath = strings.TrimSpace(filePath)
+		if filePath == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(filePath)
+		if err != nil {
+			return "", err
+		}
+		cleaned = append(cleaned, filepath.Clean(absolute))
+	}
+	if len(cleaned) == 0 {
+		return "", nil
+	}
+
+	root := filepath.Dir(cleaned[0])
+	for _, filePath := range cleaned[1:] {
+		for {
+			relative, err := filepath.Rel(root, filePath)
+			if err != nil {
+				return "", err
+			}
+			if relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				break
+			}
+			parent := filepath.Dir(root)
+			if parent == root {
+				return "", fmt.Errorf("screenshot files do not share a common source root")
+			}
+			root = parent
+		}
+	}
+	trustedRoot, err := rootfs.New(root)
+	if err != nil {
+		return "", err
+	}
+	if err := trustedRoot.CheckContained("."); err != nil {
+		return "", err
+	}
+	for _, filePath := range cleaned {
+		if err := trustedRoot.CheckContained(filePath); err != nil {
+			return "", err
+		}
+	}
+	return trustedRoot.Path(), nil
+}
+
+func validateScreenshotSourceAncestry(filePaths []string) error {
+	for _, filePath := range filePaths {
+		filePath = strings.TrimSpace(filePath)
+		if filePath == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(filePath)
+		if err != nil {
+			return err
+		}
+		validationRoot := screenshotSourceValidationRoot(absolute)
+		root, err := rootfs.New(validationRoot)
+		if err != nil {
+			return err
+		}
+		if err := root.CheckContained(absolute); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func screenshotSourceValidationRoot(absolutePath string) string {
+	absolutePath = filepath.Clean(absolutePath)
+	volume := filepath.VolumeName(absolutePath)
+	best := string(filepath.Separator)
+	if volume != "" {
+		best = volume + string(filepath.Separator)
+	}
+
+	candidates := make([]string, 0, 4)
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, cwd)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, home)
+	}
+	if temporary := strings.TrimSpace(os.TempDir()); temporary != "" {
+		candidates = append(candidates, temporary)
+	}
+	if runtime.GOOS != "windows" {
+		candidates = append(candidates, "/tmp")
+	}
+	for _, candidate := range candidates {
+		candidate, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		candidate = filepath.Clean(candidate)
+		relative, err := filepath.Rel(candidate, absolutePath)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if len(candidate) > len(best) {
+			best = candidate
+		}
+	}
+	return best
 }
 
 func persistScreenshotUploadFailureArtifact(path string, artifact screenshotUploadFailureArtifact) (string, error) {

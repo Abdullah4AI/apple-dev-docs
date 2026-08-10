@@ -3831,6 +3831,27 @@ func TestPublishValidationErrors(t *testing.T) {
 			wantErr: "Error: --group is required",
 		},
 		{
+			name:    "publish testflight upload only rejects group before notify",
+			args:    []string{"publish", "testflight", "--app", "APP_123", "--ipa", "app.ipa", "--upload-only", "--notify", "--group", "GROUP_ID"},
+			wantErr: "--group cannot be used with --upload-only",
+		},
+		{
+			name:    "publish testflight upload only rejects review submission",
+			args:    []string{"publish", "testflight", "--app", "APP_123", "--ipa", "app.ipa", "--upload-only", "--submit", "--confirm"},
+			wantErr: "--submit cannot be used with --upload-only",
+		},
+		{
+			name:    "publish testflight upload only requires upload source",
+			args:    []string{"publish", "testflight", "--app", "APP_123", "--build-number", "42", "--upload-only"},
+			wantErr: "--upload-only requires --ipa, --workspace, or --project",
+		},
+		{
+			name:     "publish testflight upload only invalid value",
+			args:     []string{"publish", "testflight", "--app", "APP_123", "--ipa", "app.ipa", "--upload-only=maybe"},
+			wantErr:  `invalid boolean value "maybe" for -upload-only`,
+			wantExit: rootcmd.ExitUsage,
+		},
+		{
 			name:    "publish testflight test-notes missing locale",
 			args:    []string{"publish", "testflight", "--app", "APP_123", "--ipa", "app.ipa", "--group", "GROUP_ID", "--test-notes", "Notes"},
 			wantErr: "Error: --locale is required with --test-notes",
@@ -4700,6 +4721,31 @@ func TestAppClipsValidationErrors(t *testing.T) {
 			name:    "advanced experiences create missing powered-by",
 			args:    []string{"app-clips", "advanced-experiences", "create", "--app-clip-id", "CLIP_ID", "--link", "https://example.com", "--default-language", "EN"},
 			wantErr: "Error: --is-powered-by is required",
+		},
+		{
+			name:    "advanced experiences create missing header image",
+			args:    []string{"app-clips", "advanced-experiences", "create", "--app-clip-id", "CLIP_ID", "--link", "https://example.com", "--default-language", "EN", "--is-powered-by", "--localization-id", "LOC_ID"},
+			wantErr: "Error: --header-image-id is required",
+		},
+		{
+			name:    "advanced experiences create missing localizations",
+			args:    []string{"app-clips", "advanced-experiences", "create", "--app-clip-id", "CLIP_ID", "--link", "https://example.com", "--default-language", "EN", "--is-powered-by", "--header-image-id", "IMAGE_ID", "--localization-id", " , "},
+			wantErr: "Error: provide --localization-id, --inline-localization, or both --language and --title",
+		},
+		{
+			name:    "advanced experiences create missing inline language",
+			args:    []string{"app-clips", "advanced-experiences", "create", "--app-clip-id", "CLIP_ID", "--link", "https://example.com", "--default-language", "EN", "--is-powered-by", "--header-image-id", "IMAGE_ID", "--title", "Order ahead"},
+			wantErr: "Error: --language is required when --title is set",
+		},
+		{
+			name:    "advanced experiences create missing inline title",
+			args:    []string{"app-clips", "advanced-experiences", "create", "--app-clip-id", "CLIP_ID", "--link", "https://example.com", "--default-language", "EN", "--is-powered-by", "--header-image-id", "IMAGE_ID", "--language", "EN"},
+			wantErr: "Error: --title is required when --language is set",
+		},
+		{
+			name:    "advanced experiences remove missing confirm",
+			args:    []string{"app-clips", "advanced-experiences", "delete", "--experience-id", "EXP_ID"},
+			wantErr: "Error: --confirm is required to remove",
 		},
 		{
 			name:    "advanced experience images create missing file",

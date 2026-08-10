@@ -86,9 +86,9 @@ Examples:
 			if trimmedDestination != "export" && trimmedDestination != "upload" {
 				return shared.UsageError("--destination must be one of: export, upload")
 			}
-			trimmedSigningStyle := strings.TrimSpace(*signingStyle)
-			if trimmedSigningStyle != "automatic" && trimmedSigningStyle != "manual" {
-				return shared.UsageError("--signing-style must be one of: automatic, manual")
+			trimmedSigningStyle, err := localxcode.NormalizeExportOptionsSigningStyle(*signingStyle)
+			if err != nil {
+				return shared.UsageError(err.Error())
 			}
 
 			trimmedArchivePath := strings.TrimSpace(*archivePath)
@@ -145,7 +145,6 @@ func exportOptionsResultRows(result *localxcode.ExportOptionsGenerateResult) [][
 	if signingCertificate := strings.TrimSpace(result.SigningCertificate); signingCertificate != "" {
 		rows = append(rows, []string{"signing_certificate", signingCertificate})
 	}
-
 	bundleIDs := make([]string, 0, len(result.ProvisioningProfiles))
 	for bundleID := range result.ProvisioningProfiles {
 		bundleIDs = append(bundleIDs, bundleID)

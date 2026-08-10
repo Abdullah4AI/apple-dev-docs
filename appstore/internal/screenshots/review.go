@@ -411,6 +411,7 @@ func rawIndexScreenshotKey(screenshotID string) string {
 
 func matchingAppDisplayTypes(width, height int) []string {
 	matches := make([]string, 0)
+	seen := make(map[string]struct{})
 	for _, displayType := range asc.ScreenshotDisplayTypes() {
 		if !strings.HasPrefix(displayType, "APP_") {
 			continue
@@ -421,7 +422,11 @@ func matchingAppDisplayTypes(width, height int) []string {
 		}
 		for _, dimension := range dimensions {
 			if dimension.Width == width && dimension.Height == height {
-				matches = append(matches, displayType)
+				canonical := asc.CanonicalScreenshotDisplayTypeForAPI(displayType)
+				if _, exists := seen[canonical]; !exists {
+					seen[canonical] = struct{}{}
+					matches = append(matches, canonical)
+				}
 				break
 			}
 		}

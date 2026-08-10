@@ -415,6 +415,28 @@ func TestSearchFlagValueCanMatchSubcommandName(t *testing.T) {
 	}
 }
 
+func TestSearchFindsFirstClassXcodeBuildCommand(t *testing.T) {
+	var code int
+	stdout, stderr := captureOutput(t, func() {
+		code = rootcmd.Run([]string{"search", "--output", "json", "--limit", "10", "asc", "xcode", "build"}, "1.2.3")
+	})
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", code, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var response searchResponse
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("failed to unmarshal search JSON: %v\nstdout=%s", err, stdout)
+	}
+	if !searchResultsContain(response.Results, "asc xcode build") {
+		t.Fatalf("expected xcode build command in results, got %#v", response.Results)
+	}
+}
+
 func TestSearchSupportsMixedFlagOrder(t *testing.T) {
 	var code int
 	stdout, stderr := captureOutput(t, func() {

@@ -57,9 +57,15 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if strings.TrimSpace(*instanceID) == "" {
+			id := strings.TrimSpace(*instanceID)
+			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
 				return shared.MissingRequiredUsageError()
+			}
+			var err error
+			id, err = asc.ValidateResourcePathSegment(id)
+			if err != nil {
+				return fmt.Errorf("analytics instances view: --instance-id: %w", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -70,7 +76,7 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.GetAnalyticsReportInstance(requestCtx, strings.TrimSpace(*instanceID))
+			resp, err := client.GetAnalyticsReportInstance(requestCtx, id)
 			if err != nil {
 				return fmt.Errorf("analytics instances view: failed to fetch: %w", err)
 			}
@@ -110,14 +116,16 @@ Examples:
 			}
 
 			id := strings.TrimSpace(*instanceID)
-			if id != "" {
-				if err := validateUUIDFlag("--instance-id", id); err != nil {
-					return fmt.Errorf("analytics instances links: %w", err)
-				}
-			}
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
 				return shared.MissingRequiredUsageError()
+			}
+			if id != "" {
+				var err error
+				id, err = asc.ValidateResourcePathSegment(id)
+				if err != nil {
+					return fmt.Errorf("analytics instances links: --instance-id: %w", err)
+				}
 			}
 
 			client, err := shared.GetASCClient()

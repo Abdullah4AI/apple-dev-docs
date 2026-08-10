@@ -259,10 +259,12 @@ func TestRunShellCommand_UsesBashWithPipefailWhenAvailable(t *testing.T) {
 
 	var gotName string
 	var gotArgs []string
+	var gotCommand *exec.Cmd
 	commandContextFn = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		gotName = name
 		gotArgs = append([]string{}, args...)
-		return exec.CommandContext(ctx, "go", "version")
+		gotCommand = exec.CommandContext(ctx, "go", "version")
+		return gotCommand
 	}
 
 	if err := runShellCommand(context.Background(), "echo hi", nil, nil, nil); err != nil {
@@ -275,6 +277,9 @@ func TestRunShellCommand_UsesBashWithPipefailWhenAvailable(t *testing.T) {
 	wantArgs := []string{"-o", "pipefail", "-c", "echo hi"}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("args = %v, want %v", gotArgs, wantArgs)
+	}
+	if gotCommand.WaitDelay != shellWaitDelay {
+		t.Fatalf("WaitDelay = %s, want %s", gotCommand.WaitDelay, shellWaitDelay)
 	}
 }
 

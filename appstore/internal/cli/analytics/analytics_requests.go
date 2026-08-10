@@ -74,11 +74,12 @@ Examples:
 			}
 
 			result := &asc.AnalyticsReportRequestResult{
-				RequestID:   response.Data.ID,
-				AppID:       resolvedAppID,
-				AccessType:  string(normalizedAccessType),
-				State:       string(response.Data.Attributes.State),
-				CreatedDate: response.Data.Attributes.CreatedDate,
+				RequestID:              response.Data.ID,
+				AppID:                  resolvedAppID,
+				AccessType:             string(normalizedAccessType),
+				State:                  string(response.Data.Attributes.State),
+				CreatedDate:            response.Data.Attributes.CreatedDate,
+				StoppedDueToInactivity: response.Data.Attributes.StoppedDueToInactivity,
 			}
 
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
@@ -92,11 +93,13 @@ func AnalyticsRequestsCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	requestID := fs.String("request-id", "", "Filter by request ID")
-	state := fs.String("state", "", "Filter by state: PROCESSING, COMPLETED, FAILED")
+	accessType := fs.String("access-type", "", "Filter by access type: ONGOING, ONE_TIME_SNAPSHOT")
+	fs.String("state", "", "Deprecated analytics request state filter")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
 	output := shared.BindOutputFlags(fs)
+	shared.HideFlagFromHelp(fs.Lookup("state"))
 
 	return &ffcli.Command{
 		Name:       "requests",
@@ -106,7 +109,7 @@ func AnalyticsRequestsCommand() *ffcli.Command {
 
 Examples:
   asc analytics requests --app "123456789"
-  asc analytics requests --app "123456789" --state COMPLETED
+  asc analytics requests --app "123456789" --access-type ONGOING
   asc analytics requests --app "123456789" --request-id "REQUEST_ID"
   asc analytics requests --next "<links.next>"
   asc analytics requests --app "123456789" --paginate
@@ -120,6 +123,15 @@ Examples:
 			if len(args) > 0 {
 				return flag.ErrHelp
 			}
+			stateFlagUsed := false
+			fs.Visit(func(parsed *flag.Flag) {
+				if parsed.Name == "state" {
+					stateFlagUsed = true
+				}
+			})
+			if stateFlagUsed {
+				return shared.UsageError("analytics requests: --state is deprecated and unsupported by App Store Connect; use --access-type ONGOING or --access-type ONE_TIME_SNAPSHOT")
+			}
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
 				return fmt.Errorf("analytics requests: --limit must be between 1 and 200")
 			}
@@ -127,18 +139,24 @@ Examples:
 				return fmt.Errorf("analytics requests: %w", err)
 			}
 			if strings.TrimSpace(*requestID) != "" {
-				if err := validateUUIDFlag("--request-id", *requestID); err != nil {
+				if err := validateAnalyticsRequestID(*requestID); err != nil {
 					return fmt.Errorf("analytics requests: %w", err)
 				}
 			}
 
-			var normalizedState asc.AnalyticsReportRequestState
-			if strings.TrimSpace(*state) != "" {
-				stateValue, err := normalizeAnalyticsRequestState(*state)
+			var normalizedAccessType asc.AnalyticsAccessType
+			if strings.TrimSpace(*accessType) != "" {
+				accessTypeValue, err := normalizeAnalyticsAccessType(*accessType)
 				if err != nil {
-					return fmt.Errorf("analytics requests: %w", err)
+					return shared.UsageError(err.Error())
 				}
-				normalizedState = stateValue
+				normalizedAccessType = accessTypeValue
+			}
+			if normalizedAccessType != "" && strings.TrimSpace(*requestID) != "" {
+				return shared.UsageError("--access-type cannot be used with --request-id")
+			}
+			if normalizedAccessType != "" && strings.TrimSpace(*next) != "" {
+				return shared.UsageError("--access-type cannot be used with --next")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -170,8 +188,8 @@ Examples:
 					asc.WithAnalyticsReportRequestsLimit(*limit),
 					asc.WithAnalyticsReportRequestsNextURL(*next),
 				}
-				if normalizedState != "" {
-					opts = append(opts, asc.WithAnalyticsReportRequestsState(string(normalizedState)))
+				if normalizedAccessType != "" {
+					opts = append(opts, asc.WithAnalyticsReportRequestsAccessType(normalizedAccessType))
 				}
 
 				if *paginate {
@@ -279,20 +297,18 @@ func analyticsReportRequestMatches(request asc.AnalyticsReportRequestResource, a
 	if request.Attributes.AccessType != accessType {
 		return false
 	}
-	if request.Attributes.State == asc.AnalyticsReportRequestStateFailed {
-		return false
-	}
 	return request.Attributes.StoppedDueToInactivity == nil || !*request.Attributes.StoppedDueToInactivity
 }
 
 func analyticsReportRequestReuseResult(appID string, request asc.AnalyticsReportRequestResource, created bool) *asc.AnalyticsReportRequestReuseResult {
 	return &asc.AnalyticsReportRequestReuseResult{
-		RequestID:   request.ID,
-		AppID:       appID,
-		AccessType:  string(request.Attributes.AccessType),
-		State:       string(request.Attributes.State),
-		CreatedDate: request.Attributes.CreatedDate,
-		Created:     created,
+		RequestID:              request.ID,
+		AppID:                  appID,
+		AccessType:             string(request.Attributes.AccessType),
+		State:                  string(request.Attributes.State),
+		CreatedDate:            request.Attributes.CreatedDate,
+		StoppedDueToInactivity: request.Attributes.StoppedDueToInactivity,
+		Created:                created,
 	}
 }
 
@@ -320,7 +336,7 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --request-id is required")
 				return shared.MissingRequiredUsageError()
 			}
-			if err := validateUUIDFlag("--request-id", id); err != nil {
+			if err := validateAnalyticsRequestID(id); err != nil {
 				return fmt.Errorf("analytics requests delete: %w", err)
 			}
 			if !*confirm {
@@ -408,13 +424,13 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 			if strings.TrimSpace(*requestID) != "" {
-				if err := validateUUIDFlag("--request-id", *requestID); err != nil {
+				if err := validateAnalyticsRequestID(*requestID); err != nil {
 					return fmt.Errorf("analytics view: %w", err)
 				}
 			}
 			if strings.TrimSpace(*instanceID) != "" {
-				if err := validateUUIDFlag("--instance-id", *instanceID); err != nil {
-					return fmt.Errorf("analytics view: %w", err)
+				if _, err := asc.ValidateResourcePathSegment(*instanceID); err != nil {
+					return fmt.Errorf("analytics view: --instance-id: %w", err)
 				}
 			}
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
@@ -455,11 +471,8 @@ Examples:
 				return fmt.Errorf("analytics view: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			paginateReports := strings.TrimSpace(*next) == "" && (strings.TrimSpace(*instanceID) != "" || *paginate)
-			reports, links, err := fetchAnalyticsReports(requestCtx, client, strings.TrimSpace(*requestID), *limit, *next, paginateReports)
+			reports, links, err := fetchAnalyticsReports(ctx, client, strings.TrimSpace(*requestID), *limit, *next, paginateReports)
 			if err != nil {
 				return fmt.Errorf("analytics view: failed to fetch reports: %w", err)
 			}
@@ -478,7 +491,7 @@ Examples:
 
 			foundInstance := false
 			for _, report := range reports {
-				instances, err := fetchAnalyticsReportInstances(requestCtx, client, report.ID, instanceOpts...)
+				instances, err := fetchAnalyticsReportInstances(ctx, client, report.ID, instanceOpts...)
 				if err != nil {
 					return fmt.Errorf("analytics view: failed to fetch instances: %w", err)
 				}
@@ -508,7 +521,7 @@ Examples:
 					}
 
 					if *includeSegments {
-						segments, err := fetchAnalyticsReportSegments(requestCtx, client, instance.ID)
+						segments, err := fetchAnalyticsReportSegments(ctx, client, instance.ID)
 						if err != nil {
 							return fmt.Errorf("analytics view: failed to fetch segments: %w", err)
 						}
@@ -594,19 +607,19 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
 				return shared.MissingRequiredUsageError()
 			}
-			if err := validateUUIDFlag("--request-id", *requestID); err != nil {
+			if err := validateAnalyticsRequestID(*requestID); err != nil {
 				return fmt.Errorf("analytics download: %w", err)
 			}
-			if err := validateUUIDFlag("--instance-id", *instanceID); err != nil {
-				return fmt.Errorf("analytics download: %w", err)
+			if _, err := asc.ValidateResourcePathSegment(*instanceID); err != nil {
+				return fmt.Errorf("analytics download: --instance-id: %w", err)
 			}
 			if strings.TrimSpace(*segmentID) != "" {
-				if err := validateUUIDFlag("--segment-id", *segmentID); err != nil {
-					return fmt.Errorf("analytics download: %w", err)
+				if _, err := asc.ValidateResourcePathSegment(*segmentID); err != nil {
+					return fmt.Errorf("analytics download: --segment-id: %w", err)
 				}
 			}
 
-			defaultOutput := fmt.Sprintf("analytics_report_%s_%s.csv.gz", strings.TrimSpace(*requestID), strings.TrimSpace(*instanceID))
+			defaultOutput := analyticsDownloadDefaultOutput(*requestID, *instanceID)
 			compressedPath, decompressedPath := shared.ResolveReportOutputPaths(*output, defaultOutput, ".csv", *decompress)
 
 			client, err := shared.GetASCClient()
@@ -614,17 +627,14 @@ Examples:
 				return fmt.Errorf("analytics download: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			reports, _, err := fetchAnalyticsReports(requestCtx, client, strings.TrimSpace(*requestID), 0, "", true)
+			reports, _, err := fetchAnalyticsReports(ctx, client, strings.TrimSpace(*requestID), 0, "", true)
 			if err != nil {
 				return fmt.Errorf("analytics download: failed to fetch reports: %w", err)
 			}
 
 			instanceFound := false
 			for _, report := range reports {
-				instances, err := fetchAnalyticsReportInstances(requestCtx, client, report.ID)
+				instances, err := fetchAnalyticsReportInstances(ctx, client, report.ID)
 				if err != nil {
 					return fmt.Errorf("analytics download: failed to fetch instances: %w", err)
 				}
@@ -642,7 +652,7 @@ Examples:
 				return fmt.Errorf("analytics download: instance %q not found for request %q", strings.TrimSpace(*instanceID), strings.TrimSpace(*requestID))
 			}
 
-			segments, err := fetchAnalyticsReportSegments(requestCtx, client, strings.TrimSpace(*instanceID))
+			segments, err := fetchAnalyticsReportSegments(ctx, client, strings.TrimSpace(*instanceID))
 			if err != nil {
 				return fmt.Errorf("analytics download: failed to fetch segments: %w", err)
 			}
@@ -672,15 +682,9 @@ Examples:
 				return fmt.Errorf("analytics download: segment download URL is empty")
 			}
 
-			download, err := client.DownloadAnalyticsReport(requestCtx, downloadURL)
+			compressedSize, err := downloadAnalyticsReportToFile(ctx, client, downloadURL, compressedPath)
 			if err != nil {
-				return fmt.Errorf("analytics download: failed to download report: %w", err)
-			}
-			defer download.Body.Close()
-
-			compressedSize, err := shared.WriteStreamToFile(compressedPath, download.Body)
-			if err != nil {
-				return fmt.Errorf("analytics download: failed to write report: %w", err)
+				return fmt.Errorf("analytics download: %w", err)
 			}
 
 			var decompressedSize int64

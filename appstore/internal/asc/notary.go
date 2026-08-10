@@ -8,11 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -127,13 +127,23 @@ type S3Credentials struct {
 // GenerateNotaryJWT generates a JWT for the Notary API.
 // It is identical to GenerateJWT but includes the "scope" claim required by the Notary API.
 func GenerateNotaryJWT(keyID, issuerID string, privateKey any) (string, error) {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return "", ErrMissingKeyID
+	}
+	issuerID = strings.TrimSpace(issuerID)
+
 	now := time.Now()
 	claims := jwt.MapClaims{
-		"iss":   issuerID,
 		"aud":   "appstoreconnect-v1",
 		"iat":   jwt.NewNumericDate(now),
 		"exp":   jwt.NewNumericDate(now.Add(tokenLifetime)),
 		"scope": []string{"/notary/v2"},
+	}
+	if issuerID == "" {
+		claims["sub"] = "user"
+	} else {
+		claims["iss"] = issuerID
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
@@ -302,17 +312,15 @@ func (c *Client) ListNotarizations(ctx context.Context) (*NotarySubmissionsListR
 	return &response, nil
 }
 
-// ComputeFileSHA256 computes the SHA-256 hex digest of a file.
-func ComputeFileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-
+// ComputeFileSHA256 computes the SHA-256 hex digest of an opened file and
+// rewinds it so the same descriptor can be uploaded.
+func ComputeFileSHA256(file io.ReadSeeker) (string, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, file); err != nil {
 		return "", fmt.Errorf("read file: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind file: %w", err)
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -547,6 +555,10 @@ func uploadMultipartPart(ctx context.Context, host, encodedPath string, creds S3
 }
 
 func completeMultipartUpload(ctx context.Context, host, encodedPath string, creds S3Credentials, uploadID string, parts []s3CompletedPart) error {
+	return completeMultipartUploadWithClient(ctx, http.DefaultClient, host, encodedPath, creds, uploadID, parts)
+}
+
+func completeMultipartUploadWithClient(ctx context.Context, httpClient *http.Client, host, encodedPath string, creds S3Credentials, uploadID string, parts []s3CompletedPart) error {
 	query := url.Values{}
 	query.Set("uploadId", uploadID)
 	rawQuery := encodeS3Query(query)
@@ -586,14 +598,66 @@ func completeMultipartUpload(ctx context.Context, host, encodedPath string, cred
 	}
 	signS3Request(req, creds, payloadHash, now)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("complete multipart upload failed: %w", err)
 	}
 	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read complete multipart upload response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("complete multipart upload failed with status %d: %s", resp.StatusCode, sanitizeErrorBody(respBody))
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(respBody))
+	rootSeen := false
+	rootClosed := false
+	rootDepth := 0
+	for {
+		token, decodeErr := decoder.Token()
+		if errors.Is(decodeErr, io.EOF) {
+			if !rootSeen {
+				return errors.New("parse complete multipart upload response: missing root element")
+			}
+			if !rootClosed {
+				return errors.New("parse complete multipart upload response: incomplete root element")
+			}
+			break
+		}
+		if decodeErr != nil {
+			return fmt.Errorf("parse complete multipart upload response: %w", decodeErr)
+		}
+
+		switch value := token.(type) {
+		case xml.StartElement:
+			if rootClosed {
+				return errors.New("parse complete multipart upload response: multiple root elements")
+			}
+			if !rootSeen {
+				rootSeen = true
+				switch value.Name.Local {
+				case "Error":
+					return fmt.Errorf("complete multipart upload failed: %s", sanitizeErrorBody(respBody))
+				case "CompleteMultipartUploadResult":
+					// Consume the complete document so malformed success responses
+					// cannot be mistaken for a completed upload.
+				default:
+					return fmt.Errorf("unexpected complete multipart upload response: %s", sanitizeErrorBody(respBody))
+				}
+			}
+			rootDepth++
+		case xml.EndElement:
+			rootDepth--
+			if rootDepth == 0 {
+				rootClosed = true
+			}
+		case xml.CharData:
+			if (!rootSeen || rootClosed) && len(bytes.TrimSpace(value)) != 0 {
+				return errors.New("parse complete multipart upload response: character data outside root element")
+			}
+		}
 	}
 	return nil
 }

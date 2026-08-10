@@ -73,6 +73,16 @@ func TestAnalyticsCompareValidationErrors(t *testing.T) {
 			wantErr: "--frequency must be",
 		},
 		{
+			name:    "sales-only report type",
+			args:    []string{"analytics", "compare", "--source", "sales", "--app", "123", "--vendor", "V", "--from", "2026-01-01", "--to", "2026-02-01", "--frequency", "DAILY", "--type", "WIN_BACK_ELIGIBILITY"},
+			wantErr: "--type for analytics compare must be",
+		},
+		{
+			name:    "sales-only report subtype",
+			args:    []string{"analytics", "compare", "--source", "sales", "--app", "123", "--vendor", "V", "--from", "2026-01-01", "--to", "2026-02-01", "--frequency", "DAILY", "--subtype", "SUMMARY_CHANNEL"},
+			wantErr: "--subtype for analytics compare must be",
+		},
+		{
 			name:    "invalid weekly comparison boundary",
 			args:    []string{"analytics", "compare", "--source", "sales", "--app", "123", "--vendor", "V", "--from", "2026-01-05", "--to", "2026-01-06", "--frequency", "WEEKLY"},
 			wantErr: "--to for weekly reports must be a Monday (week start) or Sunday (week end)",

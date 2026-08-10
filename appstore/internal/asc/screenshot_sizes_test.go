@@ -193,6 +193,17 @@ func TestScreenshotDisplayTypesMatchOpenAPI(t *testing.T) {
 	if len(unexpectedExtras) > 0 {
 		t.Fatalf("unexpected screenshot display types not in OpenAPI: %v", unexpectedExtras)
 	}
+
+	specSet := make(map[string]struct{}, len(specTypes))
+	for _, displayType := range specTypes {
+		specSet[displayType] = struct{}{}
+	}
+	for _, displayType := range codeTypes {
+		canonical := CanonicalScreenshotDisplayTypeForAPI(displayType)
+		if _, ok := specSet[canonical]; !ok {
+			t.Fatalf("canonical display type %q for %q is not in OpenAPI", canonical, displayType)
+		}
+	}
 }
 
 func TestCanonicalScreenshotDisplayTypeForAPI(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -148,6 +147,9 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --path is required")
 				return shared.MissingRequiredUsageError()
 			}
+			if err := validateArtifactDestination(pathValue, *overwrite); err != nil {
+				return fmt.Errorf("xcode-cloud artifacts download: %w", err)
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -192,73 +194,35 @@ Examples:
 	}
 }
 
-func writeArtifactFile(path string, reader io.Reader, overwrite bool) (int64, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return 0, err
+func validateArtifactDestination(path string, overwrite bool) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-
+	if err != nil {
+		return err
+	}
 	if !overwrite {
-		file, err := shared.OpenNewFileNoFollow(path, 0o600)
-		if err != nil {
-			if errors.Is(err, os.ErrExist) {
-				return 0, fmt.Errorf("output file already exists: %w", err)
-			}
-			return 0, err
-		}
-		defer file.Close()
+		return fmt.Errorf("output file already exists: %w", os.ErrExist)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to overwrite symlink %q", path)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("output path %q is a directory", path)
+	}
+	return nil
+}
 
-		n, err := io.Copy(file, reader)
-		if err != nil {
-			return 0, err
-		}
-		if err := file.Sync(); err != nil {
-			return 0, err
-		}
-		return n, nil
-	}
-
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return 0, fmt.Errorf("refusing to overwrite symlink %q", path)
-		}
-		if info.IsDir() {
-			return 0, fmt.Errorf("output path %q is a directory", path)
-		}
-		if err := os.Remove(path); err != nil {
-			return 0, err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, err
-	}
-
-	tempFile, err := os.CreateTemp(filepath.Dir(path), ".asc-artifact-*")
-	if err != nil {
-		return 0, err
-	}
-	defer tempFile.Close()
-
-	tempPath := tempFile.Name()
-	success := false
-	defer func() {
-		if !success {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	n, err := io.Copy(tempFile, reader)
-	if err != nil {
-		return 0, err
-	}
-	if err := tempFile.Sync(); err != nil {
-		return 0, err
-	}
-	if err := tempFile.Close(); err != nil {
-		return 0, err
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return 0, err
-	}
-
-	success = true
-	return n, nil
+func writeArtifactFile(path string, reader io.Reader, overwrite bool) (int64, error) {
+	return shared.SafeWriteFileNoSymlink(
+		path,
+		0o600,
+		overwrite,
+		".asc-artifact-*",
+		".asc-artifact-backup-*",
+		func(file *os.File) (int64, error) {
+			return io.Copy(file, reader)
+		},
+	)
 }

@@ -47,6 +47,8 @@ Tips:
   Use asc workflow validate before running a new workflow file.
   Preview the plan with asc workflow run --dry-run <name>.
   Run-step outputs can be referenced later as ${steps.resolve_build.BUILD_ID}.
+  Run steps can opt into bounded retry with retry.max_attempts and retry.delay, plus a per-attempt timeout.
+  Retry uses a fixed delay with no jitter; choose it only for commands that are safe to repeat.
   Output-producing step names only need to stay unique across workflows that can execute together in the same run graph.
   For asc commands that declare outputs, usually pass --output json.
   A proven local Xcode -> TestFlight shape is: asc builds next-build-number --app $APP_ID -> asc xcode archive -> asc xcode export -> asc publish testflight --group ... --wait.
@@ -77,7 +79,12 @@ Example workflow file (.asc/workflow.json):
         },
         {
           "name": "add_build_to_group",
-          "run": "asc builds add-groups --build-id ${steps.resolve_build.BUILD_ID} --group $GROUP_ID"
+          "run": "asc builds add-groups --build-id ${steps.resolve_build.BUILD_ID} --group $GROUP_ID",
+          "retry": {
+            "max_attempts": 6,
+            "delay": "10s"
+          },
+          "timeout": "2m"
         }
       ]
     },
@@ -164,6 +171,19 @@ Do not pass extra KEY:VALUE params with --resume.
 If a step declares "outputs", the command must emit JSON on stdout; for asc commands,
 usually pass --output json.
 stdout stays machine-parseable JSON even on failure; step and hook output streams to stderr.
+Retry is opt-in on run steps. retry.max_attempts counts the initial attempt and
+retry.delay is a fixed delay between failures. timeout applies to each attempt.
+Attempt counts and delays are written to stderr and attempt outcomes are included
+in the structured result and persisted run state.
+Failed-attempt diagnostics alone do not make a run resumable; recovery requires
+a successful checkpoint or a retry-enabled failed step.
+If a successful command produces invalid declared outputs, the run is terminal and
+--resume refuses to repeat the possibly mutating command.
+A timeout without retry is also terminal because the command may have completed
+remotely. A step with retry and timeout remains resumable because retry is the
+explicit repeat-safety opt-in.
+Workflow-call steps and before_all/after_all/error hooks do not accept retry or timeout.
+Omit retry or timeout to disable it; explicit null values are invalid.
 
 Security note:
   Workflows intentionally execute arbitrary shell commands.
@@ -241,18 +261,19 @@ Examples:
 func workflowValidateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("workflow validate", flag.ExitOnError)
 	filePath := fs.String("file", wf.DefaultPath, "Path to workflow.json")
-	pretty := fs.Bool("pretty", false, "Pretty-print JSON output")
+	output := shared.BindOutputFlagsWithAllowed(fs, "output", "json", "Output format: json", "json")
 
 	return &ffcli.Command{
 		Name:       "validate",
 		ShortUsage: "asc workflow validate [flags]",
 		ShortHelp:  "Validate workflow.json for errors and cycles.",
-		LongHelp: `Validate workflow.json for structure, references, cycles, and output declarations.
+		LongHelp: `Validate workflow.json for structure, references, cycles, output declarations, and run-step retry/timeout policies.
 This checks schema and wiring only; it does not assess shell-command safety.
 
 Examples:
   asc workflow validate
-  asc workflow validate --file ./.asc/workflow.json`,
+  asc workflow validate --output json
+  asc workflow validate --file ./.asc/workflow.json --output json --pretty`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(_ context.Context, args []string) error {
@@ -281,7 +302,7 @@ Examples:
 				Errors: errs,
 			}
 
-			if printErr := printJSON(os.Stdout, result, *pretty); printErr != nil {
+			if printErr := shared.PrintOutput(result, *output.Output, *output.Pretty); printErr != nil {
 				return printErr
 			}
 

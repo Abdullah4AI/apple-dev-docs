@@ -88,7 +88,7 @@ asc <subcommand> [flags]
 - `builds` - Manage builds in App Store Connect.
 - `build-bundles` - Manage build bundles and App Clip data.
 - `build-localizations` - Manage build release notes localizations.
-- `xcode` - Local Xcode archive/export helpers (macOS only).
+- `xcode` - Local Xcode build/archive/export helpers (macOS only).
 - `sandbox` - Manage sandbox testers in App Store Connect.
 
 ### Review and Release

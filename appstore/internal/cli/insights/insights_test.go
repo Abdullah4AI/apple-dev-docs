@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestNormalizeWeekStart(t *testing.T) {
@@ -19,6 +21,20 @@ func TestNormalizeWeekStart(t *testing.T) {
 
 	if _, err := normalizeWeekStart("2026-2-16"); err == nil {
 		t.Fatal("expected invalid date error")
+	}
+}
+
+func TestAnalyticsReportRequestIsActiveUsesCurrentAttribute(t *testing.T) {
+	active := false
+	stopped := true
+	if !analyticsReportRequestIsActive(asc.AnalyticsReportRequestAttributes{StoppedDueToInactivity: &active}) {
+		t.Fatal("expected stoppedDueToInactivity=false to be active")
+	}
+	if analyticsReportRequestIsActive(asc.AnalyticsReportRequestAttributes{StoppedDueToInactivity: &stopped}) {
+		t.Fatal("expected stoppedDueToInactivity=true to be inactive")
+	}
+	if !analyticsReportRequestIsActive(asc.AnalyticsReportRequestAttributes{}) {
+		t.Fatal("expected absent stoppedDueToInactivity to remain compatible and active")
 	}
 }
 

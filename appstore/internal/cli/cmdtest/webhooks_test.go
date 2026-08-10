@@ -57,6 +57,11 @@ func TestWebhooksValidationErrors(t *testing.T) {
 			wantErr: "--enabled is required",
 		},
 		{
+			name:    "create invalid event",
+			args:    []string{"webhooks", "create", "--app", "APP_ID", "--name", "Build Updates", "--url", "https://example.com/webhook", "--secret", "secret", "--events", "SUBSCRIPTION.CREATED", "--enabled", "true"},
+			wantErr: `invalid --events value "SUBSCRIPTION.CREATED"`,
+		},
+		{
 			name:    "update missing webhook id",
 			args:    []string{"webhooks", "update", "--url", "https://example.com/webhook"},
 			wantErr: "--webhook-id is required",
@@ -65,6 +70,11 @@ func TestWebhooksValidationErrors(t *testing.T) {
 			name:    "update missing fields",
 			args:    []string{"webhooks", "update", "--webhook-id", "wh-1"},
 			wantErr: "--name, --url, --secret, --events, or --enabled is required",
+		},
+		{
+			name:    "update invalid event",
+			args:    []string{"webhooks", "update", "--webhook-id", "wh-1", "--events", "BUILD_UPLOAD_STATE_UPDATED,SUBSCRIPTION.CREATED"},
+			wantErr: `invalid --events value "SUBSCRIPTION.CREATED"`,
 		},
 		{
 			name:    "delete missing confirm",
@@ -80,16 +90,6 @@ func TestWebhooksValidationErrors(t *testing.T) {
 			name:    "deliveries missing webhook id",
 			args:    []string{"webhooks", "deliveries"},
 			wantErr: "--webhook-id is required",
-		},
-		{
-			name:    "deliveries missing filter",
-			args:    []string{"webhooks", "deliveries", "--webhook-id", "wh-1"},
-			wantErr: "--created-after or --created-before is required",
-		},
-		{
-			name:    "deliveries multiple filters",
-			args:    []string{"webhooks", "deliveries", "--webhook-id", "wh-1", "--created-after", "2026-01-01", "--created-before", "2026-01-02"},
-			wantErr: "only one of --created-after or --created-before can be used",
 		},
 		{
 			name:    "deliveries redeliver missing delivery id",

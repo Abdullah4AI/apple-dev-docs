@@ -1,6 +1,8 @@
 package signing
 
 import (
+	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,88 @@ func TestSigningSyncCommandLongHelpUsesOutputDirExample(t *testing.T) {
 	}
 	if strings.Contains(cmd.LongHelp, "--output ./signing") {
 		t.Fatalf("expected long help to avoid --output path example, got %q", cmd.LongHelp)
+	}
+}
+
+func TestSigningSyncPreparesRepositoryOnceInAssetOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		hasProfile bool
+		wantEvents []string
+	}{
+		{
+			name:       "existing profile",
+			hasProfile: true,
+			wantEvents: []string{
+				"GET /v1/bundleIds/bundle-main/profiles",
+				"GET /v1/profiles/profile-main/certificates",
+				"clone repository",
+			},
+		},
+		{
+			name: "missing profile",
+			wantEvents: []string{
+				"GET /v1/bundleIds/bundle-main/profiles",
+				"GET /v1/certificates",
+				"clone repository",
+				"POST /v1/profiles",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := []string{}
+			client := newSigningFetchTestClient(t, func(req *http.Request) *http.Response {
+				events = append(events, req.Method+" "+req.URL.Path)
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/bundleIds/bundle-main/profiles":
+					if tt.hasProfile {
+						return signingFetchJSONResponse(http.StatusOK, `{"data":[{"type":"profiles","id":"profile-main","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}]}`)
+					}
+					return signingFetchJSONResponse(http.StatusOK, `{"data":[]}`)
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/profiles/profile-main/certificates":
+					return signingFetchJSONResponse(http.StatusOK, `{"data":[{"type":"certificates","id":"cert-1","attributes":{"certificateType":"IOS_DISTRIBUTION"}}]}`)
+				case req.Method == http.MethodGet && req.URL.Path == "/v1/certificates":
+					return signingFetchJSONResponse(http.StatusOK, `{"data":[{"type":"certificates","id":"cert-1","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":true,"expirationDate":"2100-01-01T00:00:00Z"}}]}`)
+				case req.Method == http.MethodPost && req.URL.Path == "/v1/profiles":
+					return signingFetchJSONResponse(http.StatusCreated, `{"data":{"type":"profiles","id":"profile-created","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}}`)
+				default:
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					return signingFetchJSONResponse(http.StatusInternalServerError, `{}`)
+				}
+			})
+
+			cloneCount := 0
+			prepareRepository := onceAfterSuccess(func() error {
+				cloneCount++
+				events = append(events, "clone repository")
+				return nil
+			})
+			_, _, _, err := resolveSigningAssets(
+				context.Background(),
+				client,
+				signingAssetsOptions{
+					BundleIDResourceID: "bundle-main",
+					BundleIdentifier:   "com.example.signing.profile",
+					ProfileType:        "IOS_APP_STORE",
+					CreateMissing:      !tt.hasProfile,
+					BeforeCreate:       prepareRepository,
+				},
+			)
+			if err != nil {
+				t.Fatalf("resolveSigningAssets() error: %v", err)
+			}
+			if err := prepareRepository(); err != nil {
+				t.Fatalf("prepareRepository() error: %v", err)
+			}
+			if cloneCount != 1 {
+				t.Fatalf("repository clone count = %d, want 1", cloneCount)
+			}
+			if strings.Join(events, ",") != strings.Join(tt.wantEvents, ",") {
+				t.Fatalf("unexpected operation order: got %v, want %v", events, tt.wantEvents)
+			}
+		})
 	}
 }
 

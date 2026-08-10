@@ -187,6 +187,7 @@ func uploadScreenshotsFanout(ctx context.Context, cfg screenshotUploadFanoutConf
 			Client:         cfg.Client,
 			LocalizationID: localizationID,
 			DisplayType:    cfg.DisplayType,
+			RootPath:       cfg.RootPath,
 			Files:          item.Files,
 			SkipExisting:   cfg.SkipExisting,
 			Replace:        cfg.Replace,
