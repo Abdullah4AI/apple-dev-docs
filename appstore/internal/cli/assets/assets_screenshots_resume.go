@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -306,10 +306,18 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 
 	writtenPath, artifactErr := persistScreenshotUploadFailureArtifact(artifactPath, artifact)
 	if artifactErr != nil {
-		return result, fmt.Errorf("write screenshot upload failure artifact: %w", artifactErr)
+		return result, screenshotUploadArtifactWriteError(uploadErr, artifactErr)
 	}
 	result.FailureArtifactPath = writtenPath
 	return result, screenshotUploadRetryError(progress)
+}
+
+// screenshotUploadArtifactWriteError reports that the upload failed and that no
+// resume artifact could be written for it. The upload error is kept because it
+// is the actionable cause, and the pending-retry framing is dropped because
+// there is no artifact left to resume from.
+func screenshotUploadArtifactWriteError(uploadErr, artifactErr error) error {
+	return errors.Join(uploadErr, fmt.Errorf("write screenshot upload failure artifact: %w", artifactErr))
 }
 
 func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifactPath string) (asc.AppScreenshotUploadResult, error) {
@@ -395,7 +403,7 @@ func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifact
 
 	writtenPath, artifactErr := persistScreenshotUploadFailureArtifact(artifactPath, nextArtifact)
 	if artifactErr != nil {
-		return result, fmt.Errorf("write screenshot upload failure artifact: %w", artifactErr)
+		return result, screenshotUploadArtifactWriteError(uploadErr, artifactErr)
 	}
 	result.FailureArtifactPath = writtenPath
 	return result, screenshotUploadRetryError(progress)
@@ -609,7 +617,19 @@ func validateScreenshotSourceAncestry(filePaths []string) error {
 		if err != nil {
 			return err
 		}
-		validationRoot := screenshotSourceValidationRoot(absolute)
+		validationRoot, ok := screenshotSourceValidationRoot(absolute)
+		if !ok {
+			// The source lives outside the working, home and system temporary
+			// directories, so every remaining ancestor is one the operator
+			// named. Platform aliases live there too (macOS reaches /tmp, /var
+			// and /etc through symlinks into /private), and auditing that chain
+			// only produces errors about paths the caller never wrote. Anchor
+			// on the file's physical parent instead: the file itself is still
+			// refused when it is a symlink, and resolveScreenshotUploadRoot
+			// still refuses a symlinked source root and any symlink below it.
+			validationRoot = physicalParentDir(absolute)
+			absolute = filepath.Join(validationRoot, filepath.Base(absolute))
+		}
 		root, err := rootfs.New(validationRoot)
 		if err != nil {
 			return err
@@ -621,15 +641,13 @@ func validateScreenshotSourceAncestry(filePaths []string) error {
 	return nil
 }
 
-func screenshotSourceValidationRoot(absolutePath string) string {
+// screenshotSourceValidationRoot returns the deepest directory the operator
+// controls for this process that contains absolutePath, reporting false when
+// the path lives outside all of them.
+func screenshotSourceValidationRoot(absolutePath string) (string, bool) {
 	absolutePath = filepath.Clean(absolutePath)
-	volume := filepath.VolumeName(absolutePath)
-	best := string(filepath.Separator)
-	if volume != "" {
-		best = volume + string(filepath.Separator)
-	}
 
-	candidates := make([]string, 0, 4)
+	candidates := make([]string, 0, 3)
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, cwd)
 	}
@@ -639,9 +657,8 @@ func screenshotSourceValidationRoot(absolutePath string) string {
 	if temporary := strings.TrimSpace(os.TempDir()); temporary != "" {
 		candidates = append(candidates, temporary)
 	}
-	if runtime.GOOS != "windows" {
-		candidates = append(candidates, "/tmp")
-	}
+
+	best := ""
 	for _, candidate := range candidates {
 		candidate, err := filepath.Abs(candidate)
 		if err != nil {
@@ -656,7 +673,20 @@ func screenshotSourceValidationRoot(absolutePath string) string {
 			best = candidate
 		}
 	}
-	return best
+	return best, best != ""
+}
+
+// physicalParentDir resolves the parent directory of absolutePath through any
+// symlinks so platform aliases do not read as untrusted path components. The
+// base name is deliberately left unresolved so a symlinked source file is still
+// rejected.
+func physicalParentDir(absolutePath string) string {
+	parent := filepath.Dir(absolutePath)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return parent
+	}
+	return resolved
 }
 
 func persistScreenshotUploadFailureArtifact(path string, artifact screenshotUploadFailureArtifact) (string, error) {

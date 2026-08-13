@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,7 +14,21 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/assets"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
+
+// migrateRequestContext bounds a single outbound request. It derives from the
+// command context rather than the caller's context so a multi-locale import is
+// not capped by one shared request deadline.
+func migrateRequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithTimeout(shared.ContextWithoutTimeout(ctx))
+}
+
+// migrateUploadContext gives one asset upload the asset upload budget, which a
+// request deadline in the parent chain would otherwise truncate.
+func migrateUploadContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return assets.ContextWithAssetUploadTimeout(shared.ContextWithoutTimeout(ctx))
+}
 
 func resolveAppID(ctx context.Context, client *asc.Client, appFlag string, config DeliverfileConfig) (string, error) {
 	if strings.TrimSpace(appFlag) != "" {
@@ -77,15 +93,19 @@ func verifyExplicitVersionOwnership(ctx context.Context, client *asc.Client, ver
 	return nil
 }
 
+// normalizeDeliverfilePlatform maps a Deliverfile platform value onto the App
+// Store Connect platform enum. fastlane deliver's own option values (ios, osx,
+// appletvos, xros) are accepted alongside the App Store Connect spellings, so a
+// Deliverfile copied verbatim from a fastlane project resolves without edits.
 func normalizeDeliverfilePlatform(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "ios":
 		return "IOS", nil
-	case "macos", "mac":
+	case "osx", "macos", "mac", "mac_os":
 		return "MAC_OS", nil
-	case "tvos", "appletvos", "tv_os":
+	case "appletvos", "tvos", "tv_os":
 		return "TV_OS", nil
-	case "visionos", "vision_os":
+	case "xros", "visionos", "vision_os":
 		return "VISION_OS", nil
 	default:
 		return "", fmt.Errorf("unsupported Deliverfile platform %q", value)
@@ -153,9 +173,24 @@ func buildAppInfoFilePlans(localizations []AppInfoFastlaneLocalization) []Locali
 	return plans
 }
 
-func uploadVersionLocalizations(ctx context.Context, client *asc.Client, versionID string, localizations []FastlaneLocalization, localeToID map[string]string, submitOpts shared.SubmitReadinessOptions) ([]LocalizationUploadItem, []shared.SubmitReadinessCreateWarning, error) {
-	results := make([]LocalizationUploadItem, 0, len(localizations))
-	warnings := make([]shared.SubmitReadinessCreateWarning, 0, len(localizations))
+type preparedVersionLocalization struct {
+	localization FastlaneLocalization
+	attributes   asc.AppStoreVersionLocalizationAttributes
+}
+
+type preparedAppInfoLocalization struct {
+	localization   AppInfoFastlaneLocalization
+	attributes     asc.AppInfoLocalizationAttributes
+	localizationID string
+}
+
+type appInfoLocalizationPlan struct {
+	appInfoID     string
+	localizations []preparedAppInfoLocalization
+}
+
+func prepareVersionLocalizations(localizations []FastlaneLocalization) ([]preparedVersionLocalization, error) {
+	prepared := make([]preparedVersionLocalization, 0, len(localizations))
 	for _, loc := range localizations {
 		attrs := asc.AppStoreVersionLocalizationAttributes{
 			Locale:          loc.Locale,
@@ -167,20 +202,133 @@ func uploadVersionLocalizations(ctx context.Context, client *asc.Client, version
 			MarketingURL:    loc.MarketingURL,
 		}
 		if err := shared.ValidateVersionLocalizationAttributes(attrs); err != nil {
-			return nil, nil, fmt.Errorf("migrate import: locale %q: %w", loc.Locale, err)
+			return nil, fmt.Errorf("migrate import: locale %q: %w", loc.Locale, err)
 		}
+		prepared = append(prepared, preparedVersionLocalization{
+			localization: loc,
+			attributes:   attrs,
+		})
+	}
+	return prepared, nil
+}
+
+func validateVersionLocalizationCreateLocales(localizations []preparedVersionLocalization, localeToID map[string]string) error {
+	for _, prepared := range localizations {
+		locale := prepared.localization.Locale
+		if err := validateLocalizationCreateTarget(locale, localeToID[locale]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateScreenshotLocalizationCreateLocales(screenshots []ScreenshotPlan, localeToID map[string]string) error {
+	for _, screenshot := range screenshots {
+		if err := validateLocalizationCreateTarget(screenshot.Locale, localeToID[screenshot.Locale]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLocalizationCreateTarget(locale, localizationID string) error {
+	if localizationID != "" {
+		return nil
+	}
+	if _, err := shared.CanonicalizeAppStoreLocalizationLocale(locale); err != nil {
+		return fmt.Errorf("migrate import: locale %q: %w", locale, err)
+	}
+	return nil
+}
+
+// validateCreateTargetLocales applies the locale half of the apply-time create
+// preflight to every discovered locale. It is what a dry run can check without
+// the remote localization list, and it reports the same error --confirm would.
+func validateCreateTargetLocales(localizations []preparedVersionLocalization, appInfos []preparedAppInfoLocalization, screenshots []ScreenshotPlan) error {
+	locales := make([]string, 0, len(localizations)+len(appInfos)+len(screenshots))
+	for _, prepared := range localizations {
+		locales = append(locales, prepared.localization.Locale)
+	}
+	for _, prepared := range appInfos {
+		locales = append(locales, prepared.localization.Locale)
+	}
+	for _, screenshot := range screenshots {
+		locales = append(locales, screenshot.Locale)
+	}
+	seen := make(map[string]struct{}, len(locales))
+	for _, locale := range locales {
+		if _, ok := seen[locale]; ok {
+			continue
+		}
+		seen[locale] = struct{}{}
+		if err := validateLocalizationCreateTarget(locale, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// localeCreateIssue reports the locale rejection migrate import performs when a
+// localization has to be created, so validate and import agree.
+func localeCreateIssue(locale string) *ValidationIssue {
+	if _, err := shared.CanonicalizeAppStoreLocalizationLocale(locale); err != nil {
+		return &ValidationIssue{
+			Locale:   locale,
+			Field:    "locale",
+			Severity: "error",
+			Message:  err.Error(),
+		}
+	}
+	return nil
+}
+
+func prepareAppInfoLocalizationAttributes(localizations []AppInfoFastlaneLocalization) ([]preparedAppInfoLocalization, error) {
+	prepared := make([]preparedAppInfoLocalization, 0, len(localizations))
+	for _, loc := range localizations {
+		attrs := asc.AppInfoLocalizationAttributes{
+			Locale:           loc.Locale,
+			Name:             loc.Name,
+			Subtitle:         loc.Subtitle,
+			PrivacyPolicyURL: loc.PrivacyURL,
+		}
+		for _, issue := range validation.AppInfoLocalizationLengthIssues(validation.AppInfoLocalization{
+			Name:     attrs.Name,
+			Subtitle: attrs.Subtitle,
+		}) {
+			return nil, fmt.Errorf("migrate import: locale %q: %s exceeds %d %s", loc.Locale, issue.Field, issue.Limit, issue.Unit)
+		}
+		prepared = append(prepared, preparedAppInfoLocalization{
+			localization: loc,
+			attributes:   attrs,
+		})
+	}
+	return prepared, nil
+}
+
+func uploadVersionLocalizations(ctx context.Context, client *asc.Client, versionID string, localizations []preparedVersionLocalization, localeToID map[string]string, submitOpts shared.SubmitReadinessOptions) ([]LocalizationUploadItem, []shared.SubmitReadinessCreateWarning, error) {
+	results := make([]LocalizationUploadItem, 0, len(localizations))
+	warnings := make([]shared.SubmitReadinessCreateWarning, 0, len(localizations))
+	for _, prepared := range localizations {
+		loc := prepared.localization
+		attrs := prepared.attributes
 		action := "create"
 		localizationID := localeToID[loc.Locale]
 		if localizationID != "" {
 			action = "update"
-			_, err := client.UpdateAppStoreVersionLocalization(ctx, localizationID, attrs)
+			requestCtx, cancel := migrateRequestContext(ctx)
+			_, err := client.UpdateAppStoreVersionLocalization(requestCtx, localizationID, attrs)
+			cancel()
 			if err != nil {
-				return nil, nil, fmt.Errorf("migrate import: failed to update %s: %w", loc.Locale, err)
+				// Report what already landed in App Store Connect; the caller
+				// prints it before failing.
+				return results, shared.NormalizeSubmitReadinessCreateWarnings(warnings), fmt.Errorf("migrate import: failed to update %s: %w", loc.Locale, err)
 			}
 		} else {
-			resp, err := client.CreateAppStoreVersionLocalization(ctx, versionID, attrs)
+			requestCtx, cancel := migrateRequestContext(ctx)
+			resp, err := client.CreateAppStoreVersionLocalization(requestCtx, versionID, attrs)
+			cancel()
 			if err != nil {
-				return nil, nil, fmt.Errorf("migrate import: failed to create %s: %w", loc.Locale, err)
+				return results, shared.NormalizeSubmitReadinessCreateWarnings(warnings), fmt.Errorf("migrate import: failed to create %s: %w", loc.Locale, err)
 			}
 			localizationID = resp.Data.ID
 			localeToID[loc.Locale] = localizationID
@@ -199,51 +347,131 @@ func uploadVersionLocalizations(ctx context.Context, client *asc.Client, version
 	return results, shared.NormalizeSubmitReadinessCreateWarnings(warnings), nil
 }
 
-func uploadAppInfoLocalizations(ctx context.Context, client *asc.Client, appID string, appInfoLocs []AppInfoFastlaneLocalization) ([]LocalizationUploadItem, error) {
-	if len(appInfoLocs) == 0 {
-		return nil, nil
+func prepareAppInfoLocalizations(ctx context.Context, client *asc.Client, appID string, localizations []preparedAppInfoLocalization) (appInfoLocalizationPlan, error) {
+	if len(localizations) == 0 {
+		return appInfoLocalizationPlan{}, nil
 	}
 	appInfos, err := client.GetAppInfos(ctx, appID)
 	if err != nil {
-		return nil, fmt.Errorf("migrate import: failed to get app info: %w", err)
+		return appInfoLocalizationPlan{}, fmt.Errorf("migrate import: failed to get app info: %w", err)
 	}
 	if len(appInfos.Data) == 0 {
-		return nil, fmt.Errorf("migrate import: no app info found for app")
+		return appInfoLocalizationPlan{}, fmt.Errorf("migrate import: no app info found for app")
 	}
 	appInfoID := shared.SelectBestAppInfoID(appInfos)
 	if strings.TrimSpace(appInfoID) == "" {
-		return nil, fmt.Errorf("migrate import: failed to select app info for app")
+		return appInfoLocalizationPlan{}, fmt.Errorf("migrate import: failed to select app info for app")
 	}
 
-	existingAppInfoLocs, err := client.GetAppInfoLocalizations(ctx, appInfoID)
+	existingAppInfoLocs, err := fetchAppInfoLocalizationsForPlan(ctx, client, appInfoID)
 	if err != nil {
-		return nil, fmt.Errorf("migrate import: failed to fetch app info localizations: %w", err)
+		return appInfoLocalizationPlan{}, fmt.Errorf("migrate import: failed to fetch app info localizations: %w", err)
 	}
 	appInfoLocaleToID := make(map[string]string)
-	for _, loc := range existingAppInfoLocs.Data {
+	for _, loc := range existingAppInfoLocs {
 		appInfoLocaleToID[loc.Attributes.Locale] = loc.ID
 	}
 
-	results := make([]LocalizationUploadItem, 0, len(appInfoLocs))
-	for _, loc := range appInfoLocs {
-		attrs := asc.AppInfoLocalizationAttributes{
-			Locale:           loc.Locale,
-			Name:             loc.Name,
-			Subtitle:         loc.Subtitle,
-			PrivacyPolicyURL: loc.PrivacyURL,
-		}
-
-		action := "create"
+	plan := appInfoLocalizationPlan{
+		appInfoID:     appInfoID,
+		localizations: make([]preparedAppInfoLocalization, 0, len(localizations)),
+	}
+	for _, prepared := range localizations {
+		loc := prepared.localization
+		attrs := prepared.attributes
 		localizationID := appInfoLocaleToID[loc.Locale]
+		if err := validateLocalizationCreateTarget(loc.Locale, localizationID); err != nil {
+			return appInfoLocalizationPlan{}, err
+		}
+		if localizationID == "" {
+			if strings.TrimSpace(attrs.Name) == "" {
+				return appInfoLocalizationPlan{}, fmt.Errorf("migrate import: locale %q: name is required when creating app info localization", loc.Locale)
+			}
+		}
+		prepared.localizationID = localizationID
+		plan.localizations = append(plan.localizations, prepared)
+	}
+	return plan, nil
+}
+
+func fetchAppInfoLocalizationsForPlan(ctx context.Context, client *asc.Client, appInfoID string) ([]asc.Resource[asc.AppInfoLocalizationAttributes], error) {
+	firstPage, err := client.GetAppInfoLocalizations(ctx, appInfoID, asc.WithAppInfoLocalizationsLimit(200))
+	if err != nil {
+		return nil, err
+	}
+	if firstPage == nil {
+		return nil, fmt.Errorf("empty app info localizations response")
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		nextPage, err := client.GetAppInfoLocalizations(pageCtx, appInfoID, asc.WithAppInfoLocalizationsNextURL(nextURL))
+		if err != nil {
+			return nil, err
+		}
+		if nextPage == nil {
+			return nil, fmt.Errorf("empty app info localizations response")
+		}
+		return nextPage, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	allPages, ok := paginated.(*asc.AppInfoLocalizationsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected app info localization pagination response type")
+	}
+	return allPages.Data, nil
+}
+
+func fetchVersionLocalizationsForPlan(ctx context.Context, client *asc.Client, versionID string) ([]asc.Resource[asc.AppStoreVersionLocalizationAttributes], error) {
+	firstPage, err := client.GetAppStoreVersionLocalizations(ctx, versionID, asc.WithAppStoreVersionLocalizationsLimit(200))
+	if err != nil {
+		return nil, err
+	}
+	if firstPage == nil {
+		return nil, fmt.Errorf("empty version localizations response")
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(pageCtx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		nextPage, err := client.GetAppStoreVersionLocalizations(pageCtx, versionID, asc.WithAppStoreVersionLocalizationsNextURL(nextURL))
+		if err != nil {
+			return nil, err
+		}
+		if nextPage == nil {
+			return nil, fmt.Errorf("empty version localizations response")
+		}
+		return nextPage, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	allPages, ok := paginated.(*asc.AppStoreVersionLocalizationsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected version localization pagination response type")
+	}
+	return allPages.Data, nil
+}
+
+func uploadAppInfoLocalizations(ctx context.Context, client *asc.Client, plan appInfoLocalizationPlan) ([]LocalizationUploadItem, error) {
+	results := make([]LocalizationUploadItem, 0, len(plan.localizations))
+	for _, prepared := range plan.localizations {
+		loc := prepared.localization
+		action := "create"
+		localizationID := prepared.localizationID
 		if localizationID != "" {
 			action = "update"
-			if _, err := client.UpdateAppInfoLocalization(ctx, localizationID, attrs); err != nil {
-				return nil, fmt.Errorf("migrate import: failed to update app info %s: %w", loc.Locale, err)
+			requestCtx, cancel := migrateRequestContext(ctx)
+			_, err := client.UpdateAppInfoLocalization(requestCtx, localizationID, prepared.attributes)
+			cancel()
+			if err != nil {
+				return results, fmt.Errorf("migrate import: failed to update app info %s: %w", loc.Locale, err)
 			}
 		} else {
-			resp, err := client.CreateAppInfoLocalization(ctx, appInfoID, attrs)
+			requestCtx, cancel := migrateRequestContext(ctx)
+			resp, err := client.CreateAppInfoLocalization(requestCtx, plan.appInfoID, prepared.attributes)
+			cancel()
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to create app info %s: %w", loc.Locale, err)
+				return results, fmt.Errorf("migrate import: failed to create app info %s: %w", loc.Locale, err)
 			}
 			localizationID = resp.Data.ID
 		}
@@ -264,31 +492,38 @@ func uploadReviewInformation(ctx context.Context, client *asc.Client, versionID 
 		return nil, nil
 	}
 
-	existing, err := client.GetAppStoreReviewDetailForVersion(ctx, versionID)
+	fetchCtx, fetchCancel := migrateRequestContext(ctx)
+	existing, err := client.GetAppStoreReviewDetailForVersion(fetchCtx, versionID)
+	fetchCancel()
 	if err != nil {
 		if !isNotFoundReviewDetail(err) {
 			return nil, fmt.Errorf("migrate import: failed to fetch review information: %w", err)
 		}
-		created, err := client.CreateAppStoreReviewDetail(ctx, versionID, buildReviewDetailCreateAttributes(info))
+		createCtx, createCancel := migrateRequestContext(ctx)
+		created, err := client.CreateAppStoreReviewDetail(createCtx, versionID, buildReviewDetailCreateAttributes(info))
+		createCancel()
 		if err != nil {
 			return nil, fmt.Errorf("migrate import: failed to create review information: %w", err)
 		}
-		return &ReviewInfoResult{Action: "create", DetailID: created.Data.ID}, nil
+		return &ReviewInfoResult{Action: migrateReviewInfoActionCreate, DetailID: created.Data.ID}, nil
 	}
 
 	if existing == nil || existing.Data.ID == "" {
 		return nil, fmt.Errorf("migrate import: review information response missing ID")
 	}
 	if reviewInformationMatches(existing.Data.Attributes, info) {
-		return &ReviewInfoResult{Action: "skip", DetailID: existing.Data.ID}, nil
+		return &ReviewInfoResult{Action: migrateReviewInfoActionSkip, DetailID: existing.Data.ID}, nil
 	}
-	if _, err := client.UpdateAppStoreReviewDetail(ctx, existing.Data.ID, buildReviewDetailUpdateAttributes(info)); err != nil {
+	updateCtx, updateCancel := migrateRequestContext(ctx)
+	_, err = client.UpdateAppStoreReviewDetail(updateCtx, existing.Data.ID, buildReviewDetailUpdateAttributes(info))
+	updateCancel()
+	if err != nil {
 		return nil, fmt.Errorf("migrate import: failed to update review information: %w", err)
 	}
-	return &ReviewInfoResult{Action: "update", DetailID: existing.Data.ID}, nil
+	return &ReviewInfoResult{Action: migrateReviewInfoActionUpdate, DetailID: existing.Data.ID}, nil
 }
 
-func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string, localeToID map[string]string, plans []ScreenshotPlan) ([]ScreenshotUploadResult, error) {
+func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string, localeToID map[string]string, plans []ScreenshotPlan) (results []ScreenshotUploadResult, err error) {
 	if len(plans) == 0 {
 		return nil, nil
 	}
@@ -298,24 +533,47 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 		plansByLocale[plan.Locale] = append(plansByLocale[plan.Locale], plan)
 	}
 
-	uploadCtx, cancel := assets.ContextWithAssetUploadTimeout(ctx)
-	defer cancel()
+	// A failure can leave a localization this stage created out of every result,
+	// so name each unreported localization on stderr instead of leaving it
+	// behind silently.
+	var createdLocales []string
+	defer func() {
+		if err == nil {
+			return
+		}
+		reportedLocales := make(map[string]struct{}, len(results))
+		for _, result := range results {
+			reportedLocales[result.Locale] = struct{}{}
+		}
+		unreportedLocales := make([]string, 0, len(createdLocales))
+		for _, locale := range createdLocales {
+			if _, reported := reportedLocales[locale]; !reported {
+				unreportedLocales = append(unreportedLocales, locale)
+			}
+		}
+		warnCreatedScreenshotLocalizations(os.Stderr, unreportedLocales)
+	}()
 
-	results := make([]ScreenshotUploadResult, 0, len(plans))
+	results = make([]ScreenshotUploadResult, 0, len(plans))
 	for locale, localePlans := range plansByLocale {
 		localizationID := localeToID[locale]
 		if localizationID == "" {
-			resp, err := client.CreateAppStoreVersionLocalization(uploadCtx, versionID, asc.AppStoreVersionLocalizationAttributes{Locale: locale})
+			createCtx, createCancel := migrateRequestContext(ctx)
+			resp, err := client.CreateAppStoreVersionLocalization(createCtx, versionID, asc.AppStoreVersionLocalizationAttributes{Locale: locale})
+			createCancel()
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to create localization for screenshots %s: %w", locale, err)
+				return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to create localization for screenshots %s: %w", locale, err)
 			}
 			localizationID = resp.Data.ID
 			localeToID[locale] = localizationID
+			createdLocales = append(createdLocales, locale)
 		}
 
-		existingSets, err := client.GetAppScreenshotSets(uploadCtx, localizationID)
+		setsCtx, setsCancel := migrateRequestContext(ctx)
+		existingSets, err := client.GetAppScreenshotSets(setsCtx, localizationID)
+		setsCancel()
 		if err != nil {
-			return nil, fmt.Errorf("migrate import: failed to fetch screenshot sets for %s: %w", locale, err)
+			return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to fetch screenshot sets for %s: %w", locale, err)
 		}
 		setByType := make(map[string]string)
 		existingFiles := make(map[string]map[string]bool)
@@ -323,14 +581,18 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 		existingOrderByType := make(map[string][]string)
 		for _, set := range existingSets.Data {
 			setByType[set.Attributes.ScreenshotDisplayType] = set.ID
-			orderedIDs, err := assets.GetOrderedAppScreenshotIDs(uploadCtx, client, set.ID)
+			orderCtx, orderCancel := migrateRequestContext(ctx)
+			orderedIDs, err := assets.GetOrderedAppScreenshotIDs(orderCtx, client, set.ID)
+			orderCancel()
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to fetch screenshot relationship order for %s: %w", set.ID, err)
+				return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to fetch screenshot relationship order for %s: %w", set.ID, err)
 			}
 			existingOrderByType[set.Attributes.ScreenshotDisplayType] = orderedIDs
-			screenshots, err := client.GetAppScreenshots(uploadCtx, set.ID)
+			screenshotsCtx, screenshotsCancel := migrateRequestContext(ctx)
+			screenshots, err := client.GetAppScreenshots(screenshotsCtx, set.ID)
+			screenshotsCancel()
 			if err != nil {
-				return nil, fmt.Errorf("migrate import: failed to fetch screenshots for %s: %w", set.ID, err)
+				return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to fetch screenshots for %s: %w", set.ID, err)
 			}
 			fileNames := make(map[string]bool)
 			fileIDs := make(map[string]string)
@@ -350,12 +612,16 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 		for _, plan := range localePlans {
 			canonicalDisplayType := asc.CanonicalScreenshotDisplayTypeForAPI(plan.DisplayType)
 			setID := setByType[canonicalDisplayType]
+			createdSet := false
 			if setID == "" {
-				set, err := client.CreateAppScreenshotSet(uploadCtx, localizationID, canonicalDisplayType)
+				setCtx, setCancel := migrateRequestContext(ctx)
+				set, err := client.CreateAppScreenshotSet(setCtx, localizationID, canonicalDisplayType)
+				setCancel()
 				if err != nil {
-					return nil, fmt.Errorf("migrate import: failed to create screenshot set %s: %w", canonicalDisplayType, err)
+					return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to create screenshot set %s: %w", canonicalDisplayType, err)
 				}
 				setID = set.Data.ID
+				createdSet = true
 				setByType[canonicalDisplayType] = setID
 				existingFiles[canonicalDisplayType] = make(map[string]bool)
 				existingIDsByName[canonicalDisplayType] = make(map[string]string)
@@ -376,6 +642,7 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 			result := ScreenshotUploadResult{
 				Locale:      plan.Locale,
 				DisplayType: canonicalDisplayType,
+				createdSet:  createdSet,
 			}
 			uploadedIDsByName := make(map[string]string)
 
@@ -390,6 +657,10 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 				}
 				var item asc.AssetUploadResultItem
 				var err error
+				// Each asset reserves, transfers, and commits under its own
+				// upload budget; a shared request deadline would truncate the
+				// transfer of the first large screenshot.
+				uploadCtx, uploadCancel := migrateUploadContext(ctx)
 				if opened, ok, openErr := plan.openedFile(filePath); openErr != nil {
 					err = openErr
 				} else if ok {
@@ -403,16 +674,24 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 					// pinned rooted handle.
 					item, err = assets.UploadScreenshotAsset(uploadCtx, client, setID, filePath)
 				}
+				uploadCancel()
 				if err != nil {
-					return nil, fmt.Errorf("migrate import: failed to upload screenshot %s: %w", filePath, err)
+					// Keep the assets that already uploaded for this set so the
+					// caller can report them.
+					results = append(results, result)
+					return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to upload screenshot %s: %w", filePath, err)
 				}
 				fileNames[name] = true
 				uploadedIDsByName[name] = item.AssetID
 				result.Uploaded = append(result.Uploaded, item)
 			}
 			orderedIDs := buildPlannedScreenshotOrder(plan.Files, existingOrderByType[canonicalDisplayType], fileIDs, uploadedIDsByName)
-			if err := assets.SetOrderedAppScreenshots(uploadCtx, client, setID, orderedIDs); err != nil {
-				return nil, fmt.Errorf("migrate import: failed to reorder screenshots for %s: %w", setID, err)
+			reorderCtx, reorderCancel := migrateRequestContext(ctx)
+			err := assets.SetOrderedAppScreenshots(reorderCtx, client, setID, orderedIDs)
+			reorderCancel()
+			if err != nil {
+				results = append(results, result)
+				return sortedScreenshotResults(results), fmt.Errorf("migrate import: failed to reorder screenshots for %s: %w", setID, err)
 			}
 			existingOrderByType[canonicalDisplayType] = orderedIDs
 			for name, id := range uploadedIDsByName {
@@ -425,13 +704,29 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, versionID string
 		}
 	}
 
+	return sortedScreenshotResults(results), nil
+}
+
+// warnCreatedScreenshotLocalizations names the localizations the screenshot
+// stage created before a failure that left them without a result, so the
+// operator can re-run the import or remove the empty localizations by hand.
+func warnCreatedScreenshotLocalizations(w io.Writer, locales []string) {
+	// Locales are collected in map order, so sort them for a stable report.
+	ordered := append([]string(nil), locales...)
+	sort.Strings(ordered)
+	for _, locale := range ordered {
+		fmt.Fprintf(w, "Warning: created localization %q before the failure; re-run import or remove it manually\n", locale)
+	}
+}
+
+func sortedScreenshotResults(results []ScreenshotUploadResult) []ScreenshotUploadResult {
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Locale == results[j].Locale {
 			return results[i].DisplayType < results[j].DisplayType
 		}
 		return results[i].Locale < results[j].Locale
 	})
-	return results, nil
+	return results
 }
 
 func buildPlannedScreenshotOrder(planFiles []string, existingOrder []string, existingIDsByName map[string]string, uploadedIDsByName map[string]string) []string {

@@ -13,11 +13,12 @@ import (
 const routingCoveragePollInterval = 2 * time.Second
 
 type routingCoverageStepDetails struct {
-	Action        string `json:"action"`
-	CoverageID    string `json:"coverageId,omitempty"`
-	FileName      string `json:"fileName"`
-	Checksum      string `json:"checksum"`
-	DeliveryState string `json:"deliveryState,omitempty"`
+	Action             string `json:"action"`
+	CoverageID         string `json:"coverageId,omitempty"`
+	PreviousCoverageID string `json:"previousCoverageId,omitempty"`
+	FileName           string `json:"fileName"`
+	Checksum           string `json:"checksum"`
+	DeliveryState      string `json:"deliveryState,omitempty"`
 }
 
 func applyPreparedRoutingCoverageStep(ctx context.Context, client *asc.Client, versionID string, prepared routingcoveragecli.PreparedRoutingCoverageFile, dryRun bool) (stepOutcome, error) {
@@ -131,6 +132,10 @@ func applyPreparedRoutingCoverageStep(ctx context.Context, client *asc.Client, v
 		if committed != nil && strings.TrimSpace(committed.Data.ID) != "" {
 			details.CoverageID = strings.TrimSpace(committed.Data.ID)
 			details.DeliveryState = routingCoverageDeliveryState(committed)
+			return stepOutcome{Details: details}, err
+		}
+		if details.Action == "replace" {
+			details, err = reportFailedRoutingCoverageReplacement(ctx, client, versionID, details, err)
 		}
 		return stepOutcome{Details: details}, err
 	}
@@ -152,6 +157,52 @@ func applyPreparedRoutingCoverageStep(ctx context.Context, client *asc.Client, v
 		Details: details,
 		Persist: true,
 	}, nil
+}
+
+// reportFailedRoutingCoverageReplacement re-reads the version's routing
+// coverage after a replacement failed without producing a usable new asset.
+//
+// A replacement deletes the previous coverage before creating its successor, so
+// the previous ID must never be echoed back as the current coverage: either it
+// survived the failure and is still current, or the version now has no routing
+// coverage at all and the operator has to be told.
+func reportFailedRoutingCoverageReplacement(
+	ctx context.Context,
+	client *asc.Client,
+	versionID string,
+	details routingCoverageStepDetails,
+	cause error,
+) (routingCoverageStepDetails, error) {
+	previousCoverageID := strings.TrimSpace(details.CoverageID)
+	details.Action = "replace_failed"
+	details.PreviousCoverageID = previousCoverageID
+	details.CoverageID = ""
+	details.DeliveryState = ""
+
+	current, readErr := client.GetRoutingAppCoverageForVersion(ctx, versionID)
+	if readErr != nil && !asc.IsNotFound(readErr) {
+		return details, fmt.Errorf(
+			"%w (routing coverage for version %s could not be re-read: %w; the previous coverage %s may already be deleted)",
+			cause,
+			versionID,
+			readErr,
+			previousCoverageID,
+		)
+	}
+	if readErr == nil && current != nil && strings.TrimSpace(current.Data.ID) != "" {
+		details.CoverageID = strings.TrimSpace(current.Data.ID)
+		details.DeliveryState = routingCoverageDeliveryState(current)
+		if strings.EqualFold(details.CoverageID, previousCoverageID) {
+			details.PreviousCoverageID = ""
+		}
+		return details, cause
+	}
+	return details, fmt.Errorf(
+		"%w (version %s now has no routing coverage: the previous coverage %s is deleted before the replacement is created)",
+		cause,
+		versionID,
+		previousCoverageID,
+	)
 }
 
 func waitForRoutingCoverageDelivery(ctx context.Context, client *asc.Client, coverageID string) (string, error) {

@@ -137,6 +137,113 @@ func TestXcodeBuildValidationErrorsAreUsageErrors(t *testing.T) {
 	}
 }
 
+func TestXcodeBuildRejectsExplicitlyEmptyOptionalValues(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "configuration",
+			args: []string{"--configuration", ""},
+			want: "--configuration must not be empty",
+		},
+		{
+			name: "destination",
+			args: []string{"--destination", ""},
+			want: "--destination must not be empty",
+		},
+		{
+			name: "derived data path",
+			args: []string{"--derived-data-path", "  "},
+			want: "--derived-data-path must not be empty",
+		},
+		{
+			name: "result bundle path",
+			args: []string{"--result-bundle-path", ""},
+			want: "--result-bundle-path must not be empty",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			originalRunBuild := runBuild
+			t.Cleanup(func() { runBuild = originalRunBuild })
+			runBuild = func(context.Context, localxcode.BuildOptions) (*localxcode.BuildResult, error) {
+				t.Fatal("runBuild must not be called for an explicitly empty value")
+				return nil, nil
+			}
+
+			cmd := XcodeBuildCommand()
+			cmd.FlagSet.SetOutput(io.Discard)
+			args := append([]string{"--project", "Demo.xcodeproj", "--scheme", "Demo"}, test.args...)
+			if err := cmd.FlagSet.Parse(args); err != nil {
+				t.Fatalf("FlagSet.Parse() error = %v", err)
+			}
+
+			var runErr error
+			stdout, stderr := captureCommandOutput(t, func() error {
+				runErr = cmd.Exec(context.Background(), nil)
+				return runErr
+			})
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("Exec() error = %v, want usage error", runErr)
+			}
+			if runErr.Error() != test.want {
+				t.Fatalf("Exec() error = %q, want %q", runErr, test.want)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if !strings.Contains(stderr, test.want) {
+				t.Fatalf("stderr = %q, want %q", stderr, test.want)
+			}
+		})
+	}
+}
+
+func TestXcodeBuildAcceptsOmittedOptionalValues(t *testing.T) {
+	originalRunBuild := runBuild
+	t.Cleanup(func() { runBuild = originalRunBuild })
+
+	called := false
+	runBuild = func(_ context.Context, opts localxcode.BuildOptions) (*localxcode.BuildResult, error) {
+		called = true
+		if opts.Configuration != "" || opts.Destination != "" || opts.DerivedDataPath != "" || opts.ResultBundlePath != "" {
+			t.Fatalf("omitted flags must stay empty, got %+v", opts)
+		}
+		exitStatus := 0
+		return &localxcode.BuildResult{
+			ProjectPath:     opts.ProjectPath,
+			Scheme:          opts.Scheme,
+			DerivedDataPath: "/tmp/derived",
+			Success:         true,
+			DurationMS:      1,
+			ExitStatus:      &exitStatus,
+		}, nil
+	}
+
+	cmd := XcodeBuildCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{"--project", "Demo.xcodeproj", "--scheme", "Demo", "--output", "json"}); err != nil {
+		t.Fatalf("FlagSet.Parse() error = %v", err)
+	}
+	var runErr error
+	_, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr != nil {
+		t.Fatalf("Exec() error = %v", runErr)
+	}
+	if !called {
+		t.Fatal("runBuild was not called for omitted optional flags")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestXcodeBuildRejectsInvalidOutputBeforeStartingBuild(t *testing.T) {
 	originalRunBuild := runBuild
 	t.Cleanup(func() { runBuild = originalRunBuild })

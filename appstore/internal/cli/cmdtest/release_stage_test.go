@@ -2,10 +2,12 @@ package cmdtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,10 +75,15 @@ func TestReleaseStage_DryRunCopyMetadataFromVersion(t *testing.T) {
 	requestCount := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requestCount++
-		if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/APP_123/appStoreVersions" {
+		body := ""
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/builds/BUILD_123/relationships/app":
+			body = `{"data":{"type":"apps","id":"APP_123"}}`
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/APP_123/appStoreVersions":
+			body = `{"data":[]}`
+		default:
 			t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
 		}
-		body := `{"data":[]}`
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(body)),
@@ -120,7 +127,74 @@ func TestReleaseStage_DryRunCopyMetadataFromVersion(t *testing.T) {
 	if !strings.Contains(stdout, `"message":"metadata copy plan deferred until version exists"`) {
 		t.Fatalf("expected deferred metadata copy message, got %q", stdout)
 	}
-	if requestCount != 1 {
-		t.Fatalf("expected exactly one request, got %d", requestCount)
+	if !strings.Contains(stdout, `"name":"validate_build","status":"dry-run"`) {
+		t.Fatalf("expected the build precondition check in the plan, got %q", stdout)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected the build check and the version lookup, got %d requests", requestCount)
+	}
+}
+
+// TestReleaseStage_ResolvesTrimmedCheckpointFile pins the CLI surface for
+// --checkpoint-file: like every other path flag it is trimmed, so the reported
+// and used checkpoint path never carries the operator's surrounding whitespace.
+func TestReleaseStage_ResolvesTrimmedCheckpointFile(t *testing.T) {
+	setupAuth(t)
+
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := ""
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/builds/BUILD_123/relationships/app":
+			body = `{"data":{"type":"apps","id":"APP_123"}}`
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/APP_123/appStoreVersions":
+			body = `{"data":[]}`
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, _ := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"release", "stage",
+			"--app", "APP_123",
+			"--version", "1.2.3",
+			"--build", "BUILD_123",
+			"--copy-metadata-from", "1.2.2",
+			"--checkpoint-file", "  stage-checkpoint.json  ",
+			"--dry-run",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	var plan struct {
+		CheckpointFile string `json:"checkpointFile"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
+		t.Fatalf("parse plan output %q: %v", stdout, err)
+	}
+	if !filepath.IsAbs(plan.CheckpointFile) {
+		t.Fatalf("expected an absolute checkpoint path, got %q", plan.CheckpointFile)
+	}
+	if filepath.Base(plan.CheckpointFile) != "stage-checkpoint.json" {
+		t.Fatalf("expected the checkpoint file name to be trimmed, got %q", plan.CheckpointFile)
 	}
 }

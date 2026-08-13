@@ -22,8 +22,6 @@ type AnalyticsReportRequestResult struct {
 	RequestID              string `json:"requestId"`
 	AppID                  string `json:"appId"`
 	AccessType             string `json:"accessType"`
-	State                  string `json:"state,omitempty"`       // Deprecated: retained for output compatibility.
-	CreatedDate            string `json:"createdDate,omitempty"` // Deprecated: retained for output compatibility.
 	StoppedDueToInactivity *bool  `json:"stoppedDueToInactivity,omitempty"`
 }
 
@@ -32,8 +30,6 @@ type AnalyticsReportRequestReuseResult struct {
 	RequestID              string `json:"requestId"`
 	AppID                  string `json:"appId"`
 	AccessType             string `json:"accessType"`
-	State                  string `json:"state,omitempty"`       // Deprecated: retained for output compatibility.
-	CreatedDate            string `json:"createdDate,omitempty"` // Deprecated: retained for output compatibility.
 	StoppedDueToInactivity *bool  `json:"stoppedDueToInactivity,omitempty"`
 	Created                bool   `json:"created"`
 }
@@ -110,19 +106,17 @@ func salesReportResultRows(result *SalesReportResult) ([]string, [][]string) {
 }
 
 func analyticsReportRequestResultRows(result *AnalyticsReportRequestResult) ([]string, [][]string) {
-	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity"}
-	rows := [][]string{{result.RequestID, result.AppID, result.AccessType, result.State, result.CreatedDate, formatAnalyticsOptionalBool(result.StoppedDueToInactivity)}}
+	headers := []string{"Request ID", "App ID", "Access Type", "Stopped Due To Inactivity"}
+	rows := [][]string{{result.RequestID, result.AppID, result.AccessType, formatAnalyticsOptionalBool(result.StoppedDueToInactivity)}}
 	return headers, rows
 }
 
 func analyticsReportRequestReuseResultRows(result *AnalyticsReportRequestReuseResult) ([]string, [][]string) {
-	headers := []string{"Request ID", "App ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity", "Created"}
+	headers := []string{"Request ID", "App ID", "Access Type", "Stopped Due To Inactivity", "Created"}
 	rows := [][]string{{
 		result.RequestID,
 		result.AppID,
 		result.AccessType,
-		result.State,
-		result.CreatedDate,
 		formatAnalyticsOptionalBool(result.StoppedDueToInactivity),
 		fmt.Sprintf("%t", result.Created),
 	}}
@@ -136,7 +130,7 @@ func analyticsReportRequestDeleteResultRows(result *AnalyticsReportRequestDelete
 }
 
 func analyticsReportRequestsRows(resp *AnalyticsReportRequestsResponse) ([]string, [][]string) {
-	headers := []string{"ID", "Access Type", "State", "Created Date", "Stopped Due To Inactivity", "App ID"}
+	headers := []string{"ID", "Access Type", "Stopped Due To Inactivity", "App ID"}
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		appID := ""
@@ -146,8 +140,6 @@ func analyticsReportRequestsRows(resp *AnalyticsReportRequestsResponse) ([]strin
 		rows = append(rows, []string{
 			item.ID,
 			string(item.Attributes.AccessType),
-			string(item.Attributes.State),
-			item.Attributes.CreatedDate,
 			formatAnalyticsOptionalBool(item.Attributes.StoppedDueToInactivity),
 			appID,
 		})

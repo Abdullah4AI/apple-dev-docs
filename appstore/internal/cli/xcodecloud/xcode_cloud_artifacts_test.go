@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,5 +100,40 @@ func TestArtifactsDownloadExistingDestinationFailsBeforeClientCreation(t *testin
 	}
 	if clientCalls != 0 {
 		t.Fatalf("client factory calls = %d, want 0", clientCalls)
+	}
+}
+
+func TestArtifactsDownloadTrailingSeparatorFailsBeforeClientOrFilesystemSideEffects(t *testing.T) {
+	separators := []string{string(os.PathSeparator)}
+	if os.PathSeparator != '/' {
+		separators = append(separators, "/")
+	}
+
+	for _, separator := range separators {
+		t.Run(strconv.Quote(separator), func(t *testing.T) {
+			parent := t.TempDir()
+			createdPath := filepath.Join(parent, "result")
+			target := createdPath + separator
+			clientCalls := 0
+			restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientCalls++
+				return nil, errors.New("client factory should not be called")
+			})
+			t.Cleanup(restore)
+
+			err := XcodeCloudArtifactsDownloadCommand().ParseAndRun(context.Background(), []string{
+				"--id", "artifact-1",
+				"--path", target,
+			})
+			if err == nil || !strings.Contains(err.Error(), strconv.Quote(target)) {
+				t.Fatalf("command error = %v, want exact destination %s", err, strconv.Quote(target))
+			}
+			if clientCalls != 0 {
+				t.Fatalf("client factory calls = %d, want 0", clientCalls)
+			}
+			if _, statErr := os.Lstat(createdPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("destination-shaped directory was created, stat error = %v", statErr)
+			}
+		})
 	}
 }

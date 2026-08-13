@@ -229,10 +229,47 @@ type AppMediaAssetState struct {
 }
 
 // StateDetail represents details about a state (errors, warnings, infos).
+//
+// App Store Connect describes state details with `code` and `description`
+// (schemas StateDetail and AppMediaStateError); it does not send `message`.
+// Message is kept as a decoded alias of Description so callers that read either
+// field always see Apple's human-readable text. It is excluded from encoding so
+// re-emitted payloads stay faithful to the App Store Connect wire format.
 type StateDetail struct {
 	Code        string `json:"code,omitempty"`
 	Description string `json:"description,omitempty"`
-	Message     string `json:"message,omitempty"`
+	Message     string `json:"-"`
+}
+
+// UnmarshalJSON decodes a state detail and mirrors the human-readable text
+// across Description and Message so either field carries Apple's text.
+func (d *StateDetail) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Code        *string `json:"code"`
+		Description *string `json:"description"`
+		Message     *string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	*d = StateDetail{}
+	if raw.Code != nil {
+		d.Code = *raw.Code
+	}
+	if raw.Description != nil {
+		d.Description = *raw.Description
+	}
+	if raw.Message != nil {
+		d.Message = *raw.Message
+	}
+	if raw.Description == nil && raw.Message != nil {
+		d.Description = *raw.Message
+	}
+	if raw.Message == nil && raw.Description != nil {
+		d.Message = *raw.Description
+	}
+	return nil
 }
 
 // GetBuilds retrieves the list of builds for an app

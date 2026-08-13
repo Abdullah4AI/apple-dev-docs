@@ -33,7 +33,7 @@ func OpenExistingNoFollow(path string) (*os.File, error) {
 // following the final component or permitting parent traversal outside root.
 func OpenNewFileNoFollowInRoot(root *os.Root, name string, perm os.FileMode) (*os.File, error) {
 	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL | unix.O_NOFOLLOW
-	return openNewFileNoFollowInRootBestEffort(root, name, func() (*os.File, error) {
+	return openWritableFileNoFollowInRootBestEffort(root, name, func() (*os.File, error) {
 		return root.OpenFile(name, flags, perm)
 	})
 }
@@ -42,7 +42,7 @@ func OpenNewFileNoFollowInRoot(root *os.Root, name string, perm os.FileMode) (*o
 // following the final component or permitting parent traversal outside root.
 func OpenAppendNoFollowInRoot(root *os.Root, name string, perm os.FileMode) (*os.File, error) {
 	flags := os.O_WRONLY | os.O_APPEND | os.O_CREATE | unix.O_NOFOLLOW | unix.O_NONBLOCK
-	return openNewFileNoFollowInRootBestEffort(root, name, func() (*os.File, error) {
+	return openWritableFileNoFollowInRootBestEffort(root, name, func() (*os.File, error) {
 		return root.OpenFile(name, flags, perm)
 	})
 }

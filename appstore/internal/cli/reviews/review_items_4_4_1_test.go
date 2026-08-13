@@ -166,28 +166,27 @@ func TestReviewItemTypeListIncludes441VersionTypes(t *testing.T) {
 	}
 }
 
-func TestReviewItemsAddRejectsDeprecatedExperimentTreatment(t *testing.T) {
-	_, err := normalizeReviewSubmissionItemType("appStoreVersionExperimentTreatments")
-	if err == nil || !strings.Contains(err.Error(), "deprecated and no longer supported") {
-		t.Fatalf("error = %v, want treatment deprecation guidance", err)
-	}
-}
-
-func TestReviewItemsAddRejectsDeprecatedCustomProductPage(t *testing.T) {
-	_, err := normalizeReviewSubmissionItemType("appCustomProductPages")
-	if err == nil || !strings.Contains(err.Error(), "app custom product page version ID") || !strings.Contains(err.Error(), "appCustomProductPageVersions") {
-		t.Fatalf("error = %v, want custom product page version migration guidance", err)
-	}
-}
-
-func TestReviewItemsAddRejectsUnsupportedLegacyTypesBeforeAuth(t *testing.T) {
+func TestReviewItemsAddRejectsRemovedItemTypesBeforeAuth(t *testing.T) {
 	tests := []struct {
 		name     string
 		itemType string
-		want     string
+		wantErr  string
 	}{
-		{name: "custom product page", itemType: "appCustomProductPages", want: "appCustomProductPageVersions"},
-		{name: "experiment treatment", itemType: "appStoreVersionExperimentTreatments", want: "experiment treatments cannot be added"},
+		{
+			name:     "custom product page",
+			itemType: "appCustomProductPages",
+			wantErr:  "--item-type appCustomProductPages is deprecated and no longer supported by App Store Connect; pass an app custom product page version ID with --item-type appCustomProductPageVersions",
+		},
+		{
+			name:     "experiment treatment",
+			itemType: "appStoreVersionExperimentTreatments",
+			wantErr:  "--item-type appStoreVersionExperimentTreatments is deprecated and no longer supported by App Store Connect; experiment treatments cannot be added as review submission items",
+		},
+		{
+			name:     "unknown",
+			itemType: "nope",
+			wantErr:  "--item-type must be one of: " + strings.Join(reviewSubmissionItemTypeList(), ", "),
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -203,41 +202,11 @@ func TestReviewItemsAddRejectsUnsupportedLegacyTypesBeforeAuth(t *testing.T) {
 				"--item-type", test.itemType,
 				"--item-id", "item-1",
 			})
-			if err == nil || !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v, want usage error containing %q", err, test.want)
+			if err == nil || !errors.Is(err, flag.ErrHelp) || err.Error() != test.wantErr {
+				t.Fatalf("error = %q, want %q with flag.ErrHelp", err, test.wantErr)
 			}
 			if factoryCalled {
-				t.Fatal("client factory called before legacy type validation")
-			}
-		})
-	}
-}
-
-func TestReviewItemsViewIsDeprecatedBeforeAuth(t *testing.T) {
-	tests := []struct {
-		name    string
-		command func() *ffcli.Command
-	}{
-		{name: "legacy", command: ReviewItemsGetCommand},
-		{name: "nested", command: func() *ffcli.Command {
-			return reviewItemsGetCommand("view", "review items view", `asc review items view --id "ITEM_ID"`)
-		}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			factoryCalled := false
-			restore := SetReviewItemsClientFactory(func() (*asc.Client, error) {
-				factoryCalled = true
-				return nil, errors.New("poison client factory called")
-			})
-			defer restore()
-
-			err := test.command().ParseAndRun(context.Background(), []string{"--id", "item-1"})
-			if err == nil || !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), "has no item-detail GET") || !strings.Contains(err.Error(), "review items list --submission") {
-				t.Fatalf("error = %v, want deprecated item-detail guidance", err)
-			}
-			if factoryCalled {
-				t.Fatal("client factory called for unsupported item-detail GET")
+				t.Fatal("client factory called before removed item type validation")
 			}
 		})
 	}
@@ -249,8 +218,6 @@ func TestReviewItemsUpdateValidatesSchemaFlagsBeforeAuth(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "deprecated state", args: []string{"--id", "item-1", "--state", "READY_FOR_REVIEW"}, want: "--state is deprecated"},
-		{name: "explicit empty state", args: []string{"--id", "item-1", "--state", ""}, want: "--state is deprecated"},
 		{name: "missing update", args: []string{"--id", "item-1"}, want: "at least one of --resolved, --removed, --clear-resolved, or --clear-removed is required"},
 		{name: "invalid resolved", args: []string{"--id", "item-1", "--resolved", "yes"}, want: "--resolved must be true or false"},
 		{name: "invalid removed", args: []string{"--id", "item-1", "--removed", "no"}, want: "--removed must be true or false"},

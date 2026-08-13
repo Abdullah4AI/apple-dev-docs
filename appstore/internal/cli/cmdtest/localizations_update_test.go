@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	cmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 type locUpdateRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -225,6 +227,54 @@ func TestLocalizationsUpdate_RejectsRawKeywordCharactersIncludingTrailingSpaceBe
 	}
 	if requestCount != 0 {
 		t.Fatalf("expected no HTTP requests, got %d", requestCount)
+	}
+}
+
+func TestLocalizationsUpdate_RejectsInvalidVersionFieldsBeforeClientCreation(t *testing.T) {
+	tests := []struct {
+		name    string
+		flag    string
+		value   string
+		wantErr string
+	}{
+		{name: "description", flag: "--description", value: strings.Repeat("d", 4001), wantErr: "description exceeds 4000 characters"},
+		{name: "keywords", flag: "--keywords", value: strings.Repeat("k", 101), wantErr: "keywords exceed 100 characters"},
+		{name: "whats new", flag: "--whats-new", value: strings.Repeat("w", 4001), wantErr: "whatsNew exceeds 4000 characters"},
+		{name: "promotional text", flag: "--promotional-text", value: strings.Repeat("p", 171), wantErr: "promotionalText exceeds 170 characters"},
+		{name: "support URL", flag: "--support-url", value: "relative/support", wantErr: "supportUrl must be a valid URI"},
+		{name: "marketing URL", flag: "--marketing-url", value: "relative/marketing", wantErr: "marketingUrl must be a valid URI"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientCalls++
+				return nil, errors.New("client should not be created")
+			}))
+
+			stdout, stderr := captureOutput(t, func() {
+				code := cmd.Run([]string{
+					"localizations", "update",
+					"--version", "ver-1",
+					"--locale", "en-US",
+					test.flag, test.value,
+				}, "1.2.3")
+				if code != cmd.ExitUsage {
+					t.Fatalf("expected exit code %d, got %d", cmd.ExitUsage, code)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantErr) {
+				t.Fatalf("expected stderr to contain %q, got %q", test.wantErr, stderr)
+			}
+			if clientCalls != 0 {
+				t.Fatalf("expected no client creation, got %d", clientCalls)
+			}
+		})
 	}
 }
 

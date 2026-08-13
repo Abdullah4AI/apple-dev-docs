@@ -17,41 +17,43 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
-	setupAuth(t)
+// signingFetchStubAPI counts the App Store Connect calls signing fetch makes
+// while resolving and creating a profile.
+type signingFetchStubAPI struct {
+	BundleLookups      atomic.Int32
+	ProfileLookups     atomic.Int32
+	CertificateLookups atomic.Int32
+	ProfileCreates     atomic.Int32
+}
 
-	outputPath := filepath.Join(t.TempDir(), "not-a-directory")
-	sentinel := []byte("keep this file")
-	if err := os.WriteFile(outputPath, sentinel, 0o600); err != nil {
-		t.Fatalf("write output sentinel: %v", err)
-	}
+// startSigningFetchStubAPI serves a bundle ID with no matching profile and a
+// single eligible certificate, so signing fetch takes the --create-missing path.
+func startSigningFetchStubAPI(t *testing.T) *signingFetchStubAPI {
+	t.Helper()
 
+	stub := &signingFetchStubAPI{}
 	certificateContent := base64.StdEncoding.EncodeToString([]byte("certificate"))
 	profileContent := base64.StdEncoding.EncodeToString([]byte("profile"))
-	var bundleLookups atomic.Int32
-	var profileLookups atomic.Int32
-	var certificateLookups atomic.Int32
-	var profileCreates atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/bundleIds":
-			bundleLookups.Add(1)
+			stub.BundleLookups.Add(1)
 			if got := req.URL.Query().Get("filter[identifier]"); got != "com.example.app" {
 				t.Errorf("bundle identifier filter = %q, want com.example.app", got)
 			}
 			writeSigningFetchOutputJSON(t, w, http.StatusOK, `{"data":[{"type":"bundleIds","id":"bundle-main","attributes":{"identifier":"com.example.app"}}]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/bundleIds/bundle-main/profiles":
-			profileLookups.Add(1)
+			stub.ProfileLookups.Add(1)
 			writeSigningFetchOutputJSON(t, w, http.StatusOK, `{"data":[]}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/certificates":
-			certificateLookups.Add(1)
+			stub.CertificateLookups.Add(1)
 			writeSigningFetchOutputJSON(t, w, http.StatusOK, fmt.Sprintf(
 				`{"data":[{"type":"certificates","id":"cert-1","attributes":{"certificateType":"IOS_DISTRIBUTION","serialNumber":"CERT1","certificateContent":%q,"activated":true,"expirationDate":"2100-01-01T00:00:00Z"}}]}`,
 				certificateContent,
 			))
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/profiles":
-			profileCreates.Add(1)
+			stub.ProfileCreates.Add(1)
 			writeSigningFetchOutputJSON(t, w, http.StatusCreated, fmt.Sprintf(
 				`{"data":{"type":"profiles","id":"profile-created","attributes":{"name":"Created Profile","profileType":"IOS_APP_STORE","profileState":"ACTIVE","profileContent":%q}}}`,
 				profileContent,
@@ -86,10 +88,16 @@ func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
 		return client, nil
 	}))
 
+	return stub
+}
+
+func runSigningFetchCreateMissing(t *testing.T, outputPath string) (string, string, error) {
+	t.Helper()
+
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 	var runErr error
-	stdout, _ := captureOutput(t, func() {
+	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"signing", "fetch",
 			"--bundle-id", "com.example.app",
@@ -102,6 +110,21 @@ func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
 		}
 		runErr = root.Run(context.Background())
 	})
+	return stdout, stderr, runErr
+}
+
+func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
+	setupAuth(t)
+
+	outputPath := filepath.Join(t.TempDir(), "not-a-directory")
+	sentinel := []byte("keep this file")
+	if err := os.WriteFile(outputPath, sentinel, 0o600); err != nil {
+		t.Fatalf("write output sentinel: %v", err)
+	}
+
+	stub := startSigningFetchStubAPI(t)
+
+	stdout, _, runErr := runSigningFetchCreateMissing(t, outputPath)
 
 	if runErr == nil {
 		t.Fatal("signing fetch succeeded with a regular file as its output directory")
@@ -109,16 +132,16 @@ func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty output", stdout)
 	}
-	if got := profileCreates.Load(); got != 0 {
+	if got := stub.ProfileCreates.Load(); got != 0 {
 		t.Fatalf("profile create requests = %d, want 0", got)
 	}
-	if got := bundleLookups.Load(); got != 1 {
+	if got := stub.BundleLookups.Load(); got != 1 {
 		t.Fatalf("bundle ID lookups = %d, want 1", got)
 	}
-	if got := profileLookups.Load(); got != 1 {
+	if got := stub.ProfileLookups.Load(); got != 1 {
 		t.Fatalf("profile lookups = %d, want 1", got)
 	}
-	if got := certificateLookups.Load(); got != 1 {
+	if got := stub.CertificateLookups.Load(); got != 1 {
 		t.Fatalf("certificate lookups = %d, want 1", got)
 	}
 	gotSentinel, err := os.ReadFile(outputPath)
@@ -127,6 +150,51 @@ func TestSigningFetchPreflightsOutputBeforeProfileCreation(t *testing.T) {
 	}
 	if string(gotSentinel) != string(sentinel) {
 		t.Fatalf("output sentinel = %q, want %q", gotSentinel, sentinel)
+	}
+}
+
+func TestSigningFetchPreflightsExistingOutputFilesBeforeProfileCreation(t *testing.T) {
+	setupAuth(t)
+
+	outputDir := t.TempDir()
+	certificatePath := filepath.Join(outputDir, "CERT1.cer")
+	sentinel := []byte("certificate from an earlier fetch")
+	if err := os.WriteFile(certificatePath, sentinel, 0o600); err != nil {
+		t.Fatalf("write existing certificate: %v", err)
+	}
+
+	stub := startSigningFetchStubAPI(t)
+
+	stdout, stderr, runErr := runSigningFetchCreateMissing(t, outputDir)
+
+	if runErr == nil {
+		t.Fatal("signing fetch overwrote or ignored an existing output file")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty output", stdout)
+	}
+	if got := stub.ProfileCreates.Load(); got != 0 {
+		t.Fatalf("profile create requests = %d, want 0 (a created profile would be orphaned): stderr=%q", got, stderr)
+	}
+
+	gotSentinel, err := os.ReadFile(certificatePath)
+	if err != nil {
+		t.Fatalf("read existing certificate: %v", err)
+	}
+	if string(gotSentinel) != string(sentinel) {
+		t.Fatalf("existing certificate = %q, want %q", gotSentinel, sentinel)
+	}
+
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		t.Fatalf("read output directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "CERT1.cer" {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("output directory entries = %v, want only the pre-existing certificate", names)
 	}
 }
 

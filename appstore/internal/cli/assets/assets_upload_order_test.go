@@ -31,9 +31,10 @@ func (fn assetsUploadRoundTripFunc) RoundTrip(req *http.Request) (*http.Response
 	return fn(req)
 }
 
-func TestUploadScreenshotsToSet_PreservesExistingOrderAndAppendsNewUploads(t *testing.T) {
-	fileA := writeAssetsTestPNG(t, t.TempDir(), "01-home.png")
-	fileB := writeAssetsTestPNG(t, t.TempDir(), "02-settings.png")
+func TestUploadScreenshotsToSetFromRoot_PreservesExistingOrderAndAppendsNewUploads(t *testing.T) {
+	sourceRoot := t.TempDir()
+	fileA := writeAssetsTestPNG(t, sourceRoot, "01-home.png")
+	fileB := writeAssetsTestPNG(t, sourceRoot, "02-settings.png")
 	files := []string{fileA, fileB}
 	sizes := []int64{fileSize(t, fileA), fileSize(t, fileB)}
 	relationshipPatchCalled := false
@@ -96,9 +97,9 @@ func TestUploadScreenshotsToSet_PreservesExistingOrderAndAppendsNewUploads(t *te
 	})
 
 	client := newAssetsUploadTestClient(t)
-	results, err := UploadScreenshotsToSet(context.Background(), client, "set-1", files, true)
+	results, err := uploadScreenshotsToSetFromRoot(context.Background(), client, "set-1", files, sourceRoot, true)
 	if err != nil {
-		t.Fatalf("UploadScreenshotsToSet() error: %v", err)
+		t.Fatalf("uploadScreenshotsToSetFromRoot() error: %v", err)
 	}
 
 	if len(results) != 2 {

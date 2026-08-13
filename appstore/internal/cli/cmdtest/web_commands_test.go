@@ -207,6 +207,17 @@ func TestWebAuthLoginExposesDeprecatedTwoFactorAliasWithoutPlaintextPasswordFlag
 	if cmd.FlagSet.Lookup("two-factor-code-command") == nil {
 		t.Fatal("expected --two-factor-code-command flag on web auth login")
 	}
+	for _, phrase := range []string{
+		"Phone-code fallback (including SMS):",
+		"interactive: if Apple offers a registered phone fallback",
+		"enter an incorrect trusted-device code once",
+		"Apple then delivers a phone verification code and asc prompts again",
+		"automated: asc reruns the configured 2FA code command after phone fallback",
+	} {
+		if !strings.Contains(cmd.LongHelp, phrase) {
+			t.Fatalf("expected %q in web auth login help, got %q", phrase, cmd.LongHelp)
+		}
+	}
 }
 
 func TestWebAppsCreateExposesDeprecatedTwoFactorAlias(t *testing.T) {

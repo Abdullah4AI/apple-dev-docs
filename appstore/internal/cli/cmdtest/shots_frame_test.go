@@ -804,6 +804,14 @@ func TestShotsFrame_RejectsInvalidWatchOptions(t *testing.T) {
 			wantStderr: "--watch-raw-dir requires --watch-review-dir",
 		},
 		{
+			name: "blank review directory",
+			args: []string{
+				"--watch",
+				"--watch-review-dir", "   ",
+			},
+			wantStderr: "--watch-review-dir must not be empty",
+		},
+		{
 			name: "zero debounce",
 			args: []string{
 				"--watch",
@@ -840,6 +848,76 @@ func TestShotsFrame_RejectsInvalidWatchOptions(t *testing.T) {
 				}
 				if err.Error() != test.wantStderr {
 					t.Fatalf("error = %q, want %q", err, test.wantStderr)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantStderr) {
+				t.Fatalf("expected stderr to contain %q, got %q", test.wantStderr, stderr)
+			}
+		})
+	}
+}
+
+func TestShotsFrame_RejectsFlagsWatchModeCannotHonor(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "device",
+			args:       []string{"--device", "mac"},
+			wantStderr: "--device cannot be used with --watch",
+		},
+		{
+			name:       "invalid device",
+			args:       []string{"--device", "totally-bogus-device"},
+			wantStderr: "--device cannot be used with --watch",
+		},
+		{
+			name:       "canvas title",
+			args:       []string{"--title", "Hello"},
+			wantStderr: "--title cannot be used with --watch",
+		},
+		{
+			name:       "canvas colors",
+			args:       []string{"--bg-color", "#1a1a2e", "--subtitle-color", "#333333"},
+			wantStderr: "--bg-color, --subtitle-color cannot be used with --watch",
+		},
+		{
+			name:       "output path",
+			args:       []string{"--output-path", "/tmp/framed.png"},
+			wantStderr: "--output-path cannot be used with --watch",
+		},
+		{
+			name:       "output dir and name",
+			args:       []string{"--output-dir", "/tmp/framed", "--name", "home"},
+			wantStderr: "--name, --output-dir cannot be used with --watch",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			configPath := filepath.Join(t.TempDir(), "missing-frame.yaml")
+			args := []string{"screenshots", "frame", "--config", configPath, "--watch"}
+			args = append(args, test.args...)
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected ErrHelp, got %v", err)
+				}
+				if !strings.Contains(err.Error(), test.wantStderr) {
+					t.Fatalf("error = %q, want it to contain %q", err, test.wantStderr)
 				}
 			})
 

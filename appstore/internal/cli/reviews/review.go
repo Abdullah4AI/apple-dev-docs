@@ -3,6 +3,7 @@ package reviews
 import (
 	"context"
 	"flag"
+	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
@@ -59,13 +60,15 @@ Examples:
 			ReviewSubmissionsUpdateCommand(),
 			ReviewSubmissionsItemsIDsCommand(),
 			ReviewItemsCommand(),
-			ReviewItemsGetCommand(),
 			ReviewItemsListCommand(),
 			ReviewItemsAddCommand(),
 			ReviewItemsUpdateCommand(),
 			ReviewItemsRemoveCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 && strings.TrimSpace(args[0]) == "items-get" {
+				return removedReviewItemDetailUsageError("asc review items-get")
+			}
 			return flag.ErrHelp
 		},
 	}

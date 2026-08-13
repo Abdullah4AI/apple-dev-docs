@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -251,6 +252,69 @@ func TestExportMissingXcodebuild(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "xcodebuild not available") {
 		t.Fatalf("expected xcodebuild error, got %v", err)
+	}
+}
+
+func TestValidateExportXcodebuildArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "none"},
+		{name: "supported provisioning flag", args: []string{"-allowProvisioningUpdates"}},
+		{name: "supported authentication flags", args: []string{"-authenticationKeyPath", "/tmp/AuthKey.p8", "-authenticationKeyID", "KEY123", "-authenticationKeyIssuerID", "ISSUER456"}},
+		{name: "authentication path named like action", args: []string{"-authenticationKeyPath", "archive"}},
+		{name: "authentication path named like managed export flag", args: []string{"-authenticationKeyPath", "-exportPath=AuthKey.p8"}},
+		{name: "authentication key ID named like action", args: []string{"-authenticationKeyID", "build"}},
+		{name: "authentication issuer ID named like action", args: []string{"-authenticationKeyIssuerID", "clean"}},
+		{name: "operation after authentication value", args: []string{"-authenticationKeyPath", "archive", "build"}, wantErr: `cannot override asc-managed argument "build"`},
+		{name: "blank passthrough", args: []string{""}, wantErr: "--xcodebuild-flag cannot be empty"},
+		{name: "whitespace passthrough", args: []string{" \t"}, wantErr: "--xcodebuild-flag cannot be empty"},
+		{name: "export operation", args: []string{"-exportArchive"}, wantErr: `cannot override asc-managed argument "-exportArchive"`},
+		{name: "archive path", args: []string{"-archivePath=/tmp/Other.xcarchive"}, wantErr: `cannot override asc-managed argument "-archivePath"`},
+		{name: "export path", args: []string{"-EXPORTPATH", "/tmp/elsewhere"}, wantErr: `cannot override asc-managed argument "-EXPORTPATH"`},
+		{name: "export options", args: []string{"-exportOptionsPlist=/tmp/Other.plist"}, wantErr: `cannot override asc-managed argument "-exportOptionsPlist"`},
+		{name: "different operation", args: []string{"build"}, wantErr: `cannot override asc-managed argument "build"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateExportXcodebuildArgs(test.args)
+			if test.wantErr == "" && err != nil {
+				t.Fatalf("ValidateExportXcodebuildArgs() error = %v", err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("ValidateExportXcodebuildArgs() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateExportXcodebuildArgsRejectsEveryArgumentExportEmits derives its
+// expectations from the shipped command. A newly managed argument must not be
+// overridable through --xcodebuild-flag.
+func TestValidateExportXcodebuildArgsRejectsEveryArgumentExportEmits(t *testing.T) {
+	opts := ExportOptions{
+		ArchivePath:   "/tmp/AscManaged.xcarchive",
+		ExportOptions: "/tmp/AscManagedExportOptions.plist",
+	}
+	exportDir := "/tmp/asc-managed-export"
+	suppliedValues := map[string]struct{}{
+		opts.ArchivePath:   {},
+		opts.ExportOptions: {},
+		exportDir:          {},
+	}
+
+	for _, arg := range buildExportCommand(opts, exportDir) {
+		if _, isValue := suppliedValues[arg]; isValue {
+			continue
+		}
+		t.Run(arg, func(t *testing.T) {
+			if err := ValidateExportXcodebuildArgs([]string{arg}); err == nil {
+				t.Fatalf("asc emits %q but --xcodebuild-flag can still override it", arg)
+			}
+		})
 	}
 }
 
@@ -522,6 +586,87 @@ func TestValidateClassifiesAltoolOutputWithZeroExit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePreservesClassifiedAltoolOutputWithNonZeroExit(t *testing.T) {
+	tests := []struct {
+		name        string
+		stdout      string
+		output      string
+		exitCode    string
+		wantDetails []string
+	}{
+		{
+			name:        "legacy error before long upload noise",
+			output:      "*** Error: Unable to validate archive './artifacts/Demo.ipa'.\n" + strings.Repeat("x", xcodebuildErrorTailLimit+1) + "\n",
+			exitCode:    "1",
+			wantDetails: []string{"Unable to validate archive './artifacts/Demo.ipa'."},
+		},
+		{
+			name:        "timestamped error on stdout before long upload noise",
+			stdout:      "2026-08-10 06:47:56.580 ERROR: [ContentDelivery.Uploader] Early server rejection.\n",
+			output:      strings.Repeat("x", xcodebuildErrorTailLimit+1) + "\n",
+			exitCode:    "1",
+			wantDetails: []string{"[ContentDelivery.Uploader] Early server rejection."},
+		},
+		{
+			name:        "unclassified failure still reports the output tail",
+			output:      "altool exited unexpectedly\n",
+			exitCode:    "70",
+			wantDetails: []string{"altool exited unexpectedly"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			ipaPath := filepath.Join(tempDir, "Demo.ipa")
+			if err := writeTestIPA(ipaPath); err != nil {
+				t.Fatalf("writeTestIPA() error: %v", err)
+			}
+			logPath := filepath.Join(tempDir, "commands.log")
+			t.Setenv("ASC_XCODE_HELPER_VALIDATE_STDOUT", test.stdout)
+			t.Setenv("ASC_XCODE_HELPER_VALIDATE_OUTPUT", test.output)
+			t.Setenv("ASC_XCODE_HELPER_VALIDATE_EXIT_CODE", test.exitCode)
+
+			restore := overrideTestEnvironment(t)
+			runtimeGOOS = "darwin"
+			lookPathFn = func(file string) (string, error) {
+				return "/usr/bin/" + file, nil
+			}
+			commandContextFn = helperCommandContext(t, logPath)
+			t.Cleanup(restore)
+
+			result, err := Validate(context.Background(), ValidateOptions{IPAPath: ipaPath})
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want altool failure; result = %+v", result)
+			}
+			for _, want := range test.wantDetails {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Validate() error = %q, want recognized detail %q", truncateErrorForLog(err), want)
+				}
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("Validate() error = %T %v, want the altool exit status preserved", err, truncateErrorForLog(err))
+			}
+			if got := fmt.Sprintf("%d", exitErr.ExitCode()); got != test.exitCode {
+				t.Fatalf("altool exit code = %s, want %s", got, test.exitCode)
+			}
+			if maxBytes := xcodebuildErrorTailLimit + 512; len(err.Error()) > maxBytes {
+				t.Fatalf("Validate() error bytes = %d, want at most %d", len(err.Error()), maxBytes)
+			}
+		})
+	}
+}
+
+func truncateErrorForLog(err error) string {
+	const limit = 512
+	message := err.Error()
+	if len(message) <= limit {
+		return message
+	}
+	return message[:limit] + "…"
 }
 
 func TestValidateRejectsOversizedInfoPlistBeforeAltool(t *testing.T) {
@@ -1246,7 +1391,59 @@ func TestExportRejectsExistingIPAWithoutOverwrite(t *testing.T) {
 	}
 }
 
-func TestRunXcodebuildWithLogWriterKeepsOnlyTailInErrorMessage(t *testing.T) {
+func TestRunXcodebuildFailurePreservesRecognizedErrorsAndFinalOutputWithinBound(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "commands.log")
+
+	restore := overrideTestEnvironment(t)
+	commandContextFn = helperCommandContext(t, logPath)
+	t.Cleanup(restore)
+
+	tests := []struct {
+		name                 string
+		action               string
+		preserveProcessError bool
+	}{
+		{name: "build", action: "build", preserveProcessError: true},
+		{name: "archive", action: "archive"},
+		{name: "export", action: "export"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := runCommandWithBoundedOutputMode(
+				context.Background(),
+				"xcodebuild",
+				[]string{"fail-large-output"},
+				nil,
+				test.action,
+				"xcodebuild",
+				test.preserveProcessError,
+			)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			errorText := err.Error()
+			for _, want := range []string{
+				"file.m:4:3: error: root cause",
+				"FINAL-DIAGNOSTIC",
+				"output truncated to 65536 bytes; preserving recognized errors and final output",
+			} {
+				if !strings.Contains(errorText, want) {
+					t.Fatalf("error = %q, want %q", errorText, want)
+				}
+			}
+
+			var exitErr *exec.ExitError
+			if got := errors.As(err, &exitErr); got != test.preserveProcessError {
+				t.Fatalf("errors.As(*exec.ExitError) = %t, want %t; error = %v", got, test.preserveProcessError, err)
+			}
+		})
+	}
+}
+
+func TestRunXcodebuildFailureStillStreamsCompleteOutputOnce(t *testing.T) {
 	tempDir := t.TempDir()
 	logPath := filepath.Join(tempDir, "commands.log")
 
@@ -1261,22 +1458,17 @@ func TestRunXcodebuildWithLogWriterKeepsOnlyTailInErrorMessage(t *testing.T) {
 	}
 
 	streamedOutput := streamed.String()
-	if !strings.Contains(streamedOutput, "EARLY-MARKER") {
-		t.Fatalf("expected streamed output to include early marker, got %q", streamedOutput)
-	}
-	if !strings.Contains(streamedOutput, "LATE-MARKER") {
-		t.Fatalf("expected streamed output to include late marker, got %q", streamedOutput)
+	for _, want := range []string{"file.m:4:3: error: root cause", "FINAL-DIAGNOSTIC"} {
+		if got := strings.Count(streamedOutput, want); got != 1 {
+			t.Fatalf("streamed diagnostic %q count = %d, want 1", want, got)
+		}
 	}
 
 	errorText := err.Error()
-	if !strings.Contains(errorText, "showing last") {
-		t.Fatalf("expected truncated tail message, got %v", err)
-	}
-	if strings.Contains(errorText, "EARLY-MARKER") {
-		t.Fatalf("expected early marker to be dropped from tail, got %v", err)
-	}
-	if !strings.Contains(errorText, "LATE-MARKER") {
-		t.Fatalf("expected late marker in error tail, got %v", err)
+	for _, want := range []string{"file.m:4:3: error: root cause", "FINAL-DIAGNOSTIC"} {
+		if !strings.Contains(errorText, want) {
+			t.Fatalf("error = %q, want %q", errorText, want)
+		}
 	}
 	if strings.Contains(errorText, "exit status 1") {
 		t.Fatalf("legacy archive/export runner error text changed: %v", err)
@@ -1284,6 +1476,92 @@ func TestRunXcodebuildWithLogWriterKeepsOnlyTailInErrorMessage(t *testing.T) {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		t.Fatalf("legacy archive/export runner unexpectedly exposes process error: %v", err)
+	}
+}
+
+func TestRunXcodebuildInterruptionPreservesRecognizedErrorsAndFinalOutputWithinBound(t *testing.T) {
+	tempDir := t.TempDir()
+	restore := overrideTestEnvironment(t)
+	commandContextFn = helperCommandContext(t, filepath.Join(tempDir, "commands.log"))
+	t.Cleanup(restore)
+
+	tests := []struct {
+		name            string
+		timeout         time.Duration
+		cancelWhenReady bool
+		wantCause       error
+	}{
+		{
+			name:      "deadline",
+			timeout:   2 * time.Second,
+			wantCause: context.DeadlineExceeded,
+		},
+		{
+			name:            "cancellation",
+			cancelWhenReady: true,
+			wantCause:       context.Canceled,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			if test.timeout > 0 {
+				ctx, cancel = context.WithTimeout(context.Background(), test.timeout)
+			}
+			defer cancel()
+
+			readyPath := filepath.Join(tempDir, test.name+".ready")
+			var readyResult <-chan error
+			if test.cancelWhenReady {
+				result := make(chan error, 1)
+				readyResult = result
+				go func() {
+					err := waitForHelperSignal(readyPath, 2*time.Second)
+					if err == nil {
+						cancel()
+					}
+					result <- err
+				}()
+			}
+
+			err := runXcodebuild(ctx, []string{"large-output-then-wait", readyPath}, nil)
+			if readyResult != nil {
+				if readyErr := <-readyResult; readyErr != nil {
+					t.Fatalf("wait for helper readiness: %v", readyErr)
+				}
+			}
+			if !errors.Is(err, test.wantCause) {
+				t.Fatalf("runXcodebuild() error = %v, want %v", err, test.wantCause)
+			}
+			if _, statErr := os.Stat(readyPath); statErr != nil {
+				t.Fatalf("helper readiness signal: %v", statErr)
+			}
+			for _, want := range []string{
+				"file.m:4:3: error: root cause",
+				"FINAL-BEFORE-INTERRUPTION",
+				"output truncated to 65536 bytes; preserving recognized errors and final output",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %q, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func waitForHelperSignal(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for %s", path)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -1299,6 +1577,327 @@ func TestTailBufferStringRemainsValidUTF8AfterByteTruncation(t *testing.T) {
 	}
 	if !strings.Contains(got, "界") {
 		t.Fatalf("String() = %q, want intact trailing diagnostic", got)
+	}
+}
+
+func renderXcodeDiagnosticOutput(t *testing.T, input string) (*xcodeDiagnosticBuffer, string) {
+	t.Helper()
+	buffer := newXcodeDiagnosticBuffer(xcodebuildErrorTailLimit, nil)
+	if _, err := io.WriteString(buffer, input); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	return buffer, buffer.String()
+}
+
+func requireBoundedXcodeDiagnosticOutput(t *testing.T, output string, values ...string) {
+	t.Helper()
+	if len(output) > xcodebuildErrorTailLimit || !utf8.ValidString(output) {
+		t.Fatalf("rendered output bytes = %d, valid UTF-8 = %t", len(output), utf8.ValidString(output))
+	}
+	for _, value := range values {
+		if !strings.Contains(output, value) {
+			t.Fatalf("String() dropped %q", value)
+		}
+	}
+}
+
+func countExactOutputLines(output string, value string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == value {
+			count++
+		}
+	}
+	return count
+}
+
+func TestXcodeDiagnosticBufferPreservesUntruncatedOutput(t *testing.T) {
+	for _, chunks := range [][]string{{"ab", "cd", "ef"}, {"abcd", "efgh"}} {
+		buffer := newXcodeDiagnosticBuffer(8, nil)
+		for _, chunk := range chunks {
+			if _, err := io.WriteString(buffer, chunk); err != nil {
+				t.Fatalf("Write(%q) error = %v", chunk, err)
+			}
+		}
+
+		want := strings.Join(chunks, "")
+		if buffer.Truncated() {
+			t.Fatalf("Truncated() = true for %q, want false", want)
+		}
+		if got := buffer.String(); got != want {
+			t.Fatalf("String() = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestXcodeDiagnosticBufferPreservesMiddleCompilerErrorFromLegacyTail(t *testing.T) {
+	const totalBytes = 90 * 1024
+	diagnostic := "file.m:4:3: error: middle root cause"
+	input := diagnostic + "\n"
+	input += strings.Repeat("h", 40*1024-len(input)) + "\n" + diagnostic + "\n"
+	input += strings.Repeat("t", totalBytes-len(input))
+
+	legacyTail := newTailBuffer(xcodebuildErrorTailLimit)
+	if _, err := legacyTail.Write([]byte(input)); err != nil {
+		t.Fatalf("legacy tail Write() error = %v", err)
+	}
+	if !strings.Contains(legacyTail.String(), diagnostic) {
+		t.Fatal("test precondition failed: legacy 64 KiB tail does not contain middle diagnostic")
+	}
+
+	_, got := renderXcodeDiagnosticOutput(t, input)
+	if !strings.Contains(got, diagnostic) {
+		t.Fatalf("String() dropped middle compiler diagnostic retained by legacy tail")
+	}
+	if got != legacyTail.String() {
+		t.Fatalf("String() did not preserve legacy tail when diagnostic was already present")
+	}
+	if count := countExactOutputLines(got, diagnostic); count != 1 {
+		t.Fatalf("diagnostic line count = %d, want 1", count)
+	}
+	requireBoundedXcodeDiagnosticOutput(t, got)
+}
+
+func TestXcodeDiagnosticBufferRenderedOutputStaysWithinLimit(t *testing.T) {
+	input := "file.m:4:3: error: root cause\n" +
+		strings.Repeat("界", xcodebuildErrorTailLimit) +
+		"\nFINAL-DIAGNOSTIC\n"
+	_, got := renderXcodeDiagnosticOutput(t, input)
+	requireBoundedXcodeDiagnosticOutput(t, got, "file.m:4:3: error: root cause", "FINAL-DIAGNOSTIC")
+}
+
+func TestXcodeDiagnosticBufferRetainsMissingErrorsOnce(t *testing.T) {
+	diagnostic := "/tmp/App/Assets.xcassets: error: App icon set missing"
+	benign := "Build summary mentions error: only as prose"
+	input := diagnostic + "\n" + diagnostic + "\n" + benign + "\n"
+	input += strings.Repeat("x", xcodebuildErrorTailLimit+128) + "\nFINAL-DIAGNOSTIC\n"
+
+	_, got := renderXcodeDiagnosticOutput(t, input)
+	if count := countExactOutputLines(got, diagnostic); count != 1 {
+		t.Fatalf("diagnostic count = %d, want 1", count)
+	}
+	if strings.Contains(got, benign) {
+		t.Fatalf("String() retained benign prose as a diagnostic: %q", got)
+	}
+	requireBoundedXcodeDiagnosticOutput(t, got, "FINAL-DIAGNOSTIC")
+}
+
+func TestXcodeDiagnosticBufferRetainsDiagnosticDisplacedByMissingPrefix(t *testing.T) {
+	missingDiagnostic := "error: " + strings.Repeat("a", 1024)
+	displacedDiagnostic := "error: displaced from the start of the legacy tail"
+	tail := "\n" + displacedDiagnostic + "\n"
+	tail += strings.Repeat("x", xcodebuildErrorTailLimit-len(tail))
+	input := missingDiagnostic + "\n" + strings.Repeat("o", 128) + tail
+
+	legacyTail := newTailBuffer(xcodebuildErrorTailLimit)
+	if _, err := legacyTail.Write([]byte(input)); err != nil {
+		t.Fatalf("legacy tail Write() error = %v", err)
+	}
+	if !strings.Contains(legacyTail.String(), displacedDiagnostic) {
+		t.Fatal("test precondition failed: displaced diagnostic is absent from the legacy tail")
+	}
+	if strings.Contains(legacyTail.String(), missingDiagnostic) {
+		t.Fatal("test precondition failed: missing diagnostic is present in the legacy tail")
+	}
+
+	_, got := renderXcodeDiagnosticOutput(t, input)
+	requireBoundedXcodeDiagnosticOutput(t, got, missingDiagnostic, displacedDiagnostic)
+}
+
+func TestXcodeDiagnosticBufferRetainsUncollectedTailBoundaryError(t *testing.T) {
+	var input strings.Builder
+	expectedDiagnostics := make(map[string]struct{})
+	for i := range 1000 {
+		diagnostic := fmt.Sprintf("error: early failure %04d", i)
+		expectedDiagnostics[diagnostic] = struct{}{}
+		input.WriteString(diagnostic + "\n")
+	}
+	boundaryDiagnostic := "error: actionable tail-boundary failure"
+	expectedDiagnostics[boundaryDiagnostic] = struct{}{}
+	input.WriteString(boundaryDiagnostic + "\n")
+	input.WriteString(strings.Repeat("x", xcodebuildErrorTailLimit-len(boundaryDiagnostic)-1))
+
+	legacyTail := newTailBuffer(xcodebuildErrorTailLimit)
+	if _, err := io.WriteString(legacyTail, input.String()); err != nil {
+		t.Fatalf("legacy tail Write() error = %v", err)
+	}
+	if !strings.Contains(legacyTail.String(), boundaryDiagnostic) {
+		t.Fatal("test precondition failed: boundary diagnostic is absent from the legacy tail")
+	}
+
+	_, got := renderXcodeDiagnosticOutput(t, input.String())
+	requireBoundedXcodeDiagnosticOutput(t, got, "error: early failure 0000", boundaryDiagnostic)
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "error:") {
+			if _, exists := expectedDiagnostics[line]; !exists {
+				t.Fatalf("String() emitted partial diagnostic line prefix %q", truncateUTF8Prefix(line, 120))
+			}
+		}
+	}
+}
+
+func TestXcodeDiagnosticBufferDoesNotDeduplicateAgainstBenignTailSubstring(t *testing.T) {
+	diagnostic := "error: root cause"
+	benign := "note: previous error: root cause was discussed"
+	input := diagnostic + "\n" + strings.Repeat("x", xcodebuildErrorTailLimit+128)
+	input += "\n" + benign + "\nFINAL-DIAGNOSTIC\n"
+	_, got := renderXcodeDiagnosticOutput(t, input)
+	if exactCount := countExactOutputLines(got, diagnostic); exactCount != 1 {
+		t.Fatalf("exact diagnostic line count = %d, want 1", exactCount)
+	}
+	if !strings.Contains(got, benign) {
+		t.Fatalf("String() dropped benign final output")
+	}
+}
+
+func TestXcodeDiagnosticBufferDoesNotLetVersionedProseExhaustDiagnosticBudget(t *testing.T) {
+	var input strings.Builder
+	for i := range 1000 {
+		fmt.Fprintf(&input, "Build 1.%d: error: only prose\n", i)
+	}
+	diagnostic := "error: actual root cause"
+	input.WriteString(diagnostic + "\n")
+	input.WriteString(strings.Repeat("x", xcodebuildErrorTailLimit+128))
+	input.WriteString("\nFINAL-DIAGNOSTIC\n")
+	_, got := renderXcodeDiagnosticOutput(t, input.String())
+	if !strings.Contains(got, diagnostic) {
+		t.Fatalf("String() dropped real diagnostic after versioned prose")
+	}
+	if strings.Contains(got, "error: only prose") {
+		t.Fatalf("String() retained versioned prose as diagnostics")
+	}
+}
+
+func TestXcodeDiagnosticBufferIndexesDenseTailOnce(t *testing.T) {
+	var input strings.Builder
+	for i := range 32 {
+		fmt.Fprintf(&input, "error: early failure %02d\n", i)
+	}
+	input.WriteString(strings.Repeat("\n", xcodebuildErrorTailLimit+128))
+	buffer, _ := renderXcodeDiagnosticOutput(t, input.String())
+
+	if allocations := testing.AllocsPerRun(1, func() {
+		_ = buffer.String()
+	}); allocations > 16 {
+		t.Fatalf("String() allocations = %.0f, want at most 16", allocations)
+	}
+}
+
+func TestXcodeDiagnosticBufferBoundsVeryLongErrorLine(t *testing.T) {
+	longDiagnostic := "error: " + strings.Repeat("界", xcodeDiagnosticLineLimit)
+	input := longDiagnostic + strings.Repeat("x", xcodebuildErrorTailLimit+128)
+	buffer, got := renderXcodeDiagnosticOutput(t, input)
+	if !strings.Contains(got, "error: ") {
+		t.Fatalf("String() dropped bounded long diagnostic")
+	}
+	requireBoundedXcodeDiagnosticOutput(t, got)
+	if buffer.diagnosticBytes > buffer.diagnosticBudget() {
+		t.Fatalf("stored diagnostic bytes = %d, budget = %d", buffer.diagnosticBytes, buffer.diagnosticBudget())
+	}
+	for _, diagnostic := range buffer.diagnostics {
+		if len(diagnostic) > xcodeDiagnosticLineLimit {
+			t.Fatalf("stored diagnostic bytes = %d, line limit = %d", len(diagnostic), xcodeDiagnosticLineLimit)
+		}
+	}
+}
+
+func TestXcodeDiagnosticBufferBoundsManyUniqueErrors(t *testing.T) {
+	var input strings.Builder
+	for i := range 5000 {
+		fmt.Fprintf(&input, "error: distinct failure %04d\n", i)
+	}
+	input.WriteString(strings.Repeat("x", xcodebuildErrorTailLimit+128))
+	input.WriteString("\nFINAL-DIAGNOSTIC\n")
+	buffer, got := renderXcodeDiagnosticOutput(t, input.String())
+	requireBoundedXcodeDiagnosticOutput(t, got, "error: distinct failure 0000", "FINAL-DIAGNOSTIC")
+	if buffer.diagnosticBytes > buffer.diagnosticBudget() {
+		t.Fatalf("stored diagnostic bytes = %d, budget = %d", buffer.diagnosticBytes, buffer.diagnosticBudget())
+	}
+}
+
+func TestXcodeDiagnosticBufferRecognizesDiagnosticSplitAcrossWrites(t *testing.T) {
+	buffer := newXcodeDiagnosticBuffer(xcodebuildErrorTailLimit, nil)
+	for _, chunk := range []string{
+		"Sources/App.swift:12:7: er",
+		"ror: split root cause",
+		"\n",
+		strings.Repeat("x", xcodebuildErrorTailLimit+128),
+	} {
+		if _, err := io.WriteString(buffer, chunk); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+	}
+
+	got := buffer.String()
+	if !strings.Contains(got, "Sources/App.swift:12:7: error: split root cause") {
+		t.Fatalf("String() dropped diagnostic split across writes")
+	}
+}
+
+func TestXcodeDiagnosticBufferSerializesConcurrentWrites(t *testing.T) {
+	var streamed bytes.Buffer
+	buffer := newXcodeDiagnosticBuffer(xcodebuildErrorTailLimit, &streamed)
+
+	var writers sync.WaitGroup
+	for range 2 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for range 100 {
+				if _, err := buffer.Write([]byte("ordinary build output\n")); err != nil {
+					t.Errorf("Write() error = %v", err)
+					return
+				}
+			}
+		}()
+	}
+	writers.Wait()
+
+	if got := buffer.String(); got != streamed.String() {
+		t.Fatalf("captured output differs from streamed output")
+	}
+}
+
+func TestRunXcodebuildPreservesCombinedChildStreamOrder(t *testing.T) {
+	restore := overrideTestEnvironment(t)
+	commandContextFn = helperCommandContext(t, filepath.Join(t.TempDir(), "commands.log"))
+	t.Cleanup(restore)
+
+	const want = "FIRST-STDOUT\nSECOND-STDERR\nTHIRD-STDOUT\nFINAL-STDERR\n"
+	var streamed bytes.Buffer
+	if err := runXcodebuild(context.Background(), []string{"alternating-stream-output"}, &streamed); err != nil {
+		t.Fatalf("runXcodebuild() error = %v", err)
+	}
+	if got := streamed.String(); got != want {
+		t.Fatalf("streamed output = %q, want child write order %q", got, want)
+	}
+}
+
+func TestIsXcodeErrorDiagnostic(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "source location", line: "Sources/App.swift:12:7: error: cannot find value", want: true},
+		{name: "line leading", line: "error: emit-module command failed", want: true},
+		{name: "fatal line leading", line: "fatal error: module map missing", want: true},
+		{name: "known tool", line: "clang: error: linker command failed", want: true},
+		{name: "xcrun tool", line: "xcrun: error: invalid active developer path", want: true},
+		{name: "path only", line: "/tmp/App/Assets.xcassets: error: App icon set missing", want: true},
+		{name: "project path only", line: "App.xcodeproj: error: Missing package product", want: true},
+		{name: "benign prose", line: "Build summary mentions error: only as prose"},
+		{name: "versioned prose", line: "Build 1.2: error: only prose"},
+		{name: "quoted note", line: "note: error: appeared in generated documentation"},
+		{name: "empty error", line: "error:"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isXcodeErrorDiagnostic(test.line); got != test.want {
+				t.Fatalf("isXcodeErrorDiagnostic(%q) = %t, want %t", test.line, got, test.want)
+			}
+		})
 	}
 }
 
@@ -1442,6 +2041,14 @@ func TestXcodeHelperProcess(t *testing.T) {
 		if output := os.Getenv("ASC_XCODE_HELPER_VALIDATE_OUTPUT"); output != "" {
 			fmt.Fprint(os.Stderr, output)
 		}
+		if code := os.Getenv("ASC_XCODE_HELPER_VALIDATE_EXIT_CODE"); code != "" {
+			parsed, err := strconv.Atoi(code)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			os.Exit(parsed)
+		}
 		os.Exit(0)
 	}
 
@@ -1552,10 +2159,40 @@ func TestXcodeHelperProcess(t *testing.T) {
 	}
 
 	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "fail-large-output" {
-		fmt.Fprint(os.Stderr, "EARLY-MARKER\n")
+		fmt.Fprint(os.Stderr, "file.m:4:3: error: root cause\n")
 		fmt.Fprint(os.Stderr, strings.Repeat("x", xcodebuildErrorTailLimit+128))
-		fmt.Fprint(os.Stderr, "\nLATE-MARKER\n")
+		fmt.Fprint(os.Stderr, "\nFINAL-DIAGNOSTIC\n")
 		os.Exit(1)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "alternating-stream-output" {
+		stdoutInfo, stdoutErr := os.Stdout.Stat()
+		stderrInfo, stderrErr := os.Stderr.Stat()
+		fmt.Fprint(os.Stdout, "FIRST-STDOUT\n")
+		fmt.Fprint(os.Stderr, "SECOND-STDERR\n")
+		fmt.Fprint(os.Stdout, "THIRD-STDOUT\n")
+		fmt.Fprint(os.Stderr, "FINAL-STDERR\n")
+		if stdoutErr != nil || stderrErr != nil || !os.SameFile(stdoutInfo, stderrInfo) {
+			fmt.Fprintln(os.Stderr, "stdout and stderr do not share one ordered descriptor")
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "large-output-then-wait" {
+		if len(commandArgs) < 3 {
+			fmt.Fprintln(os.Stderr, "missing helper readiness path")
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stderr, "file.m:4:3: error: root cause\n")
+		fmt.Fprint(os.Stderr, strings.Repeat("x", xcodebuildErrorTailLimit+128))
+		fmt.Fprint(os.Stderr, "\nFINAL-BEFORE-INTERRUPTION\n")
+		if err := os.WriteFile(commandArgs[2], []byte("ready"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		time.Sleep(5 * time.Second)
+		os.Exit(0)
 	}
 
 	fmt.Fprintf(os.Stderr, "unexpected helper invocation: %v\n", commandArgs)

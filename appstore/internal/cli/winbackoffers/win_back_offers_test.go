@@ -11,11 +11,21 @@ func TestWinBackOffersCreateHelpDescribesPricePointIDs(t *testing.T) {
 	if priceFlag == nil {
 		t.Fatal("expected --price flag")
 	}
-	if got := priceFlag.Usage; got != "Subscription price point ID(s), comma-separated" {
+	if got := priceFlag.Usage; got != "Subscription price point ID(s), comma-separated (required for paid offer modes)" {
 		t.Fatalf("unexpected --price usage: %q", got)
 	}
 	if !strings.Contains(cmd.LongHelp, `--price "SUBSCRIPTION_PRICE_POINT_ID"`) {
 		t.Fatalf("expected long help to describe subscription price point IDs, got %q", cmd.LongHelp)
+	}
+	territoryFlag := cmd.FlagSet.Lookup("territory")
+	if territoryFlag == nil {
+		t.Fatal("expected --territory flag")
+	}
+	if !strings.Contains(territoryFlag.Usage, "FREE_TRIAL") {
+		t.Fatalf("unexpected --territory usage: %q", territoryFlag.Usage)
+	}
+	if !strings.Contains(cmd.LongHelp, `--offer-mode FREE_TRIAL`) || !strings.Contains(cmd.LongHelp, `--territory "USA,FRA"`) {
+		t.Fatalf("expected long help to include a FREE_TRIAL example, got %q", cmd.LongHelp)
 	}
 }
 

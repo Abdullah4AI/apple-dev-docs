@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"path/filepath"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestBackgroundAssetsListCommand_MissingApp(t *testing.T) {
@@ -195,5 +199,35 @@ func TestBackgroundAssetsUploadFilesUpdateCommand_MissingUploaded(t *testing.T) 
 
 	if err := cmd.Exec(context.Background(), []string{}); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected flag.ErrHelp when --uploaded is missing, got %v", err)
+	}
+}
+
+func TestBackgroundAssetsUploadFilesUpdateCommand_FileRequiresChecksumBeforeFileOrClientAccess(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "missing.zip")
+	clientFactoryCalled := false
+	restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientFactoryCalled = true
+		return nil, errors.New("client factory must not run during flag validation")
+	})
+	defer restore()
+
+	cmd := BackgroundAssetsUploadFilesUpdateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--upload-file-id", "UPLOAD_ID",
+		"--uploaded", "true",
+		"--file", filePath,
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	err := cmd.Exec(context.Background(), nil)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp when --file is used without --checksum, got %v", err)
+	}
+	if got, want := err.Error(), "--file requires --checksum"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+	if clientFactoryCalled {
+		t.Fatal("client factory ran before --file/--checksum validation")
 	}
 }

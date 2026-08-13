@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -257,7 +258,9 @@ func resolveTiersWithFetcher(
 	}
 
 	if len(tiers) > 0 {
-		_ = saveCache(tiers)
+		if err := saveCache(tiers); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to cache price tiers: %v\n", err)
+		}
 	}
 
 	return tiers, nil

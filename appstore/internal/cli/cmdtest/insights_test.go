@@ -664,7 +664,7 @@ func TestInsightsWeeklyAnalyticsNestedForbiddenReturnsUnavailable(t *testing.T) 
 		case "/v1/apps/app-1/analyticsReportRequests":
 			return insightsJSONResponse(`{
 				"data":[
-					{"type":"analyticsReportRequests","id":"req-1","attributes":{"state":"COMPLETED","createdDate":"2026-02-16T10:00:00Z"}}
+					{"type":"analyticsReportRequests","id":"req-1","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}
 				],
 				"links":{"next":""}
 			}`), nil

@@ -131,7 +131,8 @@ func TestCertificatesCSRGenerate_GeneratesKeyAndCSR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParsePKCS8PrivateKey() error: %v", err)
 	}
-	if _, ok := privAny.(*rsa.PrivateKey); !ok {
+	privateKey, ok := privAny.(*rsa.PrivateKey)
+	if !ok {
 		t.Fatalf("expected RSA private key, got %T", privAny)
 	}
 
@@ -150,6 +151,13 @@ func TestCertificatesCSRGenerate_GeneratesKeyAndCSR(t *testing.T) {
 	}
 	if err := csr.CheckSignature(); err != nil {
 		t.Fatalf("CSR signature invalid: %v", err)
+	}
+	csrPublicKey, ok := csr.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected RSA CSR public key, got %T", csr.PublicKey)
+	}
+	if privateKey.E != csrPublicKey.E || privateKey.N.Cmp(csrPublicKey.N) != 0 {
+		t.Fatal("generated private key does not match CSR public key")
 	}
 	if csr.Subject.CommonName != "ASC Signing" {
 		t.Fatalf("expected CSR CN ASC Signing, got %q", csr.Subject.CommonName)
@@ -252,6 +260,249 @@ func TestCertificatesCSRGenerate_DoesNotOrphanKeyWhenCSROutExistsWithoutForce(t 
 	}
 	if string(csrData) != "OLD-CSR" {
 		t.Fatalf("expected csr file unchanged, got %q", string(csrData))
+	}
+}
+
+func TestCertificatesCSRGenerate_ValidatesLexicallyNestedOutputPaths(t *testing.T) {
+	tests := []struct {
+		name       string
+		keyParts   []string
+		csrParts   []string
+		force      bool
+		wantNested bool
+	}{
+		{
+			name:       "key output contains CSR output",
+			keyParts:   []string{"output"},
+			csrParts:   []string{"output", "request.csr"},
+			wantNested: true,
+		},
+		{
+			name:       "CSR output contains key output with force",
+			keyParts:   []string{"output", "private.key"},
+			csrParts:   []string{"output"},
+			force:      true,
+			wantNested: true,
+		},
+		{
+			name:     "sibling prefix remains valid",
+			keyParts: []string{"output"},
+			csrParts: []string{"output-extra", "request.csr"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			keyOut := filepath.Join(append([]string{dir}, test.keyParts...)...)
+			csrOut := filepath.Join(append([]string{dir}, test.csrParts...)...)
+			args := []string{
+				"certificates", "csr", "generate",
+				"--key-out", keyOut,
+				"--csr-out", csrOut,
+				"--output", "json",
+			}
+			if test.force {
+				args = append(args, "--force")
+			}
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			var runErr error
+			stdout, _ := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if test.wantNested {
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Errorf("run error = %v, want flag.ErrHelp", runErr)
+				}
+				if runErr == nil || runErr.Error() != "--key-out and --csr-out must not be nested paths" {
+					t.Errorf("run error = %v, want nested-path error", runErr)
+				}
+				if stdout != "" {
+					t.Errorf("stdout = %q, want empty output", stdout)
+				}
+				for _, path := range []string{keyOut, csrOut} {
+					if _, err := os.Lstat(path); err == nil {
+						t.Errorf("output artifact %q was created", path)
+					} else if !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("Lstat(%q) error = %v, want not exist", path, err)
+					}
+				}
+				return
+			}
+
+			if runErr != nil {
+				t.Fatalf("run error: %v", runErr)
+			}
+			if stdout == "" {
+				t.Fatal("expected generated output")
+			}
+			for _, path := range []string{keyOut, csrOut} {
+				if info, err := os.Lstat(path); err != nil {
+					t.Fatalf("Lstat(%q) error: %v", path, err)
+				} else if !info.Mode().IsRegular() {
+					t.Fatalf("output %q mode = %v, want regular file", path, info.Mode())
+				}
+			}
+		})
+	}
+}
+
+func TestCertificatesCSRGenerate_RejectsEquivalentSpellingsOfSameOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "cert.key")
+	if err := os.WriteFile(keyOut, []byte("original-private-key"), 0o600); err != nil {
+		t.Fatalf("WriteFile(keyOut) error: %v", err)
+	}
+	t.Chdir(dir)
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"certificates", "csr", "generate",
+			"--key-out", "cert.key",
+			"--csr-out", keyOut,
+			"--force",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("run error = %v, want usage error", runErr)
+	}
+	if got, want := runErr.Error(), "--key-out and --csr-out must be different paths"; got != want {
+		t.Fatalf("run error = %q, want %q", got, want)
+	}
+	if !strings.Contains(stderr, "--key-out and --csr-out must be different paths") {
+		t.Fatalf("stderr = %q, want same-path usage error", stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty output", stdout)
+	}
+	keyContents, err := os.ReadFile(keyOut)
+	if err != nil {
+		t.Fatalf("ReadFile(keyOut) error: %v", err)
+	}
+	if string(keyContents) != "original-private-key" {
+		t.Errorf("key contents = %q, want original key", keyContents)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(dir) error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("unexpected output artifacts: %v", entries)
+	}
+}
+
+func TestCertificatesCSRGenerate_ForcePreflightsCSRDestination(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, string) string
+		want  string
+	}{
+		{
+			name: "parent is a file",
+			setup: func(t *testing.T, dir string) string {
+				parent := filepath.Join(dir, "blocked-parent")
+				if err := os.WriteFile(parent, []byte("not-a-directory"), 0o600); err != nil {
+					t.Fatalf("WriteFile(parent) error: %v", err)
+				}
+				return filepath.Join(parent, "cert.csr")
+			},
+			want: "not a directory",
+		},
+		{
+			name: "destination is a directory",
+			setup: func(t *testing.T, dir string) string {
+				destination := filepath.Join(dir, "cert.csr")
+				if err := os.Mkdir(destination, 0o700); err != nil {
+					t.Fatalf("Mkdir(destination) error: %v", err)
+				}
+				return destination
+			},
+			want: "directory",
+		},
+		{
+			name: "destination is a symlink",
+			setup: func(t *testing.T, dir string) string {
+				target := filepath.Join(dir, "target.csr")
+				if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+					t.Fatalf("WriteFile(target) error: %v", err)
+				}
+				destination := filepath.Join(dir, "cert.csr")
+				if err := os.Symlink(target, destination); err != nil {
+					t.Skipf("symlink not supported: %v", err)
+				}
+				return destination
+			},
+			want: "symlink",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			keyOut := filepath.Join(dir, "cert.key")
+			if err := os.WriteFile(keyOut, []byte("original-private-key"), 0o600); err != nil {
+				t.Fatalf("WriteFile(keyOut) error: %v", err)
+			}
+			originalKeyInfo, err := os.Stat(keyOut)
+			if err != nil {
+				t.Fatalf("Stat(keyOut) error: %v", err)
+			}
+			csrOut := test.setup(t, dir)
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			var runErr error
+			stdout, _ := captureOutput(t, func() {
+				if err := root.Parse([]string{
+					"certificates", "csr", "generate",
+					"--key-out", keyOut,
+					"--csr-out", csrOut,
+					"--force",
+					"--output", "json",
+				}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if runErr == nil {
+				t.Fatal("expected CSR destination failure")
+			}
+			if !strings.Contains(runErr.Error(), "write --csr-out") || !strings.Contains(strings.ToLower(runErr.Error()), test.want) {
+				t.Fatalf("run error = %q, want CSR %q failure", runErr, test.want)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty output", stdout)
+			}
+			keyContents, err := os.ReadFile(keyOut)
+			if err != nil {
+				t.Fatalf("ReadFile(keyOut) error: %v", err)
+			}
+			if string(keyContents) != "original-private-key" {
+				t.Errorf("key contents = %q, want original key", keyContents)
+			}
+			currentKeyInfo, err := os.Stat(keyOut)
+			if err != nil {
+				t.Fatalf("Stat(keyOut) after failure error: %v", err)
+			}
+			if !os.SameFile(originalKeyInfo, currentKeyInfo) {
+				t.Error("key inode changed before deterministic CSR destination failure")
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
 func TestParseStringsContent(t *testing.T) {
@@ -244,6 +245,61 @@ func TestValidateVersionLocalizationAttributesRejectsRawKeywordCharacters(t *tes
 	}
 	if err.Error() != "keywords exceed 100 characters" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVersionLocalizationAttributesRejectsKnownConstraints(t *testing.T) {
+	tests := []struct {
+		name      string
+		attrs     asc.AppStoreVersionLocalizationAttributes
+		wantError string
+	}{
+		{
+			name:      "description length",
+			attrs:     asc.AppStoreVersionLocalizationAttributes{Description: strings.Repeat("d", validation.LimitDescription+1)},
+			wantError: "description exceeds 4000 characters",
+		},
+		{
+			name:      "whats new length",
+			attrs:     asc.AppStoreVersionLocalizationAttributes{WhatsNew: strings.Repeat("n", validation.LimitWhatsNew+1)},
+			wantError: "whatsNew exceeds 4000 characters",
+		},
+		{
+			name:      "promotional text length",
+			attrs:     asc.AppStoreVersionLocalizationAttributes{PromotionalText: strings.Repeat("p", validation.LimitPromotionalText+1)},
+			wantError: "promotionalText exceeds 170 characters",
+		},
+		{
+			name:      "marketing URI",
+			attrs:     asc.AppStoreVersionLocalizationAttributes{MarketingURL: "://invalid"},
+			wantError: "marketingUrl must be a valid URI",
+		},
+		{
+			name:      "support URI",
+			attrs:     asc.AppStoreVersionLocalizationAttributes{SupportURL: "://invalid"},
+			wantError: "supportUrl must be a valid URI",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateVersionLocalizationAttributes(test.attrs)
+			if err == nil {
+				t.Fatal("expected attribute validation error")
+			}
+			if err.Error() != test.wantError {
+				t.Fatalf("validation error = %q, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateVersionLocalizationAttributesKeepsWarningsNonfatal(t *testing.T) {
+	err := ValidateVersionLocalizationAttributes(asc.AppStoreVersionLocalizationAttributes{
+		MarketingURL: "ftp://example.com/archive#part",
+	})
+	if err != nil {
+		t.Fatalf("expected valid absolute URI to remain nonfatal, got %v", err)
 	}
 }
 

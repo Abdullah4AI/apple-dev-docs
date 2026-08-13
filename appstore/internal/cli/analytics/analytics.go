@@ -33,7 +33,7 @@ Examples:
 			AnalyticsSalesCommand(),
 			AnalyticsRequestCommand(),
 			AnalyticsRequestsCommand(),
-			AnalyticsGetCommand(),
+			AnalyticsViewCommand(),
 			AnalyticsReportsCommand(),
 			AnalyticsInstancesCommand(),
 			AnalyticsSegmentsCommand(),

@@ -2,11 +2,15 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestWebhooksListRejectsInvalidNextURL(t *testing.T) {
@@ -51,6 +55,54 @@ func TestWebhooksListRejectsInvalidNextURL(t *testing.T) {
 			}
 			if stderr != "" {
 				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+		})
+	}
+}
+
+func TestWebhooksListRejectsNextQueryFlagConflicts(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/apps/app-2/webhooks?cursor=AQ"
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "app before next",
+			args:    []string{"webhooks", "list", "--app", "app-1", "--next", nextURL},
+			wantErr: "webhooks list: --next cannot be combined with --app",
+		},
+		{
+			name:    "explicit empty app after next",
+			args:    []string{"webhooks", "list", "--next", nextURL, "--app", ""},
+			wantErr: "webhooks list: --next cannot be combined with --app",
+		},
+		{
+			name:    "limit after next",
+			args:    []string{"webhooks", "list", "--next", nextURL, "--limit", "5"},
+			wantErr: "webhooks list: --next cannot be combined with --limit",
+		},
+		{
+			name:    "out of range limit before next",
+			args:    []string{"webhooks", "list", "--limit", "201", "--next", nextURL},
+			wantErr: "webhooks list: --next cannot be combined with --limit",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientFactoryCalled := false
+			restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientFactoryCalled = true
+				return nil, errors.New("client factory must not run during validation")
+			})
+			defer restore()
+
+			assertUsageExit(t, test.args, test.wantErr)
+			if clientFactoryCalled {
+				t.Fatal("client factory ran before --next conflict validation")
 			}
 		})
 	}
@@ -103,7 +155,7 @@ func TestWebhooksListPaginateFromNext(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"webhooks", "list", "--app", "app-1", "--paginate", "--next", firstURL}); err != nil {
+		if err := root.Parse([]string{"webhooks", "list", "--paginate", "--next", firstURL}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

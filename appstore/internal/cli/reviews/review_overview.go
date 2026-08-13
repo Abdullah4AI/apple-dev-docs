@@ -69,6 +69,14 @@ type reviewDoctorResult struct {
 	NextAction             string                   `json:"nextAction"`
 	BlockingChecks         []validation.CheckResult `json:"blockingChecks,omitempty"`
 	WarningChecks          []validation.CheckResult `json:"warningChecks,omitempty"`
+	CoverageWarnings       []reviewCoverageWarning  `json:"coverageWarnings"`
+}
+
+type reviewCoverageWarning struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	Remediation string `json:"remediation"`
 }
 
 // ReviewStatusCommand returns an app-scoped review status command.
@@ -554,6 +562,7 @@ func buildReviewDoctorResult(snapshot reviewSnapshot, report validation.Report) 
 		NextAction:             "Create or select an App Store version before diagnosing review blockers.",
 		BlockingChecks:         make([]validation.CheckResult, 0),
 		WarningChecks:          make([]validation.CheckResult, 0),
+		CoverageWarnings:       reviewDoctorCoverageWarnings(),
 	}
 
 	if snapshot.Version == nil {
@@ -626,10 +635,21 @@ func buildReviewDoctorResult(snapshot reviewSnapshot, report validation.Report) 
 	case strings.EqualFold(strings.TrimSpace(snapshot.Version.State), "READY_FOR_SALE"):
 		result.NextAction = "No action needed."
 	default:
-		result.NextAction = "No submission blockers detected. Submit the version when ready."
+		result.NextAction = "No public-API submission blockers detected. Verify App Store Regulations and Permits in App Store Connect before submission."
 	}
 
 	return result
+}
+
+func reviewDoctorCoverageWarnings() []reviewCoverageWarning {
+	return []reviewCoverageWarning{
+		{
+			ID:          "review.coverage.app_store_regulations_and_permits",
+			Status:      "NOT_CHECKED",
+			Message:     "App Store Regulations and Permits declarations, including the personal-service declaration, are managed on the App Store Connect website and are not checked by asc review doctor.",
+			Remediation: "Verify App Store Regulations and Permits in App Store Connect before submission.",
+		},
+	}
 }
 
 func reviewPostCompleteAction(versionState string) string {
@@ -695,6 +715,12 @@ func renderReviewDoctor(result reviewDoctorResult, markdown bool) {
 		{"latestSubmissionId", shared.OrNA(reviewSubmissionField(result.LatestSubmission, func(s *reviewSubmissionContext) string { return s.ID }))},
 	}
 	shared.RenderSection("Current Review", []string{"field", "value"}, contextRows, markdown)
+
+	coverageRows := make([][]string, 0, len(result.CoverageWarnings))
+	for _, warning := range result.CoverageWarnings {
+		coverageRows = append(coverageRows, []string{warning.ID, warning.Status, warning.Message, warning.Remediation})
+	}
+	shared.RenderSection("Coverage Warnings", []string{"id", "status", "message", "remediation"}, coverageRows, markdown)
 
 	if len(result.BlockingChecks) > 0 {
 		blockerRows := make([][]string, 0, len(result.BlockingChecks))

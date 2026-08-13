@@ -505,6 +505,17 @@ func loginWithOptionalTwoFactorUsing(ctx context.Context, progressMessage, apple
 			}
 			_, _ = fmt.Fprintln(twoFactorStatusWriter, "Trusted-device verification was rejected. Enter the phone verification code that was just sent.")
 		}
+		writeInitialPhoneFallbackGuidance := func() {
+			if challenge == nil || !challenge.PhoneFallbackAvailable || twoFactorStatusWriter == nil {
+				return
+			}
+			destination := strings.TrimSpace(challenge.Destination)
+			if destination != "" {
+				_, _ = fmt.Fprintf(twoFactorStatusWriter, "Need a phone verification code? Enter an incorrect trusted-device code once; Apple will then deliver a verification code to %s.\n", destination)
+				return
+			}
+			_, _ = fmt.Fprintln(twoFactorStatusWriter, "Need a phone verification code? Enter an incorrect trusted-device code once; Apple will then deliver a verification code to your registered phone number.")
+		}
 		readCode := func() (string, error) {
 			if command != "" {
 				return readTwoFactorCodeFromCommandFn(ctx, command)
@@ -512,6 +523,9 @@ func loginWithOptionalTwoFactorUsing(ctx context.Context, progressMessage, apple
 			return promptTwoFactorCodeFn()
 		}
 		if code == "" {
+			if command == "" {
+				writeInitialPhoneFallbackGuidance()
+			}
 			if challenge != nil && challenge.IsPhoneMethod() {
 				challenge, prepErr = ensureTwoFactorCodeRequestedFn(ctx, session)
 				if prepErr != nil {
@@ -931,6 +945,11 @@ Two-factor input options:
   - --two-factor-code-command
   - %s environment variable (recommended for automation)
   - --two-factor-code (deprecated compatibility alias when the code is already known)
+
+Phone-code fallback (including SMS):
+  - interactive: if Apple offers a registered phone fallback, enter an incorrect trusted-device code once
+  - Apple then delivers a phone verification code and asc prompts again
+  - automated: asc reruns the configured 2FA code command after phone fallback
 
 Provider selection:
   - --public-provider-id selects the public App Store Connect provider/team ID

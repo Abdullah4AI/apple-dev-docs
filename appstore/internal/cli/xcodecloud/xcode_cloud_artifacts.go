@@ -195,6 +195,9 @@ Examples:
 }
 
 func validateArtifactDestination(path string, overwrite bool) error {
+	if len(path) > 0 && os.IsPathSeparator(path[len(path)-1]) {
+		return fmt.Errorf("output path %q must be a file", path)
+	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

@@ -173,6 +173,14 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
+			includeValues, err := normalizeAppStoreVersionInclude(*include)
+			if err != nil {
+				return shared.UsageErrorf("versions view: %v", err)
+			}
+			if len(includeValues) > 0 && (*includeBuild || *includeSubmission) {
+				return shared.UsageError("--include cannot be used with --include-build or --include-submission")
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("versions view: %w", err)
@@ -181,16 +189,7 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			includeValues, err := normalizeAppStoreVersionInclude(*include)
-			if err != nil {
-				return fmt.Errorf("versions view: %w", err)
-			}
 			if len(includeValues) > 0 {
-				if *includeBuild || *includeSubmission {
-					fmt.Fprintln(os.Stderr, "Error: --include cannot be used with --include-build or --include-submission")
-					return flag.ErrHelp
-				}
-
 				apiIncludes, includeAgeRating := splitCompatAppStoreVersionIncludes(includeValues)
 				var versionResp *asc.AppStoreVersionResponse
 				if len(apiIncludes) > 0 {
@@ -536,6 +535,11 @@ func VersionsAttachBuildCommand() *ffcli.Command {
 		ShortUsage: "asc versions attach-build [flags]",
 		ShortHelp:  "Attach a build to an app store version.",
 		LongHelp: `Attach a build to an app store version.
+
+To find the version and build IDs, list each resource for the app and use its
+returned id field:
+  asc versions list --app "APP_ID" --paginate --output json
+  asc builds list --app "APP_ID" --paginate --output json
 
 Examples:
   asc versions attach-build --version-id "VERSION_ID" --build-id "BUILD_ID"`,

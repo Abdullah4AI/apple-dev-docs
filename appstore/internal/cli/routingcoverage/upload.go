@@ -459,26 +459,14 @@ func uploadPreparedRoutingCoverageFile(ctx context.Context, client *asc.Client, 
 		return cleanupFailure(fmt.Errorf("no upload operations returned"))
 	}
 
+	// The upload streams from an unlinked snapshot that was size- and checksum-
+	// verified before the reservation, and the upload only reads it, so there is
+	// nothing left to re-verify once the operations complete.
 	uploadCtx, uploadCancel := shared.ContextWithUploadTimeout(ctx)
 	err = asc.ExecuteUploadOperationsFromFile(uploadCtx, source, response.Data.Attributes.UploadOperations)
 	uploadCancel()
 	if err != nil {
 		return cleanupFailure(fmt.Errorf("upload failed: %w", err))
-	}
-
-	uploadedInfo, err := source.Stat()
-	if err != nil {
-		return cleanupFailure(fmt.Errorf("stat file: %w", err))
-	}
-	if uploadedInfo.Size() != file.FileSize {
-		return cleanupFailure(fmt.Errorf("file changed during upload: %q", file.Path))
-	}
-	uploadedChecksum, err := checksumOpenedFile(source, uploadedInfo.Size())
-	if err != nil {
-		return cleanupFailure(fmt.Errorf("checksum failed: %w", err))
-	}
-	if !strings.EqualFold(strings.TrimSpace(uploadedChecksum.Hash), strings.TrimSpace(file.Checksum)) {
-		return cleanupFailure(fmt.Errorf("file changed during upload: %q", file.Path))
 	}
 
 	uploaded := true

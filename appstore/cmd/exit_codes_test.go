@@ -129,6 +129,18 @@ func TestExitCodeConstants(t *testing.T) {
 	}
 }
 
+func TestExitHTTPUnprocessableMatchesRuntimeMapping(t *testing.T) {
+	const want = 10 + (http.StatusUnprocessableEntity - 400)
+
+	err := &asc.APIError{StatusCode: http.StatusUnprocessableEntity}
+	if got := ExitCodeFromError(err); got != want {
+		t.Fatalf("ExitCodeFromError(HTTP 422) = %d, want %d", got, want)
+	}
+	if ExitHTTPUnprocessable != want {
+		t.Fatalf("ExitHTTPUnprocessable = %d, want %d", ExitHTTPUnprocessable, want)
+	}
+}
+
 func TestAPIErrorCodeToExitCode(t *testing.T) {
 	tests := []struct {
 		name     string

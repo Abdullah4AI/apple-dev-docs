@@ -12,7 +12,6 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	signingpkg "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/signing"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/urlsanitize"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
@@ -95,7 +94,7 @@ func syncPushCommand() *ffcli.Command {
 	password := fs.String("password", "", "Encryption password (or ASC_MATCH_PASSWORD env)")
 	branch := fs.String("branch", "main", "Git branch")
 	certType := fs.String("certificate-type", "", "Certificate type filter (optional)")
-	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (for development profiles)")
+	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (required with --create-missing for development profiles; deprecated and ignored without it until 5.0.0)")
 	createMissing := fs.Bool("create-missing", false, "Create missing profiles")
 	output := shared.BindOutputFlags(fs)
 
@@ -122,6 +121,7 @@ func syncPushCommand() *ffcli.Command {
 			if repo == "" {
 				return shared.UsageError("--repo is required")
 			}
+			warnDeviceWithoutCreateMissing(*deviceIDs, *createMissing)
 			if *createMissing && isDevelopmentProfile(profType) && strings.TrimSpace(*deviceIDs) == "" {
 				return shared.UsageError("--device is required for development profiles with --create-missing")
 			}
@@ -177,7 +177,9 @@ func syncPushCommand() *ffcli.Command {
 					CertificateType:    *certType,
 					DeviceIDs:          shared.SplitCSV(*deviceIDs),
 					CreateMissing:      *createMissing,
-					BeforeCreate:       prepareRepository,
+					BeforeCreate: func(profileCreatePlan) error {
+						return prepareRepository()
+					},
 					CreateContext: func() (context.Context, context.CancelFunc) {
 						return shared.ContextWithTimeout(ctx)
 					},
@@ -343,7 +345,7 @@ func syncPullCommand() *ffcli.Command {
 }
 
 func sanitizeRepoURLForOutput(raw string) string {
-	return urlsanitize.SanitizeURLForLog(raw, urlsanitize.DefaultSignedQueryKeys, urlsanitize.DefaultSensitiveQueryKeys)
+	return signingpkg.RedactRepoURL(raw)
 }
 
 func writeDecryptedOutputFile(outDir, relPath string, plaintext []byte) error {

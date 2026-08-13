@@ -27,11 +27,6 @@ func normalizeScreenshotDisplayType(input string) (string, error) {
 	return value, nil
 }
 
-// NormalizeScreenshotDisplayType normalizes and validates a screenshot display type.
-func NormalizeScreenshotDisplayType(input string) (string, error) {
-	return normalizeScreenshotDisplayType(input)
-}
-
 func validateScreenshotDimensions(files []string, displayType string) error {
 	for _, filePath := range files {
 		if err := asc.ValidateScreenshotDimensions(filePath, displayType); err != nil {
@@ -39,11 +34,6 @@ func validateScreenshotDimensions(files []string, displayType string) error {
 		}
 	}
 	return nil
-}
-
-// ValidateScreenshotDimensions validates screenshot dimensions for all files.
-func ValidateScreenshotDimensions(files []string, displayType string) error {
-	return validateScreenshotDimensions(files, displayType)
 }
 
 func uploadScreenshots(ctx context.Context, client *asc.Client, localizationID, displayType string, files []string, skipExisting, replace, dryRun bool) (asc.AppScreenshotUploadResult, error) {

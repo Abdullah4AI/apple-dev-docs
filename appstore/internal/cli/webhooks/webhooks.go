@@ -77,6 +77,12 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("webhooks list: %w", err)
+			}
+			if err := rejectWebhooksListNextFlagConflicts(fs, *next, "app", "limit"); err != nil {
+				return err
+			}
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
@@ -84,9 +90,6 @@ Examples:
 			}
 			if *limit != 0 && (*limit < 1 || *limit > webhooksMaxLimit) {
 				return fmt.Errorf("webhooks list: --limit must be between 1 and %d", webhooksMaxLimit)
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("webhooks list: %w", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -103,10 +106,6 @@ Examples:
 			}
 
 			if *paginate {
-				if resolvedAppID == "" {
-					fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-					return shared.MissingRequiredUsageError()
-				}
 				paginateOpts := append(opts, asc.WithWebhooksLimit(webhooksMaxLimit))
 				firstPage, err := client.GetAppWebhooks(requestCtx, resolvedAppID, paginateOpts...)
 				if err != nil {
@@ -129,6 +128,25 @@ Examples:
 			return shared.PrintOutput(webhooks, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+// rejectWebhooksListNextFlagConflicts rejects query flags that a continuation
+// URL already encodes: `--next` replaces the whole request path, so an
+// explicitly provided app or page size would otherwise be dropped silently.
+func rejectWebhooksListNextFlagConflicts(fs *flag.FlagSet, next string, names ...string) error {
+	if strings.TrimSpace(next) == "" {
+		return nil
+	}
+	provided := make(map[string]struct{}, len(names))
+	fs.Visit(func(f *flag.Flag) {
+		provided[f.Name] = struct{}{}
+	})
+	for _, name := range names {
+		if _, ok := provided[name]; ok {
+			return shared.UsageErrorf("webhooks list: --next cannot be combined with --%s", name)
+		}
+	}
+	return nil
 }
 
 // WebhooksGetCommand returns the webhooks view subcommand.

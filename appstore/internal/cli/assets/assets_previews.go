@@ -101,7 +101,8 @@ func assetsPreviewsUploadCommandWithDependencies(deps previewUploadDependencies)
 	path := fs.String("path", "", "Path to preview file or directory")
 	deviceType := fs.String("device-type", "", "Device type (e.g., IPHONE_65)")
 	skipExisting := fs.Bool("skip-existing", false, "Skip files whose MD5 checksum already exists in the target preview set")
-	replace := fs.Bool("replace", false, "Delete all existing previews from the target set before uploading")
+	replace := fs.Bool("replace", false, "Delete all existing previews from the target set before uploading (requires --confirm)")
+	confirm := fs.Bool("confirm", false, "Confirm the deletions performed by --replace (required with --replace)")
 	dryRun := fs.Bool("dry-run", false, "Show what would be uploaded, skipped, or deleted without making changes")
 	output := shared.BindOutputFlags(fs)
 
@@ -120,7 +121,8 @@ Examples:
   asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65"
   asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews/preview.mov" --device-type "IPHONE_65"
   asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65" --skip-existing
-  asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65" --replace
+  asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65" --replace --confirm
+  asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65" --replace --dry-run
   asc video-previews upload --version-localization "VERSION_LOCALIZATION_ID" --path "./previews" --device-type "IPHONE_65" --skip-existing --dry-run`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -143,6 +145,13 @@ Examples:
 			if *skipExisting && *replace {
 				fmt.Fprintln(os.Stderr, "Error: --skip-existing and --replace are mutually exclusive")
 				return flag.ErrHelp
+			}
+			if *replace && !*dryRun && !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete existing previews with --replace")
+				return shared.MissingRequiredUsageError()
+			}
+			if *confirm && !*replace {
+				return shared.UsageError("--confirm only applies to --replace")
 			}
 
 			previewType, err := normalizePreviewType(deviceValue)
@@ -376,11 +385,14 @@ Examples:
 						destPath := filepath.Join(destDir, destName)
 
 						videoURL := strings.TrimSpace(preview.Attributes.VideoURL)
+						failureReason := "preview has no videoUrl"
 						if videoURL == "" {
 							requestCtx, cancel := shared.ContextWithTimeout(ctx)
 							full, err := client.GetAppPreview(requestCtx, preview.ID)
 							cancel()
-							if err == nil {
+							if err != nil {
+								failureReason = fmt.Sprintf("failed to fetch preview details: %v", err)
+							} else {
 								videoURL = strings.TrimSpace(full.Data.Attributes.VideoURL)
 							}
 						}
@@ -396,7 +408,7 @@ Examples:
 								ID:          strings.TrimSpace(preview.ID),
 								PreviewType: previewType,
 								OutputPath:  destPath,
-								Error:       "preview has no videoUrl",
+								Error:       failureReason,
 							})
 							continue
 						}

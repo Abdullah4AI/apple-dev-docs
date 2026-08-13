@@ -2,11 +2,17 @@ package signing
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestSigningSyncCommandLongHelpUsesOutputDirExample(t *testing.T) {
@@ -16,6 +22,18 @@ func TestSigningSyncCommandLongHelpUsesOutputDirExample(t *testing.T) {
 	}
 	if strings.Contains(cmd.LongHelp, "--output ./signing") {
 		t.Fatalf("expected long help to avoid --output path example, got %q", cmd.LongHelp)
+	}
+}
+
+func TestSigningSyncPushHelpDocumentsDeviceTransition(t *testing.T) {
+	deviceFlag := syncPushCommand().FlagSet.Lookup("device")
+	if deviceFlag == nil {
+		t.Fatal("expected --device flag")
+	}
+	if !strings.Contains(deviceFlag.Usage, "--create-missing") ||
+		!strings.Contains(deviceFlag.Usage, "deprecated") ||
+		!strings.Contains(deviceFlag.Usage, "5.0.0") {
+		t.Fatalf("--device usage = %q, want the transition and rejection release", deviceFlag.Usage)
 	}
 }
 
@@ -82,7 +100,9 @@ func TestSigningSyncPreparesRepositoryOnceInAssetOrder(t *testing.T) {
 					BundleIdentifier:   "com.example.signing.profile",
 					ProfileType:        "IOS_APP_STORE",
 					CreateMissing:      !tt.hasProfile,
-					BeforeCreate:       prepareRepository,
+					BeforeCreate: func(profileCreatePlan) error {
+						return prepareRepository()
+					},
 				},
 			)
 			if err != nil {
@@ -98,6 +118,48 @@ func TestSigningSyncPreparesRepositoryOnceInAssetOrder(t *testing.T) {
 				t.Fatalf("unexpected operation order: got %v, want %v", events, tt.wantEvents)
 			}
 		})
+	}
+}
+
+func TestSigningSyncPushWarnsForDeviceWithoutCreateMissing(t *testing.T) {
+	clientCalls := 0
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientCalls++
+		return nil, errors.New("client reached after validation")
+	}))
+
+	cmd := syncPushCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := cmd.Parse([]string{
+			"--bundle-id", "com.example.app",
+			"--profile-type", "IOS_APP_DEVELOPMENT",
+			"--repo", "git@github.com:team/certs.git",
+			"--password", "secret",
+			"--device", "DEVICE1",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = cmd.Run(context.Background())
+	})
+
+	if runErr == nil || runErr.Error() != "signing sync push: client reached after validation" {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("deprecated input must not return a usage error: %v", runErr)
+	}
+	if clientCalls != 1 {
+		t.Fatalf("client factory calls = %d, want 1", clientCalls)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	wantWarning := "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0.\n"
+	if stderr != wantWarning {
+		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
 	}
 }
 

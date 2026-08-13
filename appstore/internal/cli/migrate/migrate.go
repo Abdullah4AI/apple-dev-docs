@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -202,10 +203,29 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID or Deliverfile app_identifier)")
 				return shared.MissingRequiredUsageError()
 			}
+			preparedLocalizations, err := prepareVersionLocalizations(localizations)
+			if err != nil {
+				return err
+			}
+			preparedAppInfoLocalizations, err := prepareAppInfoLocalizationAttributes(appInfoLocs)
+			if err != nil {
+				return err
+			}
+			if *dryRun {
+				// A preview has no remote localization list that could exempt an
+				// already existing locale, so run the locale half of the apply
+				// preflight here. Without it a clean plan is followed by a hard
+				// failure on the --confirm run for a purely local reason.
+				if err := validateCreateTargetLocales(preparedLocalizations, preparedAppInfoLocalizations, screenshotPlan); err != nil {
+					return err
+				}
+			}
 
 			var client *asc.Client
-			var requestCtx context.Context
-			var cancel context.CancelFunc
+			// Resolution reads share one request budget. Every later call
+			// derives its own from ctx, so a long import is not capped by this
+			// deadline.
+			requestCtx := ctx
 			needsClient := !*dryRun ||
 				(strings.TrimSpace(*appID) == "" && strings.TrimSpace(inputs.DeliverfileConfig.AppIdentifier) != "") ||
 				(strings.TrimSpace(*versionID) == "" && strings.TrimSpace(inputs.DeliverfileConfig.AppVersion) != "" && strings.TrimSpace(inputs.DeliverfileConfig.Platform) != "")
@@ -214,10 +234,9 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("migrate import: %w", err)
 				}
-				requestCtx, cancel = shared.ContextWithTimeout(ctx)
-				defer cancel()
-			} else {
-				requestCtx = ctx
+				resolveCtx, cancelResolve := migrateRequestContext(ctx)
+				defer cancelResolve()
+				requestCtx = resolveCtx
 			}
 
 			resolvedAppID, err := resolveAppID(requestCtx, client, *appID, inputs.DeliverfileConfig)
@@ -251,65 +270,146 @@ Examples:
 				return printMigrateOutput(presentableImportResult(result, *includeSensitive), *output.Output, *output.Pretty)
 			}
 
-			if client == nil {
-				client, err = shared.GetASCClient()
-				if err != nil {
-					return fmt.Errorf("migrate import: %w", err)
-				}
-			}
-			if requestCtx == nil {
-				requestCtx, cancel = shared.ContextWithTimeout(ctx)
-				defer cancel()
-			}
-
-			if err := verifyExplicitVersionOwnership(requestCtx, client, *versionID, resolvedAppID, resolvedVersionID); err != nil {
+			ownershipCtx, cancelOwnership := migrateRequestContext(ctx)
+			err = verifyExplicitVersionOwnership(ownershipCtx, client, *versionID, resolvedAppID, resolvedVersionID)
+			cancelOwnership()
+			if err != nil {
 				return fmt.Errorf("migrate import: %w", err)
 			}
 
 			localeToID := make(map[string]string)
 			if len(localizations) > 0 || len(screenshotPlan) > 0 {
-				existingLocs, err := client.GetAppStoreVersionLocalizations(requestCtx, strings.TrimSpace(resolvedVersionID), asc.WithAppStoreVersionLocalizationsLimit(200))
+				existingCtx, cancelExisting := migrateRequestContext(ctx)
+				existingLocs, err := fetchVersionLocalizationsForPlan(existingCtx, client, strings.TrimSpace(resolvedVersionID))
+				cancelExisting()
 				if err != nil {
 					return fmt.Errorf("migrate import: failed to fetch existing localizations: %w", err)
 				}
-				for _, loc := range existingLocs.Data {
+				for _, loc := range existingLocs {
 					localeToID[loc.Attributes.Locale] = loc.ID
 				}
+			}
+			if err := validateVersionLocalizationCreateLocales(preparedLocalizations, localeToID); err != nil {
+				return err
+			}
+			if err := validateScreenshotLocalizationCreateLocales(screenshotPlan, localeToID); err != nil {
+				return err
+			}
+			appInfoCtx, cancelAppInfo := migrateRequestContext(ctx)
+			appInfoPlan, err := prepareAppInfoLocalizations(appInfoCtx, client, resolvedAppID, preparedAppInfoLocalizations)
+			cancelAppInfo()
+			if err != nil {
+				return err
 			}
 
 			submitOpts := shared.SubmitReadinessOptions{}
 			if migrateVersionLocalizationsNeedUpdateContext(localizations, localeToID) {
-				submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(requestCtx, client, resolvedVersionID, resolvedAppID, "")
+				readinessCtx, cancelReadiness := migrateRequestContext(ctx)
+				submitOpts = shared.ResolveSubmitReadinessOptionsForVersionBestEffort(readinessCtx, client, resolvedVersionID, resolvedAppID, "")
+				cancelReadiness()
 			}
-			uploaded, warnings, err := uploadVersionLocalizations(requestCtx, client, resolvedVersionID, localizations, localeToID, submitOpts)
-			if err != nil {
-				return err
-			}
-			appInfoUploaded, err := uploadAppInfoLocalizations(requestCtx, client, resolvedAppID, appInfoLocs)
-			if err != nil {
-				return err
-			}
-			reviewResult, err := uploadReviewInformation(requestCtx, client, resolvedVersionID, reviewInfo)
-			if err != nil {
-				return err
-			}
-			screenshotResults, err := uploadScreenshots(requestCtx, client, resolvedVersionID, localeToID, screenshotPlan)
-			if err != nil {
-				return err
+			// Each stage records what it applied before the failure so an
+			// interrupted import still reports the App Store Connect state it
+			// left behind instead of printing nothing.
+			completedStages := make([]string, 0, 4)
+			var createWarnings []shared.SubmitReadinessCreateWarning
+			reportPartialFailure := func(stage string, failure error) error {
+				if !migrateImportAppliedAnything(result) {
+					return failure
+				}
+				result.Status = migratePartialStatus
+				result.FailureStage = stage
+				result.Failure = shared.SanitizeTerminal(failure.Error())
+				result.CompletedStages = append([]string(nil), completedStages...)
+				shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
+				if printErr := printMigrateOutput(presentableImportResult(result, *includeSensitive), *output.Output, *output.Pretty); printErr != nil {
+					return errors.Join(failure, fmt.Errorf("print partial migrate import result: %w", printErr))
+				}
+				// Locales created before the failure still need the submission
+				// fields the warning names, so report them here too.
+				if warnErr := shared.PrintSubmitReadinessCreateWarnings(os.Stderr, createWarnings); warnErr != nil {
+					return errors.Join(failure, warnErr)
+				}
+				return failure
 			}
 
+			uploaded, warnings, err := uploadVersionLocalizations(ctx, client, resolvedVersionID, preparedLocalizations, localeToID, submitOpts)
 			result.Uploaded = uploaded
+			createWarnings = warnings
+			if err != nil {
+				return reportPartialFailure(migrateStageVersionLocalizations, err)
+			}
+			if len(uploaded) > 0 {
+				completedStages = append(completedStages, migrateStageVersionLocalizations)
+			}
+
+			appInfoUploaded, err := uploadAppInfoLocalizations(ctx, client, appInfoPlan)
 			result.AppInfoUploaded = appInfoUploaded
+			if err != nil {
+				return reportPartialFailure(migrateStageAppInfoLocalizations, err)
+			}
+			if len(appInfoUploaded) > 0 {
+				completedStages = append(completedStages, migrateStageAppInfoLocalizations)
+			}
+
+			reviewResult, err := uploadReviewInformation(ctx, client, resolvedVersionID, reviewInfo)
 			result.ReviewInfoResult = reviewResult
+			if err != nil {
+				return reportPartialFailure(migrateStageReviewInformation, err)
+			}
+			if migrateReviewInfoApplied(reviewResult) {
+				completedStages = append(completedStages, migrateStageReviewInformation)
+			}
+
+			screenshotResults, err := uploadScreenshots(ctx, client, resolvedVersionID, localeToID, screenshotPlan)
 			result.ScreenshotResults = screenshotResults
+			if err != nil {
+				return reportPartialFailure(migrateStageScreenshots, err)
+			}
+			if migrateScreenshotsApplied(screenshotResults) {
+				completedStages = append(completedStages, migrateStageScreenshots)
+			}
 
 			shared.WarnIncludeSensitive(os.Stderr, *includeSensitive)
 			if err := printMigrateOutput(presentableImportResult(result, *includeSensitive), *output.Output, *output.Pretty); err != nil {
 				return err
 			}
-			return shared.PrintSubmitReadinessCreateWarnings(os.Stderr, warnings)
+			return shared.PrintSubmitReadinessCreateWarnings(os.Stderr, createWarnings)
 		},
 	}
+}
+
+// migrateImportAppliedAnything reports whether the run already changed App
+// Store Connect. A failure before the first mutation keeps the plain error and
+// an empty stdout.
+func migrateImportAppliedAnything(result *MigrateImportResult) bool {
+	if result == nil {
+		return false
+	}
+	return len(result.Uploaded) > 0 ||
+		len(result.AppInfoUploaded) > 0 ||
+		migrateReviewInfoApplied(result.ReviewInfoResult) ||
+		migrateScreenshotsApplied(result.ScreenshotResults)
+}
+
+// migrateReviewInfoApplied reports whether the review information stage changed
+// the remote detail. A skip means App Store Connect already carried the
+// imported values, so nothing was written.
+func migrateReviewInfoApplied(result *ReviewInfoResult) bool {
+	return result != nil && result.Action != migrateReviewInfoActionSkip
+}
+
+// migrateScreenshotsApplied reports whether the screenshot stage changed App
+// Store Connect. A result that only lists assets which already existed left the
+// version untouched, while a created set counts even when no asset finished
+// uploading into it.
+func migrateScreenshotsApplied(results []ScreenshotUploadResult) bool {
+	for _, result := range results {
+		if len(result.Uploaded) > 0 || result.createdSet {
+			return true
+		}
+	}
+	return false
 }
 
 func migrateVersionLocalizationsNeedUpdateContext(localizations []FastlaneLocalization, localeToID map[string]string) bool {
@@ -510,9 +610,29 @@ type SkippedItem struct {
 	Reason string `json:"reason"`
 }
 
+const (
+	migratePartialStatus             = "partial"
+	migrateStageVersionLocalizations = "version_localizations"
+	migrateStageAppInfoLocalizations = "app_info_localizations"
+	migrateStageReviewInformation    = "review_information"
+	migrateStageScreenshots          = "screenshots"
+)
+
+// Review information outcomes. Only create and update write to App Store
+// Connect; skip means the remote detail already matched the imported values.
+const (
+	migrateReviewInfoActionCreate = "create"
+	migrateReviewInfoActionUpdate = "update"
+	migrateReviewInfoActionSkip   = "skip"
+)
+
 // MigrateImportResult is the result of a migrate import operation.
 type MigrateImportResult struct {
 	DryRun               bool                          `json:"dryRun"`
+	Status               string                        `json:"status,omitempty"`
+	FailureStage         string                        `json:"failureStage,omitempty"`
+	Failure              string                        `json:"failure,omitempty"`
+	CompletedStages      []string                      `json:"completedStages,omitempty"`
 	VersionID            string                        `json:"versionId"`
 	AppID                string                        `json:"appId,omitempty"`
 	DeliverfilePath      string                        `json:"deliverfilePath,omitempty"`
@@ -943,28 +1063,56 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 
-			metadataDir, err := resolveFastlaneChild(*fastlaneDir, "metadata", *allowExternalMetadata)
+			workDir, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("migrate validate: %w", err)
+			}
+
+			// Resolve the metadata directory exactly the way migrate import
+			// does, so a Deliverfile metadata_path cannot leave validate
+			// checking a directory the import step never reads.
+			inputs, skipped, err := resolveImportInputs(importInputOptions{
+				WorkDir:               workDir,
+				FastlaneDir:           *fastlaneDir,
+				MetadataOnly:          true,
+				AllowExternalMetadata: *allowExternalMetadata,
+			})
+			if err != nil {
+				return fmt.Errorf("migrate validate: %w", err)
+			}
+
+			metadataDir := inputs.MetadataDir
+			if inputs.DeliverfileConfig.SkipMetadata && metadataDir != "" {
+				skipped = append(skipped, SkippedItem{
+					Path:   metadataDir,
+					Reason: "skip_metadata in Deliverfile",
+				})
+				metadataDir = ""
 			}
 
 			// Read metadata from fastlane structure
-			localeDirs, skipped, err := scanFastlaneMetadataLocaleDirs(metadataDir)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("migrate validate: metadata directory not found: %s", metadataDir)
+			var localizations []FastlaneLocalization
+			var appInfoLocs []AppInfoFastlaneLocalization
+			if metadataDir != "" {
+				localeDirs, metadataSkipped, err := scanFastlaneMetadataLocaleDirs(metadataDir)
+				if err != nil {
+					if os.IsNotExist(err) {
+						return fmt.Errorf("migrate validate: metadata directory not found: %s", metadataDir)
+					}
+					return fmt.Errorf("migrate validate: %w", err)
 				}
-				return fmt.Errorf("migrate validate: %w", err)
-			}
-			localizations, err := readFastlaneMetadataFromLocaleDirs(metadataDir, localeDirs)
-			if err != nil {
-				return fmt.Errorf("migrate validate: %w", err)
-			}
+				skipped = append(skipped, metadataSkipped...)
 
-			// Read App Info metadata (name, subtitle)
-			appInfoLocs, err := readFastlaneAppInfoMetadataFromLocaleDirs(metadataDir, localeDirs)
-			if err != nil {
-				return fmt.Errorf("migrate validate: %w", err)
+				localizations, err = readFastlaneMetadataFromLocaleDirs(metadataDir, localeDirs)
+				if err != nil {
+					return fmt.Errorf("migrate validate: %w", err)
+				}
+
+				// Read App Info metadata (name, subtitle)
+				appInfoLocs, err = readFastlaneAppInfoMetadataFromLocaleDirs(metadataDir, localeDirs)
+				if err != nil {
+					return fmt.Errorf("migrate validate: %w", err)
+				}
 			}
 
 			// Validate and collect issues
@@ -973,6 +1121,12 @@ Examples:
 
 			for _, loc := range localizations {
 				locales = append(locales, loc.Locale)
+				// migrate import rejects these locales when it has to create a
+				// localization, so report them here instead of passing a tree
+				// the import step refuses.
+				if issue := localeCreateIssue(loc.Locale); issue != nil {
+					issues = append(issues, *issue)
+				}
 				issues = append(issues, validateVersionLocalization(loc)...)
 			}
 

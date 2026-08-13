@@ -44,11 +44,17 @@ type UserUpdateAttributes struct {
 	ProvisioningAllowed *bool    `json:"provisioningAllowed,omitempty"`
 }
 
+// UserUpdateRelationships describes relationships for updating a user.
+type UserUpdateRelationships struct {
+	VisibleApps *RelationshipList `json:"visibleApps,omitempty"`
+}
+
 // UserUpdateData is the data portion of a user update request.
 type UserUpdateData struct {
-	Type       ResourceType          `json:"type"`
-	ID         string                `json:"id"`
-	Attributes *UserUpdateAttributes `json:"attributes,omitempty"`
+	Type          ResourceType             `json:"type"`
+	ID            string                   `json:"id"`
+	Attributes    *UserUpdateAttributes    `json:"attributes,omitempty"`
+	Relationships *UserUpdateRelationships `json:"relationships,omitempty"`
 }
 
 // UserUpdateRequest is a request to update a user.

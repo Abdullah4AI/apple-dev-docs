@@ -4,17 +4,123 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
+
+func TestFormatAppNameWithSuffixCountsCharacters(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseName string
+		suffix   string
+		want     string
+	}{
+		{
+			name:     "unicode at truncation boundary",
+			baseName: "12345678901234567890123🚀Launch",
+			suffix:   "app",
+			want:     "12345678901234567890123🚀 - app",
+		},
+		{
+			name:     "ascii behavior",
+			baseName: "123456789012345678901234567890123",
+			suffix:   "app",
+			want:     "123456789012345678901234 - app",
+		},
+		{
+			name:     "unicode suffix-only fallback",
+			baseName: "A",
+			suffix:   strings.Repeat("🚀", maxAppNameLen+1),
+			want:     strings.Repeat("🚀", maxAppNameLen),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatAppNameWithSuffix(tt.baseName, tt.suffix)
+			if !utf8.ValidString(got) {
+				t.Errorf("formatAppNameWithSuffix() returned invalid UTF-8: %q", got)
+			}
+			if gotRunes, wantRunes := utf8.RuneCountInString(got), utf8.RuneCountInString(tt.want); gotRunes != wantRunes {
+				t.Errorf("formatAppNameWithSuffix() rune count = %d, want %d", gotRunes, wantRunes)
+			}
+			if gotRunes := utf8.RuneCountInString(got); gotRunes > maxAppNameLen {
+				t.Errorf("formatAppNameWithSuffix() rune count = %d, limit %d", gotRunes, maxAppNameLen)
+			}
+			if got != tt.want {
+				t.Errorf("formatAppNameWithSuffix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunAppsCreateAutoRenamePreservesUnicode(t *testing.T) {
+	origResolveAppCreateSession := resolveAppCreateSessionFn
+	t.Cleanup(func() {
+		resolveAppCreateSessionFn = origResolveAppCreateSession
+	})
+
+	const originalName = "12345678901234567890123🚀Launch"
+	const retryName = "12345678901234567890123🚀 - app"
+	var requestBodies []string
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		requestBodies = append(requestBodies, string(body))
+
+		status := http.StatusOK
+		responseBody := `{"data":{"id":"app-123","type":"apps","attributes":{}}}`
+		if len(requestBodies) == 1 {
+			status = http.StatusUnprocessableEntity
+			responseBody = `{"errors":[{"code":"ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE.DIFFERENT_ACCOUNT","detail":"The app name you entered is already being used."}]}`
+		}
+		return &http.Response{
+			StatusCode: status,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+			Request:    req,
+		}, nil
+	})
+
+	resolveAppCreateSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{Client: &http.Client{Transport: transport}}, "cache", nil
+	}
+
+	t.Setenv("ASC_WEB_MIN_REQUEST_INTERVAL", "0")
+	err := RunAppsCreate(context.Background(), AppsCreateRunOptions{
+		Name:                     originalName,
+		BundleID:                 "com.example.app",
+		SKU:                      "SKU123",
+		AppleID:                  "user@example.com",
+		Output:                   "json",
+		AutoRename:               true,
+		DisableBundleIDPreflight: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAppsCreate returned error: %v", err)
+	}
+	if len(requestBodies) != 2 {
+		t.Fatalf("expected 2 create requests, got %d", len(requestBodies))
+	}
+	if !strings.Contains(requestBodies[0], `"name":"`+originalName+`"`) {
+		t.Errorf("initial serialized request did not preserve name: %s", requestBodies[0])
+	}
+	if !strings.Contains(requestBodies[1], `"name":"`+retryName+`"`) {
+		t.Errorf("retry serialized request did not preserve name: %s", requestBodies[1])
+	}
+}
 
 func TestAppCreateCanPromptInteractivelyUsesControllingTTYWhenStdinIsNotTerminal(t *testing.T) {
 	origOpenTTY := openTTYFn

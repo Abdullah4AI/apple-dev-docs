@@ -79,10 +79,14 @@ func BetaGroupsListCommand() *ffcli.Command {
 
 The --build-id lookup is experimental. It resolves the build's app and
 automatically paginates the app's groups, returning both explicit build
-relationships and groups with all-build access. App Store Connect does not
-expose a build-side GET for beta groups, so the command prefers the documented
-betaGroups build filter. If that filter is rejected, the command falls back to
-the inverse group-to-build relationship.
+relationships and groups with all-build access.
+App Store Connect exposes no GET /v1/builds/{id}/relationships/betaGroups. It
+does document include=betaGroups on GET /v1/builds/{id}, but that read caps
+included groups at limit[betaGroups]=50, has no documented build-side endpoint
+for paging past the cap, and reports the same explicit linkage Apple can omit
+for all-build groups. So the command prefers the documented betaGroups build
+filter. If that filter is rejected, the command falls back to the inverse
+group-to-build relationship.
 All-build groups omitted by the filter are also checked through that inverse
 linkage because Apple can omit their explicit relationships. These checks scan
 linkage IDs only; cost scales with the checked groups and their build page count.

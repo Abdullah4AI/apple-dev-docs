@@ -263,7 +263,7 @@ func TestAnalyticsReportsRelationshipsPaginateFromNextWithoutReportID(t *testing
 	)
 }
 
-func TestAnalyticsGetRejectsInvalidNextURL(t *testing.T) {
+func TestAnalyticsViewRejectsInvalidNextURL(t *testing.T) {
 	runAnalyticsInvalidNextURLCases(
 		t,
 		[]string{"analytics", "view"},
@@ -271,7 +271,7 @@ func TestAnalyticsGetRejectsInvalidNextURL(t *testing.T) {
 	)
 }
 
-func TestAnalyticsGetPaginateFromNextWithoutRequestID(t *testing.T) {
+func TestAnalyticsViewPaginateFromNextWithoutRequestID(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 

@@ -61,7 +61,7 @@ func TestSaveCheckpointRefusesSymlinkedRepositoryDirectoryComponent(t *testing.T
 	t.Chdir(workDir)
 
 	externalDir := t.TempDir()
-	checkpointDir := defaultCheckpointPath("123", "1.0.0", "456", "IOS")
+	checkpointDir := defaultStageCheckpointPath("123", "1.0.0", "456", "IOS")
 	if err := os.MkdirAll(filepath.Dir(filepath.Dir(checkpointDir)), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}

@@ -200,15 +200,17 @@ func formatAppNameWithSuffix(baseName, suffix string) string {
 		return ""
 	}
 	sep := " - "
-	maxBase := maxAppNameLen - len(sep) - len(suffix)
+	suffixRunes := []rune(suffix)
+	maxBase := maxAppNameLen - len([]rune(sep)) - len(suffixRunes)
 	if maxBase <= 0 {
-		if len(suffix) > maxAppNameLen {
-			return suffix[:maxAppNameLen]
+		if len(suffixRunes) > maxAppNameLen {
+			return string(suffixRunes[:maxAppNameLen])
 		}
 		return suffix
 	}
-	if len(baseName) > maxBase {
-		baseName = strings.TrimSpace(baseName[:maxBase])
+	baseNameRunes := []rune(baseName)
+	if len(baseNameRunes) > maxBase {
+		baseName = strings.TrimSpace(string(baseNameRunes[:maxBase]))
 		baseName = strings.TrimRight(baseName, "-")
 		baseName = strings.TrimSpace(baseName)
 	}

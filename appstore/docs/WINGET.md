@@ -89,8 +89,8 @@ The release workflow generates these files with
 ## Release Automation
 
 `.github/workflows/release.yml` generates the WinGet manifests after the GitHub
-release and Homebrew tap update complete. It then opens or updates a PR against
-`microsoft/winget-pkgs`.
+release is published, in parallel with the Homebrew tap update. It then opens or
+updates a PR against `microsoft/winget-pkgs`.
 
 Required release configuration:
 

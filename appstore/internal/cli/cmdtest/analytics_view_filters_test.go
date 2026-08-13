@@ -3,8 +3,6 @@ package cmdtest
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,83 +12,6 @@ import (
 )
 
 const analyticsViewRequestID = "11111111-1111-1111-1111-111111111111"
-
-func TestAnalyticsViewDeprecatedDatePreservesReportDateMatching(t *testing.T) {
-	setupAuth(t)
-	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
-
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = originalTransport })
-
-	requestCount := 0
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestCount++
-		switch requestCount {
-		case 1:
-			if req.Method != http.MethodGet || req.URL.Path != "/v1/analyticsReportRequests/"+analyticsViewRequestID+"/reports" {
-				t.Fatalf("unexpected reports request: %s %s", req.Method, req.URL.String())
-			}
-			return analyticsViewJSONResponse(`{
-				"data":[{
-					"type":"analyticsReports",
-					"id":"report-1",
-					"attributes":{"name":"App Sessions","reportType":"STANDARD","category":"APP_USAGE","granularity":"DAILY"}
-				}],
-				"links":{"self":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/11111111-1111-1111-1111-111111111111/reports"}
-			}`), nil
-		case 2:
-			if req.Method != http.MethodGet || req.URL.Path != "/v1/analyticsReports/report-1/instances" {
-				t.Fatalf("unexpected instances request: %s %s", req.Method, req.URL.String())
-			}
-			if req.URL.Query().Has("filter[processingDate]") {
-				t.Fatalf("deprecated --date must not become a processing-date API filter: %s", req.URL.String())
-			}
-			return analyticsViewJSONResponse(`{
-				"data":[{
-					"type":"analyticsReportInstances",
-					"id":"instance-1",
-					"attributes":{"reportDate":"2024-01-20","processingDate":"2024-01-21","granularity":"DAILY","version":"1.0"}
-				}],
-				"links":{}
-			}`), nil
-		default:
-			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
-			return nil, nil
-		}
-	})
-
-	stdout, stderr := runAnalyticsViewForOutput(
-		t,
-		"--request-id", analyticsViewRequestID,
-		"--date", "2024-01-20",
-		"--output", "json",
-	)
-	const warning = "Warning: `--date` is deprecated. Use `--processing-date`.\n"
-	if stderr != warning {
-		t.Fatalf("stderr = %q, want %q", stderr, warning)
-	}
-	assertAnalyticsViewJSONEqual(t, stdout, `{
-		"requestId":"11111111-1111-1111-1111-111111111111",
-		"data":[{
-			"id":"report-1",
-			"reportType":"STANDARD",
-			"name":"App Sessions",
-			"category":"APP_USAGE",
-			"granularity":"DAILY",
-			"instances":[{
-				"id":"instance-1",
-				"reportDate":"2024-01-20",
-				"processingDate":"2024-01-21",
-				"granularity":"DAILY",
-				"version":"1.0"
-			}]
-		}],
-		"links":{"self":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/11111111-1111-1111-1111-111111111111/reports"}
-	}`)
-	if requestCount != 2 {
-		t.Fatalf("expected 2 requests, got %d", requestCount)
-	}
-}
 
 func TestAnalyticsViewProcessingDateForwardsFilter(t *testing.T) {
 	setupAuth(t)
@@ -272,32 +193,6 @@ func TestAnalyticsViewFiltersPaginateAndPreserveOutput(t *testing.T) {
 	}`)
 	if requestCount != 5 {
 		t.Fatalf("expected 5 requests, got %d", requestCount)
-	}
-}
-
-func TestAnalyticsViewDeprecatedDateConflictsWithProcessingDate(t *testing.T) {
-	stdout, stderr, err := runCommand(t, []string{
-		"analytics", "view",
-		"--request-id", analyticsViewRequestID,
-		"--processing-date", "2024-01-20",
-		"--date", "2024-01-21",
-	})
-	if err == nil {
-		t.Fatal("expected conflicting date flags to fail")
-	}
-	if !errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("error = %v, want usage error", err)
-	}
-	if stdout != "" {
-		t.Fatalf("expected empty stdout, got %q", stdout)
-	}
-	const warning = "Warning: `--date` is deprecated. Use `--processing-date`."
-	if !strings.Contains(stderr, warning) {
-		t.Fatalf("stderr = %q, want warning %q", stderr, warning)
-	}
-	const conflict = "Error: --date conflicts with --processing-date; use only --processing-date"
-	if !strings.Contains(stderr, conflict) {
-		t.Fatalf("stderr = %q, want conflict %q", stderr, conflict)
 	}
 }
 

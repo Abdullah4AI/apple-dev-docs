@@ -147,18 +147,22 @@ type WinBackOfferUpdateRequest struct {
 // WinBackOfferPriceAttributes describes a win-back offer price (attributes are empty).
 type WinBackOfferPriceAttributes struct{}
 
-// WinBackOfferPriceRelationships describes price relationships.
+// WinBackOfferPriceRelationships describes price relationships. The
+// subscriptionPricePoint relationship must be omitted for free offers
+// (FREE_TRIAL); the API rejects it with "subscriptionPricePoint should not
+// be set for free offers".
 type WinBackOfferPriceRelationships struct {
-	Territory              Relationship `json:"territory"`
-	SubscriptionPricePoint Relationship `json:"subscriptionPricePoint"`
+	Territory              Relationship  `json:"territory"`
+	SubscriptionPricePoint *Relationship `json:"subscriptionPricePoint,omitempty"`
 }
 
 // WinBackOfferPriceInlineCreate describes inline creation data for prices.
 // Win-back offer prices do not exist before the offer is created, so the
 // create request must inline them via the JSON:API `included` array with
-// temporary `${price-N}` IDs, each carrying territory and
-// subscriptionPricePoint relationships. Without the relationships the API
-// rejects the request with "Missing subscriptionPricePoint relationship".
+// temporary `${price-N}` IDs, each carrying a territory relationship plus,
+// for paid offer modes only, a subscriptionPricePoint relationship. Without
+// the relationships the API rejects paid requests with "Missing
+// subscriptionPricePoint relationship".
 type WinBackOfferPriceInlineCreate struct {
 	Type          ResourceType                    `json:"type"`
 	ID            string                          `json:"id,omitempty"`

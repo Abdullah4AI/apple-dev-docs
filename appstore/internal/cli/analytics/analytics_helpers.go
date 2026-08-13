@@ -274,28 +274,6 @@ func normalizeAnalyticsProcessingDateFilter(value string) (string, error) {
 	return parsed.Format("2006-01-02"), nil
 }
 
-func normalizeAnalyticsDateFilter(value string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "", nil
-	}
-	parsed, err := time.Parse("2006-01-02", trimmed)
-	if err != nil {
-		return "", fmt.Errorf("--date must be in YYYY-MM-DD format")
-	}
-	return parsed.Format("2006-01-02"), nil
-}
-
-func matchAnalyticsInstanceDate(attrs asc.AnalyticsReportInstanceAttributes, date string) bool {
-	if strings.TrimSpace(date) == "" {
-		return true
-	}
-	if strings.HasPrefix(attrs.ReportDate, date) {
-		return true
-	}
-	return strings.HasPrefix(attrs.ProcessingDate, date)
-}
-
 func normalizeAnalyticsGranularities(value string) ([]string, error) {
 	parts := strings.Split(value, ",")
 	seen := make(map[string]struct{}, len(parts))

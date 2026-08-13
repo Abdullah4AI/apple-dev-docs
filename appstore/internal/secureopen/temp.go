@@ -70,7 +70,7 @@ func CreateTempNoFollowInRoot(root *os.Root, dir string, pattern string, perm os
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
-		return nil, "", err
+		return nil, name, err
 	}
 
 	return nil, "", fmt.Errorf("failed to create temporary file in %q beneath root %q", dir, root.Name())

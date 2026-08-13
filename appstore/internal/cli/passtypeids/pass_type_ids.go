@@ -103,6 +103,14 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("pass-type-ids list: %w", err)
 			}
+			if len(certificateFieldsValue) > 0 && !shared.HasInclude(includeValue, "certificates") {
+				fmt.Fprintln(os.Stderr, "Error: --certificate-fields requires --include certificates")
+				return flag.ErrHelp
+			}
+			if *certificatesLimit != 0 && !shared.HasInclude(includeValue, "certificates") {
+				fmt.Fprintln(os.Stderr, "Error: --limit-certificates requires --include certificates")
+				return flag.ErrHelp
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -211,6 +219,14 @@ Examples:
 			includeValue, err := normalizePassTypeIDInclude(*include)
 			if err != nil {
 				return fmt.Errorf("pass-type-ids view: %w", err)
+			}
+			if len(certificateFieldsValue) > 0 && !shared.HasInclude(includeValue, "certificates") {
+				fmt.Fprintln(os.Stderr, "Error: --certificate-fields requires --include certificates")
+				return flag.ErrHelp
+			}
+			if *certificatesLimit != 0 && !shared.HasInclude(includeValue, "certificates") {
+				fmt.Fprintln(os.Stderr, "Error: --limit-certificates requires --include certificates")
+				return flag.ErrHelp
 			}
 
 			client, err := shared.GetASCClient()

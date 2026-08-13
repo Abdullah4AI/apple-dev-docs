@@ -274,6 +274,9 @@ Notes:
 - Output-producing step names only need to stay unique within workflows that
   can execute together in the same run graph. Independent workflows can reuse
   names like `archive` or `publish`.
+- Declared outputs keep the exact JSON value the command printed. A numeric
+  `$.nextBuildNumber` of `42` is stored and interpolated as `42`, so it can be
+  passed straight to `CURRENT_PROJECT_VERSION` or another build-number flag.
 
 ## Bounded retry and timeout
 

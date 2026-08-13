@@ -792,6 +792,63 @@ func TestRun_SubWorkflow_CallerEnvOverridesSubWorkflowEnv(t *testing.T) {
 	}
 }
 
+// TestRun_SubWorkflowWithOverridesRuntimeParams pins the top of the precedence
+// chain: mergeEnv(subWf.Env, env, resolvedWith) applies `with` last, so a value
+// hardcoded on a workflow-call step cannot be overridden with a KEY:VALUE
+// parameter at run time. The documentation must describe this order, not the
+// intuitive "parameters always win".
+func TestRun_SubWorkflowWithOverridesRuntimeParams(t *testing.T) {
+	def := &Definition{
+		Workflows: map[string]Workflow{
+			"main": {Steps: []Step{
+				{Workflow: "helper", With: map[string]string{"MSG": "from-with"}},
+			}},
+			"helper": {Steps: []Step{{Run: "echo $MSG"}}},
+		},
+	}
+	opts := runOpts("main")
+	opts.Params = map[string]string{"MSG": "from-cli-param"}
+
+	result, err := Run(context.Background(), def, opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	stdout := opts.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(stdout, "from-with") {
+		t.Fatalf("expected step `with` to override the runtime parameter, got %q", stdout)
+	}
+	if strings.Contains(stdout, "from-cli-param") {
+		t.Fatalf("expected the runtime parameter to lose to step `with`, got %q", stdout)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("expected ok, got %q", result.Status)
+	}
+}
+
+// TestRun_SubWorkflowWithValuesAreLiteral records that `with` values are not
+// shell-expanded: only ${steps.NAME.OUTPUT} references are interpolated, so a
+// documented `"MESSAGE": "v$VERSION"` reaches the step as the literal text.
+func TestRun_SubWorkflowWithValuesAreLiteral(t *testing.T) {
+	def := &Definition{
+		Env: map[string]string{"VERSION": "1.2.0"},
+		Workflows: map[string]Workflow{
+			"main": {Steps: []Step{
+				{Workflow: "helper", With: map[string]string{"MSG": "build v$VERSION"}},
+			}},
+			"helper": {Steps: []Step{{Run: `echo "[$MSG]"`}}},
+		},
+	}
+	opts := runOpts("main")
+
+	if _, err := Run(context.Background(), def, opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	stdout := opts.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(stdout, "[build v$VERSION]") {
+		t.Fatalf("expected `with` values to stay literal, got %q", stdout)
+	}
+}
+
 func TestRun_SubWorkflowEnvDoesNotLeak(t *testing.T) {
 	def := &Definition{
 		Workflows: map[string]Workflow{

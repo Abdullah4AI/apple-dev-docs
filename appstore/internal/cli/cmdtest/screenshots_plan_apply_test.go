@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
@@ -315,6 +316,187 @@ func TestScreenshotsApplyUploadsApprovedArtifacts(t *testing.T) {
 	}
 }
 
+func TestScreenshotsApplyGivesAssetUploadsTheUploadTimeoutBudget(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_TIMEOUT", "30s")
+	t.Setenv("ASC_TIMEOUT_SECONDS", "")
+	t.Setenv("ASC_UPLOAD_TIMEOUT", "20m")
+	t.Setenv("ASC_UPLOAD_TIMEOUT_SECONDS", "")
+
+	reviewDir, imagePath := writeScreenshotReviewArtifacts(t)
+	fileInfo, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf("stat review artifact: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	var uploadBudget time.Duration
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789/appStoreVersions":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/appStoreVersionLocalizations":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersionLocalizations","id":"LOC_123","attributes":{"locale":"en-US"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return statusJSONResponse(`{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
+			body := fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"uploadOperations":[{"method":"PUT","url":"https://upload.example/new-1","length":%d,"offset":0}]}}}`, fileInfo.Size())
+			return statusJSONResponse(body), nil
+		case req.Method == http.MethodPut && req.URL.Host == "upload.example":
+			if deadline, ok := req.Context().Deadline(); ok {
+				uploadBudget = time.Until(deadline)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     http.Header{},
+			}, nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/new-1":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"uploaded":true}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/new-1":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return statusJSONResponse(`{}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	_, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"screenshots", "apply",
+			"--app", "123456789",
+			"--version", "1.2.3",
+			"--review-output-dir", reviewDir,
+			"--confirm",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if uploadBudget <= 30*time.Second {
+		t.Fatalf("expected screenshot upload budget to use the 20m upload timeout, got %s", uploadBudget)
+	}
+}
+
+func TestScreenshotsApplyReportsCompletedGroupsWhenALaterGroupFails(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	reviewDir, imagePaths := writeTwoSlotScreenshotReviewArtifacts(t)
+	firstInfo, err := os.Stat(imagePaths[0])
+	if err != nil {
+		t.Fatalf("stat review artifact: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789/appStoreVersions":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/appStoreVersionLocalizations":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersionLocalizations","id":"LOC_123","attributes":{"locale":"en-US"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return statusJSONResponse(`{"data":[{"type":"appScreenshotSets","id":"set-61","attributes":{"screenshotDisplayType":"APP_IPHONE_61"}},{"type":"appScreenshotSets","id":"set-65","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`), nil
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/v1/appScreenshotSets/"):
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
+			body, readErr := io.ReadAll(req.Body)
+			if readErr != nil {
+				t.Fatalf("read screenshot create request: %v", readErr)
+			}
+			if strings.Contains(string(body), "set-65") {
+				return jsonHTTPResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","detail":"screenshot reservation failed"}]}`), nil
+			}
+			return statusJSONResponse(fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"new-61","attributes":{"uploadOperations":[{"method":"PUT","url":"https://upload.example/new-61","length":%d,"offset":0}]}}}`, firstInfo.Size())), nil
+		case req.Method == http.MethodPut && req.URL.Host == "upload.example":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     http.Header{},
+			}, nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/new-61":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-61","attributes":{"uploaded":true}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/new-61":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-61","attributes":{"assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
+		case req.Method == http.MethodPatch && strings.HasSuffix(req.URL.Path, "/relationships/appScreenshots"):
+			return statusJSONResponse(`{}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"screenshots", "apply",
+			"--app", "123456789",
+			"--version", "1.2.3",
+			"--review-output-dir", reviewDir,
+			"--confirm",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected the failing upload group to surface an error")
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if stdout == "" {
+		t.Fatal("expected completed upload groups to be reported before the error")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+	groups, ok := payload["groups"].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("expected the completed group to be reported, got %T %v", payload["groups"], payload["groups"])
+	}
+	group := groups[0].(map[string]any)
+	if group["displayType"] != "APP_IPHONE_61" {
+		t.Fatalf("expected completed group APP_IPHONE_61, got %v", group["displayType"])
+	}
+	results := group["result"].(map[string]any)["results"].([]any)
+	if results[0].(map[string]any)["assetId"] != "new-61" {
+		t.Fatalf("expected uploaded assetId new-61, got %v", results[0].(map[string]any)["assetId"])
+	}
+}
+
 func TestScreenshotsApplyCanonicalizesLegacyReviewDisplayAliases(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -429,6 +611,125 @@ func TestScreenshotsApplyCanonicalizesLegacyReviewDisplayAliases(t *testing.T) {
 			uploads,
 			invalidSetCreates,
 		)
+	}
+}
+
+func TestScreenshotsApplyUploadsIPad13ScreenshotToCurrentSlotOnly(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	// Manifests written before the iPad slot correction list both the legacy
+	// 12.9" 2nd-generation slot and the current 13" slot for 2048x2732.
+	reviewDir, imagePath := writeScreenshotReviewArtifactsWithPlannedDisplayType(
+		t,
+		2048,
+		2732,
+		2048,
+		2732,
+		[]string{"APP_IPAD_PRO_129", "APP_IPAD_PRO_3GEN_129"},
+	)
+	fileInfo, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf("stat review artifact: %v", err)
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	setCreates := make([]string, 0, 2)
+	screenshotCreates := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789/appStoreVersions":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersions/version-1/appStoreVersionLocalizations":
+			return statusJSONResponse(`{"data":[{"type":"appStoreVersionLocalizations","id":"LOC_123","attributes":{"locale":"en-US"}}]}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshotSets":
+			body, readErr := io.ReadAll(req.Body)
+			if readErr != nil {
+				t.Fatalf("read screenshot set request: %v", readErr)
+			}
+			var payload struct {
+				Data struct {
+					Attributes struct {
+						ScreenshotDisplayType string `json:"screenshotDisplayType"`
+					} `json:"attributes"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal screenshot set request: %v", err)
+			}
+			setCreates = append(setCreates, payload.Data.Attributes.ScreenshotDisplayType)
+			return statusJSONResponse(fmt.Sprintf(`{"data":{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":%q}}}`, payload.Data.Attributes.ScreenshotDisplayType)), nil
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/v1/appScreenshotSets/"):
+			return statusJSONResponse(`{"data":[],"links":{}}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
+			screenshotCreates++
+			return statusJSONResponse(fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"uploadOperations":[{"method":"PUT","url":"https://upload.example/new-1","length":%d,"offset":0}]}}}`, fileInfo.Size())), nil
+		case req.Method == http.MethodPut && req.URL.Host == "upload.example":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     http.Header{},
+			}, nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/new-1":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"uploaded":true}}}`), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/new-1":
+			return statusJSONResponse(`{"data":{"type":"appScreenshots","id":"new-1","attributes":{"assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
+		case req.Method == http.MethodPatch && strings.HasSuffix(req.URL.Path, "/relationships/appScreenshots"):
+			return statusJSONResponse(`{}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"screenshots", "apply",
+			"--app", "123456789",
+			"--version", "1.2.3",
+			"--review-output-dir", reviewDir,
+			"--confirm",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout=%s", err, stdout)
+	}
+	if payload["plannedGroups"] != float64(1) {
+		t.Fatalf("expected plannedGroups=1, got %v", payload["plannedGroups"])
+	}
+	groups, ok := payload["groups"].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("expected one upload group, got %T %v", payload["groups"], payload["groups"])
+	}
+	if displayType := groups[0].(map[string]any)["displayType"]; displayType != "APP_IPAD_PRO_3GEN_129" {
+		t.Fatalf("expected displayType APP_IPAD_PRO_3GEN_129, got %v", displayType)
+	}
+	if len(setCreates) != 1 || setCreates[0] != "APP_IPAD_PRO_3GEN_129" {
+		t.Fatalf("expected one APP_IPAD_PRO_3GEN_129 screenshot set create, got %v", setCreates)
+	}
+	if screenshotCreates != 1 {
+		t.Fatalf("expected one screenshot upload, got %d", screenshotCreates)
 	}
 }
 
@@ -696,6 +997,84 @@ func writeScreenshotReviewArtifactsWithPlannedDisplayType(t *testing.T, actualWi
 		1,
 		0,
 	)
+}
+
+// writeTwoSlotScreenshotReviewArtifacts writes one approved en-US entry per
+// display type so the plan fans out into two upload groups.
+func writeTwoSlotScreenshotReviewArtifacts(t *testing.T) (string, []string) {
+	t.Helper()
+
+	reviewDir := t.TempDir()
+	slots := []struct {
+		id          string
+		displayType string
+		width       int
+		height      int
+	}{
+		{id: "home", displayType: "APP_IPHONE_61", width: 1206, height: 2622},
+		{id: "details", displayType: "APP_IPHONE_65", width: 1284, height: 2778},
+	}
+
+	imagePaths := make([]string, 0, len(slots))
+	entries := make([]map[string]any, 0, len(slots))
+	approved := make([]string, 0, len(slots))
+	for _, slot := range slots {
+		imagePath := filepath.Join(reviewDir, slot.id+".png")
+		if err := os.WriteFile(imagePath, pngBytes(t, slot.width, slot.height), 0o600); err != nil {
+			t.Fatalf("write screenshot image: %v", err)
+		}
+		imagePaths = append(imagePaths, imagePath)
+		key := "en-US|iphone|" + slot.id
+		approved = append(approved, key)
+		entries = append(entries, map[string]any{
+			"key":                  key,
+			"screenshot_id":        slot.id,
+			"locale":               "en-US",
+			"device":               "iphone",
+			"framed_path":          imagePath,
+			"framed_relative_path": slot.id + ".png",
+			"width":                slot.width,
+			"height":               slot.height,
+			"display_types":        []string{slot.displayType},
+			"valid_app_store_size": true,
+			"status":               "ready",
+			"approved":             true,
+			"approval_state":       "approved",
+		})
+	}
+
+	manifestBytes, err := json.Marshal(map[string]any{
+		"generated_at":  "2026-03-15T00:00:00Z",
+		"raw_dir":       "",
+		"framed_dir":    reviewDir,
+		"output_dir":    reviewDir,
+		"approval_path": filepath.Join(reviewDir, "approved.json"),
+		"summary": map[string]any{
+			"total":            len(entries),
+			"ready":            len(entries),
+			"missing_raw":      0,
+			"invalid_size":     0,
+			"approved":         len(entries),
+			"pending_approval": 0,
+		},
+		"entries": entries,
+	})
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewDir, "manifest.json"), manifestBytes, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	approvalBytes, err := json.Marshal(map[string]any{"approved": approved})
+	if err != nil {
+		t.Fatalf("marshal approvals: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewDir, "approved.json"), approvalBytes, 0o600); err != nil {
+		t.Fatalf("write approvals: %v", err)
+	}
+
+	return reviewDir, imagePaths
 }
 
 func writeScreenshotReviewArtifactsFixture(t *testing.T, actualWidth, actualHeight, manifestWidth, manifestHeight int, displayTypes []string, validAppStoreSize bool, status string, readyCount, invalidCount int) (string, string) {

@@ -1,28 +1,17 @@
 package validation
 
 import (
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestLegalChecks_CopyrightEmpty(t *testing.T) {
-	checks := legalChecks(
-		"", false, false,
-		[]VersionLocalization{{Locale: "en-US", SupportURL: "https://example.com"}},
-		[]AppInfoLocalization{{Locale: "en-US", PrivacyPolicyURL: "https://example.com/privacy"}},
-	)
-	if !hasCheckID(checks, "legal.required.copyright") {
-		t.Fatal("expected copyright required check")
-	}
-}
-
-func TestLegalChecks_CopyrightWhitespaceOnly(t *testing.T) {
-	checks := legalChecks(
-		"   ", false, false,
-		[]VersionLocalization{{Locale: "en-US", SupportURL: "https://example.com"}},
-		[]AppInfoLocalization{{Locale: "en-US", PrivacyPolicyURL: "https://example.com/privacy"}},
-	)
-	if !hasCheckID(checks, "legal.required.copyright") {
-		t.Fatal("expected copyright required check for whitespace-only")
+	for _, value := range []string{"", "   "} {
+		checks := legalChecks(value, false, false, nil, nil)
+		if len(checks) != 1 || checks[0].ID != "legal.required.copyright" {
+			t.Fatalf("copyright checks for %q = %+v, want only legal.required.copyright", value, checks)
+		}
 	}
 }
 
@@ -34,6 +23,86 @@ func TestLegalChecks_CopyrightPresent(t *testing.T) {
 	)
 	if hasCheckID(checks, "legal.required.copyright") {
 		t.Fatal("did not expect copyright check when copyright is set")
+	}
+}
+
+func TestLegalChecks_CopyrightAcceptsAppStoreConnectFreeTextForms(t *testing.T) {
+	currentYear := time.Now().Year()
+	for _, value := range []string{
+		fmt.Sprintf("© %d Acme Inc.", currentYear),
+		fmt.Sprintf("(c) %d Acme Inc.", currentYear),
+		fmt.Sprintf("Copyright %d Acme Inc.", currentYear),
+		fmt.Sprintf("2019-%d Acme Inc.", currentYear),
+		fmt.Sprintf("%d, Acme Inc.", currentYear),
+	} {
+		checks := legalChecks(value, false, false, nil, nil)
+		if hasCheckID(checks, "legal.format.copyright_year") {
+			t.Fatalf("copyright %q reported legal.format.copyright_year, want no year check", value)
+		}
+	}
+}
+
+func TestLegalChecks_CopyrightYearAdvisesInsteadOfBlocking(t *testing.T) {
+	checks := legalChecks("Acme Inc.", false, false, nil, nil)
+
+	var found []CheckResult
+	for _, check := range checks {
+		if check.ID == "legal.format.copyright_year" {
+			found = append(found, check)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("copyright-year checks = %+v, want exactly one", checks)
+	}
+	if found[0].Severity != SeverityWarning {
+		t.Fatalf("copyright-year severity = %q, want %q", found[0].Severity, SeverityWarning)
+	}
+	if summarize(checks, false).Blocking != 0 {
+		t.Fatalf("copyright-year check is blocking in non-strict mode: %+v", summarize(checks, false))
+	}
+}
+
+func TestHasValidLeadingCopyrightYear(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "past year", value: "2016 Acme", want: true},
+		{name: "current year", value: "2026 Acme", want: true},
+		{name: "past year before 1900", value: "1899 Acme", want: true},
+		{name: "surrounding whitespace", value: "  2026 Acme  ", want: true},
+		{name: "unicode whitespace", value: "\u00a02026\tAcme\u00a0", want: true},
+		{name: "year without owner grammar", value: "2026", want: true},
+		{name: "copyright sign prefix", value: "\u00a9 2026 Acme Inc.", want: true},
+		{name: "copyright sign joined to year", value: "\u00a92026 Acme Inc.", want: true},
+		{name: "parenthesized c prefix", value: "(c) 2026 Acme", want: true},
+		{name: "parenthesized uppercase c prefix", value: "(C) 2026 Acme", want: true},
+		{name: "copyright word prefix", value: "Copyright 2026 Acme", want: true},
+		{name: "copyright word and sign prefix", value: "Copyright \u00a9 2026 Acme", want: true},
+		{name: "lowercase copyright word prefix", value: "copyright 2026 Acme", want: true},
+		{name: "year range", value: "2019-2026 Acme Inc.", want: true},
+		{name: "spaced year range", value: "2019 - 2026 Acme Inc.", want: true},
+		{name: "en dash year range", value: "2019\u20132026 Acme Inc.", want: true},
+		{name: "copyright sign with year range", value: "\u00a9 2019-2026 Acme Inc.", want: true},
+		{name: "comma after year", value: "2026, Acme", want: true},
+		{name: "period after year", value: "2026. Acme", want: true},
+		{name: "marker without year", value: "\u00a9 Acme Inc.", want: false},
+		{name: "year zero", value: "0000 Acme", want: false},
+		{name: "missing year", value: "Acme", want: false},
+		{name: "year is not leading", value: "Acme 2026", want: false},
+		{name: "year joined to owner", value: "2026会社", want: false},
+		{name: "five digit prefix", value: "20260 Acme", want: false},
+		{name: "non ASCII digits", value: "２０２６ Acme", want: false},
+		{name: "future year", value: "2027 Acme", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hasValidLeadingCopyrightYear(test.value, 2026); got != test.want {
+				t.Fatalf("hasValidLeadingCopyrightYear(%q, 2026) = %v, want %v", test.value, got, test.want)
+			}
+		})
 	}
 }
 

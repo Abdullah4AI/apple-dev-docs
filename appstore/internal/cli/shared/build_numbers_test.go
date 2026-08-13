@@ -57,6 +57,36 @@ func TestBuildNumberNextIncrementsLastSegment(t *testing.T) {
 	}
 }
 
+func TestBuildNumberCompareUsesNumericComponents(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  string
+		right string
+		want  int
+	}{
+		{name: "dotted numeric order", left: "1.10", right: "1.9", want: 1},
+		{name: "missing trailing zero is equal", left: "1.2", right: "1.2.0", want: 0},
+		{name: "first component wins", left: "10", right: "9.99", want: 1},
+		{name: "lower component", left: "2.3.3", right: "2.3.4", want: -1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			left, err := parseBuildNumber(test.left, "left")
+			if err != nil {
+				t.Fatalf("parse left: %v", err)
+			}
+			right, err := parseBuildNumber(test.right, "right")
+			if err != nil {
+				t.Fatalf("parse right: %v", err)
+			}
+			if got := left.Compare(right); got != test.want {
+				t.Fatalf("Compare(%q, %q) = %d, want %d", test.left, test.right, got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseBuildTimestamp(t *testing.T) {
 	tests := []struct {
 		name    string

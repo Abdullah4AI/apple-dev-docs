@@ -24,7 +24,7 @@ const (
 	ExitHTTPBadRequest    = 10       // 400
 	ExitHTTPUnauthorized  = ExitAuth // 401 (special case)
 	ExitHTTPForbidden     = ExitAuth // 403 (special case)
-	ExitHTTPUnprocessable = 22       // 422
+	ExitHTTPUnprocessable = 32       // 422
 
 	// HTTP 5xx range: 60 + (status - 500)
 	ExitHTTPInternalServer     = 60 // 500

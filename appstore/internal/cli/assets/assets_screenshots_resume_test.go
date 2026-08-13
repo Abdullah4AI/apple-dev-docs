@@ -93,11 +93,60 @@ func TestExecuteAppScreenshotUploadDryRunRejectsSymlinkAboveSelectedFileRoot(t *
 	}
 }
 
-func TestExecuteAppScreenshotUploadDryRunAllowsSystemTemporaryAlias(t *testing.T) {
+func TestExecuteAppScreenshotUploadDryRunAllowsSystemAliasedSourceDirectories(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("system /tmp alias is Unix-only")
+		t.Skip("system directory aliases are Unix-only")
 	}
-	workDir, err := os.MkdirTemp("/tmp", "asc-screenshot-source-*")
+
+	// macOS reaches /tmp, /var and /etc through symlinks into /private, so a
+	// source path under any of them must not be reported as an untrusted
+	// symlink the caller never wrote.
+	for _, base := range []string{"/tmp", "/var/tmp"} {
+		t.Run(base, func(t *testing.T) {
+			workDir, err := os.MkdirTemp(base, "asc-screenshot-source-*")
+			if err != nil {
+				t.Fatalf("create temporary screenshot directory: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := os.RemoveAll(workDir); err != nil {
+					t.Errorf("remove temporary screenshot directory: %v", err)
+				}
+			})
+			filePath := writeAssetsTestPNG(t, workDir, "01-home.png")
+
+			requests := 0
+			client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				requests++
+				writeAssetsTestJSON(w, http.StatusOK, `{"data":[],"links":{}}`)
+			}))
+
+			_, err = executeAppScreenshotUpload(context.Background(), screenshotUploadConfig[asc.AppScreenshotUploadResult]{
+				Client:         client,
+				LocalizationID: "LOC_123",
+				DisplayType:    "APP_IPHONE_65",
+				Files:          []string{filePath},
+				DryRun:         true,
+				RequestContext: contextWithAssetUploadTimeout,
+				UploadContext:  contextWithAssetUploadTimeout,
+				Access:         appStoreVersionScreenshotSetAccess,
+			}, "")
+			if err != nil {
+				t.Fatalf("executeAppScreenshotUpload() error: %v", err)
+			}
+			if requests == 0 {
+				t.Fatal("expected dry-run API lookup after source validation")
+			}
+		})
+	}
+}
+
+func TestResolveScreenshotUploadRootRejectsSymlinkedSourceFileOutsideTrustedRoots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("system directory aliases are Unix-only")
+	}
+
+	targetPath := writeAssetsTestPNG(t, t.TempDir(), "real.png")
+	workDir, err := os.MkdirTemp("/var/tmp", "asc-screenshot-source-*")
 	if err != nil {
 		t.Fatalf("create temporary screenshot directory: %v", err)
 	}
@@ -106,29 +155,13 @@ func TestExecuteAppScreenshotUploadDryRunAllowsSystemTemporaryAlias(t *testing.T
 			t.Errorf("remove temporary screenshot directory: %v", err)
 		}
 	})
-	filePath := writeAssetsTestPNG(t, workDir, "01-home.png")
-
-	requests := 0
-	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		requests++
-		writeAssetsTestJSON(w, http.StatusOK, `{"data":[],"links":{}}`)
-	}))
-
-	_, err = executeAppScreenshotUpload(context.Background(), screenshotUploadConfig[asc.AppScreenshotUploadResult]{
-		Client:         client,
-		LocalizationID: "LOC_123",
-		DisplayType:    "APP_IPHONE_65",
-		Files:          []string{filePath},
-		DryRun:         true,
-		RequestContext: contextWithAssetUploadTimeout,
-		UploadContext:  contextWithAssetUploadTimeout,
-		Access:         appStoreVersionScreenshotSetAccess,
-	}, "")
-	if err != nil {
-		t.Fatalf("executeAppScreenshotUpload() error: %v", err)
+	linkPath := filepath.Join(workDir, "01-home.png")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatalf("create screenshot symlink: %v", err)
 	}
-	if requests == 0 {
-		t.Fatal("expected dry-run API lookup after source validation")
+
+	if _, err := resolveScreenshotUploadRoot("", []string{linkPath}); !errors.Is(err, rootfs.ErrSymlink) {
+		t.Fatalf("resolveScreenshotUploadRoot() error = %v, want rootfs.ErrSymlink", err)
 	}
 }
 
@@ -579,6 +612,59 @@ func TestResumeScreenshotsDoesNotCreateWhenPendingLookupFails(t *testing.T) {
 	}
 	if len(progress.PendingAssets) != 1 || progress.PendingAssets[0].AssetID != "pending-1" {
 		t.Fatalf("expected pending asset to remain resumable, got %#v", progress.PendingAssets)
+	}
+}
+
+func TestExecuteAppScreenshotUploadKeepsUploadErrorWhenArtifactWriteFails(t *testing.T) {
+	workDir := t.TempDir()
+	filePath := writeAssetsTestPNG(t, workDir, "01-home.png")
+
+	// Make the artifact directory unusable by putting a regular file where the
+	// artifact's parent directory has to be.
+	blockedDir := filepath.Join(workDir, "reports")
+	if err := os.WriteFile(blockedDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	artifactPath := filepath.Join(blockedDir, "failure-artifact.json")
+
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = assetsUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appStoreVersionLocalizations/LOC_123/appScreenshotSets":
+			return assetsJSONResponse(http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			return assetsJSONResponse(http.StatusOK, `{"data":[],"links":{}}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/appScreenshots":
+			return assetsJSONResponse(http.StatusUnauthorized, `{"errors":[{"status":"401","code":"NOT_AUTHORIZED","detail":"authentication credentials are missing"}]}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = origTransport
+	})
+
+	client := newAssetsUploadTestClient(t)
+	_, err := executeAppScreenshotUpload(context.Background(), screenshotUploadConfig[asc.AppScreenshotUploadResult]{
+		Client:         client,
+		LocalizationID: "LOC_123",
+		DisplayType:    "APP_IPHONE_65",
+		Files:          []string{filePath},
+		RequestContext: contextWithAssetUploadTimeout,
+		UploadContext:  contextWithAssetUploadTimeout,
+		Access:         appStoreVersionScreenshotSetAccess,
+	}, artifactPath)
+	if err == nil {
+		t.Fatal("expected executeAppScreenshotUpload() error")
+	}
+	if !strings.Contains(err.Error(), "write screenshot upload failure artifact") {
+		t.Fatalf("expected artifact write failure in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "authentication credentials are missing") {
+		t.Fatalf("expected the original upload failure to survive, got %v", err)
 	}
 }
 

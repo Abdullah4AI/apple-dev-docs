@@ -252,6 +252,8 @@ func TestBuildsNextBuildNumberWithFiltersUsesCanonicalQueryShape(t *testing.T) {
 		http.DefaultTransport = originalTransport
 	})
 
+	chronologicalBuildRequests := 0
+	maximumBuildRequests := 0
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/preReleaseVersions":
@@ -287,10 +289,20 @@ func TestBuildsNextBuildNumberWithFiltersUsesCanonicalQueryShape(t *testing.T) {
 			if query.Get("sort") != "-uploadedDate" {
 				t.Fatalf("expected sort=-uploadedDate, got %q", query.Get("sort"))
 			}
-			if query.Get("limit") != "1" {
-				t.Fatalf("expected limit=1, got %q", query.Get("limit"))
+			switch query.Get("limit") {
+			case "1":
+				chronologicalBuildRequests++
+				return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"builds","id":"build-new-50","attributes":{"version":"50","uploadedDate":"2026-02-02T00:00:00Z"}}]}`), nil
+			case "200":
+				maximumBuildRequests++
+				return jsonHTTPResponse(http.StatusOK, `{"data":[
+					{"type":"builds","id":"build-new-50","attributes":{"version":"50","uploadedDate":"2026-02-02T00:00:00Z"}},
+					{"type":"builds","id":"build-old-100","attributes":{"version":"100","uploadedDate":"2026-02-01T00:00:00Z"}}
+				]}`), nil
+			default:
+				t.Fatalf("expected limit=1 or limit=200, got %q", query.Get("limit"))
+				return nil, nil
 			}
-			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"builds","id":"build-1","attributes":{"version":"100","uploadedDate":"2026-02-01T00:00:00Z"}}]}`), nil
 
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/100000001/buildUploads":
 			query := req.URL.Query()
@@ -303,7 +315,7 @@ func TestBuildsNextBuildNumberWithFiltersUsesCanonicalQueryShape(t *testing.T) {
 			if query.Get("filter[platform]") != "IOS" {
 				t.Fatalf("expected filter[platform]=IOS, got %q", query.Get("filter[platform]"))
 			}
-			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleVersion":"101"}}],"links":{"next":""}}`), nil
+			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleVersion":"90"}}],"links":{"next":""}}`), nil
 
 		default:
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
@@ -337,19 +349,26 @@ func TestBuildsNextBuildNumberWithFiltersUsesCanonicalQueryShape(t *testing.T) {
 	var out struct {
 		LatestProcessedBuildNumber *string `json:"latestProcessedBuildNumber"`
 		LatestUploadBuildNumber    *string `json:"latestUploadBuildNumber"`
+		LatestObservedBuildNumber  *string `json:"latestObservedBuildNumber"`
 		NextBuildNumber            string  `json:"nextBuildNumber"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("unmarshal output: %v\nstdout: %s", err, stdout)
 	}
-	if out.LatestProcessedBuildNumber == nil || *out.LatestProcessedBuildNumber != "100" {
-		t.Fatalf("expected latestProcessedBuildNumber=100, got %v", out.LatestProcessedBuildNumber)
+	if out.LatestProcessedBuildNumber == nil || *out.LatestProcessedBuildNumber != "50" {
+		t.Fatalf("expected latestProcessedBuildNumber=50, got %v", out.LatestProcessedBuildNumber)
 	}
-	if out.LatestUploadBuildNumber == nil || *out.LatestUploadBuildNumber != "101" {
-		t.Fatalf("expected latestUploadBuildNumber=101, got %v", out.LatestUploadBuildNumber)
+	if out.LatestUploadBuildNumber == nil || *out.LatestUploadBuildNumber != "90" {
+		t.Fatalf("expected latestUploadBuildNumber=90, got %v", out.LatestUploadBuildNumber)
 	}
-	if out.NextBuildNumber != "102" {
-		t.Fatalf("expected nextBuildNumber=102, got %q", out.NextBuildNumber)
+	if out.LatestObservedBuildNumber == nil || *out.LatestObservedBuildNumber != "100" {
+		t.Fatalf("expected latestObservedBuildNumber=100, got %v", out.LatestObservedBuildNumber)
+	}
+	if out.NextBuildNumber != "101" {
+		t.Fatalf("expected nextBuildNumber=101, got %q", out.NextBuildNumber)
+	}
+	if chronologicalBuildRequests != 1 || maximumBuildRequests != 1 {
+		t.Fatalf("build requests = chronological:%d maximum:%d, want 1 each", chronologicalBuildRequests, maximumBuildRequests)
 	}
 }
 
@@ -701,5 +720,20 @@ func TestBuildsHelpShowsNextBuildNumberAndHidesLatestAlias(t *testing.T) {
 	}
 	if strings.Contains(usage, "\n  latest\t") || strings.Contains(usage, "\n  latest ") {
 		t.Fatalf("expected deprecated latest alias to stay hidden from builds help, got %q", usage)
+	}
+}
+
+func TestBuildsNextBuildNumberHelpExplainsChronologicalAndNumericValues(t *testing.T) {
+	usage := usageForCommand(t, "builds", "next-build-number")
+	for _, want := range []string{
+		"latestProcessedBuildNumber reports the most recently uploaded matching build",
+		"zero-style placeholders are reported as null",
+		"latestObservedBuildNumber and nextBuildNumber use the highest positive numeric",
+		"sourcesConsidered is empty",
+		"nextBuildNumber uses --initial-build-number",
+	} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("expected next-build-number help to contain %q, got %q", want, usage)
+		}
 	}
 }

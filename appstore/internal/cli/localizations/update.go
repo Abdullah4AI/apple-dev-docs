@@ -214,7 +214,15 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 		fmt.Fprintln(os.Stderr, "Error: --version is required for version localizations")
 		return shared.MissingRequiredUsageError()
 	}
-	if err := shared.ValidateVersionLocalizationAttributes(asc.AppStoreVersionLocalizationAttributes{Keywords: p.keywords}); err != nil {
+	attrs := asc.AppStoreVersionLocalizationAttributes{
+		Description:     p.description,
+		Keywords:        p.keywords,
+		WhatsNew:        p.whatsNew,
+		PromotionalText: p.promotionalText,
+		SupportURL:      p.supportURL,
+		MarketingURL:    p.marketingURL,
+	}
+	if err := shared.ValidateVersionLocalizationAttributes(attrs); err != nil {
 		return shared.UsageError(err.Error())
 	}
 
@@ -241,15 +249,6 @@ func updateVersionLocalization(ctx context.Context, p updateVersionParams) error
 	}
 	if localizationID == "" {
 		return fmt.Errorf("localizations update: no existing localization found for locale %q", p.locale)
-	}
-
-	attrs := asc.AppStoreVersionLocalizationAttributes{
-		Description:     p.description,
-		Keywords:        p.keywords,
-		WhatsNew:        p.whatsNew,
-		PromotionalText: p.promotionalText,
-		SupportURL:      p.supportURL,
-		MarketingURL:    p.marketingURL,
 	}
 
 	resp, err := client.UpdateAppStoreVersionLocalization(requestCtx, localizationID, attrs)

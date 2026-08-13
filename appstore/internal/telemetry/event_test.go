@@ -211,7 +211,7 @@ func TestBuildEventWithContextAllowsKnownFailureParameters(t *testing.T) {
 	clearContextEnv(t)
 	setTelemetryTestHome(t)
 
-	for _, parameter := range []string{"--id", "--app", "--app-id"} {
+	for _, parameter := range []string{"--id", "--app", "--app-id", "--key-type", "--export-xcodebuild-flag"} {
 		t.Run(parameter, func(t *testing.T) {
 			ev, ok := BuildEventWithContext(
 				"asc apps view",
@@ -232,6 +232,37 @@ func TestBuildEventWithContextAllowsKnownFailureParameters(t *testing.T) {
 				t.Fatalf("FailureParameter = %v, want %q", ev.FailureParameter, parameter)
 			}
 		})
+	}
+}
+
+func TestBuildEventWithContextStripsKnownFailureParameterValue(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	ev, ok := BuildEventWithContext(
+		"asc auth login",
+		"1.2.3",
+		0,
+		2,
+		EventContext{
+			InvocationShape:  InvocationShapeLeaf,
+			ErrorKind:        ErrorKindInvalidValue,
+			FailureStage:     FailureStageValidation,
+			FailureParameter: "--key-type=individual",
+		},
+	)
+	if !ok {
+		t.Fatal("expected event")
+	}
+	if ev.FailureParameter == nil || *ev.FailureParameter != "--key-type" {
+		t.Fatalf("FailureParameter = %v, want --key-type", ev.FailureParameter)
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if strings.Contains(string(data), "individual") {
+		t.Fatalf("payload leaked failure parameter value: %s", data)
 	}
 }
 
@@ -346,7 +377,7 @@ func TestBuildEventWithContextRejectsUnknownFailureParameterNames(t *testing.T) 
 			InvocationShape:  InvocationShapeLeaf,
 			ErrorKind:        ErrorKindUnknownFlag,
 			FailureStage:     FailureStageParse,
-			FailureParameter: "--my-secret-project",
+			FailureParameter: "--my-secret-project=SECRET",
 		},
 	)
 	if !ok {
@@ -402,7 +433,11 @@ func TestBuildEventReusesInstallIDAcrossLocalInvocationSources(t *testing.T) {
 		env        map[string]string
 		wantSource InvocationSource
 	}{
-		{name: "Claude Code", env: map[string]string{"CLAUDECODE": "1"}, wantSource: SourceClaudeCode},
+		{
+			name:       "Claude Code",
+			env:        map[string]string{"CLAUDE_CODE_CHILD_SESSION": "1"},
+			wantSource: SourceClaudeCode,
+		},
 		{name: "Cursor Agent", env: map[string]string{"CURSOR_AGENT": "1"}, wantSource: SourceCursorAgent},
 		{
 			name:       "Codex Desktop",
@@ -449,7 +484,7 @@ func TestBuildEventOmitsInstallIDForEphemeralAgentRuntime(t *testing.T) {
 	}{
 		{
 			name:        "Claude Code in CI",
-			env:         map[string]string{"CI": "true", "CLAUDECODE": "1"},
+			env:         map[string]string{"CI": "true", "CLAUDE_CODE_CHILD_SESSION": "1"},
 			wantRuntime: RuntimeCI,
 			wantSource:  SourceClaudeCode,
 		},

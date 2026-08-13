@@ -2,6 +2,7 @@ package reviews
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -37,7 +38,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
-			reviewItemsGetCommand("view", "review items view", `asc review items view --id "ITEM_ID"`),
 			reviewItemsListCommand("list", "review items list", `asc review items list [flags]`, `asc review items list --submission "SUBMISSION_ID"
   asc review items list --submission "SUBMISSION_ID" --paginate`),
 			reviewItemsAddCommand("add", "review items add", `asc review items add [flags]`, `asc review items add --submission "SUBMISSION_ID" --item-type appStoreVersions --item-id "VERSION_ID"
@@ -50,47 +50,23 @@ Examples:
 			reviewItemsRemoveCommand("remove", "review items remove", `asc review items remove [flags]`, `asc review items remove --id "ITEM_ID" --confirm`),
 		},
 		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				subcommand := strings.TrimSpace(args[0])
+				if subcommand == "view" {
+					return removedReviewItemDetailUsageError("asc review items view")
+				}
+				return shared.UsageErrorf("unexpected argument(s): %s", shared.SanitizeTerminal(subcommand))
+			}
 			return flag.ErrHelp
 		},
 	}
 }
 
-// ReviewItemsGetCommand returns the stable review items-get subcommand.
-func ReviewItemsGetCommand() *ffcli.Command {
-	return reviewItemsGetCommand("items-get", "review items-get", `asc review items-get --id "ITEM_ID"`)
-}
-
-func reviewItemsGetCommand(name, errorPrefix, example string) *ffcli.Command {
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
-
-	itemID := fs.String("id", "", "Review submission item ID (required)")
-	shared.BindOutputFlags(fs)
-
-	return &ffcli.Command{
-		Name:       name,
-		ShortUsage: example + " [flags]",
-		ShortHelp:  "DEPRECATED: App Store Connect has no review-item detail endpoint.",
-		LongHelp: `DEPRECATED: App Store Connect API 4.4.1 has no review-item detail endpoint.
-
-Use asc review items list --submission "SUBMISSION_ID" instead.
-
-Examples:
-  ` + example,
-		FlagSet:   fs,
-		UsageFunc: shared.DeprecatedUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if len(args) != 0 {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("unexpected positional arguments"))
-			}
-			trimmedID := strings.TrimSpace(*itemID)
-			if trimmedID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
-			}
-
-			return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError(`App Store Connect API 4.4.1 has no item-detail GET; use asc review items list --submission "SUBMISSION_ID"`))
-		},
-	}
+func removedReviewItemDetailUsageError(command string) error {
+	return shared.UsageErrorf(
+		"`%s` was removed in 4.0.0; use `asc review items list --submission \"SUBMISSION_ID\"` instead",
+		command,
+	)
 }
 
 // ReviewItemsListCommand returns the review items list subcommand.
@@ -349,7 +325,6 @@ func reviewItemsUpdateCommand(name, errorPrefix, shortUsage, examples string) *f
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 
 	itemID := fs.String("id", "", "Review submission item ID (required)")
-	fs.String("state", "", "Deprecated: no longer supported by App Store Connect")
 	resolved := fs.String("resolved", "", "Whether the item is resolved: true or false")
 	removed := fs.String("removed", "", "Whether the item is removed: true or false")
 	clearResolved := fs.Bool("clear-resolved", false, "Set resolved to JSON null")
@@ -377,9 +352,6 @@ Examples:
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError()
-			}
-			if reviewFlagWasProvided(fs, "state") {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("--state is deprecated and no longer supported by App Store Connect; use --resolved or --removed"))
 			}
 			resolvedProvided := reviewFlagWasProvided(fs, "resolved")
 			removedProvided := reviewFlagWasProvided(fs, "removed")
@@ -517,19 +489,47 @@ Examples:
 }
 
 func normalizeReviewSubmissionItemType(value string) (asc.ReviewSubmissionItemType, error) {
-	if strings.TrimSpace(value) == "" {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return "", fmt.Errorf("--item-type is required")
 	}
-	if strings.TrimSpace(value) == string(asc.ReviewSubmissionItemTypeAppStoreVersionExperimentTreatment) {
-		return "", fmt.Errorf("--item-type %s is deprecated and no longer supported by App Store Connect; experiment treatments cannot be added as review submission items", asc.ReviewSubmissionItemTypeAppStoreVersionExperimentTreatment)
-	}
-	if strings.TrimSpace(value) == string(asc.ReviewSubmissionItemTypeAppCustomProductPage) {
-		return "", fmt.Errorf("--item-type %s is deprecated and no longer supported by App Store Connect; pass an app custom product page version ID with --item-type %s", asc.ReviewSubmissionItemTypeAppCustomProductPage, asc.ReviewSubmissionItemTypeAppCustomProductPageVersion)
+	if guidance, ok := removedReviewSubmissionItemTypeGuidance(trimmed); ok {
+		return "", errors.New(guidance)
 	}
 	if itemType, ok := asc.ParseReviewSubmissionItemType(value); ok {
 		return itemType, nil
 	}
 	return "", fmt.Errorf("--item-type must be one of: %s", strings.Join(reviewSubmissionItemTypeList(), ", "))
+}
+
+// Item types App Store Connect stopped accepting as review submission items.
+// They are rejected with targeted migration guidance instead of the generic
+// supported-value list.
+const (
+	removedItemTypeCustomProductPages   = "appCustomProductPages"
+	removedItemTypeExperimentTreatments = "appStoreVersionExperimentTreatments"
+	removedItemTypeExperimentV2Alias    = "appStoreVersionExperimentV2"
+)
+
+func removedReviewSubmissionItemTypeGuidance(value string) (string, bool) {
+	switch value {
+	case removedItemTypeExperimentV2Alias:
+		return fmt.Sprintf(
+			"--item-type %s was removed in 4.0.0; use --item-type %s",
+			removedItemTypeExperimentV2Alias, asc.ReviewSubmissionItemTypeAppStoreVersionExperimentV2,
+		), true
+	case removedItemTypeExperimentTreatments:
+		return fmt.Sprintf(
+			"--item-type %s is deprecated and no longer supported by App Store Connect; experiment treatments cannot be added as review submission items",
+			removedItemTypeExperimentTreatments,
+		), true
+	case removedItemTypeCustomProductPages:
+		return fmt.Sprintf(
+			"--item-type %s is deprecated and no longer supported by App Store Connect; pass an app custom product page version ID with --item-type %s",
+			removedItemTypeCustomProductPages, asc.ReviewSubmissionItemTypeAppCustomProductPageVersion,
+		), true
+	}
+	return "", false
 }
 
 func reviewSubmissionItemTypeList() []string {

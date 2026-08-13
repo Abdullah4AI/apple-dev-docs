@@ -10,17 +10,29 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestAnalyticsViewProcessingDateFlagLifecycle(t *testing.T) {
-	cmd := AnalyticsGetCommand()
+	root := AnalyticsCommand()
+	viewIndex := -1
+	for index, subcommand := range root.Subcommands {
+		if subcommand.Name == "get" {
+			t.Fatal("removed analytics get compatibility command is still registered")
+		}
+		if subcommand.Name == "view" {
+			viewIndex = index
+		}
+	}
+	if viewIndex == -1 {
+		t.Fatal("canonical analytics view command is not registered")
+	}
+	cmd := root.Subcommands[viewIndex]
 	if cmd.FlagSet.Lookup("processing-date") == nil {
 		t.Fatal("canonical --processing-date flag is not registered")
 	}
-	if cmd.FlagSet.Lookup("date") == nil {
-		t.Fatal("deprecated --date compatibility flag is not registered")
+	if cmd.FlagSet.Lookup("date") != nil {
+		t.Fatal("removed --date compatibility flag is still registered")
 	}
 
 	visible := make(map[string]bool)
@@ -30,22 +42,18 @@ func TestAnalyticsViewProcessingDateFlagLifecycle(t *testing.T) {
 	if !visible["processing-date"] {
 		t.Fatal("canonical --processing-date flag is hidden from help")
 	}
-	if visible["date"] {
-		t.Fatal("deprecated --date flag should be hidden from canonical help")
-	}
 
 	usage := cmd.UsageFunc(cmd)
 	for _, want := range []string{
 		"The --processing-date and --granularity filters are sent to App Store Connect",
-		"The deprecated --date compatibility flag retains its previous local matching",
 		`--processing-date "2024-01-20"`,
 	} {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("analytics view help does not contain %q:\n%s", want, usage)
 		}
 	}
-	if strings.Contains(usage, `--date "2024-01-20"`) {
-		t.Fatalf("analytics view help still teaches deprecated --date:\n%s", usage)
+	if strings.Contains(usage, "deprecated") || strings.Contains(usage, "--date compatibility") {
+		t.Fatalf("analytics view help still describes removed compatibility behavior:\n%s", usage)
 	}
 }
 
@@ -65,13 +73,8 @@ func TestAnalyticsRequestsAccessTypeFlagLifecycle(t *testing.T) {
 	if !strings.Contains(usage, `--access-type ONGOING`) {
 		t.Fatalf("analytics requests help does not teach --access-type:\n%s", usage)
 	}
-	if cmd.FlagSet.Lookup("state") == nil {
-		t.Fatal("deprecated --state compatibility flag is not registered")
-	}
-	for _, item := range shared.VisibleHelpFlags(cmd.FlagSet) {
-		if item.Name == "state" {
-			t.Fatal("deprecated --state flag should be hidden from canonical help")
-		}
+	if cmd.FlagSet.Lookup("state") != nil {
+		t.Fatal("removed --state compatibility flag is still registered")
 	}
 }
 
@@ -89,46 +92,6 @@ func TestAnalyticsRequestsRejectsInvalidAccessType(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "--access-type must be ONGOING or ONE_TIME_SNAPSHOT") {
 		t.Fatalf("expected access type validation error, got %q", stderr)
-	}
-}
-
-func TestAnalyticsRequestsDeprecatedStateFailsBeforeAuth(t *testing.T) {
-	tests := []struct {
-		name      string
-		stateArgs []string
-	}{
-		{name: "legacy value", stateArgs: []string{"--state", "COMPLETED"}},
-		{name: "equals empty", stateArgs: []string{"--state="}},
-		{name: "separate empty", stateArgs: []string{"--state", ""}},
-		{name: "whitespace", stateArgs: []string{"--state", " \t "}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			clientFactoryCalls := 0
-			restoreClient := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
-				clientFactoryCalls++
-				return nil, errors.New("client construction should not be attempted")
-			})
-			t.Cleanup(restoreClient)
-
-			args := []string{"analytics", "requests", "--app", "app-1"}
-			args = append(args, tt.stateArgs...)
-			stdout, stderr, err := runAnalyticsCommand(t, args)
-			if !errors.Is(err, flag.ErrHelp) {
-				t.Fatalf("expected usage error, got %v", err)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if !strings.Contains(stderr, "--state is deprecated and unsupported by App Store Connect") ||
-				!strings.Contains(stderr, "use --access-type ONGOING or --access-type ONE_TIME_SNAPSHOT") {
-				t.Fatalf("expected migration guidance, got %q", stderr)
-			}
-			if clientFactoryCalls != 0 {
-				t.Fatalf("client factory calls = %d, want 0", clientFactoryCalls)
-			}
-		})
 	}
 }
 
@@ -377,7 +340,7 @@ func TestAnalyticsRequestsValidationErrors(t *testing.T) {
 	}
 }
 
-func TestAnalyticsGetValidationErrors(t *testing.T) {
+func TestAnalyticsViewValidationErrors(t *testing.T) {
 	stdout, stderr, err := runAnalyticsCommand(t, []string{"analytics", "view"})
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected ErrHelp, got %v", err)

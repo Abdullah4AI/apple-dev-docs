@@ -140,6 +140,52 @@ func TestValidateBuildOptionsRejectsXcodebuildOperationModes(t *testing.T) {
 	}
 }
 
+// TestValidateBuildOptionsRejectsEveryArgumentBuildEmits derives its
+// expectations from the shipped command instead of copying the blocklist, so a
+// newly managed xcodebuild argument that nobody added to
+// reservedBuildPassthroughArgument fails here rather than silently letting
+// --xcodebuild-flag override it and make the structured result untruthful.
+func TestValidateBuildOptionsRejectsEveryArgumentBuildEmits(t *testing.T) {
+	opts := BuildOptions{
+		WorkspacePath:    "AscManagedWorkspace.xcworkspace",
+		Scheme:           "AscManagedScheme",
+		Configuration:    "AscManagedConfiguration",
+		Destination:      "AscManagedDestination",
+		DerivedDataPath:  "/tmp/asc-managed-derived-data",
+		ResultBundlePath: "/tmp/asc-managed-result.xcresult",
+		Clean:            true,
+		NoCodeSigning:    true,
+	}
+	suppliedValues := map[string]struct{}{
+		opts.WorkspacePath:    {},
+		opts.Scheme:           {},
+		opts.Configuration:    {},
+		opts.Destination:      {},
+		opts.DerivedDataPath:  {},
+		opts.ResultBundlePath: {},
+	}
+
+	// --project is mutually exclusive with --workspace, so it never appears in
+	// the same command and needs its own pass.
+	projectOpts := opts
+	projectOpts.WorkspacePath = ""
+	projectOpts.ProjectPath = "AscManagedProject.xcodeproj"
+	suppliedValues[projectOpts.ProjectPath] = struct{}{}
+
+	for _, args := range [][]string{buildBuildCommand(opts), buildBuildCommand(projectOpts)} {
+		for _, arg := range args {
+			if _, isValue := suppliedValues[arg]; isValue {
+				continue
+			}
+			t.Run(arg, func(t *testing.T) {
+				if reserved := reservedBuildPassthroughArgument([]string{arg}); reserved == "" {
+					t.Fatalf("asc emits %q but --xcodebuild-flag can still override it", arg)
+				}
+			})
+		}
+	}
+}
+
 func TestBuildCommandUsesTypedOptionsAndPreservesRawArguments(t *testing.T) {
 	opts := BuildOptions{
 		WorkspacePath:    "Demo App.xcworkspace",

@@ -124,7 +124,7 @@ Try it:
   asc workflow list
   asc workflow run --dry-run beta
   asc workflow run beta BUILD_ID:123456789 GROUP_ID:abcdef
-  asc workflow run release --resume beta-20260312T120000Z-deadbeef
+  asc workflow run beta --resume beta-20260312T120000Z-deadbeef
 
 More docs:
   https://github.com/rorkai/App-Store-Connect-CLI/blob/main/docs/WORKFLOWS.md
@@ -136,7 +136,7 @@ Examples:
   asc workflow run beta SUBMIT_BETA:true
   asc workflow run release VERSION:2.1.0
   asc workflow run --dry-run beta
-  asc workflow run release --resume beta-20260312T120000Z-deadbeef`,
+  asc workflow run beta --resume beta-20260312T120000Z-deadbeef`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -167,6 +167,7 @@ Run state is persisted in a repo-local runs directory next to the workflow file.
 Use --resume with the emitted run ID to continue a partially completed run without
 rerunning already-persisted successful steps.
 Resume automatically reuses the original workflow file, saved params, and persisted outputs.
+A run ID belongs to the workflow it was created from; pass that same workflow name.
 Do not pass extra KEY:VALUE params with --resume.
 If a step declares "outputs", the command must emit JSON on stdout; for asc commands,
 usually pass --output json.
@@ -197,7 +198,7 @@ Examples:
   asc workflow run beta
   asc workflow run beta BUILD_ID:123456789 GROUP_ID:abcdef
   asc workflow run --dry-run beta
-  asc workflow run release --resume beta-20260312T120000Z-deadbeef`,
+  asc workflow run beta --resume beta-20260312T120000Z-deadbeef`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {

@@ -420,6 +420,67 @@ func TestScreenshotSizeEntryIncludesIPadPro129M5Dimensions(t *testing.T) {
 	}
 }
 
+func TestScreenshotSizeCatalogSeparatesIPad13AndLegacy129Dimensions(t *testing.T) {
+	tests := []struct {
+		name       string
+		modernType string
+		legacyType string
+	}{
+		{
+			name:       "app screenshots",
+			modernType: "APP_IPAD_PRO_3GEN_129",
+			legacyType: "APP_IPAD_PRO_129",
+		},
+		{
+			name:       "iMessage screenshots",
+			modernType: "IMESSAGE_APP_IPAD_PRO_3GEN_129",
+			legacyType: "IMESSAGE_APP_IPAD_PRO_129",
+		},
+	}
+
+	sharedDimensions := []ScreenshotDimension{
+		{Width: 2048, Height: 2732},
+		{Width: 2732, Height: 2048},
+	}
+	modernOnlyDimensions := []ScreenshotDimension{
+		{Width: 2064, Height: 2752},
+		{Width: 2752, Height: 2064},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			modern, ok := ScreenshotSizeEntryForDisplayType(test.modernType)
+			if !ok {
+				t.Fatalf("expected %s entry in screenshot size catalog", test.modernType)
+			}
+			legacy, ok := ScreenshotSizeEntryForDisplayType(test.legacyType)
+			if !ok {
+				t.Fatalf("expected %s entry in screenshot size catalog", test.legacyType)
+			}
+
+			for _, dim := range sharedDimensions {
+				if !containsScreenshotDimension(modern.Dimensions, dim) {
+					t.Fatalf("expected %s to include shared dimension %s", test.modernType, dim.String())
+				}
+				if !containsScreenshotDimension(legacy.Dimensions, dim) {
+					t.Fatalf("expected %s to include shared dimension %s", test.legacyType, dim.String())
+				}
+			}
+			for _, dim := range modernOnlyDimensions {
+				if !containsScreenshotDimension(modern.Dimensions, dim) {
+					t.Fatalf("expected %s to include modern dimension %s", test.modernType, dim.String())
+				}
+				if containsScreenshotDimension(legacy.Dimensions, dim) {
+					t.Fatalf("did not expect %s to include modern dimension %s", test.legacyType, dim.String())
+				}
+				if err := ValidateScreenshotDimensionsForSize("ipad-13.png", dim.Width, dim.Height, test.legacyType); err == nil {
+					t.Fatalf("expected %s to reject modern dimension %s", test.legacyType, dim.String())
+				}
+			}
+		})
+	}
+}
+
 func TestScreenshotSizeEntryIncludesMacDesktopDimensions(t *testing.T) {
 	entry, ok := ScreenshotSizeEntryForDisplayType("APP_DESKTOP")
 	if !ok {

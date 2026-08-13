@@ -27,6 +27,10 @@ type ScreenshotUploadResult struct {
 	DisplayType string                      `json:"displayType"`
 	Uploaded    []asc.AssetUploadResultItem `json:"uploaded,omitempty"`
 	Skipped     []SkippedItem               `json:"skipped,omitempty"`
+	// createdSet records that this run created the screenshot set, so a later
+	// failure still reports the App Store Connect state it left behind even
+	// when no asset finished uploading.
+	createdSet bool
 }
 
 const maxMigrateScreenshotFileSize = int64(1024 * 1024 * 1024)
@@ -339,7 +343,25 @@ func inferScreenshotDisplayTypeFromDimensions(path string, width, height int) (s
 		return displayType, nil
 	}
 
+	if candidates := ambiguousDisplayTypesForDimensions(width, height); len(candidates) > 0 {
+		return "", fmt.Errorf(
+			"ambiguous screenshot display type for %q: %dx%d matches %s; name the file after the device (for example %q or %q)",
+			path, width, height, strings.Join(candidates, " and "), "apple tv", "vision pro",
+		)
+	}
+
 	return "", fmt.Errorf("unable to infer screenshot display type for %q", path)
+}
+
+// ambiguousDisplayTypesForDimensions reports display types that share one size,
+// so a screenshot is never routed to a guessed slot. Apple TV 4K and Apple
+// Vision Pro both use 3840x2160, and only the file name can separate them.
+func ambiguousDisplayTypesForDimensions(width, height int) []string {
+	maxDim, minDim := orderedDimensions(width, height)
+	if maxDim == 3840 && minDim == 2160 {
+		return []string{"APP_APPLE_TV", "APP_APPLE_VISION_PRO"}
+	}
+	return nil
 }
 
 func readImageDimensions(path string) (int, int, error) {
@@ -352,10 +374,12 @@ func readImageDimensions(path string) (int, int, error) {
 
 func inferDisplayTypeFromFilename(path string) string {
 	name := strings.ToLower(filepath.Base(path))
+	if strings.Contains(name, "app_ipad_pro_129") ||
+		(strings.Contains(name, "12.9") && strings.Contains(name, "2nd generation")) {
+		return "APP_IPAD_PRO_129"
+	}
+
 	replacements := map[string]string{
-		"ipad pro 13":      "APP_IPAD_PRO_129",
-		"ipad pro 13-inch": "APP_IPAD_PRO_129",
-		"ipad pro 13 inch": "APP_IPAD_PRO_129",
 		"iphone 6.9":       "APP_IPHONE_69",
 		"iphone6.9":        "APP_IPHONE_69",
 		"iphone 6.7":       "APP_IPHONE_67",
@@ -374,17 +398,24 @@ func inferDisplayTypeFromFilename(path string) string {
 		"iphone4.0":        "APP_IPHONE_40",
 		"iphone 3.5":       "APP_IPHONE_35",
 		"iphone3.5":        "APP_IPHONE_35",
-		"ipad 12.9":        "APP_IPAD_PRO_129",
-		"ipad12.9":         "APP_IPAD_PRO_129",
 		"ipad 11":          "APP_IPAD_PRO_3GEN_11",
 		"ipad11":           "APP_IPAD_PRO_3GEN_11",
 		"ipad 10.5":        "APP_IPAD_105",
 		"ipad10.5":         "APP_IPAD_105",
 		"ipad 9.7":         "APP_IPAD_97",
 		"ipad9.7":          "APP_IPAD_97",
+		"ipad pro 13":      "APP_IPAD_PRO_3GEN_129",
+		"ipad pro 13-inch": "APP_IPAD_PRO_3GEN_129",
+		"ipad pro 13 inch": "APP_IPAD_PRO_3GEN_129",
+		"ipad-pro-13":      "APP_IPAD_PRO_3GEN_129",
+		"ipad 12.9":        "APP_IPAD_PRO_3GEN_129",
+		"ipad12.9":         "APP_IPAD_PRO_3GEN_129",
 		"apple tv":         "APP_APPLE_TV",
 		"appletv":          "APP_APPLE_TV",
+		"apple_tv":         "APP_APPLE_TV",
 		"vision pro":       "APP_APPLE_VISION_PRO",
+		"visionpro":        "APP_APPLE_VISION_PRO",
+		"vision_pro":       "APP_APPLE_VISION_PRO",
 		"desktop":          "APP_DESKTOP",
 		"mac":              "APP_DESKTOP",
 		"watch ultra":      "APP_WATCH_ULTRA",
@@ -401,13 +432,15 @@ func inferDisplayTypeFromFilename(path string) string {
 	return ""
 }
 
-func inferDisplayTypeFromDimensions(width, height int) string {
-	maxDim := width
-	minDim := height
+func orderedDimensions(width, height int) (int, int) {
 	if height > width {
-		maxDim = height
-		minDim = width
+		return height, width
 	}
+	return width, height
+}
+
+func inferDisplayTypeFromDimensions(width, height int) string {
+	maxDim, minDim := orderedDimensions(width, height)
 	switch {
 	case maxDim == 2688 && minDim == 1242:
 		return "APP_IPHONE_65"
@@ -438,9 +471,9 @@ func inferDisplayTypeFromDimensions(width, height int) string {
 	case maxDim == 960 && minDim == 640:
 		return "APP_IPHONE_35"
 	case maxDim == 2732 && minDim == 2048:
-		return "APP_IPAD_PRO_129"
+		return "APP_IPAD_PRO_3GEN_129"
 	case maxDim == 2752 && minDim == 2064:
-		return "APP_IPAD_PRO_129"
+		return "APP_IPAD_PRO_3GEN_129"
 	case maxDim == 2420 && minDim == 1668:
 		return "APP_IPAD_PRO_3GEN_11"
 	case maxDim == 2388 && minDim == 1668:
@@ -455,6 +488,29 @@ func inferDisplayTypeFromDimensions(width, height int) string {
 		return "APP_IPAD_97"
 	case maxDim == 1920 && minDim == 1080:
 		return "APP_APPLE_TV"
+	// Apple Watch and Mac sizes, matching internal/screenshotcatalog. Without
+	// them a watchOS or macOS fastlane tree aborts the whole import instead of
+	// selecting a slot.
+	case maxDim == 514 && minDim == 422:
+		return "APP_WATCH_ULTRA"
+	case maxDim == 502 && minDim == 410:
+		return "APP_WATCH_ULTRA"
+	case maxDim == 496 && minDim == 416:
+		return "APP_WATCH_SERIES_10"
+	case maxDim == 484 && minDim == 396:
+		return "APP_WATCH_SERIES_7"
+	case maxDim == 448 && minDim == 368:
+		return "APP_WATCH_SERIES_4"
+	case maxDim == 390 && minDim == 312:
+		return "APP_WATCH_SERIES_3"
+	case maxDim == 1280 && minDim == 800:
+		return "APP_DESKTOP"
+	case maxDim == 1440 && minDim == 900:
+		return "APP_DESKTOP"
+	case maxDim == 2560 && minDim == 1600:
+		return "APP_DESKTOP"
+	case maxDim == 2880 && minDim == 1800:
+		return "APP_DESKTOP"
 	default:
 		return ""
 	}

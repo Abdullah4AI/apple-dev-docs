@@ -14,6 +14,16 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
+func TestAssetsPreviewsListHelpOnlyDocumentsSupportedFlags(t *testing.T) {
+	cmd := AssetsPreviewsListCommand()
+
+	for _, unsupported := range []string{"--replace", "--confirm", "--dry-run"} {
+		if strings.Contains(cmd.LongHelp, unsupported) {
+			t.Errorf("list help must not document unsupported flag %s", unsupported)
+		}
+	}
+}
+
 func TestAssetsPreviewsUploadCommandRejectsSkipExistingWithReplace(t *testing.T) {
 	cmd := AssetsPreviewsUploadCommand()
 	cmd.FlagSet.SetOutput(io.Discard)
@@ -64,6 +74,7 @@ func TestAssetsPreviewsUploadCommandRejectsUnsupportedFileBeforeAuth(t *testing.
 		"--path", dir,
 		"--device-type", "IPHONE_65",
 		"--replace",
+		"--confirm",
 	}); err != nil {
 		t.Fatalf("parse error: %v", err)
 	}

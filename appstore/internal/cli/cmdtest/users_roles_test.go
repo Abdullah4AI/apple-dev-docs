@@ -47,6 +47,12 @@ func TestUsersUpdateNormalizesRoles(t *testing.T) {
 		if got := payload.Data.Attributes.Roles; len(got) != 2 || got[0] != "DEVELOPER" || got[1] != "APP_MANAGER" {
 			t.Fatalf("roles = %#v, want [DEVELOPER APP_MANAGER]", got)
 		}
+		if payload.Data.Attributes.AllAppsVisible != nil {
+			t.Fatalf("allAppsVisible = %v, want omitted", payload.Data.Attributes.AllAppsVisible)
+		}
+		if payload.Data.Relationships != nil {
+			t.Fatalf("relationships = %+v, want omitted", payload.Data.Relationships)
+		}
 		return jsonResponse(http.StatusOK, `{"data":{"type":"users","id":"user-1","attributes":{"roles":["DEVELOPER","APP_MANAGER"]}}}`)
 	}))
 

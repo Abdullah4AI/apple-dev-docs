@@ -21,6 +21,7 @@ func ReleaseStageCommand() *ffcli.Command {
 	version := fs.String("version", "", "App Store version string (required)")
 	buildID := fs.String("build", "", "Build ID to attach (required)")
 	metadataDir := fs.String("metadata-dir", "", "Metadata directory to apply")
+	allowDeletes := fs.Bool("allow-deletes", false, "Allow destructive delete operations when applying --metadata-dir (disables default locale fallback for missing locales)")
 	routingCoverageFile := fs.String("routing-coverage-file", "", "[experimental] Routing app coverage GeoJSON file to reconcile before readiness")
 	copyMetadataFrom := fs.String("copy-metadata-from", "", "Copy localization metadata from this source version string")
 	copyFields := fs.String("copy-fields", "", "Comma-separated metadata fields to copy: description, keywords, marketingUrl, promotionalText, supportUrl, whatsNew")
@@ -38,11 +39,12 @@ func ReleaseStageCommand() *ffcli.Command {
 		ShortUsage: "asc release stage --app \"APP_ID\" --version \"2.4.0\" --build \"BUILD_ID\" (--metadata-dir \"./metadata/version/2.4.0\" | --copy-metadata-from \"2.3.2\") [--routing-coverage-file \"./coverage.geojson\"] [flags]",
 		ShortHelp:  "Run version + metadata + attach + validate.",
 		LongHelp: `Run a deterministic pre-submit App Store staging pipeline:
-1. Ensure/create version
-2. Apply metadata/localizations or copy metadata from another version
-3. Reconcile routing app coverage when --routing-coverage-file is set
-4. Attach selected build
-5. Run readiness checks
+1. Verify --build exists and belongs to --app
+2. Ensure/create version
+3. Apply metadata/localizations or copy metadata from another version
+4. Reconcile routing app coverage when --routing-coverage-file is set
+5. Attach selected build
+6. Run readiness checks
 
 Stops before creating a review submission.
 Supports dry-run planning, step-level structured output, and checkpointed resume.
@@ -101,6 +103,9 @@ Examples:
 			if (trimmedMetadataDir == "" && trimmedCopyMetadataFrom == "") || (trimmedMetadataDir != "" && trimmedCopyMetadataFrom != "") {
 				return shared.UsageError("exactly one of --metadata-dir or --copy-metadata-from is required")
 			}
+			if *allowDeletes && trimmedMetadataDir == "" {
+				return shared.UsageError("--allow-deletes requires --metadata-dir")
+			}
 
 			selectedCopyFields := []string(nil)
 			if trimmedCopyMetadataFrom != "" {
@@ -143,6 +148,7 @@ Examples:
 				Timeout:                     *timeout,
 				DryRun:                      *dryRun,
 				Confirm:                     *confirm,
+				AllowDeletes:                *allowDeletes,
 				StrictValidate:              *strictValidate,
 				CheckpointFile:              absCheckpointPath,
 			})

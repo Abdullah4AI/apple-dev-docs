@@ -11,22 +11,20 @@ import (
 type ReviewSubmissionItemType string
 
 const (
-	ReviewSubmissionItemTypeAppStoreVersion                    ReviewSubmissionItemType = "appStoreVersions"
-	ReviewSubmissionItemTypeAppCustomProductPageVersion        ReviewSubmissionItemType = "appCustomProductPageVersions"
-	ReviewSubmissionItemTypeAppCustomProductPage               ReviewSubmissionItemType = "appCustomProductPages"
-	ReviewSubmissionItemTypeAppEvent                           ReviewSubmissionItemType = "appEvents"
-	ReviewSubmissionItemTypeAppStoreVersionExperiment          ReviewSubmissionItemType = "appStoreVersionExperiments"
-	ReviewSubmissionItemTypeAppStoreVersionExperimentV2        ReviewSubmissionItemType = "appStoreVersionExperimentsV2"
-	ReviewSubmissionItemTypeAppStoreVersionExperimentTreatment ReviewSubmissionItemType = "appStoreVersionExperimentTreatments"
-	ReviewSubmissionItemTypeBackgroundAssetVersion             ReviewSubmissionItemType = "backgroundAssetVersions"
-	ReviewSubmissionItemTypeGameCenterAchievementVersion       ReviewSubmissionItemType = "gameCenterAchievementVersions"
-	ReviewSubmissionItemTypeGameCenterActivityVersion          ReviewSubmissionItemType = "gameCenterActivityVersions"
-	ReviewSubmissionItemTypeGameCenterChallengeVersion         ReviewSubmissionItemType = "gameCenterChallengeVersions"
-	ReviewSubmissionItemTypeGameCenterLeaderboardSetVersion    ReviewSubmissionItemType = "gameCenterLeaderboardSetVersions"
-	ReviewSubmissionItemTypeGameCenterLeaderboardVersion       ReviewSubmissionItemType = "gameCenterLeaderboardVersions"
-	ReviewSubmissionItemTypeInAppPurchaseVersion               ReviewSubmissionItemType = "inAppPurchaseVersions"
-	ReviewSubmissionItemTypeSubscriptionVersion                ReviewSubmissionItemType = "subscriptionVersions"
-	ReviewSubmissionItemTypeSubscriptionGroupVersion           ReviewSubmissionItemType = "subscriptionGroupVersions"
+	ReviewSubmissionItemTypeAppStoreVersion                 ReviewSubmissionItemType = "appStoreVersions"
+	ReviewSubmissionItemTypeAppCustomProductPageVersion     ReviewSubmissionItemType = "appCustomProductPageVersions"
+	ReviewSubmissionItemTypeAppEvent                        ReviewSubmissionItemType = "appEvents"
+	ReviewSubmissionItemTypeAppStoreVersionExperiment       ReviewSubmissionItemType = "appStoreVersionExperiments"
+	ReviewSubmissionItemTypeAppStoreVersionExperimentV2     ReviewSubmissionItemType = "appStoreVersionExperimentsV2"
+	ReviewSubmissionItemTypeBackgroundAssetVersion          ReviewSubmissionItemType = "backgroundAssetVersions"
+	ReviewSubmissionItemTypeGameCenterAchievementVersion    ReviewSubmissionItemType = "gameCenterAchievementVersions"
+	ReviewSubmissionItemTypeGameCenterActivityVersion       ReviewSubmissionItemType = "gameCenterActivityVersions"
+	ReviewSubmissionItemTypeGameCenterChallengeVersion      ReviewSubmissionItemType = "gameCenterChallengeVersions"
+	ReviewSubmissionItemTypeGameCenterLeaderboardSetVersion ReviewSubmissionItemType = "gameCenterLeaderboardSetVersions"
+	ReviewSubmissionItemTypeGameCenterLeaderboardVersion    ReviewSubmissionItemType = "gameCenterLeaderboardVersions"
+	ReviewSubmissionItemTypeInAppPurchaseVersion            ReviewSubmissionItemType = "inAppPurchaseVersions"
+	ReviewSubmissionItemTypeSubscriptionVersion             ReviewSubmissionItemType = "subscriptionVersions"
+	ReviewSubmissionItemTypeSubscriptionGroupVersion        ReviewSubmissionItemType = "subscriptionGroupVersions"
 )
 
 // ReviewSubmissionItemAttributes describes review submission item attributes.
@@ -118,7 +116,6 @@ type ReviewSubmissionItemCreateRequest struct {
 
 type reviewSubmissionItemTypeSpec struct {
 	canonical         ReviewSubmissionItemType
-	aliases           []string
 	applyRelationship func(*ReviewSubmissionItemCreateRelationships, string)
 }
 
@@ -167,7 +164,6 @@ var reviewSubmissionItemTypeSpecs = []reviewSubmissionItemTypeSpec{
 	},
 	{
 		canonical: ReviewSubmissionItemTypeAppStoreVersionExperimentV2,
-		aliases:   []string{"appStoreVersionExperimentV2"},
 		applyRelationship: func(relationships *ReviewSubmissionItemCreateRelationships, itemID string) {
 			relationships.AppStoreVersionExperimentV2 = reviewSubmissionItemRelationship(ResourceTypeAppStoreVersionExperiments, itemID)
 		},
@@ -225,11 +221,6 @@ func ParseReviewSubmissionItemType(value string) (ReviewSubmissionItemType, bool
 	for _, spec := range reviewSubmissionItemTypeSpecs {
 		if normalized == string(spec.canonical) {
 			return spec.canonical, true
-		}
-		for _, alias := range spec.aliases {
-			if normalized == alias {
-				return spec.canonical, true
-			}
 		}
 	}
 	return "", false

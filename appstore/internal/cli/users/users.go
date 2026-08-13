@@ -240,15 +240,9 @@ Examples:
 				attrs.AllAppsVisible = &allAppsVisible
 			}
 
-			user, err := client.UpdateUser(requestCtx, idValue, attrs)
+			user, err := client.UpdateUser(requestCtx, idValue, attrs, visibleAppIDs)
 			if err != nil {
 				return fmt.Errorf("users update: failed to update: %w", err)
-			}
-
-			if len(visibleAppIDs) > 0 {
-				if err := client.SetUserVisibleApps(requestCtx, idValue, visibleAppIDs); err != nil {
-					return fmt.Errorf("users update: roles updated but failed to set visible apps: %w", err)
-				}
 			}
 
 			return shared.PrintOutput(user, *output.Output, *output.Pretty)

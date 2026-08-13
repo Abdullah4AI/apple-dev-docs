@@ -128,18 +128,8 @@ func TestReviewCommandItemsValidationErrors(t *testing.T) {
 			wantErr: "--item-id is required",
 		},
 		{
-			name:    "review items view missing id",
-			args:    []string{"review", "items", "view"},
-			wantErr: "--id is required",
-		},
-		{
-			name:    "review items-get compatibility missing id",
-			args:    []string{"review", "items-get"},
-			wantErr: "--id is required",
-		},
-		{
 			name:    "review items-update missing id",
-			args:    []string{"review", "items-update", "--state", "READY_FOR_REVIEW"},
+			args:    []string{"review", "items-update", "--resolved", "true"},
 			wantErr: "--id is required",
 		},
 		{
@@ -241,42 +231,5 @@ func TestReviewCommandItemsInvalidItemType(t *testing.T) {
 	}
 	if strings.Contains(stderr, "gameCenterLeaderboardReleases") {
 		t.Fatalf("did not expect undocumented leaderboard release type in stderr, got %q", stderr)
-	}
-}
-
-func TestReviewCommandItemsInvalidState(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		wantPrefix string
-	}{
-		{
-			name:       "legacy",
-			args:       []string{"review", "items-update", "--id", "ITEM_ID", "--state", "nope"},
-			wantPrefix: "review items-update:",
-		},
-		{
-			name:       "nested",
-			args:       []string{"review", "items", "update", "--id", "ITEM_ID", "--state", "nope"},
-			wantPrefix: "review items update:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			if err := root.Parse(test.args); err != nil {
-				t.Fatalf("parse error: %v", err)
-			}
-			err := root.Run(context.Background())
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.HasPrefix(err.Error(), test.wantPrefix) {
-				t.Fatalf("expected error prefix %q, got %v", test.wantPrefix, err)
-			}
-		})
 	}
 }

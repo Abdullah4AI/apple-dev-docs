@@ -65,16 +65,6 @@ const (
 	AnalyticsAccessTypeOneTimeSnapshot AnalyticsAccessType = "ONE_TIME_SNAPSHOT"
 )
 
-// AnalyticsReportRequestState is retained for source compatibility with older
-// responses; current App Store Connect responses do not expose this attribute.
-type AnalyticsReportRequestState string
-
-const (
-	AnalyticsReportRequestStateProcessing AnalyticsReportRequestState = "PROCESSING"
-	AnalyticsReportRequestStateCompleted  AnalyticsReportRequestState = "COMPLETED"
-	AnalyticsReportRequestStateFailed     AnalyticsReportRequestState = "FAILED"
-)
-
 // SalesReportParams describes sales report query parameters.
 type SalesReportParams struct {
 	VendorNumber  string
@@ -93,12 +83,8 @@ type ReportDownload struct {
 
 // AnalyticsReportRequestAttributes describes analytics report request data.
 type AnalyticsReportRequestAttributes struct {
-	AccessType AnalyticsAccessType `json:"accessType,omitempty"`
-	// Legacy compatibility: current App Store Connect responses omit this field.
-	State AnalyticsReportRequestState `json:"state,omitempty"`
-	// Legacy compatibility: current App Store Connect responses omit this field.
-	CreatedDate            string `json:"createdDate,omitempty"`
-	StoppedDueToInactivity *bool  `json:"stoppedDueToInactivity,omitempty"`
+	AccessType             AnalyticsAccessType `json:"accessType,omitempty"`
+	StoppedDueToInactivity *bool               `json:"stoppedDueToInactivity,omitempty"`
 }
 
 // AnalyticsReportRequestRelationships describes request relationships.
@@ -213,8 +199,7 @@ type AnalyticsReportRequestReportsLinkagesResponse = LinkagesResponse
 
 type analyticsReportRequestsQuery struct {
 	listQuery
-	accessType         AnalyticsAccessType
-	deprecatedStateSet bool
+	accessType AnalyticsAccessType
 }
 
 type analyticsReportsQuery struct {
@@ -266,15 +251,6 @@ func WithAnalyticsReportRequestsNextURL(next string) AnalyticsReportRequestsOpti
 func WithAnalyticsReportRequestsAccessType(accessType AnalyticsAccessType) AnalyticsReportRequestsOption {
 	return func(q *analyticsReportRequestsQuery) {
 		q.accessType = AnalyticsAccessType(strings.TrimSpace(string(accessType)))
-	}
-}
-
-// WithAnalyticsReportRequestsState is retained for source compatibility.
-// Deprecated: App Store Connect does not support state filtering. Use
-// WithAnalyticsReportRequestsAccessType instead.
-func WithAnalyticsReportRequestsState(_ string) AnalyticsReportRequestsOption {
-	return func(q *analyticsReportRequestsQuery) {
-		q.deprecatedStateSet = true
 	}
 }
 
@@ -454,10 +430,6 @@ func (c *Client) GetAnalyticsReportRequests(ctx context.Context, appID string, o
 	for _, opt := range opts {
 		opt(query)
 	}
-	if query.deprecatedStateSet {
-		return nil, fmt.Errorf("analyticsReportRequests: state filtering is unsupported by App Store Connect; use WithAnalyticsReportRequestsAccessType")
-	}
-
 	path := "/v1/analyticsReportRequests"
 	if strings.TrimSpace(appID) != "" {
 		path = fmt.Sprintf("/v1/apps/%s/analyticsReportRequests", strings.TrimSpace(appID))
@@ -486,7 +458,10 @@ func (c *Client) GetAnalyticsReportRequests(ctx context.Context, appID string, o
 
 // GetAnalyticsReportRequest retrieves a specific analytics report request by ID.
 func (c *Client) GetAnalyticsReportRequest(ctx context.Context, requestID string) (*AnalyticsReportRequestResponse, error) {
-	path := fmt.Sprintf("/v1/analyticsReportRequests/%s", requestID)
+	path, err := resourcePath("/v1/analyticsReportRequests/%s", requestID)
+	if err != nil {
+		return nil, fmt.Errorf("analytics report request: %w", err)
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -501,14 +476,20 @@ func (c *Client) GetAnalyticsReportRequest(ctx context.Context, requestID string
 
 // DeleteAnalyticsReportRequest deletes an analytics report request by ID.
 func (c *Client) DeleteAnalyticsReportRequest(ctx context.Context, requestID string) error {
-	path := fmt.Sprintf("/v1/analyticsReportRequests/%s", strings.TrimSpace(requestID))
-	_, err := c.do(ctx, "DELETE", path, nil)
+	path, err := resourcePath("/v1/analyticsReportRequests/%s", requestID)
+	if err != nil {
+		return fmt.Errorf("analytics report request: %w", err)
+	}
+	_, err = c.do(ctx, "DELETE", path, nil)
 	return err
 }
 
 // GetAnalyticsReport retrieves a specific analytics report by ID.
 func (c *Client) GetAnalyticsReport(ctx context.Context, reportID string) (*AnalyticsReportResponse, error) {
-	path := fmt.Sprintf("/v1/analyticsReports/%s", strings.TrimSpace(reportID))
+	path, err := resourcePath("/v1/analyticsReports/%s", reportID)
+	if err != nil {
+		return nil, fmt.Errorf("analytics report: %w", err)
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -528,15 +509,22 @@ func (c *Client) GetAnalyticsReports(ctx context.Context, requestID string, opts
 		opt(query)
 	}
 
-	path := fmt.Sprintf("/v1/analyticsReportRequests/%s/reports", strings.TrimSpace(requestID))
+	var path string
 	if query.nextURL != "" {
 		// Validate nextURL to prevent credential exfiltration
 		if err := validateNextURL(query.nextURL); err != nil {
 			return nil, fmt.Errorf("analyticsReports: %w", err)
 		}
 		path = query.nextURL
-	} else if queryString := buildAnalyticsReportsQuery(query); queryString != "" {
-		path += "?" + queryString
+	} else {
+		var err error
+		path, err = resourcePath("/v1/analyticsReportRequests/%s/reports", requestID)
+		if err != nil {
+			return nil, fmt.Errorf("analytics reports: %w", err)
+		}
+		if queryString := buildAnalyticsReportsQuery(query); queryString != "" {
+			path += "?" + queryString
+		}
 	}
 
 	data, err := c.do(ctx, "GET", path, nil)
@@ -586,15 +574,22 @@ func (c *Client) GetAnalyticsReportInstances(ctx context.Context, reportID strin
 		opt(query)
 	}
 
-	path := fmt.Sprintf("/v1/analyticsReports/%s/instances", strings.TrimSpace(reportID))
+	var path string
 	if query.nextURL != "" {
 		// Validate nextURL to prevent credential exfiltration
 		if err := validateNextURL(query.nextURL); err != nil {
 			return nil, fmt.Errorf("analyticsReportInstances: %w", err)
 		}
 		path = query.nextURL
-	} else if queryString := buildAnalyticsReportInstancesQuery(query); queryString != "" {
-		path += "?" + queryString
+	} else {
+		var err error
+		path, err = resourcePath("/v1/analyticsReports/%s/instances", reportID)
+		if err != nil {
+			return nil, fmt.Errorf("analytics report instances: %w", err)
+		}
+		if queryString := buildAnalyticsReportInstancesQuery(query); queryString != "" {
+			path += "?" + queryString
+		}
 	}
 
 	data, err := c.do(ctx, "GET", path, nil)

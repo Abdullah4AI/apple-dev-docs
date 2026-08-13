@@ -63,7 +63,11 @@ func winBackOfferPriceRelationshipIDs(raw json.RawMessage) (string, string, erro
 	if err := json.Unmarshal(raw, &relationships); err != nil {
 		return "", "", fmt.Errorf("decode win-back offer price relationships: %w", err)
 	}
-	return relationships.Territory.Data.ID, relationships.SubscriptionPricePoint.Data.ID, nil
+	pricePointID := ""
+	if relationships.SubscriptionPricePoint != nil {
+		pricePointID = relationships.SubscriptionPricePoint.Data.ID
+	}
+	return relationships.Territory.Data.ID, pricePointID, nil
 }
 
 func formatIntegerRange(rangeValue *IntegerRange) string {

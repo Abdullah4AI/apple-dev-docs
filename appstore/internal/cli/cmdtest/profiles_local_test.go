@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -293,6 +294,144 @@ type localListResult struct {
 	Items      []localProfileItem `json:"items"`
 
 	SkippedItems []localSkippedItem `json:"skippedItems"`
+}
+
+func TestProfilesLocalDefaultFollowsActiveXcodeWithoutCombiningStores(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("active Xcode profile directory is macOS-specific")
+	}
+
+	binDir := t.TempDir()
+	xcodebuildPath := filepath.Join(binDir, "xcodebuild")
+	if err := os.WriteFile(xcodebuildPath, []byte("#!/bin/sh\nprintf 'Xcode 16.0\\nBuild version 16A1\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake xcodebuild: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	modernDir := filepath.Join(homeDir, "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles")
+	legacyDir := filepath.Join(homeDir, "Library", "MobileDevice", "Provisioning Profiles")
+	if err := os.MkdirAll(modernDir, 0o755); err != nil {
+		t.Fatalf("create modern profile directory: %v", err)
+	}
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("create legacy profile directory: %v", err)
+	}
+
+	modernUUID := "00000000-0000-0000-0000-000000000016"
+	legacyUUID := "00000000-0000-0000-0000-000000000015"
+	modernPath := filepath.Join(modernDir, modernUUID+".mobileprovision")
+	legacyPath := filepath.Join(legacyDir, legacyUUID+".mobileprovision")
+	expiresAt := time.Now().Add(-24 * time.Hour)
+	if err := os.WriteFile(modernPath, buildMobileprovision(t, modernUUID, "Modern Profile", expiresAt), 0o600); err != nil {
+		t.Fatalf("write modern profile: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, buildMobileprovision(t, legacyUUID, "Legacy Profile", expiresAt), 0o600); err != nil {
+		t.Fatalf("write legacy profile: %v", err)
+	}
+
+	run := func(args []string) (string, string, error) {
+		root := RootCommand("1.2.3")
+		root.FlagSet.SetOutput(io.Discard)
+		var runErr error
+		stdout, stderr := captureOutput(t, func() {
+			if err := root.Parse(args); err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			runErr = root.Run(context.Background())
+		})
+		return stdout, stderr, runErr
+	}
+
+	stdout, stderr, err := run([]string{"profiles", "local", "list", "--output", "json"})
+	if err != nil {
+		t.Fatalf("default list error = %v, stderr = %q", err, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty list stderr, got %q", stderr)
+	}
+	var list localListResult
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+		t.Fatalf("decode list JSON: %v (stdout=%q)", err, stdout)
+	}
+	if list.InstallDir != modernDir || list.Listed != 1 || len(list.Items) != 1 || list.Items[0].UUID != modernUUID {
+		t.Fatalf("default list combined or selected the wrong store: %+v", list)
+	}
+
+	_, stderr, err = run([]string{"profiles", "local", "clean", "--expired", "--confirm", "--output", "json"})
+	if err != nil {
+		t.Fatalf("default clean error = %v, stderr = %q", err, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty clean stderr, got %q", stderr)
+	}
+	if _, err := os.Stat(modernPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("modern profile must be deleted, stat error = %v", err)
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy profile must remain outside the selected store: %v", err)
+	}
+}
+
+func TestProfilesLocalDefaultFallsBackToLegacyDirectoryWithoutFullXcode(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("active Xcode profile directory is macOS-specific")
+	}
+
+	binDir := t.TempDir()
+	xcodebuildPath := filepath.Join(binDir, "xcodebuild")
+	script := "#!/bin/sh\nprintf 'xcode-select: error: tool '\\''xcodebuild'\\'' requires Xcode\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(xcodebuildPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake xcodebuild: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	legacyDir := filepath.Join(homeDir, "Library", "MobileDevice", "Provisioning Profiles")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("create legacy profile directory: %v", err)
+	}
+	legacyUUID := "00000000-0000-0000-0000-000000000015"
+	legacyPath := filepath.Join(legacyDir, legacyUUID+".mobileprovision")
+	if err := os.WriteFile(legacyPath, buildMobileprovision(t, legacyUUID, "Legacy Profile", time.Now().Add(24*time.Hour)), 0o600); err != nil {
+		t.Fatalf("write legacy profile: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"profiles", "local", "list", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr != nil {
+		t.Fatalf("profiles local list error = %v, stderr = %q", runErr, stderr)
+	}
+
+	var list localListResult
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+		t.Fatalf("decode list JSON: %v (stdout=%q)", err, stdout)
+	}
+	if list.InstallDir != legacyDir {
+		t.Fatalf("install dir = %q, want the legacy default %q", list.InstallDir, legacyDir)
+	}
+	if list.Listed != 1 || len(list.Items) != 1 || list.Items[0].UUID != legacyUUID {
+		t.Fatalf("legacy profiles were not listed: %+v", list)
+	}
+
+	if lines := strings.Count(strings.TrimSpace(stderr), "\n") + 1; lines != 1 {
+		t.Fatalf("expected a single stderr notice, got %q", stderr)
+	}
+	for _, want := range []string{"active Xcode", legacyDir, "--install-dir"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr notice %q missing %q", stderr, want)
+		}
+	}
 }
 
 func TestProfilesLocal_InstallListCleanExpired(t *testing.T) {

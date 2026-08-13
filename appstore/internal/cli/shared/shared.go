@@ -1269,8 +1269,8 @@ var (
 )
 
 // DefaultOutputFormat returns the default output format for CLI commands.
-// It checks ASC_DEFAULT_OUTPUT first. When unset, interactive terminals default
-// to table output and non-interactive contexts default to JSON.
+// It checks ASC_DEFAULT_OUTPUT first. When unset, local interactive terminals
+// default to table output while CI and non-interactive contexts default to JSON.
 // Valid ASC_DEFAULT_OUTPUT values are "json", "table", "markdown", and "md".
 func DefaultOutputFormat() string {
 	defaultOutputOnce.Do(func() {
@@ -1282,6 +1282,9 @@ func DefaultOutputFormat() string {
 func resolveDefaultOutput() string {
 	env := strings.TrimSpace(os.Getenv(defaultOutputEnvVar))
 	if env == "" {
+		if isCIEnvironment() {
+			return "json"
+		}
 		if isTerminal(int(os.Stdout.Fd())) {
 			return "table"
 		}
@@ -1295,6 +1298,27 @@ func resolveDefaultOutput() string {
 		fmt.Fprintf(os.Stderr, "Warning: invalid %s value %q (expected json, table, markdown, or md); using json\n", defaultOutputEnvVar, env)
 		return "json"
 	}
+}
+
+func isCIEnvironment() bool {
+	for _, key := range []string{
+		"CI",
+		"GITHUB_ACTIONS",
+		"GITLAB_CI",
+		"CIRCLECI",
+		"BUILDKITE",
+		"BITRISE_IO",
+		"TF_BUILD",
+		"TRAVIS",
+		"APPVEYOR",
+	} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		}
+	}
+	return strings.TrimSpace(os.Getenv("TEAMCITY_VERSION")) != "" ||
+		strings.TrimSpace(os.Getenv("JENKINS_URL")) != ""
 }
 
 // BindOutputFlagsWith registers a custom output-format flag and --pretty.

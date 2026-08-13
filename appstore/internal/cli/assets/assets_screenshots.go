@@ -94,6 +94,7 @@ type screenshotUploadCommandOptions struct {
 	DeviceType            string
 	SkipExisting          bool
 	Replace               bool
+	Confirm               bool
 	DryRun                bool
 	MaxScreenshots        int
 }
@@ -256,7 +257,7 @@ func ExecuteScreenshotSetUpload[T any](ctx context.Context, opts ScreenshotSetUp
 	if err != nil {
 		return zero, err
 	}
-	if err := ValidateScreenshotDimensions(files, apiDisplayType); err != nil {
+	if err := validateScreenshotDimensions(files, apiDisplayType); err != nil {
 		return zero, err
 	}
 
@@ -410,7 +411,8 @@ func AssetsScreenshotsUploadCommand() *ffcli.Command {
 	deviceType := fs.String("device-type", "", "Device type (e.g., IPHONE_65 or IPAD_PRO_3GEN_129)")
 	resume := fs.String("resume", "", "Resume a previous upload from a failure artifact")
 	skipExisting := fs.Bool("skip-existing", false, "Skip files whose MD5 checksum already exists in the target screenshot set")
-	replace := fs.Bool("replace", false, "Delete all existing screenshots from the target set before uploading")
+	replace := fs.Bool("replace", false, "Delete all existing screenshots from the target set before uploading (requires --confirm)")
+	confirm := fs.Bool("confirm", false, "Confirm the deletions performed by --replace (required with --replace)")
 	dryRun := fs.Bool("dry-run", false, "Show what would be uploaded, skipped, or deleted without making changes")
 	maxScreenshots := fs.Int("max-screenshots", 0, "Upload only the first N sorted screenshots per set; must be 10 or less")
 	output := shared.BindOutputFlags(fs)
@@ -433,11 +435,16 @@ matching --device-type are uploaded. This supports layouts like
 returned as data[].id by "asc localizations list --version VERSION_ID --output json".
 It is not the locale code such as en-US.
 
+--replace deletes every existing screenshot in each target set before uploading
+and therefore requires --confirm. Use --replace --dry-run to preview the
+deletions without --confirm.
+
 Examples:
   asc localizations list --version "VERSION_ID" --output json --locale "en-US"
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65"
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --skip-existing
-  asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --replace
+  asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --replace --confirm
+  asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --replace --dry-run
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --max-screenshots 10
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPHONE_65" --skip-existing --dry-run
   asc screenshots upload --version-localization "VERSION_LOCALIZATION_ID" --path "./screenshots" --device-type "IPAD_PRO_3GEN_129"
@@ -459,8 +466,8 @@ Examples:
 					strings.TrimSpace(*deviceType) != "" {
 					return shared.UsageError("--resume cannot be combined with --version-localization, --app, --version, --version-id, --platform, --path, or --device-type")
 				}
-				if *skipExisting || *replace || *dryRun || *maxScreenshots != 0 {
-					return shared.UsageError("--resume cannot be combined with --skip-existing, --replace, --dry-run, or --max-screenshots")
+				if *skipExisting || *replace || *confirm || *dryRun || *maxScreenshots != 0 {
+					return shared.UsageError("--resume cannot be combined with --skip-existing, --replace, --confirm, --dry-run, or --max-screenshots")
 				}
 
 				client, err := shared.GetASCClient()
@@ -487,6 +494,7 @@ Examples:
 				DeviceType:            *deviceType,
 				SkipExisting:          *skipExisting,
 				Replace:               *replace,
+				Confirm:               *confirm,
 				DryRun:                *dryRun,
 				MaxScreenshots:        *maxScreenshots,
 			}, screenshotUploadDependencies{
@@ -542,7 +550,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 
 	if locID == "" {
 		if !appModeRequested {
-			fmt.Fprintln(os.Stderr, "Error: --version-localization is required")
+			fmt.Fprintln(os.Stderr, "Error: choose an upload mode: --version-localization VERSION_LOCALIZATION_ID; (--app APP_ID or ASC_APP_ID) with --version VERSION or --version-id VERSION_ID; or --resume ARTIFACT_PATH")
 			return nil, shared.MissingRequiredUsageError()
 		}
 	} else if appModeRequested {
@@ -580,6 +588,13 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	if opts.SkipExisting && opts.Replace {
 		fmt.Fprintln(os.Stderr, "Error: --skip-existing and --replace are mutually exclusive")
 		return nil, flag.ErrHelp
+	}
+	if opts.Replace && !opts.DryRun && !opts.Confirm {
+		fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete existing screenshots with --replace")
+		return nil, shared.MissingRequiredUsageError()
+	}
+	if opts.Confirm && !opts.Replace {
+		return nil, shared.UsageError("--confirm only applies to --replace")
 	}
 	if opts.MaxScreenshots < 0 {
 		return nil, shared.UsageError("--max-screenshots must be zero or greater")

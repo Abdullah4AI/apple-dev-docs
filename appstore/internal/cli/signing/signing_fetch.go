@@ -17,6 +17,14 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
+const deviceWithoutCreateMissingDeprecationWarning = "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0."
+
+func warnDeviceWithoutCreateMissing(deviceIDs string, createMissing bool) {
+	if !createMissing && strings.TrimSpace(deviceIDs) != "" {
+		fmt.Fprintln(os.Stderr, deviceWithoutCreateMissingDeprecationWarning)
+	}
+}
+
 // SigningFetchCommand returns the signing fetch subcommand.
 func SigningFetchCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("fetch", flag.ExitOnError)
@@ -24,11 +32,11 @@ func SigningFetchCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (optional, or ASC_APP_ID env)")
 	bundleID := fs.String("bundle-id", "", "Bundle identifier (e.g., com.example.app) - required")
 	profileType := fs.String("profile-type", "", "Profile type: IOS_APP_STORE, IOS_APP_DEVELOPMENT, MAC_APP_STORE, etc. (required)")
-	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (required for development profiles)")
+	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (required with --create-missing for development profiles; deprecated and ignored without it until 5.0.0)")
 	certType := fs.String("certificate-type", "", "Certificate type filter (optional)")
 	outputPath := fs.String("output", "./signing", "Output directory for signing files")
 	createMissing := fs.Bool("create-missing", false, "Create missing profiles")
-	output := shared.BindOutputFlagsWith(fs, "format", "json", "Output format for metadata: json (default), table, markdown")
+	output := shared.BindOutputFlagsWith(fs, "format", shared.DefaultOutputFormat(), "Output format for metadata: json, table, markdown")
 
 	return &ffcli.Command{
 		Name:       "fetch",
@@ -40,11 +48,13 @@ This command resolves the bundle ID, finds matching certificates and profiles,
 and writes them to the output directory.
 
 With --create-missing, it will create a new profile if none exist for the
-specified configuration.
+specified configuration. Devices are only applied to profiles this command
+creates. In 4.x, passing --device without --create-missing prints a deprecation
+warning and ignores the device IDs; 5.0.0 will reject that combination.
 
 Examples:
   asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_STORE --output ./signing
-  asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_DEVELOPMENT --device "DEVICE1,DEVICE2"
+  asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_DEVELOPMENT --create-missing --device "DEVICE1,DEVICE2"
   asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_STORE --create-missing`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -61,6 +71,7 @@ Examples:
 				return shared.MissingRequiredUsageError()
 			}
 			profType = strings.ToUpper(profType)
+			warnDeviceWithoutCreateMissing(*deviceIDs, *createMissing)
 			if *createMissing && isDevelopmentProfile(profType) && strings.TrimSpace(*deviceIDs) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --device is required for development profiles")
 				return shared.MissingRequiredUsageError()
@@ -76,6 +87,15 @@ Examples:
 				}
 				return nil
 			})
+			// signing fetch never overwrites, so every colliding output file has
+			// to be detected before the profile is created in App Store Connect.
+			// Otherwise a failed write leaves a stray profile in the account.
+			preflightOutput := func(profileName, profileID string, certificates []asc.Resource[asc.CertificateAttributes]) error {
+				if err := prepareOutputDir(); err != nil {
+					return err
+				}
+				return ensureOutputPathsAreFree(signingOutputPaths(outputDir, profileName, profileID, certificates))
+			}
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -114,7 +134,9 @@ Examples:
 					CertificateType:    *certType,
 					DeviceIDs:          shared.SplitCSV(*deviceIDs),
 					CreateMissing:      *createMissing,
-					BeforeCreate:       prepareOutputDir,
+					BeforeCreate: func(plan profileCreatePlan) error {
+						return preflightOutput(plan.ProfileName, "", plan.Certificates)
+					},
 				},
 			)
 			if err != nil {
@@ -124,12 +146,11 @@ Examples:
 			result.ProfileID = profile.Data.ID
 			result.Created = created
 
-			if err := prepareOutputDir(); err != nil {
+			if err := preflightOutput(profile.Data.Attributes.Name, profile.Data.ID, certs.Data); err != nil {
 				return fmt.Errorf("signing fetch: %w", err)
 			}
 
-			profileName := safeFileName(profile.Data.Attributes.Name, profile.Data.ID)
-			profilePath := filepath.Join(outputDir, profileName+".mobileprovision")
+			profilePath := profileOutputPath(outputDir, profile.Data.Attributes.Name, profile.Data.ID)
 			profileContent, err := decodeBase64Content("profile", profile.Data.Attributes.ProfileContent)
 			if err != nil {
 				return fmt.Errorf("signing fetch: decode profile: %w", err)
@@ -140,8 +161,7 @@ Examples:
 			result.ProfileFile = profilePath
 
 			for _, cert := range certs.Data {
-				certName := safeFileName(cert.Attributes.SerialNumber, cert.ID)
-				certPath := filepath.Join(outputDir, certName+".cer")
+				certPath := certificateOutputPath(outputDir, cert)
 				certContent, err := decodeBase64Content("certificate", cert.Attributes.CertificateContent)
 				if err != nil {
 					return fmt.Errorf("signing fetch: decode certificate: %w", err)
@@ -223,8 +243,15 @@ type signingAssetsOptions struct {
 	CertificateType    string
 	DeviceIDs          []string
 	CreateMissing      bool
-	BeforeCreate       func() error
+	BeforeCreate       func(profileCreatePlan) error
 	CreateContext      func() (context.Context, context.CancelFunc)
+}
+
+// profileCreatePlan describes the profile that is about to be created so callers
+// can fail before App Store Connect is mutated.
+type profileCreatePlan struct {
+	ProfileName  string
+	Certificates []asc.Resource[asc.CertificateAttributes]
 }
 
 var errNoMatchingProfileCertificates = errors.New("profile has no matching associated certificates")
@@ -295,8 +322,10 @@ func resolveSigningAssets(ctx context.Context, client *asc.Client, options signi
 			options.ProfileType,
 		)
 	}
+	profileName := profileCreateName(options.ProfileType, time.Now())
 	if options.BeforeCreate != nil {
-		if err := options.BeforeCreate(); err != nil {
+		plan := profileCreatePlan{ProfileName: profileName, Certificates: certificates.Data}
+		if err := options.BeforeCreate(plan); err != nil {
 			return nil, nil, false, fmt.Errorf("preflight before creating profile: %w", err)
 		}
 	}
@@ -313,6 +342,7 @@ func resolveSigningAssets(ctx context.Context, client *asc.Client, options signi
 		createCtx,
 		client,
 		options.BundleIDResourceID,
+		profileName,
 		options.ProfileType,
 		extractIDs(certificates.Data),
 		options.DeviceIDs,
@@ -469,18 +499,47 @@ func findProfileCertificates(ctx context.Context, client *asc.Client, profileID,
 		}
 		return nil, fmt.Errorf("profile %s has no associated certificates: %w", profileID, errNoMatchingProfileCertificates)
 	}
-	return &asc.CertificatesResponse{Data: all, Links: links}, nil
+
+	usable := usableProfileCertificates(all, time.Now())
+	if len(usable) == 0 {
+		return nil, fmt.Errorf("profile %s has no active, unexpired associated certificates: %w", profileID, errNoMatchingProfileCertificates)
+	}
+	return &asc.CertificatesResponse{Data: usable, Links: links}, nil
 }
 
-func createProfile(ctx context.Context, client *asc.Client, bundleIDResourceID, profileType string, certIDs, deviceIDs []string) (*asc.ProfileResponse, error) {
+// usableProfileCertificates drops the certificates an existing profile is
+// associated with that App Store Connect reports as deactivated or expired, so
+// signing fetch never writes and signing sync push never publishes a dead
+// certificate. Unlike the creation path this keeps certificates whose metadata
+// does not prove they are unusable, because a resolved profile must stay
+// usable when the API omits those attributes.
+func usableProfileCertificates(certificates []asc.Resource[asc.CertificateAttributes], now time.Time) []asc.Resource[asc.CertificateAttributes] {
+	usable := make([]asc.Resource[asc.CertificateAttributes], 0, len(certificates))
+	for _, certificate := range certificates {
+		if activated := certificate.Attributes.Activated; activated != nil && !*activated {
+			continue
+		}
+		expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(certificate.Attributes.ExpirationDate))
+		if err == nil && !expiresAt.After(now) {
+			continue
+		}
+		usable = append(usable, certificate)
+	}
+	return usable
+}
+
+func createProfile(ctx context.Context, client *asc.Client, bundleIDResourceID, profileName, profileType string, certIDs, deviceIDs []string) (*asc.ProfileResponse, error) {
 	if len(certIDs) == 0 {
 		return nil, fmt.Errorf("no certificates available to create profile")
 	}
-	name := fmt.Sprintf("%s-%s", profileType, time.Now().Format("20060102"))
 	return client.CreateProfile(ctx, asc.ProfileCreateAttributes{
-		Name:        name,
+		Name:        profileName,
 		ProfileType: profileType,
 	}, bundleIDResourceID, certIDs, deviceIDs)
+}
+
+func profileCreateName(profileType string, now time.Time) string {
+	return fmt.Sprintf("%s-%s", profileType, now.Format("20060102"))
 }
 
 func isDevelopmentProfile(profileType string) bool {
@@ -533,6 +592,43 @@ func decodeBase64Content(label, content string) ([]byte, error) {
 		return nil, fmt.Errorf("decode %s: %w", label, err)
 	}
 	return data, nil
+}
+
+// signingOutputPaths returns every file signing fetch writes for the resolved
+// assets. profileID is empty while the profile is still being planned.
+func signingOutputPaths(outputDir, profileName, profileID string, certificates []asc.Resource[asc.CertificateAttributes]) []string {
+	paths := make([]string, 0, len(certificates)+1)
+	paths = append(paths, profileOutputPath(outputDir, profileName, profileID))
+	for _, certificate := range certificates {
+		paths = append(paths, certificateOutputPath(outputDir, certificate))
+	}
+	return paths
+}
+
+func profileOutputPath(outputDir, profileName, profileID string) string {
+	return filepath.Join(outputDir, safeFileName(profileName, profileID)+".mobileprovision")
+}
+
+func certificateOutputPath(outputDir string, certificate asc.Resource[asc.CertificateAttributes]) string {
+	return filepath.Join(outputDir, safeFileName(certificate.Attributes.SerialNumber, certificate.ID)+".cer")
+}
+
+// ensureOutputPathsAreFree reports the first colliding output file. Writes use
+// O_EXCL, so a collision always fails the command; detecting it up front keeps
+// the failure free of remote and on-disk side effects.
+func ensureOutputPathsAreFree(paths []string) error {
+	for _, path := range paths {
+		_, err := os.Lstat(path)
+		switch {
+		case err == nil:
+			return fmt.Errorf("output file already exists: %s: %w", path, os.ErrExist)
+		case errors.Is(err, os.ErrNotExist):
+			continue
+		default:
+			return fmt.Errorf("inspect output path %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func writeBinaryFile(path string, data []byte) error {

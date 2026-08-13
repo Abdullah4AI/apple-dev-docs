@@ -121,8 +121,8 @@ func TestAnalyticsRequestReuseExistingUsesExistingRequest(t *testing.T) {
 		}
 
 		body := `{"data":[` +
-			`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","state":"COMPLETED"}},` +
-			`{"type":"analyticsReportRequests","id":"req-existing","attributes":{"accessType":"ONGOING","state":"PROCESSING","createdDate":"2026-05-01T00:00:00Z"}}` +
+			`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","stoppedDueToInactivity":false}},` +
+			`{"type":"analyticsReportRequests","id":"req-existing","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}` +
 			`],"links":{"next":""}}`
 		return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 	}))
@@ -175,7 +175,7 @@ func TestAnalyticsRequestReuseExistingUsesExistingRequestFromLaterPage(t *testin
 				t.Fatalf("expected analytics requests path, got %s", req.URL.Path)
 			}
 			body := `{"data":[` +
-				`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","state":"COMPLETED"}}` +
+				`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","stoppedDueToInactivity":false}}` +
 				`],"links":{"next":"/v1/apps/app-1/analyticsReportRequests?cursor=2"}}`
 			return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 		case 2:
@@ -189,7 +189,7 @@ func TestAnalyticsRequestReuseExistingUsesExistingRequestFromLaterPage(t *testin
 				t.Fatalf("expected cursor=2, got %q", req.URL.Query().Get("cursor"))
 			}
 			body := `{"data":[` +
-				`{"type":"analyticsReportRequests","id":"req-existing-page-2","attributes":{"accessType":"ONGOING","state":"PROCESSING","createdDate":"2026-05-01T00:00:00Z"}}` +
+				`{"type":"analyticsReportRequests","id":"req-existing-page-2","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}` +
 				`],"links":{"next":""}}`
 			return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 		default:
@@ -246,7 +246,7 @@ func TestAnalyticsRequestReuseExistingUsesExistingRequestFromFirstPageWithMultip
 				t.Fatalf("expected analytics requests path, got %s", req.URL.Path)
 			}
 			body := `{"data":[` +
-				`{"type":"analyticsReportRequests","id":"req-existing-page-1","attributes":{"accessType":"ONGOING","state":"PROCESSING","createdDate":"2026-05-01T00:00:00Z"}}` +
+				`{"type":"analyticsReportRequests","id":"req-existing-page-1","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}` +
 				`],"links":{"next":"/v1/apps/app-1/analyticsReportRequests?cursor=2"}}`
 			return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 		case 2:
@@ -260,7 +260,7 @@ func TestAnalyticsRequestReuseExistingUsesExistingRequestFromFirstPageWithMultip
 				t.Fatalf("expected cursor=2, got %q", req.URL.Query().Get("cursor"))
 			}
 			body := `{"data":[` +
-				`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","state":"COMPLETED"}}` +
+				`{"type":"analyticsReportRequests","id":"req-snapshot","attributes":{"accessType":"ONE_TIME_SNAPSHOT","stoppedDueToInactivity":false}}` +
 				`],"links":{"next":""}}`
 			return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 		default:
@@ -348,7 +348,7 @@ func TestAnalyticsRequestReuseExistingCreatesMissingRequest(t *testing.T) {
 			if payload.Data.Attributes.AccessType != "ONGOING" || payload.Data.Relationships.App.Data.ID != "app-1" {
 				t.Fatalf("unexpected create payload: %#v", payload)
 			}
-			response := `{"data":{"type":"analyticsReportRequests","id":"req-created","attributes":{"accessType":"ONGOING","state":"PROCESSING","createdDate":"2026-05-02T00:00:00Z"}}}`
+			response := `{"data":{"type":"analyticsReportRequests","id":"req-created","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}}`
 			return analyticsReuseExistingJSONResponse(http.StatusCreated, response), nil
 		default:
 			t.Fatalf("unexpected extra request %d: %s %s", count, req.Method, req.URL.String())
@@ -387,6 +387,11 @@ func TestAnalyticsRequestReuseExistingCreatesMissingRequest(t *testing.T) {
 	if result["created"] != true {
 		t.Fatalf("expected created=true, got %#v", result["created"])
 	}
+	for _, removed := range []string{"state", "createdDate"} {
+		if _, ok := result[removed]; ok {
+			t.Fatalf("removed output field %q is still present: %#v", removed, result)
+		}
+	}
 }
 
 func TestAnalyticsRequestReuseExistingRefetchesAfterCreateConflict(t *testing.T) {
@@ -421,7 +426,7 @@ func TestAnalyticsRequestReuseExistingRefetchesAfterCreateConflict(t *testing.T)
 				t.Fatalf("expected analytics requests path, got %s", req.URL.Path)
 			}
 			body := `{"data":[` +
-				`{"type":"analyticsReportRequests","id":"req-created-by-race","attributes":{"accessType":"ONGOING","state":"PROCESSING","createdDate":"2026-05-03T00:00:00Z"}}` +
+				`{"type":"analyticsReportRequests","id":"req-created-by-race","attributes":{"accessType":"ONGOING","stoppedDueToInactivity":false}}` +
 				`],"links":{"next":""}}`
 			return analyticsReuseExistingJSONResponse(http.StatusOK, body), nil
 		default:

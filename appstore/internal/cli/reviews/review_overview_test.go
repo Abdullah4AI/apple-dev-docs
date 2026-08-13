@@ -6,10 +6,12 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -181,6 +183,132 @@ func TestBuildReviewDoctorResultAddsRemovedItemsOnlyBlocker(t *testing.T) {
 	if result.Summary.Blocking != 1 || result.Summary.Errors != 1 {
 		t.Fatalf("expected summary to include synthetic blocker, got %+v", result.Summary)
 	}
+}
+
+func TestBuildReviewDoctorResultDisclosesWebOnlyCoverageWithoutChangingCheckSemantics(t *testing.T) {
+	snapshot := reviewSnapshot{
+		AppID: "123456789",
+		Version: &reviewVersionContext{
+			ID:       "ver-1",
+			Version:  "1.2.3",
+			Platform: "IOS",
+			State:    "PREPARE_FOR_SUBMISSION",
+		},
+	}
+
+	result := buildReviewDoctorResult(snapshot, validation.Report{})
+
+	if result.Summary != (validation.Summary{}) {
+		t.Fatalf("expected coverage warning not to change summary, got %+v", result.Summary)
+	}
+	if len(result.BlockingChecks) != 0 {
+		t.Fatalf("expected coverage warning not to add blockers, got %+v", result.BlockingChecks)
+	}
+	if len(result.WarningChecks) != 0 {
+		t.Fatalf("expected coverage warning not to add app-specific warning checks, got %+v", result.WarningChecks)
+	}
+	if result.NextAction != "No public-API submission blockers detected. Verify App Store Regulations and Permits in App Store Connect before submission." {
+		t.Fatalf("expected next action to disclose the public-API boundary, got %q", result.NextAction)
+	}
+
+	output, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal review doctor result: %v", err)
+	}
+	var payload struct {
+		CoverageWarnings []struct {
+			ID          string `json:"id"`
+			Status      string `json:"status"`
+			Message     string `json:"message"`
+			Remediation string `json:"remediation"`
+		} `json:"coverageWarnings"`
+	}
+	if err := json.Unmarshal(output, &payload); err != nil {
+		t.Fatalf("unmarshal review doctor result: %v", err)
+	}
+	if len(payload.CoverageWarnings) != 1 {
+		t.Fatalf("expected one coverage warning, got %s", output)
+	}
+	warning := payload.CoverageWarnings[0]
+	if warning.ID != "review.coverage.app_store_regulations_and_permits" {
+		t.Fatalf("unexpected coverage warning ID %q", warning.ID)
+	}
+	if warning.Status != "NOT_CHECKED" {
+		t.Fatalf("expected NOT_CHECKED status, got %q", warning.Status)
+	}
+	if !strings.Contains(warning.Message, "personal-service declaration") {
+		t.Fatalf("expected personal-service declaration disclosure, got %q", warning.Message)
+	}
+	if !strings.Contains(warning.Remediation, "App Store Connect") {
+		t.Fatalf("expected App Store Connect remediation, got %q", warning.Remediation)
+	}
+}
+
+func TestRenderReviewDoctorDisclosesWebOnlyCoverage(t *testing.T) {
+	result := buildReviewDoctorResult(reviewSnapshot{
+		AppID: "123456789",
+		Version: &reviewVersionContext{
+			ID:       "ver-1",
+			Version:  "1.2.3",
+			Platform: "IOS",
+			State:    "PREPARE_FOR_SUBMISSION",
+		},
+	}, validation.Report{})
+
+	for _, test := range []struct {
+		name     string
+		markdown bool
+	}{
+		{name: "table"},
+		{name: "markdown", markdown: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := captureReviewStdout(t, func() {
+				renderReviewDoctor(result, test.markdown)
+			})
+			for _, want := range []string{
+				"Coverage Warnings",
+				"review.coverage.app_store_regulations_and_permits",
+				"NOT_CHECKED",
+				"personal-service declaration",
+				"Verify App Store Regulations and Permits in App Store Connect before submission.",
+			} {
+				if !strings.Contains(strings.ToLower(output), strings.ToLower(want)) {
+					t.Fatalf("expected %q in output:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
+func captureReviewStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = writer
+	t.Cleanup(func() {
+		os.Stdout = oldStdout
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	done := make(chan []byte, 1)
+	go func() {
+		output, _ := io.ReadAll(reader)
+		done <- output
+	}()
+
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	return string(<-done)
 }
 
 func TestBuildReviewOverviewResultsExposeReviewDetailConfiguredState(t *testing.T) {

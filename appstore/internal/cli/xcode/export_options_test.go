@@ -324,6 +324,91 @@ func TestXcodeExportRejectsInvalidSigningStyleBeforeSideEffects(t *testing.T) {
 	}
 }
 
+func TestXcodeExportRejectsManagedXcodebuildFlagsBeforeSideEffects(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	t.Cleanup(restore)
+
+	runXcodeExportPreflight = func(context.Context) error {
+		t.Fatal("preflight must not run for a managed xcodebuild argument")
+		return nil
+	}
+	runGenerateExportOptions = func(context.Context, localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+		t.Fatal("export options generation must not run for a managed xcodebuild argument")
+		return nil, nil
+	}
+	runExport = func(context.Context, localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		t.Fatal("export must not run for a managed xcodebuild argument")
+		return nil, nil
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--ipa-path", "Demo.ipa",
+		"--xcodebuild-flag=-exportPath=/tmp/elsewhere",
+	}); err != nil {
+		t.Fatalf("FlagSet.Parse() error = %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("Exec() error = %v, want usage error", runErr)
+	}
+	wantError := `--xcodebuild-flag cannot override asc-managed argument "-exportPath"`
+	if runErr.Error() != wantError {
+		t.Fatalf("Exec() error = %q, want %q", runErr.Error(), wantError)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, wantError) {
+		t.Fatalf("stderr = %q, want managed-argument error", stderr)
+	}
+}
+
+func TestXcodeExportAcceptsActionNamedAuthenticationValues(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	t.Cleanup(restore)
+
+	wantErr := errors.New("reached Xcode preflight")
+	runXcodeExportPreflight = func(context.Context) error { return wantErr }
+	runGenerateExportOptions = func(context.Context, localxcode.ExportOptionsGenerateOptions) (*localxcode.ExportOptionsGenerateResult, error) {
+		t.Fatal("export options generation ran after failed preflight")
+		return nil, nil
+	}
+	runExport = func(context.Context, localxcode.ExportOptions) (*localxcode.ExportResult, error) {
+		t.Fatal("export ran after failed preflight")
+		return nil, nil
+	}
+
+	cmd := XcodeExportCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--archive-path", "Demo.xcarchive",
+		"--ipa-path", "Demo.ipa",
+		"--xcodebuild-flag=-authenticationKeyPath",
+		"--xcodebuild-flag=archive",
+		"--xcodebuild-flag=-authenticationKeyID",
+		"--xcodebuild-flag=build",
+		"--xcodebuild-flag=-authenticationKeyIssuerID",
+		"--xcodebuild-flag=clean",
+		"--xcodebuild-flag=-authenticationKeyPath",
+		"--xcodebuild-flag=-exportPath=AuthKey.p8",
+	}); err != nil {
+		t.Fatalf("FlagSet.Parse() error = %v", err)
+	}
+
+	runErr := cmd.Exec(context.Background(), nil)
+	if !errors.Is(runErr, wantErr) {
+		t.Fatalf("Exec() error = %v, want preflight sentinel", runErr)
+	}
+}
+
 func TestXcodeExportRejectsExplicitlyEmptyTeamIDBeforeSideEffects(t *testing.T) {
 	restore := overrideXcodeCommandTestHooks(t)
 	defer restore()

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -76,9 +77,41 @@ func ValidateVersionLocalizationKeys(locale string, values map[string]string) er
 	return validateLocalizationKeys(locale, values, versionLocalizationAllowedKeys)
 }
 
-// ValidateVersionLocalizationAttributes validates version localization field limits.
+// ValidateVersionLocalizationAttributes validates version localization attributes
+// that the App Store Connect request contract makes locally knowable.
 func ValidateVersionLocalizationAttributes(attrs asc.AppStoreVersionLocalizationAttributes) error {
-	return validation.ValidateKeywordField(attrs.Keywords)
+	issues := validation.VersionLocalizationLengthIssues(validation.VersionLocalization{
+		Description:     attrs.Description,
+		Keywords:        attrs.Keywords,
+		WhatsNew:        attrs.WhatsNew,
+		PromotionalText: attrs.PromotionalText,
+	})
+	if len(issues) > 0 {
+		issue := issues[0]
+		if issue.Field == "keywords" {
+			return fmt.Errorf("keywords exceed %d %s", issue.Limit, issue.Unit)
+		}
+		return fmt.Errorf("%s exceeds %d %s", issue.Field, issue.Limit, issue.Unit)
+	}
+
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "marketingUrl", value: attrs.MarketingURL},
+		{name: "supportUrl", value: attrs.SupportURL},
+	} {
+		if field.value == "" {
+			continue
+		}
+		// The request schema declares these attributes as URI-formatted strings.
+		// Scheme-specific suitability remains a non-blocking validation concern.
+		parsed, err := url.Parse(field.value)
+		if err != nil || !parsed.IsAbs() || strings.ContainsAny(field.value, " \t\r\n") {
+			return fmt.Errorf("%s must be a valid URI", field.name)
+		}
+	}
+	return nil
 }
 
 // ValidateVersionLocalizationValues validates .strings keys and value limits for one locale.

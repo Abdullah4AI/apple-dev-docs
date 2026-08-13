@@ -17,16 +17,6 @@ type screenshotUploadProgress struct {
 	FailedFile    string
 }
 
-// UploadScreenshotsToSet uploads screenshots in the provided file order and then
-// applies that order to the remote screenshot set.
-func UploadScreenshotsToSet(ctx context.Context, client *asc.Client, setID string, files []string, preserveExistingOrder bool) ([]asc.AssetUploadResultItem, error) {
-	sourceRootPath, err := resolveScreenshotUploadRoot("", files)
-	if err != nil {
-		return nil, err
-	}
-	return uploadScreenshotsToSetFromRoot(ctx, client, setID, files, sourceRootPath, preserveExistingOrder)
-}
-
 func uploadScreenshotsToSetFromRoot(ctx context.Context, client *asc.Client, setID string, files []string, sourceRootPath string, preserveExistingOrder bool) ([]asc.AssetUploadResultItem, error) {
 	orderedIDs := make([]string, 0, len(files))
 	if preserveExistingOrder {

@@ -186,8 +186,10 @@ def job_block(workflow: str, job: str) -> str:
 
 
 def assert_optimized_workflow(path: Path, test_job: str) -> None:
-    workflow = path.read_text()
+    assert_optimized_workflow_text(path, path.read_text(), test_job)
 
+
+def assert_optimized_workflow_text(path: Path, workflow: str, test_job: str) -> None:
     assert "actions/upload-artifact" not in workflow, f"{path}: development artifacts must not be uploaded"
     changes = job_block(workflow, "changes")
     assert "scope: ${{ steps.scope.outputs.scope }}" in changes
@@ -209,18 +211,42 @@ def assert_optimized_workflow(path: Path, test_job: str) -> None:
     assert "wall|docs|website|telemetry|full" in changes
     assert "invalid CI scope" in changes
 
-    assert "runs-on: ubuntu-latest" in job_block(workflow, "wall-only-check")
+    wall_only = job_block(workflow, "wall-only-check")
+    assert "runs-on: ubuntu-latest" in wall_only
+    assert "make check-wall-of-apps" in wall_only, f"{path}: wall-only-check must validate the Wall source"
     assert "runs-on: ubuntu-latest" in job_block(workflow, "format-and-lint")
     quality = job_block(workflow, "quality-checks")
     assert "runs-on: ubuntu-latest" in quality
     assert "python3 scripts/test_ci_change_scope.py" in quality
     assert "contains(fromJSON('[\"telemetry\", \"full\"]'), needs.changes.outputs.scope)" in quality
+    # Agents.md: formatting, documentation, and lint must keep running on PR and main.
+    for command in (
+        "make format-check",
+        "python3 scripts/test_check_docs.py",
+        "make check-docs",
+        "make check-wall-of-apps",
+        "make lint",
+    ):
+        assert command in quality, f"{path}: quality-checks must run {command!r}"
+    # Every test job runs on ubuntu, so darwin- and windows-gated sources and tests
+    # are never type-checked unless CI vets them explicitly. golangci-lint covers
+    # GOOS=linux with tests enabled, so only the two absent platforms need a pass.
+    for goos in ("darwin", "windows"):
+        assert f"GOOS={goos} go vet ./..." in quality, (
+            f"{path}: quality-checks must type-check {goos}-gated code"
+        )
     website = job_block(workflow, "website-checks")
     assert "uses: ./.github/workflows/website-checks.yml" in website
     assert "needs.changes.outputs.website_affected == 'true'" in website
     tests = job_block(workflow, test_job)
     assert "runs-on: ubuntu-latest" in tests
     assert "needs.changes.outputs.scope == 'full'" in tests
+    # Agents.md: the Go test suite must keep running, over the whole module, with the
+    # keychain bypass that stops runners from prompting or leaking host profile state.
+    assert "python3 scripts/go_test_shard.py" in tests, f"{path}: {test_job} must run the sharded Go test suite"
+    assert "--packages ./..." in tests, f"{path}: {test_job} must cover every package"
+    assert "go test" in tests, f"{path}: {test_job} must invoke go test"
+    assert "ASC_BYPASS_KEYCHAIN=1" in tests, f"{path}: {test_job} must bypass the keychain"
 
     build_platforms = job_block(workflow, "build-platforms")
     assert "needs.changes.outputs.scope == 'full'" in build_platforms
@@ -242,6 +268,31 @@ def assert_optimized_workflow(path: Path, test_job: str) -> None:
     assert "if: always()" in build
     assert "needs.build-platforms.result" in build
     assert "needs.ordinary-build.result" in build
+
+
+def assert_optimized_workflow_rejects_weakened_checks() -> None:
+    """Prove the guard fails when a required check is deleted from PR or main CI."""
+    for path, test_job in ((PR_WORKFLOW, "unit-test-shards"), (MAIN_WORKFLOW, "test-shards")):
+        workflow = path.read_text()
+        for command in (
+            "make format-check",
+            "python3 scripts/test_check_docs.py",
+            "make check-docs",
+            "make check-wall-of-apps",
+            "make lint",
+            "GOOS=darwin go vet ./...",
+            "GOOS=windows go vet ./...",
+            "python3 scripts/go_test_shard.py",
+            "--packages ./...",
+            "ASC_BYPASS_KEYCHAIN=1",
+        ):
+            assert command in workflow, f"{path}: expected to find {command!r}"
+            weakened = workflow.replace(command, "true")
+            try:
+                assert_optimized_workflow_text(path, weakened, test_job)
+            except AssertionError:
+                continue
+            raise AssertionError(f"{path}: guard accepts CI with {command!r} removed")
 
 
 def run_security_target(path: str) -> subprocess.CompletedProcess[str]:
@@ -307,6 +358,7 @@ def main() -> None:
     assert_govulncheck_version_source()
     assert_optimized_workflow(PR_WORKFLOW, "unit-test-shards")
     assert_optimized_workflow(MAIN_WORKFLOW, "test-shards")
+    assert_optimized_workflow_rejects_weakened_checks()
 
     pr = PR_WORKFLOW.read_text()
     for required_job in ("format-and-lint", "unit-tests", "build"):

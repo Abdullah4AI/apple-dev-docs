@@ -96,6 +96,25 @@ func setTerminalDetection(t *testing.T, detector func(fd int) bool) {
 	})
 }
 
+func clearCIEnvironment(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"CI",
+		"GITHUB_ACTIONS",
+		"GITLAB_CI",
+		"CIRCLECI",
+		"BUILDKITE",
+		"BITRISE_IO",
+		"TF_BUILD",
+		"TRAVIS",
+		"APPVEYOR",
+		"TEAMCITY_VERSION",
+		"JENKINS_URL",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestDefaultOutputFormat_ReturnsJSON(t *testing.T) {
 	resetDefaultOutput(t)
 	setTerminalDetection(t, func(int) bool { return false })
@@ -118,11 +137,73 @@ func TestDefaultOutputFormat_UnsetReturnsJSON(t *testing.T) {
 func TestDefaultOutputFormat_UnsetReturnsTableWhenStdoutTTY(t *testing.T) {
 	resetDefaultOutput(t)
 	setTerminalDetection(t, func(int) bool { return true })
+	clearCIEnvironment(t)
 	t.Setenv("ASC_DEFAULT_OUTPUT", "")
 	os.Unsetenv("ASC_DEFAULT_OUTPUT")
 
 	if got := DefaultOutputFormat(); got != "table" {
 		t.Fatalf("expected table, got %q", got)
+	}
+}
+
+func TestDefaultOutputFormat_UnsetReturnsJSONWhenStdoutTTYInCI(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "generic", key: "CI", value: "true"},
+		{name: "GitHub Actions", key: "GITHUB_ACTIONS", value: "1"},
+		{name: "GitLab", key: "GITLAB_CI", value: "yes"},
+		{name: "CircleCI", key: "CIRCLECI", value: "on"},
+		{name: "Buildkite", key: "BUILDKITE", value: "y"},
+		{name: "Bitrise", key: "BITRISE_IO", value: "true"},
+		{name: "Azure Pipelines", key: "TF_BUILD", value: "true"},
+		{name: "Travis", key: "TRAVIS", value: "true"},
+		{name: "AppVeyor", key: "APPVEYOR", value: "true"},
+		{name: "TeamCity", key: "TEAMCITY_VERSION", value: "2026.1"},
+		{name: "Jenkins", key: "JENKINS_URL", value: "https://ci.example.test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDefaultOutput(t)
+			setTerminalDetection(t, func(int) bool { return true })
+			clearCIEnvironment(t)
+			t.Setenv("ASC_DEFAULT_OUTPUT", "")
+			os.Unsetenv("ASC_DEFAULT_OUTPUT")
+			t.Setenv(tt.key, tt.value)
+
+			if got := DefaultOutputFormat(); got != "json" {
+				t.Fatalf("DefaultOutputFormat() = %q, want json", got)
+			}
+		})
+	}
+}
+
+func TestDefaultOutputFormat_FalseCIMarkersKeepTTYTableDefault(t *testing.T) {
+	resetDefaultOutput(t)
+	setTerminalDetection(t, func(int) bool { return true })
+	clearCIEnvironment(t)
+	t.Setenv("ASC_DEFAULT_OUTPUT", "")
+	os.Unsetenv("ASC_DEFAULT_OUTPUT")
+	t.Setenv("CI", "false")
+	t.Setenv("GITHUB_ACTIONS", "0")
+
+	if got := DefaultOutputFormat(); got != "table" {
+		t.Fatalf("DefaultOutputFormat() = %q, want table", got)
+	}
+}
+
+func TestDefaultOutputFormat_ExplicitEnvOverridesCI(t *testing.T) {
+	resetDefaultOutput(t)
+	setTerminalDetection(t, func(int) bool { return true })
+	clearCIEnvironment(t)
+	t.Setenv("CI", "true")
+	t.Setenv("ASC_DEFAULT_OUTPUT", "table")
+
+	if got := DefaultOutputFormat(); got != "table" {
+		t.Fatalf("DefaultOutputFormat() = %q, want explicit table", got)
 	}
 }
 
@@ -310,6 +391,7 @@ func TestBindOutputFlagsUsesDefaultOutputFormat(t *testing.T) {
 func TestBindOutputFlagsUsesTTYAwareDefaultWhenEnvUnset(t *testing.T) {
 	resetDefaultOutput(t)
 	setTerminalDetection(t, func(int) bool { return true })
+	clearCIEnvironment(t)
 	t.Setenv("ASC_DEFAULT_OUTPUT", "")
 	os.Unsetenv("ASC_DEFAULT_OUTPUT")
 

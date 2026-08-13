@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
-	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 type migrateUploadRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -112,38 +111,60 @@ func TestUploadScreenshots_ReordersPlannedFilesBeforeUntouchedRemoteExtras(t *te
 	}
 }
 
-func TestUploadVersionLocalizations_RejectsOverLimitKeywordBytesBeforeRequests(t *testing.T) {
-	origTransport := http.DefaultTransport
-	requestCount := 0
-	http.DefaultTransport = migrateUploadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestCount++
-		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
-		return nil, nil
-	})
-	t.Cleanup(func() {
-		http.DefaultTransport = origTransport
-	})
-
-	client := newMigrateUploadTestClient(t)
-	_, _, err := uploadVersionLocalizations(
-		context.Background(),
-		client,
-		"version-1",
-		[]FastlaneLocalization{{
-			Locale:   "ja",
-			Keywords: strings.Repeat("語", 101),
-		}},
-		map[string]string{},
-		shared.SubmitReadinessOptions{},
-	)
+func TestPrepareVersionLocalizationsRejectsOverLimitKeywords(t *testing.T) {
+	_, err := prepareVersionLocalizations([]FastlaneLocalization{{
+		Locale:   "ja",
+		Keywords: strings.Repeat("語", 101),
+	}})
 	if err == nil {
-		t.Fatal("expected upload validation error")
+		t.Fatal("expected localization validation error")
 	}
-	if !strings.Contains(err.Error(), "keywords exceed 100 characters") {
-		t.Fatalf("expected keyword character-limit error, got %v", err)
+	const wantError = `migrate import: locale "ja": keywords exceed 100 characters`
+	if err.Error() != wantError {
+		t.Fatalf("prepareVersionLocalizations() error = %q, want %q", err, wantError)
 	}
-	if requestCount != 0 {
-		t.Fatalf("expected no HTTP requests, got %d", requestCount)
+}
+
+func TestPrepareVersionLocalizationsPreservesOrderAndDuplicates(t *testing.T) {
+	localizations := []FastlaneLocalization{
+		{Locale: "en-US", Description: "first"},
+		{Locale: "en-US", Description: "second"},
+		{Locale: "fr-FR", Description: "third"},
+	}
+
+	prepared, err := prepareVersionLocalizations(localizations)
+	if err != nil {
+		t.Fatalf("prepareVersionLocalizations() error: %v", err)
+	}
+	if len(prepared) != len(localizations) {
+		t.Fatalf("prepared localization count = %d, want %d", len(prepared), len(localizations))
+	}
+
+	gotLocales := make([]string, 0, len(prepared))
+	gotDescriptions := make([]string, 0, len(prepared))
+	for _, item := range prepared {
+		gotLocales = append(gotLocales, item.localization.Locale)
+		gotDescriptions = append(gotDescriptions, item.attributes.Description)
+	}
+	if want := []string{"en-US", "en-US", "fr-FR"}; !reflect.DeepEqual(gotLocales, want) {
+		t.Fatalf("prepared locales = %v, want %v", gotLocales, want)
+	}
+	if want := []string{"first", "second", "third"}; !reflect.DeepEqual(gotDescriptions, want) {
+		t.Fatalf("prepared descriptions = %v, want %v", gotDescriptions, want)
+	}
+}
+
+func TestValidateLocalizationCreateTargetAllowsExistingUnsupportedRoot(t *testing.T) {
+	if err := validateLocalizationCreateTarget("nl", "existing-loc"); err != nil {
+		t.Fatalf("validateLocalizationCreateTarget() error = %v, want nil for update", err)
+	}
+}
+
+func TestValidateLocalizationCreateTargetRejectsUnsupportedRootCreate(t *testing.T) {
+	err := validateLocalizationCreateTarget("nl", "")
+	const wantError = `migrate import: locale "nl": unsupported locale "nl"; did you mean: nl-NL`
+	if err == nil || err.Error() != wantError {
+		t.Fatalf("validateLocalizationCreateTarget() error = %q, want %q", err, wantError)
 	}
 }
 
@@ -209,4 +230,47 @@ func migrateFileSize(t *testing.T, path string) int64 {
 		t.Fatalf("stat file: %v", err)
 	}
 	return info.Size()
+}
+
+func TestNormalizeDeliverfilePlatformAcceptsFastlaneSpellings(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{value: "ios", want: "IOS"},
+		{value: "IOS", want: "IOS"},
+		{value: "osx", want: "MAC_OS"},
+		{value: "OSX", want: "MAC_OS"},
+		{value: "macos", want: "MAC_OS"},
+		{value: "mac", want: "MAC_OS"},
+		{value: "mac_os", want: "MAC_OS"},
+		{value: "appletvos", want: "TV_OS"},
+		{value: "tvos", want: "TV_OS"},
+		{value: "tv_os", want: "TV_OS"},
+		{value: "xros", want: "VISION_OS"},
+		{value: " xrOS ", want: "VISION_OS"},
+		{value: "visionos", want: "VISION_OS"},
+		{value: "vision_os", want: "VISION_OS"},
+	}
+	for _, test := range tests {
+		t.Run(test.value, func(t *testing.T) {
+			got, err := normalizeDeliverfilePlatform(test.value)
+			if err != nil {
+				t.Fatalf("normalizeDeliverfilePlatform(%q) error = %v", test.value, err)
+			}
+			if got != test.want {
+				t.Fatalf("normalizeDeliverfilePlatform(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDeliverfilePlatformRejectsUnknownValue(t *testing.T) {
+	_, err := normalizeDeliverfilePlatform("android")
+	if err == nil {
+		t.Fatal("expected unsupported platform error")
+	}
+	if err.Error() != `unsupported Deliverfile platform "android"` {
+		t.Fatalf("error = %q, want unsupported Deliverfile platform message", err)
+	}
 }

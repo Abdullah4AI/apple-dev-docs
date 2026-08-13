@@ -9502,8 +9502,12 @@ func TestUpdateUser_SendsRequest(t *testing.T) {
 		if req.URL.Path != "/v1/users/user-1" {
 			t.Fatalf("expected path /v1/users/user-1, got %s", req.URL.Path)
 		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request: %v", err)
+		}
 		var payload UserUpdateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
 		if payload.Data.Type != ResourceTypeUsers {
@@ -9521,6 +9525,19 @@ func TestUpdateUser_SendsRequest(t *testing.T) {
 		if payload.Data.Attributes.AllAppsVisible == nil || *payload.Data.Attributes.AllAppsVisible {
 			t.Fatalf("expected allAppsVisible=false, got %+v", payload.Data.Attributes.AllAppsVisible)
 		}
+		if payload.Data.Relationships == nil || payload.Data.Relationships.VisibleApps == nil {
+			t.Fatal("expected visibleApps relationships")
+		}
+		visibleApps := payload.Data.Relationships.VisibleApps.Data
+		if len(visibleApps) != 2 {
+			t.Fatalf("expected 2 visibleApps relationships, got %d", len(visibleApps))
+		}
+		if visibleApps[0].Type != ResourceTypeApps || visibleApps[0].ID != "app-2" {
+			t.Fatalf("unexpected first visibleApps relationship: %+v", visibleApps[0])
+		}
+		if visibleApps[1].Type != ResourceTypeApps || visibleApps[1].ID != "app-1" {
+			t.Fatalf("unexpected second visibleApps relationship: %+v", visibleApps[1])
+		}
 		assertAuthorized(t, req)
 	}, response)
 
@@ -9528,7 +9545,59 @@ func TestUpdateUser_SendsRequest(t *testing.T) {
 	if _, err := client.UpdateUser(context.Background(), "user-1", UserUpdateAttributes{
 		Roles:          []string{"ADMIN"},
 		AllAppsVisible: &allAppsVisible,
-	}); err != nil {
+	}, []string{" app-2 ", "app-1"}); err != nil {
+		t.Fatalf("UpdateUser() error: %v", err)
+	}
+}
+
+func TestUpdateUser_OmitsVisibleAppsWhenEmpty(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":{"type":"users","id":"user-1","attributes":{"username":"user@example.com","roles":["ADMIN"],"allAppsVisible":true,"provisioningAllowed":false}}}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/users/user-1" {
+			t.Fatalf("expected path /v1/users/user-1, got %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request: %v", err)
+		}
+		var payload UserUpdateRequest
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if payload.Data.Attributes == nil {
+			t.Fatal("expected attributes to be set")
+		}
+		if payload.Data.Attributes.AllAppsVisible != nil {
+			t.Fatalf("expected allAppsVisible to be omitted, got %+v", payload.Data.Attributes.AllAppsVisible)
+		}
+		if payload.Data.Relationships != nil {
+			t.Fatalf("expected relationships to be omitted, got %+v", payload.Data.Relationships)
+		}
+		var envelope struct {
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("failed to decode request envelope: %v", err)
+		}
+		if _, ok := envelope.Data["relationships"]; ok {
+			t.Fatalf("expected relationships key to be omitted, got %s", body)
+		}
+		var attributes map[string]json.RawMessage
+		if err := json.Unmarshal(envelope.Data["attributes"], &attributes); err != nil {
+			t.Fatalf("failed to decode request attributes: %v", err)
+		}
+		if _, ok := attributes["allAppsVisible"]; ok {
+			t.Fatalf("expected allAppsVisible key to be omitted, got %s", body)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.UpdateUser(context.Background(), "user-1", UserUpdateAttributes{
+		Roles: []string{"ADMIN"},
+	}, []string{" ", ""}); err != nil {
 		t.Fatalf("UpdateUser() error: %v", err)
 	}
 }
@@ -9706,30 +9775,6 @@ func TestRemoveUserVisibleApps_SendsRequest(t *testing.T) {
 
 	if err := client.RemoveUserVisibleApps(context.Background(), "user-1", []string{"app-1"}); err != nil {
 		t.Fatalf("RemoveUserVisibleApps() error: %v", err)
-	}
-}
-
-func TestSetUserVisibleApps_SendsRequest(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, ``)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/users/user-1/relationships/visibleApps" {
-			t.Fatalf("expected path /v1/users/user-1/relationships/visibleApps, got %s", req.URL.Path)
-		}
-		var payload RelationshipRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if len(payload.Data) != 2 {
-			t.Fatalf("expected 2 relationships, got %d", len(payload.Data))
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.SetUserVisibleApps(context.Background(), "user-1", []string{"app-1", "app-2"}); err != nil {
-		t.Fatalf("SetUserVisibleApps() error: %v", err)
 	}
 }
 
@@ -11578,7 +11623,7 @@ func TestCreateWinBackOffer_SendsRequest(t *testing.T) {
 					Territory: Relationship{
 						Data: ResourceData{Type: ResourceTypeTerritories, ID: "USA"},
 					},
-					SubscriptionPricePoint: Relationship{
+					SubscriptionPricePoint: &Relationship{
 						Data: ResourceData{Type: ResourceTypeSubscriptionPricePoints, ID: "price-point-1"},
 					},
 				},

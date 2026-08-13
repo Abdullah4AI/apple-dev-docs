@@ -411,6 +411,32 @@ func TestCertificatesCreateCommand_GenerateCSRWriteFailures(t *testing.T) {
 	}
 }
 
+func TestValidateCSRFileOutputPathRejectsWindowsSeparators(t *testing.T) {
+	windowsPathSeparator := func(character uint8) bool {
+		return character == '\\' || character == '/'
+	}
+
+	for _, path := range []string{"output/", `output\`} {
+		if _, err := validateCSRFileOutputPathWithSeparator(path, windowsPathSeparator); err == nil {
+			t.Fatalf("validateCSRFileOutputPathWithSeparator(%q) error = nil, want file-path error", path)
+		}
+	}
+}
+
+func TestValidateCSRPairOutputPathsCleansAbsolutePaths(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "output")
+	csrOut := filepath.Join(dir, "discard") + string(filepath.Separator) + ".." + string(filepath.Separator) + "output" + string(filepath.Separator) + "request.csr"
+
+	err := validateCSRPairOutputPaths(keyOut, csrOut)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("validateCSRPairOutputPaths() error = %v, want flag.ErrHelp", err)
+	}
+	if err.Error() != "--key-out and --csr-out must not be nested paths" {
+		t.Fatalf("validateCSRPairOutputPaths() error = %q, want nested-path error", err)
+	}
+}
+
 func TestCertificatesRevokeCommand_MissingID(t *testing.T) {
 	cmd := CertificatesRevokeCommand()
 

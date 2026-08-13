@@ -273,17 +273,146 @@ func TestDiscoverScreenshotPlan_IgnoresEmptyLocaleDirectories(t *testing.T) {
 	}
 }
 
-func TestInferScreenshotDisplayType_FastlaneIPadPro13Filename(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "iPad Pro 13-inch (M5)-1-main-screen.png")
-	writePNG(t, path, 2064, 2752)
-
-	displayType, err := inferScreenshotDisplayType(path)
-	if err != nil {
-		t.Fatalf("inferScreenshotDisplayType() error: %v", err)
+func TestInferScreenshotDisplayType_IPadPro129GenerationDisambiguation(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		width  int
+		height int
+		want   string
+	}{
+		{
+			name:   "13 inch M5 filename",
+			path:   "iPad Pro 13-inch (M5)-1-main-screen.png",
+			width:  2064,
+			height: 2752,
+			want:   "APP_IPAD_PRO_3GEN_129",
+		},
+		{
+			name:   "modern 12.9 inch generation filename",
+			path:   "iPad Pro (12.9-inch) (6th generation)-1-main-screen.png",
+			width:  2048,
+			height: 2732,
+			want:   "APP_IPAD_PRO_3GEN_129",
+		},
+		{
+			name:   "unhinted 13 inch dimensions",
+			path:   "main-screen.png",
+			width:  2064,
+			height: 2752,
+			want:   "APP_IPAD_PRO_3GEN_129",
+		},
+		{
+			name:   "unhinted shared dimensions default modern",
+			path:   "main-screen.png",
+			width:  2048,
+			height: 2732,
+			want:   "APP_IPAD_PRO_3GEN_129",
+		},
+		{
+			name:   "explicit legacy display type",
+			path:   "APP_IPAD_PRO_129-1-main-screen.png",
+			width:  2048,
+			height: 2732,
+			want:   "APP_IPAD_PRO_129",
+		},
+		{
+			name:   "explicit second generation filename",
+			path:   "iPad Pro (12.9-inch) (2nd generation)-1-main-screen.png",
+			width:  2048,
+			height: 2732,
+			want:   "APP_IPAD_PRO_129",
+		},
 	}
-	if displayType != "APP_IPAD_PRO_129" {
-		t.Fatalf("expected APP_IPAD_PRO_129, got %q", displayType)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			displayType, err := inferScreenshotDisplayTypeFromDimensions(test.path, test.width, test.height)
+			if err != nil {
+				t.Fatalf("inferScreenshotDisplayTypeFromDimensions() error: %v", err)
+			}
+			if displayType != test.want {
+				t.Fatalf("display type = %q, want %q", displayType, test.want)
+			}
+		})
+	}
+}
+
+func TestInferScreenshotDisplayType_WatchAndDesktopDimensions(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		width  int
+		height int
+		want   string
+	}{
+		{name: "watch series 3", path: "applewatch_1.png", width: 312, height: 390, want: "APP_WATCH_SERIES_3"},
+		{name: "watch series 4", path: "applewatch_1.png", width: 368, height: 448, want: "APP_WATCH_SERIES_4"},
+		{name: "watch series 7", path: "applewatch_1.png", width: 396, height: 484, want: "APP_WATCH_SERIES_7"},
+		{name: "watch series 10", path: "applewatch_1.png", width: 416, height: 496, want: "APP_WATCH_SERIES_10"},
+		{name: "watch ultra 410", path: "applewatch_1.png", width: 410, height: 502, want: "APP_WATCH_ULTRA"},
+		{name: "watch ultra 422", path: "applewatch_1.png", width: 422, height: 514, want: "APP_WATCH_ULTRA"},
+		{name: "desktop 1280x800", path: "01-main.png", width: 1280, height: 800, want: "APP_DESKTOP"},
+		{name: "desktop 2880x1800", path: "01-main.png", width: 2880, height: 1800, want: "APP_DESKTOP"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			displayType, err := inferScreenshotDisplayTypeFromDimensions(test.path, test.width, test.height)
+			if err != nil {
+				t.Fatalf("inferScreenshotDisplayTypeFromDimensions() error: %v", err)
+			}
+			if displayType != test.want {
+				t.Fatalf("display type = %q, want %q", displayType, test.want)
+			}
+		})
+	}
+}
+
+func TestInferScreenshotDisplayType_AmbiguousUltraHighDefinitionDimensions(t *testing.T) {
+	_, err := inferScreenshotDisplayTypeFromDimensions("01-main.png", 3840, 2160)
+	if err == nil {
+		t.Fatal("expected 3840x2160 to be reported as ambiguous")
+	}
+	for _, want := range []string{"ambiguous screenshot display type", "APP_APPLE_TV", "APP_APPLE_VISION_PRO"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to contain %q", err, want)
+		}
+	}
+
+	displayType, err := inferScreenshotDisplayTypeFromDimensions("vision_pro-01.png", 3840, 2160)
+	if err != nil {
+		t.Fatalf("inferScreenshotDisplayTypeFromDimensions() error: %v", err)
+	}
+	if displayType != "APP_APPLE_VISION_PRO" {
+		t.Fatalf("display type = %q, want APP_APPLE_VISION_PRO", displayType)
+	}
+
+	displayType, err = inferScreenshotDisplayTypeFromDimensions("apple_tv-01.png", 3840, 2160)
+	if err != nil {
+		t.Fatalf("inferScreenshotDisplayTypeFromDimensions() error: %v", err)
+	}
+	if displayType != "APP_APPLE_TV" {
+		t.Fatalf("display type = %q, want APP_APPLE_TV", displayType)
+	}
+}
+
+func TestInferScreenshotDisplayType_IPad13InchFilenameHintWithoutCatalogDimensions(t *testing.T) {
+	tests := []string{
+		"ipad pro 13 marketing.png",
+		"ipad-pro-13-inch-marketing.png",
+		"ipad 12.9 marketing.png",
+	}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			displayType, err := inferScreenshotDisplayTypeFromDimensions(name, 1600, 1200)
+			if err != nil {
+				t.Fatalf("inferScreenshotDisplayTypeFromDimensions() error: %v", err)
+			}
+			if displayType != "APP_IPAD_PRO_3GEN_129" {
+				t.Fatalf("display type = %q, want APP_IPAD_PRO_3GEN_129", displayType)
+			}
+		})
 	}
 }
 

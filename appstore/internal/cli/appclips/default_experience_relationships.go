@@ -119,35 +119,3 @@ Examples:
 		},
 	}
 }
-
-func DeprecatedAppClipDefaultExperienceRelationshipsAliasCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("relationships", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "relationships",
-		ShortUsage: "asc app-clips default-experiences links <subcommand> [flags]",
-		ShortHelp:  "DEPRECATED: use `asc app-clips default-experiences links ...`.",
-		LongHelp:   "Deprecated compatibility alias for `asc app-clips default-experiences links ...`.",
-		FlagSet:    fs,
-		UsageFunc:  shared.DeprecatedUsageFunc,
-		Subcommands: []*ffcli.Command{
-			shared.DeprecatedAliasLeafCommand(
-				AppClipDefaultExperienceReviewDetailRelationshipCommand(),
-				"app-store-review-detail",
-				"asc app-clips default-experiences links app-store-review-detail --experience-id \"EXP_ID\"",
-				"asc app-clips default-experiences links app-store-review-detail",
-				"Warning: `asc app-clips default-experiences relationships app-store-review-detail` is deprecated. Use `asc app-clips default-experiences links app-store-review-detail`.",
-			),
-			shared.DeprecatedAliasLeafCommand(
-				AppClipDefaultExperienceReleaseWithAppStoreVersionRelationshipCommand(),
-				"release-with-app-store-version",
-				"asc app-clips default-experiences links release-with-app-store-version --experience-id \"EXP_ID\"",
-				"asc app-clips default-experiences links release-with-app-store-version",
-				"Warning: `asc app-clips default-experiences relationships release-with-app-store-version` is deprecated. Use `asc app-clips default-experiences links release-with-app-store-version`.",
-			),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}

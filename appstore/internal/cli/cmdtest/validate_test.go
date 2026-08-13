@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
@@ -378,6 +379,97 @@ func TestValidateVersionAndVersionIDMutuallyExclusive(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "mutually exclusive") {
 		t.Fatalf("expected mutually exclusive error, got %q", stderr)
+	}
+}
+
+func TestValidateWarnsCopyrightWithoutLeadingAcquisitionYear(t *testing.T) {
+	fixture := validValidateFixture()
+	fixture.version = strings.Replace(fixture.version, `"copyright":"2026 Test Company"`, `"copyright":"Example Inc."`, 1)
+
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr != nil {
+		t.Fatalf("expected copyright format to be advisory, got %T: %v", runErr, runErr)
+	}
+	if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitSuccess)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("failed to parse JSON output: %v; stdout=%q", err, stdout)
+	}
+
+	var matches []validation.CheckResult
+	for _, check := range report.Checks {
+		if check.ID == "legal.format.copyright_year" {
+			matches = append(matches, check)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one copyright-year check, got %d: %+v", len(matches), report.Checks)
+	}
+	if report.Summary.Errors != 0 || report.Summary.Blocking != 0 {
+		t.Fatalf("expected no blocking issues, got %+v", report.Summary)
+	}
+	check := matches[0]
+	if check.Severity != validation.SeverityWarning || check.Field != "copyright" || check.ResourceType != "appStoreVersion" {
+		t.Fatalf("unexpected copyright-year check: %+v", check)
+	}
+}
+
+func TestValidateAcceptsCopyrightMarkersAndYearRanges(t *testing.T) {
+	for _, copyright := range []string{"© 2026 Test Company", "Copyright 2026 Test Company", "2019-2026 Test Company"} {
+		t.Run(copyright, func(t *testing.T) {
+			fixture := validValidateFixture()
+			fixture.version = strings.Replace(fixture.version, `"copyright":"2026 Test Company"`, `"copyright":"`+copyright+`"`, 1)
+
+			client := newValidateTestClient(t, fixture)
+			restore := validate.SetClientFactory(func() (*asc.Client, error) {
+				return client, nil
+			})
+			defer restore()
+
+			root := RootCommand("1.2.3")
+			var runErr error
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--output", "json"}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if runErr != nil {
+				t.Fatalf("run error: %v", runErr)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+
+			var report validation.Report
+			if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+				t.Fatalf("failed to parse JSON output: %v; stdout=%q", err, stdout)
+			}
+			if hasCheckWithID(report.Checks, "legal.format.copyright_year") {
+				t.Fatalf("copyright %q reported legal.format.copyright_year: %+v", copyright, report.Checks)
+			}
+		})
 	}
 }
 

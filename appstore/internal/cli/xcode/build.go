@@ -78,6 +78,9 @@ Examples:
 			if err := localxcode.ValidateBuildOptions(opts); err != nil {
 				return shared.UsageError(err.Error())
 			}
+			if emptyFlag := firstExplicitlyEmptyFlag(fs, "configuration", "destination", "derived-data-path", "result-bundle-path"); emptyFlag != "" {
+				return shared.UsageErrorf("--%s must not be empty", emptyFlag)
+			}
 			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
 				return shared.UsageError(err.Error())
 			}

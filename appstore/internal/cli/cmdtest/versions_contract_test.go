@@ -13,9 +13,13 @@ import (
 	"testing"
 
 	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 const releaseTypeValues = "MANUAL, AFTER_APPROVAL, SCHEDULED"
+
+const appStoreVersionIncludeValues = "ageRatingDeclaration, app, appStoreVersionLocalizations, build, appStoreVersionPhasedRelease, gameCenterAppVersion, routingAppCoverage, appStoreReviewDetail, appStoreVersionSubmission, appClipDefaultExperience, appStoreVersionExperiments, appStoreVersionExperimentsV2, alternativeDistributionPackage"
 
 func clearASCAuth(t *testing.T) {
 	t.Helper()
@@ -74,6 +78,58 @@ func TestVersionsViewSendsExactSupportedIncludeQuery(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestVersionsViewIncludeValidationBeforeClient(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "unsupported include",
+			args:       []string{"versions", "view", "--version-id", "version-1", "--include", "invalid"},
+			wantStderr: "Error: versions view: --include must be one of: " + appStoreVersionIncludeValues + "\n",
+		},
+		{
+			name:       "include with include build",
+			args:       []string{"versions", "view", "--version-id", "version-1", "--include", "build", "--include-build"},
+			wantStderr: "Error: --include cannot be used with --include-build or --include-submission\n",
+		},
+		{
+			name:       "include with include submission",
+			args:       []string{"versions", "view", "--version-id", "version-1", "--include", "appStoreVersionSubmission", "--include-submission"},
+			wantStderr: "Error: --include cannot be used with --include-build or --include-submission\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearASCAuth(t)
+			clientFactoryCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientFactoryCalls++
+				return nil, fmt.Errorf("client should not be created")
+			}))
+
+			stdout, stderr := captureOutput(t, func() {
+				if code := rootcmd.Run(test.args, "test"); code != rootcmd.ExitUsage {
+					t.Errorf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Errorf("stdout = %q, want empty", stdout)
+			}
+			errorLine, _, _ := strings.Cut(stderr, "\n")
+			if got := errorLine + "\n"; got != test.wantStderr {
+				t.Errorf("stderr error line = %q, want %q; full stderr = %q", got, test.wantStderr, stderr)
+			}
+			if clientFactoryCalls != 0 {
+				t.Errorf("client factory calls = %d, want 0", clientFactoryCalls)
+			}
+		})
 	}
 }
 

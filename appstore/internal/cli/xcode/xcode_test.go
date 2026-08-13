@@ -781,6 +781,45 @@ func TestXcodeValidatePassesIPAAndAuthFlags(t *testing.T) {
 	}
 }
 
+func TestXcodeArchiveRejectsExplicitlyEmptyConfiguration(t *testing.T) {
+	restore := overrideXcodeCommandTestHooks(t)
+	defer restore()
+
+	runArchive = func(context.Context, localxcode.ArchiveOptions) (*localxcode.ArchiveResult, error) {
+		t.Fatal("runArchive must not be called for an explicitly empty configuration")
+		return nil, nil
+	}
+
+	cmd := XcodeArchiveCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--project", "Demo.xcodeproj",
+		"--scheme", "Demo",
+		"--archive-path", "Demo.xcarchive",
+		"--configuration", "  ",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("Exec() error = %v, want usage error", runErr)
+	}
+	if runErr.Error() != "--configuration must not be empty" {
+		t.Fatalf("Exec() error = %q, want %q", runErr, "--configuration must not be empty")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "--configuration must not be empty") {
+		t.Fatalf("stderr = %q, want empty configuration usage error", stderr)
+	}
+}
+
 func TestXcodeValidateRejectsNonIPAPath(t *testing.T) {
 	restore := overrideXcodeCommandTestHooks(t)
 	defer restore()

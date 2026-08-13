@@ -12,6 +12,15 @@ func printMigrateImportResultMarkdown(result *MigrateImportResult) error {
 		fmt.Println("## Dry Run - No changes made")
 		fmt.Println()
 	}
+	if result.Status == migratePartialStatus {
+		fmt.Printf("## Partial Import - failed at %s\n\n", result.FailureStage)
+		if result.Failure != "" {
+			fmt.Printf("**Failure:** %s\n\n", result.Failure)
+		}
+		if len(result.CompletedStages) > 0 {
+			fmt.Printf("**Completed Stages:** %s\n\n", strings.Join(result.CompletedStages, ", "))
+		}
+	}
 	fmt.Printf("**Version ID:** %s\n\n", result.VersionID)
 	if result.AppID != "" {
 		fmt.Printf("**App ID:** %s\n\n", result.AppID)
@@ -157,6 +166,16 @@ func printMigrateImportResultMarkdown(result *MigrateImportResult) error {
 func printMigrateImportResultTable(result *MigrateImportResult) error {
 	if result.DryRun {
 		fmt.Println("DRY RUN - No changes made")
+		fmt.Println()
+	}
+	if result.Status == migratePartialStatus {
+		fmt.Printf("PARTIAL IMPORT - failed at %s\n", result.FailureStage)
+		if result.Failure != "" {
+			fmt.Printf("Failure: %s\n", result.Failure)
+		}
+		if len(result.CompletedStages) > 0 {
+			fmt.Printf("Completed Stages: %s\n", strings.Join(result.CompletedStages, ", "))
+		}
 		fmt.Println()
 	}
 	fmt.Printf("Version ID: %s\n\n", result.VersionID)

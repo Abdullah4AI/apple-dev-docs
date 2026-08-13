@@ -84,6 +84,12 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 }
 
 func TestSigningFetchValidationErrors(t *testing.T) {
+	// Flag validation must fail before any client is built; an unusable client
+	// keeps the test hermetic if that ever regresses.
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		return nil, errors.New("App Store Connect client must not be created during flag validation")
+	}))
+
 	tests := []struct {
 		name    string
 		args    []string
@@ -135,6 +141,46 @@ func TestSigningFetchValidationErrors(t *testing.T) {
 	}
 }
 
+func TestSigningFetchWarnsForDeviceWithoutCreateMissing(t *testing.T) {
+	clientCalls := 0
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientCalls++
+		return nil, errors.New("client reached after validation")
+	}))
+
+	cmd := SigningFetchCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.Parse([]string{
+		"--bundle-id", "com.example.app",
+		"--profile-type", "IOS_APP_DEVELOPMENT",
+		"--device", "DEVICE1,DEVICE2",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		runErr = cmd.Run(context.Background())
+	})
+
+	if runErr == nil || runErr.Error() != "signing fetch: client reached after validation" {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("deprecated input must not return a usage error: %v", runErr)
+	}
+	if clientCalls != 1 {
+		t.Fatalf("client factory calls = %d, want 1", clientCalls)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	wantWarning := "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0.\n"
+	if stderr != wantWarning {
+		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	}
+}
+
 func TestSigningFetchWriteFiles_NoOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	profilePath := filepath.Join(dir, "profile.mobileprovision")
@@ -180,6 +226,112 @@ func TestSigningFetchWriteFiles_NoOverwrite(t *testing.T) {
 		t.Fatal("expected error when overwriting certificate file")
 	} else if !errors.Is(err, os.ErrExist) {
 		t.Fatalf("expected ErrExist, got %v", err)
+	}
+}
+
+func TestSigningFetchHelpPairsDeviceWithCreateMissing(t *testing.T) {
+	cmd := SigningFetchCommand()
+
+	deviceFlag := cmd.FlagSet.Lookup("device")
+	if deviceFlag == nil {
+		t.Fatal("expected --device flag")
+	}
+	if !strings.Contains(deviceFlag.Usage, "--create-missing") {
+		t.Fatalf("--device usage = %q, want it to name --create-missing", deviceFlag.Usage)
+	}
+	if !strings.Contains(deviceFlag.Usage, "deprecated") || !strings.Contains(deviceFlag.Usage, "5.0.0") {
+		t.Fatalf("--device usage = %q, want the transition and rejection release", deviceFlag.Usage)
+	}
+	if !strings.Contains(cmd.LongHelp, "warning and ignores the device IDs; 5.0.0 will reject") {
+		t.Fatalf("long help must describe the --device transition, got %q", cmd.LongHelp)
+	}
+
+	for _, line := range strings.Split(cmd.LongHelp, "\n") {
+		if !strings.Contains(line, "--device") {
+			continue
+		}
+		if !strings.Contains(line, "--create-missing") {
+			t.Fatalf("example uses --device without --create-missing: %q", line)
+		}
+	}
+}
+
+func TestSigningFetchFormatUsesSharedOutputDefault(t *testing.T) {
+	tests := []struct {
+		name         string
+		defaultValue string
+	}{
+		{name: "resolved table default", defaultValue: "table"},
+		{name: "resolved JSON default", defaultValue: "json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shared.ResetDefaultOutputFormat()
+			t.Cleanup(shared.ResetDefaultOutputFormat)
+			t.Setenv("ASC_DEFAULT_OUTPUT", tt.defaultValue)
+
+			cmd := SigningFetchCommand()
+			formatFlag := cmd.FlagSet.Lookup("format")
+			if formatFlag == nil {
+				t.Fatal("expected --format flag")
+			}
+			if got := formatFlag.Value.String(); got != tt.defaultValue {
+				t.Fatalf("default --format = %q, want %q", got, tt.defaultValue)
+			}
+
+			if err := cmd.FlagSet.Parse([]string{"--format", "markdown"}); err != nil {
+				t.Fatalf("parse explicit --format: %v", err)
+			}
+			if got := formatFlag.Value.String(); got != "markdown" {
+				t.Fatalf("explicit --format = %q, want markdown", got)
+			}
+		})
+	}
+}
+
+func TestSigningOutputPathsCoverProfileAndCertificateFiles(t *testing.T) {
+	dir := filepath.Join("tmp", "signing")
+	paths := signingOutputPaths(dir, "Created Profile", "profile-created", []asc.Resource[asc.CertificateAttributes]{
+		{ID: "cert-1", Attributes: asc.CertificateAttributes{SerialNumber: "CERT1"}},
+		{ID: "cert-2", Attributes: asc.CertificateAttributes{}},
+	})
+
+	want := []string{
+		filepath.Join(dir, "Created Profile.mobileprovision"),
+		filepath.Join(dir, "CERT1.cer"),
+		filepath.Join(dir, "cert-2.cer"),
+	}
+	if strings.Join(paths, ",") != strings.Join(want, ",") {
+		t.Fatalf("signingOutputPaths() = %v, want %v", paths, want)
+	}
+}
+
+func TestEnsureOutputPathsAreFreeReportsCollisions(t *testing.T) {
+	dir := t.TempDir()
+	free := filepath.Join(dir, "free.cer")
+	existing := filepath.Join(dir, "existing.cer")
+	danglingSymlink := filepath.Join(dir, "dangling.cer")
+
+	if err := os.WriteFile(existing, []byte("certificate"), 0o600); err != nil {
+		t.Fatalf("write existing certificate: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing.cer"), danglingSymlink); err != nil {
+		t.Fatalf("create dangling symlink: %v", err)
+	}
+
+	if err := ensureOutputPathsAreFree([]string{free}); err != nil {
+		t.Fatalf("ensureOutputPathsAreFree() error for free path: %v", err)
+	}
+
+	for _, path := range []string{existing, danglingSymlink} {
+		err := ensureOutputPathsAreFree([]string{free, path})
+		if !errors.Is(err, os.ErrExist) {
+			t.Fatalf("ensureOutputPathsAreFree(%q) error = %v, want os.ErrExist", path, err)
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Fatalf("ensureOutputPathsAreFree(%q) error = %v, want the colliding path named", path, err)
+		}
 	}
 }
 
@@ -363,6 +515,122 @@ func TestResolveSigningAssetsFiltersExistingProfileCertificatesByRequestedType(t
 				t.Fatalf("expected only %s, got %v", tt.wantID, got)
 			}
 		})
+	}
+}
+
+func TestResolveSigningAssetsSkipsUnusableExistingProfileCertificates(t *testing.T) {
+	client := newSigningFetchTestClient(t, func(req *http.Request) *http.Response {
+		switch req.URL.Path {
+		case "/v1/bundleIds/bundle-main/profiles":
+			return signingFetchJSONResponse(
+				http.StatusOK,
+				`{"data":[{"type":"profiles","id":"profile-main","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}]}`,
+			)
+		case "/v1/profiles/profile-main/certificates":
+			return signingFetchJSONResponse(
+				http.StatusOK,
+				`{"data":[
+					{"type":"certificates","id":"cert-expired","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":true,"expirationDate":"2000-01-01T00:00:00Z"}},
+					{"type":"certificates","id":"cert-deactivated","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":false,"expirationDate":"2100-01-01T00:00:00Z"}},
+					{"type":"certificates","id":"cert-undated","attributes":{"certificateType":"IOS_DISTRIBUTION"}},
+					{"type":"certificates","id":"cert-valid","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":true,"expirationDate":"2100-01-01T00:00:00Z"}}
+				]}`,
+			)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return signingFetchJSONResponse(http.StatusInternalServerError, `{}`)
+		}
+	})
+
+	_, certificates, created, err := resolveSigningAssets(
+		context.Background(),
+		client,
+		signingAssetsOptions{
+			BundleIDResourceID: "bundle-main",
+			BundleIdentifier:   "com.example.signing.profile",
+			ProfileType:        "IOS_APP_STORE",
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveSigningAssets() error: %v", err)
+	}
+	if created {
+		t.Fatal("expected the existing profile to be reused")
+	}
+	// Certificates whose metadata does not prove they are unusable are kept.
+	want := "cert-undated,cert-valid"
+	if got := strings.Join(extractIDs(certificates.Data), ","); got != want {
+		t.Fatalf("certificate IDs = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSigningAssetsTreatsProfileWithOnlyUnusableCertificatesAsNoMatch(t *testing.T) {
+	requestPaths := []string{}
+	client := newSigningFetchTestClient(t, func(req *http.Request) *http.Response {
+		requestPaths = append(requestPaths, req.Method+" "+req.URL.Path)
+		switch {
+		case req.URL.Path == "/v1/bundleIds/bundle-main/profiles":
+			return signingFetchJSONResponse(
+				http.StatusOK,
+				`{"data":[{"type":"profiles","id":"profile-main","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}]}`,
+			)
+		case req.URL.Path == "/v1/profiles/profile-main/certificates":
+			return signingFetchJSONResponse(
+				http.StatusOK,
+				`{"data":[{"type":"certificates","id":"cert-expired","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":true,"expirationDate":"2000-01-01T00:00:00Z"}}]}`,
+			)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/certificates":
+			return signingFetchJSONResponse(
+				http.StatusOK,
+				`{"data":[{"type":"certificates","id":"cert-fresh","attributes":{"certificateType":"IOS_DISTRIBUTION","activated":true,"expirationDate":"2100-01-01T00:00:00Z"}}]}`,
+			)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/profiles":
+			return signingFetchJSONResponse(
+				http.StatusCreated,
+				`{"data":{"type":"profiles","id":"profile-created","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}}`,
+			)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return signingFetchJSONResponse(http.StatusInternalServerError, `{}`)
+		}
+	})
+
+	_, _, _, err := resolveSigningAssets(
+		context.Background(),
+		client,
+		signingAssetsOptions{
+			BundleIDResourceID: "bundle-main",
+			BundleIdentifier:   "com.example.signing.profile",
+			ProfileType:        "IOS_APP_STORE",
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "no active, unexpired associated certificates") {
+		t.Fatalf("resolveSigningAssets() error = %v, want unusable certificate error", err)
+	}
+
+	requestPaths = requestPaths[:0]
+	profile, certificates, created, err := resolveSigningAssets(
+		context.Background(),
+		client,
+		signingAssetsOptions{
+			BundleIDResourceID: "bundle-main",
+			BundleIdentifier:   "com.example.signing.profile",
+			ProfileType:        "IOS_APP_STORE",
+			CreateMissing:      true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveSigningAssets() error: %v", err)
+	}
+	if !created || profile.Data.ID != "profile-created" {
+		t.Fatalf("expected a new profile, got created=%v profile=%#v", created, profile)
+	}
+	if got := strings.Join(extractIDs(certificates.Data), ","); got != "cert-fresh" {
+		t.Fatalf("certificate IDs = %q, want cert-fresh", got)
+	}
+	wantPaths := "GET /v1/bundleIds/bundle-main/profiles,GET /v1/profiles/profile-main/certificates,GET /v1/certificates,POST /v1/profiles"
+	if strings.Join(requestPaths, ",") != wantPaths {
+		t.Fatalf("unexpected lookup order: %v", requestPaths)
 	}
 }
 
@@ -704,7 +972,7 @@ func TestResolveSigningAssetsRejectsProfileCreationWhenAllCertificatesAreIneligi
 			BundleIdentifier:   "com.example.signing.profile",
 			ProfileType:        "IOS_APP_STORE",
 			CreateMissing:      true,
-			BeforeCreate: func() error {
+			BeforeCreate: func(profileCreatePlan) error {
 				preflightCalled = true
 				return nil
 			},
@@ -808,8 +1076,14 @@ func TestResolveSigningAssetsPreflightsBeforeCreatingProfile(t *testing.T) {
 			BundleIdentifier:   "com.example.signing.profile",
 			ProfileType:        "IOS_APP_STORE",
 			CreateMissing:      true,
-			BeforeCreate: func() error {
+			BeforeCreate: func(plan profileCreatePlan) error {
 				events = append(events, "repository preflight")
+				if plan.ProfileName != profileCreateName("IOS_APP_STORE", time.Now()) {
+					t.Errorf("preflight profile name = %q, want the name used to create the profile", plan.ProfileName)
+				}
+				if got := extractIDs(plan.Certificates); len(got) != 1 || got[0] != "cert-1" {
+					t.Errorf("preflight certificates = %v, want the certificates used to create the profile", got)
+				}
 				return nil
 			},
 		},
@@ -860,7 +1134,7 @@ func TestResolveSigningAssetsRefreshesCreateTimeoutAfterPreflight(t *testing.T) 
 			BundleIdentifier:   "com.example.signing.profile",
 			ProfileType:        "IOS_APP_STORE",
 			CreateMissing:      true,
-			BeforeCreate: func() error {
+			BeforeCreate: func(profileCreatePlan) error {
 				events = append(events, "repository preflight")
 				expireRequest()
 				return nil
