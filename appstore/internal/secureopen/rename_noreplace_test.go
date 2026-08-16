@@ -72,3 +72,42 @@ func TestRenameNoReplaceInRootPreservesExistingDestination(t *testing.T) {
 		t.Fatalf("staged content = %q, want complete", got)
 	}
 }
+
+func TestRenameNoReplaceInRootPublishesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.Mkdir("staged", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := root.OpenRoot("staged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := OpenNewFileNoFollowInRoot(staged, "bundle.json", 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("complete")); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := staged.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenameNoReplaceInRoot(root, "staged", "published"); err != nil {
+		t.Fatalf("RenameNoReplaceInRoot() directory error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "published", "bundle.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "complete" {
+		t.Fatalf("published data = %q", data)
+	}
+}

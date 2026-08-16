@@ -253,6 +253,10 @@ func TestGetAllRatings_Aggregation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/lookup" {
 			country := r.URL.Query().Get("country")
+			if country == "fr" {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			if resp, ok := responses[country]; ok {
 				w.Header().Set("Content-Type", "application/json")
 				writeBody(t, w, resp)
@@ -375,6 +379,108 @@ func TestGetAllRatings_NoRatings(t *testing.T) {
 	}
 	if global.CountryCount != 0 {
 		t.Fatalf("CountryCount = %d, want 0", global.CountryCount)
+	}
+}
+
+func TestGetAllRatings_AllStorefrontHTTPFailuresRetainStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		HTTPClient: &http.Client{
+			Transport: &testTransport{baseURL: server.URL},
+		},
+	}
+
+	_, err := client.GetAllRatings(context.Background(), "123", 5, context.WithCancel)
+	if err == nil {
+		t.Fatal("expected all-storefront failure")
+	}
+	const wantError = "app not found in any country: 123"
+	if err.Error() != wantError {
+		t.Fatalf("error = %q, want %q", err, wantError)
+	}
+	var statusError interface{ HTTPStatusCode() int }
+	if !errors.As(err, &statusError) {
+		t.Fatalf("error %T does not retain HTTP status", err)
+	}
+	if got := statusError.HTTPStatusCode(); got != http.StatusServiceUnavailable {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", got, http.StatusServiceUnavailable)
+	}
+}
+
+func TestGetAllRatings_MixedHTTPFailuresSelectServerStatusDeterministically(t *testing.T) {
+	tests := []struct {
+		name            string
+		completionOrder []int
+	}{
+		{name: "client finishes first", completionOrder: []int{1, 2}},
+		{name: "server finishes first", completionOrder: []int{2, 1}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var requestCount atomic.Int32
+			ready := make(chan int, 2)
+			finished := make(chan int, 2)
+			releases := []chan struct{}{make(chan struct{}), make(chan struct{})}
+			releaseRemaining := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				request := int(requestCount.Add(1))
+				status := http.StatusTooManyRequests
+				if request <= 2 {
+					ready <- request
+					<-releases[request-1]
+					if request == 2 {
+						status = http.StatusServiceUnavailable
+					}
+				} else {
+					<-releaseRemaining
+				}
+				w.WriteHeader(status)
+				if request <= 2 {
+					finished <- request
+				}
+			}))
+			defer server.Close()
+
+			client := &Client{
+				HTTPClient: &http.Client{
+					Transport: &testTransport{baseURL: server.URL},
+				},
+			}
+
+			errCh := make(chan error, 1)
+			go func() {
+				_, err := client.GetAllRatings(context.Background(), "123", 2, context.WithCancel)
+				errCh <- err
+			}()
+
+			for range 2 {
+				<-ready
+			}
+			for _, request := range test.completionOrder {
+				close(releases[request-1])
+				if got := <-finished; got != request {
+					t.Fatalf("request %d completed, want %d", got, request)
+				}
+			}
+			close(releaseRemaining)
+
+			err := <-errCh
+			if err == nil {
+				t.Fatal("expected all-storefront failure")
+			}
+			var statusError interface{ HTTPStatusCode() int }
+			if !errors.As(err, &statusError) {
+				t.Fatalf("error %T does not retain HTTP status", err)
+			}
+			if got := statusError.HTTPStatusCode(); got != http.StatusServiceUnavailable {
+				t.Fatalf("HTTPStatusCode() = %d, want deterministic server status %d", got, http.StatusServiceUnavailable)
+			}
+		})
 	}
 }
 

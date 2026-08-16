@@ -75,6 +75,98 @@ func TestNormalizeExportOptionsSigningStyle(t *testing.T) {
 	}
 }
 
+func TestNormalizeExportOptionsMethod(t *testing.T) {
+	for _, tc := range []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "", want: "", wantErr: true},
+		{input: " app-store-connect ", want: "app-store-connect"},
+		{input: "release-testing", want: "release-testing"},
+		{input: "ad-hoc", want: "ad-hoc", wantErr: true},
+		{input: "enterprise", want: "enterprise", wantErr: true},
+	} {
+		got, err := NormalizeExportOptionsMethod(tc.input)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Fatalf("NormalizeExportOptionsMethod(%q) = %q, %v; want %q, error=%v", tc.input, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
+func TestGenerateExportOptions_ReleaseTestingWritesModernMethod(t *testing.T) {
+	archivePath := writeExportOptionsTestArchive(t, "TEAM123")
+	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
+
+	result, err := GenerateExportOptions(context.Background(), ExportOptionsGenerateOptions{
+		ArchivePath:  archivePath,
+		OutputPath:   outputPath,
+		Method:       "release-testing",
+		Destination:  "export",
+		SigningStyle: "automatic",
+	})
+	if err != nil {
+		t.Fatalf("GenerateExportOptions() error: %v", err)
+	}
+	if result.Method != "release-testing" {
+		t.Fatalf("result method = %q, want release-testing", result.Method)
+	}
+	if payload := readExportOptionsTestPlist(t, outputPath); payload["method"] != "release-testing" {
+		t.Fatalf("plist method = %#v, want release-testing", payload["method"])
+	}
+}
+
+func TestGenerateExportOptions_ReleaseTestingRejectsUploadDestination(t *testing.T) {
+	archivePath := writeExportOptionsTestArchive(t, "TEAM123")
+	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
+
+	_, err := GenerateExportOptions(context.Background(), ExportOptionsGenerateOptions{
+		ArchivePath: archivePath,
+		OutputPath:  outputPath,
+		Method:      "release-testing",
+		Destination: "upload",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release-testing") || !strings.Contains(err.Error(), "destination=export") {
+		t.Fatalf("expected release-testing destination error, got %v", err)
+	}
+	if _, statErr := os.Stat(outputPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("invalid release-testing options created output: %v", statErr)
+	}
+}
+
+func TestGenerateExportOptions_ManualReleaseTestingPassesMethodToResolver(t *testing.T) {
+	archivePath := writeExportOptionsTestArchive(t, "TEAM123")
+	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
+
+	originalGenerator := manualExportOptionsGeneratorFn
+	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID, method string) (manualExportOptions, error) {
+		if method != exportOptionsMethodReleaseTesting {
+			t.Fatalf("manual generator method = %q, want release-testing", method)
+		}
+		return manualExportOptions{
+			TeamID:             teamID,
+			SigningCertificate: "Apple Distribution: Example (TEAM123)",
+			ProvisioningProfiles: map[string]string{
+				"com.example.demo": "adhoc-profile-uuid",
+			},
+		}, nil
+	}
+	t.Cleanup(func() { manualExportOptionsGeneratorFn = originalGenerator })
+
+	result, err := GenerateExportOptions(context.Background(), ExportOptionsGenerateOptions{
+		ArchivePath:  archivePath,
+		OutputPath:   outputPath,
+		Method:       "release-testing",
+		SigningStyle: "manual",
+	})
+	if err != nil {
+		t.Fatalf("GenerateExportOptions() error: %v", err)
+	}
+	if result.Method != "release-testing" || result.ProvisioningProfiles["com.example.demo"] != "adhoc-profile-uuid" {
+		t.Fatalf("unexpected release-testing manual result: %#v", result)
+	}
+}
+
 func TestGenerateExportOptions_ExplicitTeamOverridesArchiveTeam(t *testing.T) {
 	archivePath := writeExportOptionsTestArchive(t, "ARCHIVE123")
 	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
@@ -474,7 +566,7 @@ func TestGenerateExportOptions_ManualSigningRejectsExistingOutputBeforeLookup(t 
 	}
 
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(context.Context, string, string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(context.Context, string, string, string) (manualExportOptions, error) {
 		t.Fatal("manual signing lookup must not run for an unusable output destination")
 		return manualExportOptions{}, nil
 	}
@@ -618,6 +710,11 @@ func TestGenerateExportOptions_RejectsInvalidDestinationAndSigningStyleBeforeWri
 			errorHint: "signing",
 			opts:      ExportOptionsGenerateOptions{Destination: "export", SigningStyle: "invalid"},
 		},
+		{
+			name:      "method",
+			errorHint: "method",
+			opts:      ExportOptionsGenerateOptions{Method: "ad-hoc", Destination: "export", SigningStyle: "automatic"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
@@ -643,7 +740,7 @@ func TestGenerateExportOptions_ManualGeneratorOutputIsValidatedBeforeReplacingOu
 	}
 
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID, _ string) (manualExportOptions, error) {
 		return manualExportOptions{
 			TeamID:               teamID,
 			SigningCertificate:   "Apple Distribution",
@@ -681,7 +778,7 @@ func TestGenerateExportOptions_ManualSigningPreflightsOutputParentBeforeLookup(t
 	t.Cleanup(func() { preflightExportOptionsParentFn = originalPreflight })
 
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(context.Context, string, string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(context.Context, string, string, string) (manualExportOptions, error) {
 		t.Fatal("manual signing lookup ran before output-parent preflight")
 		return manualExportOptions{}, nil
 	}
@@ -721,7 +818,10 @@ func TestGenerateExportOptions_ManualSigningWritesResolvedCertificateAndProfiles
 	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
 
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID, method string) (manualExportOptions, error) {
+		if method != exportOptionsMethodAppStoreConnect {
+			t.Fatalf("manual generator method = %q, want app-store-connect", method)
+		}
 		if teamID != "TEAM123" {
 			t.Fatalf("manual generator team ID = %q, want archive team", teamID)
 		}
@@ -776,7 +876,7 @@ func TestGenerateExportOptions_ManualSigningRejectsGeneratorTeamMismatch(t *test
 	outputPath := filepath.Join(t.TempDir(), "ExportOptions.plist")
 
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID, _ string) (manualExportOptions, error) {
 		if teamID != "ARCHIVE123" {
 			t.Fatalf("manual generator team ID = %q, want archive team", teamID)
 		}
@@ -806,7 +906,7 @@ func TestGenerateExportOptions_ManualSigningRejectsGeneratorTeamMismatch(t *test
 func TestGenerateExportOptions_ManualOutputIsDeterministic(t *testing.T) {
 	archivePath := writeExportOptionsTestArchive(t, "TEAM123")
 	originalGenerator := manualExportOptionsGeneratorFn
-	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID string) (manualExportOptions, error) {
+	manualExportOptionsGeneratorFn = func(_ context.Context, _ string, teamID, _ string) (manualExportOptions, error) {
 		return manualExportOptions{
 			TeamID:             teamID,
 			SigningCertificate: "Apple Distribution: Example (TEAM123)",

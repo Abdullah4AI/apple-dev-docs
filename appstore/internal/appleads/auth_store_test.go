@@ -29,6 +29,238 @@ func TestStoreCredentialsConfigUsesActiveConfigPath(t *testing.T) {
 	}
 }
 
+func TestStoreCredentialsConfigRejectsUnsafeAdAccountID(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	credentials := testAdsCredentials()
+	credentials.AdAccountID = "123;orgId=999"
+
+	err := StoreCredentialsConfigAt("ads", credentials, configPath)
+	if err == nil || !strings.Contains(err.Error(), "invalid ad account ID") {
+		t.Fatalf("StoreCredentialsConfigAt() error = %v, want invalid ad account ID", err)
+	}
+}
+
+func TestStoreCredentialsConfigRejectsUnsafeOrgID(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	credentials := testAdsCredentials()
+	credentials.OrgID = "123;adAccountId=999"
+
+	err := StoreCredentialsConfigAt("ads", credentials, configPath)
+	if err == nil || !strings.Contains(err.Error(), "invalid organization ID") {
+		t.Fatalf("StoreCredentialsConfigAt() error = %v, want invalid organization ID", err)
+	}
+}
+
+func TestStoreCredentialsConfigRoundTripsIndependentAdAccountID(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+	credentials := testAdsCredentials()
+	credentials.AdAccountID = "AD_ACCOUNT"
+
+	if err := StoreCredentialsConfig("ads", credentials); err != nil {
+		t.Fatalf("StoreCredentialsConfig() error: %v", err)
+	}
+
+	loaded, _, err := GetCredentialsWithSource("ads")
+	if err != nil {
+		t.Fatalf("GetCredentialsWithSource() error: %v", err)
+	}
+	if loaded.OrgID != "123456" || loaded.AdAccountID != "AD_ACCOUNT" {
+		t.Fatalf("contexts = org %q ad account %q", loaded.OrgID, loaded.AdAccountID)
+	}
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("LoadAt() error: %v", err)
+	}
+	if cfg.Ads.OrgID != "123456" || cfg.Ads.AdAccountID != "AD_ACCOUNT" || cfg.Ads.Keys[0].AdAccountID != "AD_ACCOUNT" {
+		t.Fatalf("stored ads config = %+v", cfg.Ads)
+	}
+}
+
+func TestStoreCredentialsConfigCanClearDefaultAdAccountID(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+	credentials := testAdsCredentials()
+	credentials.AdAccountID = "AD_ACCOUNT"
+	if err := StoreCredentialsConfig("ads", credentials); err != nil {
+		t.Fatalf("StoreCredentialsConfig(initial) error: %v", err)
+	}
+
+	credentials.AdAccountID = ""
+	if err := StoreCredentialsConfig("ads", credentials); err != nil {
+		t.Fatalf("StoreCredentialsConfig(clear) error: %v", err)
+	}
+	loaded, _, err := GetCredentialsWithSource("ads")
+	if err != nil {
+		t.Fatalf("GetCredentialsWithSource() error: %v", err)
+	}
+	if loaded.AdAccountID != "" {
+		t.Fatalf("AdAccountID = %q, want cleared", loaded.AdAccountID)
+	}
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("LoadAt() error: %v", err)
+	}
+	if cfg.Ads.AdAccountID != "" || cfg.Ads.Keys[0].AdAccountID != "" {
+		t.Fatalf("stored ad account was not cleared: %+v", cfg.Ads)
+	}
+}
+
+func TestNamedConfigProfileDoesNotInheritGlobalAdAccountID(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+	credentialsA := testAdsCredentials()
+	credentialsA.AdAccountID = "ACCOUNT_A"
+	credentialsB := testAdsCredentials()
+	credentialsB.ClientID = "CLIENT_B"
+	if err := config.SaveAt(configPath, &config.Config{Ads: config.AdsConfig{
+		DefaultKeyName: "profile-b",
+		AdAccountID:    "ACCOUNT_A",
+		Keys: []config.AdsCredential{
+			{Name: "profile-a", ClientID: credentialsA.ClientID, TeamID: credentialsA.TeamID, KeyID: credentialsA.KeyID, PrivateKeyPath: credentialsA.PrivateKeyPath, OrgID: credentialsA.OrgID, AdAccountID: credentialsA.AdAccountID},
+			{Name: "profile-b", ClientID: credentialsB.ClientID, TeamID: credentialsB.TeamID, KeyID: credentialsB.KeyID, PrivateKeyPath: credentialsB.PrivateKeyPath, OrgID: credentialsB.OrgID},
+		},
+	}}); err != nil {
+		t.Fatalf("SaveAt() error: %v", err)
+	}
+
+	for _, profile := range []string{"profile-b", ""} {
+		loaded, _, err := GetCredentialsWithSource(profile)
+		if err != nil {
+			t.Fatalf("GetCredentialsWithSource(%q) error: %v", profile, err)
+		}
+		if loaded.AdAccountID != "" {
+			t.Fatalf("GetCredentialsWithSource(%q).AdAccountID = %q, want empty", profile, loaded.AdAccountID)
+		}
+	}
+}
+
+func TestNamedConfigProfileDoesNotInheritRootContexts(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+	if err := config.SaveAt(configPath, &config.Config{Ads: config.AdsConfig{
+		DefaultKeyName: "profile-a",
+		OrgID:          "ROOT_ORG",
+		AdAccountID:    "ROOT_ACCOUNT",
+		Keys: []config.AdsCredential{
+			{Name: "profile-a", ClientID: "A", TeamID: "T", KeyID: "K", PrivateKeyPath: "a.pem"},
+			{Name: "profile-b", ClientID: "B", TeamID: "T", KeyID: "K", PrivateKeyPath: "b.pem"},
+		},
+	}}); err != nil {
+		t.Fatalf("SaveAt() error: %v", err)
+	}
+
+	loaded, _, err := GetCredentialsWithSource("profile-b")
+	if err != nil {
+		t.Fatalf("GetCredentialsWithSource() error: %v", err)
+	}
+	if loaded.OrgID != "" {
+		t.Fatalf("OrgID = %q, must not inherit root org", loaded.OrgID)
+	}
+	if loaded.AdAccountID != "" {
+		t.Fatalf("AdAccountID = %q, must not inherit root ad account", loaded.AdAccountID)
+	}
+}
+
+func TestNamedConfigProfileDoesNotInheritPreviousDefaultContexts(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+
+	profileA := testAdsCredentials()
+	profileA.OrgID = "ORG_A"
+	profileA.AdAccountID = "ACCOUNT_A"
+	if err := StoreCredentialsConfig("profile-a", profileA); err != nil {
+		t.Fatalf("StoreCredentialsConfig(profile-a) error: %v", err)
+	}
+
+	profileB := testAdsCredentials()
+	profileB.ClientID = "CLIENT_B"
+	profileB.OrgID = ""
+	profileB.AdAccountID = ""
+	if err := StoreCredentialsConfig("profile-b", profileB); err != nil {
+		t.Fatalf("StoreCredentialsConfig(profile-b) error: %v", err)
+	}
+
+	for _, profile := range []string{"profile-b", ""} {
+		loaded, _, err := GetCredentialsWithSource(profile)
+		if err != nil {
+			t.Fatalf("GetCredentialsWithSource(%q) error: %v", profile, err)
+		}
+		if loaded.OrgID != "" || loaded.AdAccountID != "" {
+			t.Fatalf("GetCredentialsWithSource(%q) contexts = org %q ad account %q, want empty", profile, loaded.OrgID, loaded.AdAccountID)
+		}
+	}
+
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("LoadAt() error: %v", err)
+	}
+	if cfg.Ads.DefaultKeyName != "profile-b" || cfg.Ads.OrgID != "" || cfg.Ads.AdAccountID != "" {
+		t.Fatalf("default profile contexts = %+v, want profile-b with empty contexts", cfg.Ads)
+	}
+}
+
+func TestSwitchingDefaultToProfileWithoutOrgClearsRootContexts(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+
+	profileA := testAdsCredentials()
+	profileA.OrgID = "ORG_A"
+	profileA.AdAccountID = "ACCOUNT_A"
+	if err := StoreCredentialsConfig("profile-a", profileA); err != nil {
+		t.Fatalf("StoreCredentialsConfig(profile-a) error: %v", err)
+	}
+	profileB := testAdsCredentials()
+	profileB.ClientID = "CLIENT_B"
+	profileB.OrgID = ""
+	profileB.AdAccountID = ""
+	if err := StoreCredentialsConfig("profile-b", profileB); err != nil {
+		t.Fatalf("StoreCredentialsConfig(profile-b) error: %v", err)
+	}
+	if err := SetDefaultCredentials("profile-a"); err != nil {
+		t.Fatalf("SetDefaultCredentials(profile-a) error: %v", err)
+	}
+	if err := SetDefaultCredentials("profile-b"); err != nil {
+		t.Fatalf("SetDefaultCredentials(profile-b) error: %v", err)
+	}
+
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("LoadAt() error: %v", err)
+	}
+	if cfg.Ads.DefaultKeyName != "profile-b" || cfg.Ads.OrgID != "" || cfg.Ads.AdAccountID != "" {
+		t.Fatalf("switched default contexts = %+v, want profile-b with empty contexts", cfg.Ads)
+	}
+}
+
+func TestRemoveDefaultConfigProfileClearsAdAccountContext(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "active-config.json")
+	t.Setenv("ASC_CONFIG_PATH", configPath)
+	t.Setenv(adsBypassKeychainEnvVar, "1")
+	credentials := testAdsCredentials()
+	credentials.AdAccountID = "ACCOUNT_A"
+	if err := StoreCredentialsConfig("profile-a", credentials); err != nil {
+		t.Fatalf("StoreCredentialsConfig() error: %v", err)
+	}
+	if err := RemoveCredentials("profile-a"); err != nil {
+		t.Fatalf("RemoveCredentials() error: %v", err)
+	}
+
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("LoadAt() error: %v", err)
+	}
+	if cfg.Ads.DefaultKeyName != "" || cfg.Ads.OrgID != "" || cfg.Ads.AdAccountID != "" {
+		t.Fatalf("removed default left context behind: %+v", cfg.Ads)
+	}
+}
+
 func TestLoadConfigWithPathDoesNotFallbackToGlobalWhenASCConfigPathSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

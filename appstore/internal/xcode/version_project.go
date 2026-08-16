@@ -54,6 +54,7 @@ type preparedVersionWrite struct {
 	mode     os.FileMode
 	root     rootfs.Root
 	name     string
+	ownsRoot bool
 }
 
 type xcconfigMutation struct {
@@ -865,6 +866,7 @@ func (project *structuredVersionProject) checkXCConfigWritable(path string, allo
 	if err != nil {
 		return err
 	}
+	defer root.Close()
 	if err := root.AllowingInternalSymlinks().CheckContained(path); err != nil {
 		if errors.Is(err, rootfs.ErrSymlink) {
 			if info, lstatErr := os.Lstat(path); lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -899,12 +901,7 @@ func (project *structuredVersionProject) checkXCConfigWritable(path string, allo
 	return nil
 }
 
-func (project *structuredVersionProject) versionFileTarget(path string, allowExternal bool) (preparedVersionWrite, error) {
-	projectRoot, err := rootfs.New(project.rootDir)
-	if err != nil {
-		return preparedVersionWrite{}, err
-	}
-	projectRoot = projectRoot.AllowingInternalSymlinks()
+func (project *structuredVersionProject) versionFileTarget(projectRoot rootfs.Root, path string, allowExternal bool) (preparedVersionWrite, error) {
 	if err := projectRoot.CheckContained(path); err == nil {
 		return preparedVersionWrite{path: path, root: projectRoot, name: path}, nil
 	} else if !allowExternal {
@@ -920,17 +917,13 @@ func (project *structuredVersionProject) versionFileTarget(path string, allowExt
 	}
 	name := filepath.Base(path)
 	if err := externalRoot.CheckContained(name); err != nil {
+		_ = externalRoot.Close()
 		return preparedVersionWrite{}, err
 	}
-	return preparedVersionWrite{path: path, root: externalRoot, name: name}, nil
+	return preparedVersionWrite{path: path, root: externalRoot, name: name, ownsRoot: true}, nil
 }
 
-func (project *structuredVersionProject) containedVersionFileTarget(path string) (preparedVersionWrite, error) {
-	projectRoot, err := rootfs.New(project.rootDir)
-	if err != nil {
-		return preparedVersionWrite{}, err
-	}
-	projectRoot = projectRoot.AllowingInternalSymlinks()
+func (project *structuredVersionProject) containedVersionFileTarget(projectRoot rootfs.Root, path string) (preparedVersionWrite, error) {
 	if err := projectRoot.CheckContained(path); err != nil {
 		return preparedVersionWrite{}, err
 	}
@@ -1041,9 +1034,16 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 		}
 	}
 
+	projectRoot, err := rootfs.New(project.rootDir)
+	if err != nil {
+		return nil, err
+	}
+	projectRoot = projectRoot.AllowingInternalSymlinks()
+	defer projectRoot.Close()
 	var writes []preparedVersionWrite
+	defer func() { _ = closeVersionWrites(writes) }()
 	if pbxprojChanged {
-		write, err := project.preparePBXProjWrite()
+		write, err := project.preparePBXProjWrite(projectRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -1059,17 +1059,20 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 		if err := project.checkXCConfigWritable(path, opts.AllowExternalXCConfig); err != nil {
 			return nil, err
 		}
-		target, err := project.versionFileTarget(path, opts.AllowExternalXCConfig)
+		target, err := project.versionFileTarget(projectRoot, path, opts.AllowExternalXCConfig)
 		if err != nil {
 			return nil, fmt.Errorf("prepare xcconfig %s: %w", path, err)
 		}
 		write, fileChanges, changed, err := prepareXCConfigWrite(target, xcconfigMutations[path])
 		if err != nil {
+			_ = target.root.Close()
 			return nil, err
 		}
 		if changed {
 			writes = append(writes, write)
 			changes = append(changes, fileChanges...)
+		} else if target.ownsRoot {
+			_ = target.root.Close()
 		}
 	}
 
@@ -1328,11 +1331,16 @@ func consumersSelected(paths []string, consumers map[string]map[string]bool, ide
 	return true
 }
 
-func (project *structuredVersionProject) preparePBXProjWrite() (preparedVersionWrite, error) {
-	target, err := project.containedVersionFileTarget(project.pbxprojPath)
+func (project *structuredVersionProject) preparePBXProjWrite(projectRoot rootfs.Root) (result preparedVersionWrite, resultErr error) {
+	target, err := project.containedVersionFileTarget(projectRoot, project.pbxprojPath)
 	if err != nil {
 		return preparedVersionWrite{}, fmt.Errorf("prepare Xcode project file: %w", err)
 	}
+	defer func() {
+		if resultErr != nil {
+			_ = target.root.Close()
+		}
+	}()
 	original, mode, err := readRegularVersionFile(target)
 	if err != nil {
 		return preparedVersionWrite{}, err
@@ -1438,7 +1446,10 @@ func readRegularVersionFile(target preparedVersionWrite) ([]byte, os.FileMode, e
 
 var atomicWriteVersionFileFn = atomicWritePreparedVersionFile
 
-func commitVersionWrites(writes []preparedVersionWrite) error {
+func commitVersionWrites(writes []preparedVersionWrite) (resultErr error) {
+	defer func() {
+		resultErr = errors.Join(resultErr, closeVersionWrites(writes))
+	}()
 	sort.Slice(writes, func(left, right int) bool { return writes[left].path < writes[right].path })
 	var committed []preparedVersionWrite
 	for _, write := range writes {
@@ -1463,6 +1474,16 @@ func commitVersionWrites(writes []preparedVersionWrite) error {
 	return nil
 }
 
+func closeVersionWrites(writes []preparedVersionWrite) error {
+	var closeErrors []error
+	for _, write := range writes {
+		if err := write.root.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close root for %s: %w", write.path, err))
+		}
+	}
+	return errors.Join(closeErrors...)
+}
+
 func atomicWritePreparedVersionFile(write preparedVersionWrite, data []byte) error {
 	return write.root.WriteFile(write.name, data, write.mode)
 }
@@ -1476,6 +1497,7 @@ func atomicWriteVersionFile(path string, data []byte, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	defer root.Close()
 	return root.WriteFile(filepath.Base(path), data, mode)
 }
 

@@ -22,6 +22,7 @@ import (
 	"howett.net/plist"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 var (
@@ -66,7 +67,12 @@ type ExportOptions struct {
 	IPAPath        string
 	Overwrite      bool
 	XcodebuildArgs []string
+	Environment    []string
 	LogWriter      io.Writer
+	// terminateProcessGroup is reserved for the exact release-testing seam.
+	// Ordinary CLI exports retain their established subprocess behavior.
+	terminateProcessGroup   bool
+	strictExportedIPASource bool
 }
 
 type ExportResult struct {
@@ -232,7 +238,7 @@ func Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
 	if err := validateExportOptions(opts); err != nil {
 		return nil, err
 	}
-	if err := ensureXcodeAvailable(ctx); err != nil {
+	if err := ensureXcodeAvailableWithEnvironment(ctx, opts.Environment, opts.terminateProcessGroup); err != nil {
 		return nil, err
 	}
 	if err := validateExportInputPaths(opts); err != nil {
@@ -265,7 +271,7 @@ func Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
 	defer os.RemoveAll(tempExportDir)
 
 	args := buildExportCommand(opts, tempExportDir)
-	if err := runXcodebuild(ctx, args, opts.LogWriter); err != nil {
+	if err := runXcodebuildWithEnvironment(ctx, args, opts.Environment, opts.LogWriter, opts.terminateProcessGroup); err != nil {
 		return nil, err
 	}
 
@@ -288,12 +294,20 @@ func Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := readIPABundleInfo(exportedIPAPath)
-	if err != nil {
-		return nil, fmt.Errorf("inspect exported IPA before installation: %w", err)
-	}
-	if err := moveExportedIPA(exportedIPAPath, opts.IPAPath, opts.Overwrite); err != nil {
-		return nil, err
+	var info bundleInfo
+	if opts.strictExportedIPASource {
+		info, err = finalizeExactExportedIPA(exportedIPAPath, opts.IPAPath)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		info, err = readIPABundleInfo(exportedIPAPath)
+		if err != nil {
+			return nil, fmt.Errorf("inspect exported IPA before installation: %w", err)
+		}
+		if err := moveExportedIPA(exportedIPAPath, opts.IPAPath, opts.Overwrite); err != nil {
+			return nil, err
+		}
 	}
 
 	return &ExportResult{
@@ -437,6 +451,11 @@ func validateExportOptions(opts ExportOptions) error {
 	if err := ValidateExportXcodebuildArgs(opts.XcodebuildArgs); err != nil {
 		return err
 	}
+	if opts.Environment != nil {
+		if err := validateProcessEnvironment(opts.Environment); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -533,6 +552,7 @@ func normalizeExportOptions(opts ExportOptions) ExportOptions {
 	opts.ArchivePath = normalizeDirectoryPath(opts.ArchivePath)
 	opts.ExportOptions = strings.TrimSpace(opts.ExportOptions)
 	opts.IPAPath = strings.TrimSpace(opts.IPAPath)
+	opts.Environment = cloneEnvironment(opts.Environment)
 	return opts
 }
 
@@ -598,6 +618,10 @@ func validateExistingFile(pathValue, flagName string) error {
 }
 
 func ensureXcodeAvailable(ctx context.Context) error {
+	return ensureXcodeAvailableWithEnvironment(ctx, nil, false)
+}
+
+func ensureXcodeAvailableWithEnvironment(ctx context.Context, environment []string, terminateProcessGroup bool) error {
 	if runtimeGOOS != "darwin" {
 		return fmt.Errorf("supported on macOS only; current platform is %s", runtimeGOOS)
 	}
@@ -607,7 +631,7 @@ func ensureXcodeAvailable(ctx context.Context) error {
 		}
 		return fmt.Errorf("locate xcodebuild: %w", err)
 	}
-	if err := runXcodebuild(ctx, []string{"-version"}, io.Discard); err != nil {
+	if err := runXcodebuildWithEnvironment(ctx, []string{"-version"}, environment, io.Discard, terminateProcessGroup); err != nil {
 		return fmt.Errorf("xcodebuild not usable: %w", err)
 	}
 	return nil
@@ -800,6 +824,10 @@ func cloneStrings(values []string) []string {
 
 func runXcodebuild(ctx context.Context, args []string, logWriter io.Writer) error {
 	return runCommandWithBoundedOutput(ctx, "xcodebuild", args, logWriter, summarizeAction(args), "xcodebuild")
+}
+
+func runXcodebuildWithEnvironment(ctx context.Context, args, environment []string, logWriter io.Writer, terminateProcessGroup bool) error {
+	return runCommandWithBoundedOutputEnvironment(ctx, "xcodebuild", args, environment, logWriter, summarizeAction(args), "xcodebuild", terminateProcessGroup)
 }
 
 func runXcodebuildForBuild(ctx context.Context, args []string, logWriter io.Writer) error {
@@ -1342,18 +1370,34 @@ func parseBuildStatusMetadataField(line string) (string, string, bool) {
 }
 
 func runCommandWithBoundedOutput(ctx context.Context, name string, args []string, logWriter io.Writer, action string, commandLabel string) error {
-	return runCommandWithBoundedOutputMode(ctx, name, args, logWriter, action, commandLabel, false)
+	return runCommandWithBoundedOutputEnvironmentMode(ctx, name, args, nil, logWriter, action, commandLabel, false)
 }
 
 func runCommandWithBoundedOutputMode(ctx context.Context, name string, args []string, logWriter io.Writer, action string, commandLabel string, preserveProcessError bool) error {
+	return runCommandWithBoundedOutputEnvironmentMode(ctx, name, args, nil, logWriter, action, commandLabel, preserveProcessError)
+}
+
+func runCommandWithBoundedOutputEnvironment(ctx context.Context, name string, args, environment []string, logWriter io.Writer, action string, commandLabel string, terminateProcessGroup bool) error {
+	return runCommandWithBoundedOutputEnvironmentMode(ctx, name, args, environment, logWriter, action, commandLabel, false, terminateProcessGroup)
+}
+
+func runCommandWithBoundedOutputEnvironmentMode(ctx context.Context, name string, args, environment []string, logWriter io.Writer, action string, commandLabel string, preserveProcessError bool, terminateProcessGroup ...bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cmd := commandContextFn(ctx, name, args...)
+	if environment != nil {
+		cmd.Env = cloneEnvironment(environment)
+	}
 	outputWindow := newXcodeDiagnosticBuffer(xcodebuildErrorTailLimit, logWriter)
 	cmd.Stdout = outputWindow
 	cmd.Stderr = outputWindow
-	if err := runXcodeCommand(cmd); err != nil {
+	cleanupProcessGroup := len(terminateProcessGroup) > 0 && terminateProcessGroup[0]
+	run := runXcodeCommand
+	if cleanupProcessGroup {
+		run = runXcodeCommandWithProcessGroupCleanup
+	}
+	if err := run(cmd); err != nil {
 		return formatCommandOutputError(ctx, err, outputWindow, action, commandLabel, preserveProcessError)
 	}
 	return nil
@@ -1893,11 +1937,26 @@ func isDirectUploadMode(exportOptionsPlistPath string) bool {
 
 func moveExportedIPA(sourcePath, destinationPath string, overwrite bool) error {
 	if !overwrite {
-		if _, err := os.Lstat(destinationPath); err == nil {
-			return fmt.Errorf("--ipa-path already exists: %s (use --overwrite to replace it)", destinationPath)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("lstat ipa path: %w", err)
+		source, err := os.Open(sourcePath)
+		if err != nil {
+			return fmt.Errorf("open exported ipa: %w", err)
 		}
+		defer source.Close()
+		info, err := source.Stat()
+		if err != nil {
+			return fmt.Errorf("inspect exported ipa: %w", err)
+		}
+		root, err := rootfs.New(filepath.Dir(destinationPath))
+		if err != nil {
+			return fmt.Errorf("open ipa output root: %w", err)
+		}
+		defer root.Close()
+		if _, err := root.CreateNewFrom(filepath.Base(destinationPath), source, info.Mode().Perm()); err != nil {
+			return newDestinationExistsError(destinationPath, err)
+		}
+		// Publication is the commit point. The source lives in Export's owned
+		// temporary directory, whose deferred cleanup handles best-effort removal.
+		return nil
 	}
 	// Export runs only on macOS, where rename replaces an existing regular file
 	// atomically. Do not unlink the old artifact first: if the final move fails,

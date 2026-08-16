@@ -10,8 +10,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/urlsanitize"
+	"golang.org/x/text/unicode/norm"
 )
 
 // redactedRepoUserinfo replaces credentials that net/url cannot parse.
@@ -65,6 +70,46 @@ type GitStore struct {
 	RepoURL  string
 	LocalDir string
 	Branch   string
+
+	rootMu sync.Mutex
+	root   *rootfs.Root
+}
+
+func (g *GitStore) filesystemRoot() (rootfs.Root, error) {
+	absolute, err := filepath.Abs(g.LocalDir)
+	if err != nil {
+		return rootfs.Root{}, err
+	}
+	absolute = filepath.Clean(absolute)
+
+	g.rootMu.Lock()
+	defer g.rootMu.Unlock()
+	if g.root != nil && g.root.Path() == absolute {
+		return *g.root, nil
+	}
+	if g.root != nil {
+		if err := g.root.Close(); err != nil {
+			return rootfs.Root{}, err
+		}
+		g.root = nil
+	}
+	root, err := rootfs.New(absolute)
+	if err != nil {
+		return rootfs.Root{}, err
+	}
+	g.root = &root
+	return root, nil
+}
+
+func (g *GitStore) closeFilesystemRoot() error {
+	g.rootMu.Lock()
+	defer g.rootMu.Unlock()
+	if g.root == nil {
+		return nil
+	}
+	err := g.root.Close()
+	g.root = nil
+	return err
 }
 
 // Clone clones the git repo. If allowCreate is true (push mode), falls back to
@@ -119,42 +164,184 @@ func (g *GitStore) Clone(ctx context.Context, allowCreate bool) error {
 // WriteEncryptedFile writes an encrypted file into the repo.
 // Validates that the resolved path stays inside LocalDir to prevent symlink escapes.
 func (g *GitStore) WriteEncryptedFile(relPath string, plaintext []byte, password string) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return err
+	}
 	encrypted, err := Encrypt(plaintext, password)
 	if err != nil {
 		return err
 	}
 
-	fullPath := filepath.Join(g.LocalDir, relPath+".enc")
-	if err := EnsureInsideDir(g.LocalDir, fullPath); err != nil {
+	root, err := g.filesystemRoot()
+	if err != nil {
 		return err
 	}
+	return root.WriteFile(relPath+".enc", encrypted, 0o600)
+}
 
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+// WriteEncryptedFileWithMetadata writes a versioned encrypted file whose
+// non-secret metadata is authenticated with the ciphertext.
+func (g *GitStore) WriteEncryptedFileWithMetadata(relPath string, plaintext []byte, password string, metadata EncryptedFileMetadata) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
 		return err
 	}
-	if err := RejectSymlinkIfExists(fullPath); err != nil {
+	metadata.RelativePath = canonicalEncryptedRepositoryPath(relPath)
+	encrypted, err := EncryptFile(plaintext, password, metadata)
+	if err != nil {
 		return err
 	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return err
+	}
+	return root.CreateNewFileAtomic(relPath+".enc", encrypted, 0o600)
+}
 
-	return os.WriteFile(fullPath, encrypted, 0o600)
+// ReplaceEncryptedFileWithMetadata atomically creates or replaces a versioned
+// encrypted non-secret index artifact after the caller has validated its scope.
+func (g *GitStore) ReplaceEncryptedFileWithMetadata(relPath string, plaintext []byte, password string, metadata EncryptedFileMetadata) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return err
+	}
+	metadata.RelativePath = canonicalEncryptedRepositoryPath(relPath)
+	encrypted, err := EncryptFile(plaintext, password, metadata)
+	if err != nil {
+		return err
+	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return err
+	}
+	return root.WriteFilePreservingMode(relPath+".enc", encrypted, 0o600)
+}
+
+// CheckNewEncryptedFile performs the rooted, non-mutating destination checks
+// used before publishing a new versioned encrypted artifact.
+func (g *GitStore) CheckNewEncryptedFile(relPath string) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return err
+	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return err
+	}
+	return root.CheckCreateNewFile(relPath + ".enc")
+}
+
+// CheckWriteEncryptedFile performs the non-mutating rooted checks used before
+// replacing or creating a legacy encrypted signing artifact.
+func (g *GitStore) CheckWriteEncryptedFile(relPath string) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return err
+	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return err
+	}
+	return root.CheckWriteFilePreservingMode(relPath + ".enc")
+}
+
+// CheckEncryptedFileParent validates an encrypted artifact's future parent
+// layout without assuming its final profile-specific name is known yet.
+func (g *GitStore) CheckEncryptedFileParent(relPath string) error {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return err
+	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return err
+	}
+	return root.CheckFileParent(relPath + ".enc")
+}
+
+// EncryptedFileSize returns the size of a regular no-follow encrypted artifact.
+func (g *GitStore) EncryptedFileSize(relPath string) (int64, error) {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return 0, err
+	}
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return 0, err
+	}
+	file, err := root.OpenFile(relPath + ".enc")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }
 
 // ReadEncryptedFile reads and decrypts a file from the repo.
 // Rejects symlinks to prevent reading outside the clone directory.
 func (g *GitStore) ReadEncryptedFile(relPath string, password string) ([]byte, error) {
-	fullPath := filepath.Join(g.LocalDir, relPath+".enc")
-	if err := EnsureInsideDir(g.LocalDir, fullPath); err != nil {
-		return nil, err
-	}
-	if err := rejectSymlink(fullPath); err != nil {
-		return nil, err
-	}
+	plaintext, _, err := g.ReadEncryptedFileWithMetadata(relPath, password)
+	return plaintext, err
+}
 
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		return nil, err
+// ReadEncryptedFileWithMetadata reads either a versioned envelope or a legacy
+// encrypted file.
+func (g *GitStore) ReadEncryptedFileWithMetadata(relPath string, password string) ([]byte, EncryptedFileMetadata, error) {
+	if err := validateEncryptedRepositoryPath(filepath.ToSlash(relPath)); err != nil {
+		return nil, EncryptedFileMetadata{}, err
 	}
-	return Decrypt(data, password)
+	root, err := g.filesystemRoot()
+	if err != nil {
+		return nil, EncryptedFileMetadata{}, err
+	}
+	data, err := root.ReadFileLimited(relPath+".enc", maxEncryptedFileSize)
+	if err != nil {
+		return nil, EncryptedFileMetadata{}, err
+	}
+	plaintext, metadata, err := DecryptFile(data, password)
+	if err != nil {
+		return nil, EncryptedFileMetadata{}, err
+	}
+	if metadata.Version != 0 && canonicalEncryptedRepositoryPath(metadata.RelativePath) != canonicalEncryptedRepositoryPath(relPath) {
+		return nil, EncryptedFileMetadata{}, fmt.Errorf("encrypted file metadata path %q does not match %q", metadata.RelativePath, relPath)
+	}
+	return plaintext, metadata, nil
+}
+
+func canonicalEncryptedRepositoryPath(path string) string {
+	return strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
+}
+
+// ValidateEncryptedRepositoryPaths rejects path sets that cannot coexist on a
+// Windows case-insensitive or normalization-insensitive macOS checkout. It
+// normalizes canonically equivalent paths before applying the Unicode
+// simple-fold classes behind strings.EqualFold.
+// Exact duplicate canonical paths retain their existing update semantics.
+func ValidateEncryptedRepositoryPaths(paths []string) error {
+	seen := make(map[string]string, len(paths))
+	for _, rawPath := range paths {
+		portablePath := filepath.ToSlash(rawPath)
+		if err := validateEncryptedRepositoryPath(portablePath); err != nil {
+			return err
+		}
+		key := windowsUnicodeCaseFoldKey(portablePath)
+		if existing, ok := seen[key]; ok && existing != portablePath {
+			return errors.New("encrypted repository paths collide under Windows Unicode case folding")
+		}
+		seen[key] = portablePath
+	}
+	return nil
+}
+
+// CheckEncryptedRepositoryPaths validates planned paths together with every
+// existing encrypted artifact before a push writes any repository files.
+func (g *GitStore) CheckEncryptedRepositoryPaths(planned []string) error {
+	existing, err := g.ListEncryptedFiles()
+	if err != nil {
+		return err
+	}
+	combined := make([]string, 0, len(existing)+len(planned))
+	combined = append(combined, existing...)
+	combined = append(combined, planned...)
+	return ValidateEncryptedRepositoryPaths(combined)
 }
 
 // ListEncryptedFiles returns relative paths (without .enc) of all encrypted files.
@@ -164,18 +351,13 @@ func (g *GitStore) ListEncryptedFiles() ([]string, error) {
 		if err != nil {
 			return err
 		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("encrypted signing repository contains symlink %q", path)
+		}
 		if info.IsDir() {
 			if info.Name() == ".git" {
 				return filepath.SkipDir
 			}
-			// Skip symlinked directories to prevent escape.
-			if info.Mode()&os.ModeSymlink != 0 {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Skip symlinked files.
-		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 		if strings.HasSuffix(info.Name(), ".enc") {
@@ -183,11 +365,93 @@ func (g *GitStore) ListEncryptedFiles() ([]string, error) {
 			if err != nil {
 				return err
 			}
+			rel = filepath.ToSlash(rel)
+			if err := validateEncryptedRepositoryPath(rel); err != nil {
+				return err
+			}
 			files = append(files, strings.TrimSuffix(rel, ".enc"))
 		}
 		return nil
 	})
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateEncryptedRepositoryPaths(files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func validateEncryptedRepositoryPath(path string) error {
+	if !utf8.ValidString(path) {
+		return errors.New("encrypted repository path is not valid UTF-8")
+	}
+	if strings.ContainsRune(path, '\\') {
+		return fmt.Errorf("encrypted repository path %q contains a non-portable backslash", path)
+	}
+	for _, r := range path {
+		if unicode.IsControl(r) || isBidiControl(r) {
+			return fmt.Errorf("encrypted repository path contains control characters")
+		}
+	}
+	for _, component := range strings.Split(path, "/") {
+		if err := validateWindowsPortablePathComponent(component); err != nil {
+			return fmt.Errorf("encrypted repository path %q has a Windows-incompatible component: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func windowsUnicodeCaseFoldKey(path string) string {
+	path = norm.NFC.String(path)
+	var key strings.Builder
+	key.Grow(len(path))
+	for _, r := range path {
+		representative := r
+		for folded := unicode.SimpleFold(r); folded != r; folded = unicode.SimpleFold(folded) {
+			if folded < representative {
+				representative = folded
+			}
+		}
+		key.WriteRune(representative)
+	}
+	return key.String()
+}
+
+func validateWindowsPortablePathComponent(component string) error {
+	if component == "" {
+		return fmt.Errorf("path component is empty")
+	}
+	// Rooted filesystem validation reports traversal components with its
+	// established ErrEscapesRoot contract.
+	if component == "." || component == ".." {
+		return nil
+	}
+	if strings.ContainsAny(component, `<>:"|?*`) {
+		return fmt.Errorf("path component %q contains a reserved character", component)
+	}
+	if strings.HasSuffix(component, ".") || strings.HasSuffix(component, " ") {
+		return fmt.Errorf("path component %q ends with a dot or space", component)
+	}
+
+	stem := component
+	if dot := strings.IndexByte(stem, '.'); dot >= 0 {
+		stem = stem[:dot]
+	}
+	upperStem := strings.ToUpper(stem)
+	switch upperStem {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
+		return fmt.Errorf("path component %q uses a reserved device name", component)
+	}
+	return nil
+}
+
+func isBidiControl(r rune) bool {
+	return r == '\u061c' || r == '\u200e' || r == '\u200f' ||
+		(r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069')
 }
 
 // CommitAndPush stages all changes, commits, and pushes.
@@ -222,10 +486,12 @@ func (g *GitStore) CommitAndPush(ctx context.Context, message string) error {
 
 // Cleanup removes the local clone directory.
 func (g *GitStore) Cleanup() error {
-	if g.LocalDir == "" {
-		return nil
+	closeErr := g.closeFilesystemRoot()
+	var removeErr error
+	if g.LocalDir != "" {
+		removeErr = os.RemoveAll(g.LocalDir)
 	}
-	return os.RemoveAll(g.LocalDir)
+	return errors.Join(closeErr, removeErr)
 }
 
 // EnsureInsideDir checks that target stays inside baseDir and does not traverse
@@ -275,18 +541,6 @@ func EnsureInsideDir(baseDir, target string) error {
 	return nil
 }
 
-// rejectSymlink checks that path is not a symlink.
-func rejectSymlink(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to read symlink %q (potential escape)", path)
-	}
-	return nil
-}
-
 // RejectSymlinkIfExists rejects writes through an existing symlink path.
 func RejectSymlinkIfExists(path string) error {
 	info, err := os.Lstat(path)
@@ -314,6 +568,7 @@ func (e gitConfigProbeError) Unwrap() error { return e.err }
 
 func newGitCommand(ctx context.Context, dir string, args ...string) (*exec.Cmd, error) {
 	environment := gitEnvironmentWithoutRepositorySelectors(os.Environ(), runtime.GOOS)
+	environment = gitEnvironmentWithoutSigningSyncPasswords(environment, runtime.GOOS)
 	coreSSHCommandConfigured := false
 	if gitCommandMayUseSSH(args) && !hasGitSSHEnvironmentOverride(environment, runtime.GOOS) {
 		var err error
@@ -328,6 +583,19 @@ func newGitCommand(ctx context.Context, dir string, args ...string) (*exec.Cmd, 
 	cmd.Dir = dir
 	cmd.Env = gitCommandEnvironmentWithConfig(environment, runtime.GOOS, coreSSHCommandConfigured)
 	return cmd, nil
+}
+
+var gitSigningSyncPasswordEnvironmentKeys = []string{
+	"ASC_SIGNING_SYNC_PASSWORD",
+	"ASC_MATCH_PASSWORD",
+}
+
+func gitEnvironmentWithoutSigningSyncPasswords(environment []string, goos string) []string {
+	caseInsensitive := goos == "windows"
+	for _, key := range gitSigningSyncPasswordEnvironmentKeys {
+		environment = removeCommandEnvironmentValue(environment, key, caseInsensitive)
+	}
+	return environment
 }
 
 var gitRepositorySelectorEnvironmentKeys = []string{

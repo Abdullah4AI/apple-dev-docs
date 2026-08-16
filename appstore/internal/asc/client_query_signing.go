@@ -197,7 +197,7 @@ func buildPassTypeIDQuery(query *passTypeIDQuery) string {
 }
 
 func buildBundleIDCapabilitiesQuery(_ *bundleIDCapabilitiesQuery) string {
-	// Bundle ID capabilities endpoint does not support limit/pagination params.
+	// The live relationship endpoint rejects limit despite the OpenAPI entry.
 	return ""
 }
 

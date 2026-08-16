@@ -1354,6 +1354,67 @@ func TestStructuredVersion_CommitFailureRollsBackEarlierFiles(t *testing.T) {
 	if got := mustReadVersionTestFile(t, secondPath); got != "old-b" {
 		t.Fatalf("second file changed: %q", got)
 	}
+	if opened, err := fileRoot.OpenRoot(); err == nil {
+		_ = opened.Close()
+		t.Fatal("commitVersionWrites() retained its pinned root after rollback")
+	}
+}
+
+func TestStructuredVersion_CommitClosesPreparedRoots(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "version.xcconfig")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitVersionWrites([]preparedVersionWrite{{
+		path: path, root: fileRoot, name: path, original: []byte("old"), updated: []byte("new"), mode: 0o644,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := fileRoot.OpenRoot(); err == nil {
+		_ = opened.Close()
+		t.Fatal("commitVersionWrites() retained its pinned root after commit")
+	}
+}
+
+func TestStructuredVersion_ContainedTargetsReuseProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "a.xcconfig")
+	secondPath := filepath.Join(root, "b.xcconfig")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.WriteFile(path, []byte("VERSION = 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projectRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRoot = projectRoot.AllowingInternalSymlinks()
+	project := &structuredVersionProject{rootDir: root}
+	first, err := project.versionFileTarget(projectRoot, firstPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := project.versionFileTarget(projectRoot, secondPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ownsRoot || second.ownsRoot {
+		t.Fatal("contained version targets unexpectedly allocated separate roots")
+	}
+	if err := first.root.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := second.root.OpenRoot(); err == nil {
+		_ = opened.Close()
+		t.Fatal("contained version targets did not share the project root")
+	}
 }
 
 func mustGetStructuredVersion(t *testing.T, project, target, configuration string) *VersionInfo {

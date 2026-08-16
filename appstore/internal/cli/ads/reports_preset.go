@@ -64,17 +64,20 @@ type adsReportPresetPagination struct {
 
 type adsReportLevelSpec struct {
 	commandPath []string
+	reportPath  []string
 }
 
 var adsReportLevels = map[string]adsReportLevelSpec{
-	"campaigns":             {commandPath: []string{"reports", "campaigns"}},
-	"ad-groups":             {commandPath: []string{"reports", "ad-groups"}},
-	"keywords":              {commandPath: []string{"reports", "keywords"}},
-	"search-terms":          {commandPath: []string{"reports", "search-terms"}},
-	"ads":                   {commandPath: []string{"reports", "ads"}},
-	"ad-group-keywords":     {commandPath: []string{"reports", "ad-group-keywords"}},
-	"ad-group-search-terms": {commandPath: []string{"reports", "ad-group-search-terms"}},
+	"campaigns":             {commandPath: []string{"reports", "campaigns"}, reportPath: []string{"reports", "apps", "campaigns"}},
+	"ad-groups":             {commandPath: []string{"reports", "ad-groups"}, reportPath: []string{"reports", "apps", "ad-groups"}},
+	"keywords":              {commandPath: []string{"reports", "keywords"}, reportPath: []string{"reports", "apps", "keywords"}},
+	"search-terms":          {commandPath: []string{"reports", "search-terms"}, reportPath: []string{"reports", "apps", "search-terms"}},
+	"ads":                   {commandPath: []string{"reports", "ads"}, reportPath: []string{"reports", "apps", "ads"}},
+	"ad-group-keywords":     {commandPath: []string{"reports", "ad-group-keywords"}, reportPath: []string{"reports", "apps", "keywords"}},
+	"ad-group-search-terms": {commandPath: []string{"reports", "ad-group-search-terms"}, reportPath: []string{"reports", "apps", "search-terms"}},
 }
+
+const reportsPresetMigrationHelp = "Use the matching `asc ads reports apps` command for the selected `--level`; ad-group keyword and search-term levels map to the consolidated `keywords` and `search-terms` reports."
 
 // ReportsPresetCommand returns an operator-friendly Apple Ads reporting helper.
 func ReportsPresetCommand() *ffcli.Command {
@@ -84,7 +87,7 @@ func ReportsPresetCommand() *ffcli.Command {
 			AdsProfile: fs.String("ads-profile", "", "Use named Apple Ads authentication profile"),
 			Org:        fs.String("org", "", "Apple Ads organization ID (or ASC_ADS_ORG_ID env)"),
 		},
-		output:          shared.BindOutputFlags(fs),
+		output:          bindAdsRawOutputFlags(fs),
 		level:           fs.String("level", "campaigns", "Report level: campaigns, ad-groups, keywords, search-terms, ads, ad-group-keywords, ad-group-search-terms"),
 		campaign:        fs.String("campaign", "", "Campaign ID for campaign-scoped report levels"),
 		adGroup:         fs.String("ad-group", "", "Ad group ID for ad-group-scoped report levels"),
@@ -100,9 +103,9 @@ func ReportsPresetCommand() *ffcli.Command {
 		returnRowTotals: fs.Bool("return-row-totals", false, "Request row totals in the report response"),
 	}
 
-	return &ffcli.Command{
+	command := &ffcli.Command{
 		Name:       "preset",
-		ShortUsage: "asc ads reports preset --level campaigns --from YYYY-MM-DD --to YYYY-MM-DD [flags]",
+		ShortUsage: "asc ads v5 reports preset --level campaigns --from YYYY-MM-DD --to YYYY-MM-DD [flags]",
 		ShortHelp:  "Build and run Apple Ads report presets without JSON payloads.",
 		LongHelp: `Build and run Apple Ads report presets without JSON payloads.
 
@@ -120,9 +123,9 @@ requires selector.orderBy. HOURLY granularity is available for
 	request row totals.
 
 Examples:
-  asc ads reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions --org "123456"
-  asc ads reports preset --level keywords --campaign 12345 --last-days 7 --fields keyword,impressions,taps --org "123456"
-  asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions --org "123456"`,
+  asc ads v5 reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions --org "123456"
+  asc ads v5 reports preset --level keywords --campaign 12345 --last-days 7 --fields keyword,impressions,taps --org "123456"
+  asc ads v5 reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions --org "123456"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -139,9 +142,24 @@ Examples:
 			return executeReportsPreset(ctx, flags)
 		},
 	}
+	return markAdsLegacyCommandDeprecatedWithGuidance(command, []string{"v5", "reports", "preset"}, reportsPresetMigrationHelp, func() string {
+		return reportsPresetMigrationGuidance(strings.TrimSpace(*flags.level))
+	})
+}
+
+func reportsPresetMigrationGuidance(level string) string {
+	levelSpec, ok := adsReportLevels[level]
+	if !ok {
+		return reportsPresetMigrationHelp
+	}
+	return "Use `asc ads " + strings.Join(levelSpec.reportPath, " ") + "`."
 }
 
 func executeReportsPreset(ctx context.Context, flags adsReportPresetFlags) error {
+	outputFormat, err := validateAdsRawOutput(flags.output)
+	if err != nil {
+		return shared.UsageError(err.Error())
+	}
 	level := strings.TrimSpace(*flags.level)
 	levelSpec, ok := adsReportLevels[level]
 	if !ok {
@@ -149,7 +167,7 @@ func executeReportsPreset(ctx context.Context, flags adsReportPresetFlags) error
 	}
 	spec, ok := appleads.EndpointByCommandPath(levelSpec.commandPath...)
 	if !ok {
-		return fmt.Errorf("ads reports preset: endpoint for level %q is not registered", level)
+		return fmt.Errorf("ads v5 reports preset: endpoint for level %q is not registered", level)
 	}
 	pathParams, err := reportPresetPathParams(spec, flags)
 	if err != nil {
@@ -161,12 +179,12 @@ func executeReportsPreset(ctx context.Context, flags adsReportPresetFlags) error
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("ads reports preset: marshal request: %w", err)
+		return fmt.Errorf("ads v5 reports preset: marshal request: %w", err)
 	}
 
 	client, err := resolveClient(ctx, flags.common, spec.RequiresOrg)
 	if err != nil {
-		return fmt.Errorf("ads: %w", err)
+		return fmt.Errorf("ads v5 reports preset: %w", err)
 	}
 
 	requestCtx, cancel := requestContext(ctx)
@@ -174,9 +192,9 @@ func executeReportsPreset(ctx context.Context, flags adsReportPresetFlags) error
 
 	result, err := client.Do(requestCtx, spec, pathParams, url.Values{}, body)
 	if err != nil {
-		return fmt.Errorf("ads reports preset: %w", err)
+		return fmt.Errorf("ads v5 reports preset: %w", err)
 	}
-	return shared.PrintOutput(result, *flags.output.Output, *flags.output.Pretty)
+	return shared.PrintOutput(result, outputFormat, *flags.output.Pretty)
 }
 
 func reportPresetPathParams(spec appleads.EndpointSpec, flags adsReportPresetFlags) (map[string]string, error) {

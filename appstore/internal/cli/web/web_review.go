@@ -511,7 +511,7 @@ func newDownloadRoot(outDir string) (rootfs.Root, string, error) {
 	}
 	root, err := rootfs.New(absolute)
 	if err != nil {
-		return rootfs.Root{}, "", fmt.Errorf("failed to resolve output directory %q: %w", outDir, err)
+		return rootfs.Root{}, "", fmt.Errorf("failed to create output directory %q: %w", outDir, err)
 	}
 	return root, ".", nil
 }
@@ -673,6 +673,7 @@ func downloadAttachmentsForShow(
 	if err != nil {
 		return nil, nil, err
 	}
+	defer root.Close()
 	if err := root.MkdirAll(prefix, 0o755); err != nil {
 		return nil, nil, fmt.Errorf("failed to create output directory %q: %w", outDir, err)
 	}

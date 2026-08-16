@@ -60,6 +60,11 @@ func renameNoReplaceWindows(parent windows.Handle, oldName, newName string) erro
 	}
 	var source windows.Handle
 	var status windows.IO_STATUS_BLOCK
+	createOptions := uint32(windows.FILE_OPEN_REPARSE_POINT | windows.FILE_OPEN_FOR_BACKUP_INTENT | windows.FILE_SYNCHRONOUS_IO_NONALERT)
+	// FILE_NON_DIRECTORY_FILE made this primitive unusable for atomic bundle
+	// directory publication. Omitting both type constraints lets the no-follow
+	// handle open either a regular file or a directory while preserving the
+	// existing rename contract.
 	err = windows.NtCreateFile(
 		&source,
 		windows.DELETE|windows.SYNCHRONIZE,
@@ -69,7 +74,7 @@ func renameNoReplaceWindows(parent windows.Handle, oldName, newName string) erro
 		0,
 		windows.FILE_SHARE_DELETE|windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
 		windows.FILE_OPEN,
-		windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_NON_DIRECTORY_FILE,
+		createOptions,
 		0,
 		0,
 	)

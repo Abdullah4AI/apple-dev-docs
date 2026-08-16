@@ -19,27 +19,27 @@ func TestAdsUsageErrorsExitTwoWithBuiltBinary(t *testing.T) {
 	}{
 		{
 			name:       "invalid endpoint output",
-			args:       []string{"ads", "campaigns", "--output", "xml"},
+			args:       []string{"ads", "v5", "campaigns", "--output", "xml"},
 			wantStderr: "unsupported format: xml",
 		},
 		{
 			name:       "unexpected endpoint arg",
-			args:       []string{"ads", "campaigns", "--output", "json", "unexpected"},
-			wantStderr: "unexpected argument(s): unexpected",
+			args:       []string{"ads", "v5", "campaigns", "--output", "json", "unexpected"},
+			wantStderr: "unknown command `asc ads v5 campaigns unexpected`",
 		},
 		{
 			name:       "missing destructive confirm",
-			args:       []string{"ads", "campaigns", "delete", "--campaign", "123"},
+			args:       []string{"ads", "v5", "campaigns", "delete", "--campaign", "123"},
 			wantStderr: "--confirm is required",
 		},
 		{
 			name:       "missing required query flag",
-			args:       []string{"ads", "apps", "search", "--org", "123456", "--output", "json"},
+			args:       []string{"ads", "v5", "apps", "search", "--org", "123456", "--output", "json"},
 			wantStderr: "--query is required",
 		},
 		{
 			name:       "invalid raw api method",
-			args:       []string{"ads", "api", "request", "--method", "PATCH", "--path", "v5/campaigns"},
+			args:       []string{"ads", "v5", "api", "request", "--method", "PATCH", "--path", "v5/campaigns"},
 			wantStderr: "--method must be one of: GET, POST, PUT, DELETE",
 		},
 	}

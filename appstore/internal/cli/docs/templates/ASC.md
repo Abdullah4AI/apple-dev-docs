@@ -138,7 +138,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `reviews` - List and manage App Store customer reviews.
 - `review` - Manage App Store review details, attachments, and submissions.
 - `analytics` - Request and download analytics and sales reports.
-- `ads` - Manage Apple Ads Campaign Management API resources.
+- `ads` - Manage Apple Ads API resources.
 - `performance` - Access performance metrics and diagnostic logs.
 - `finance` - Download payments and financial reports.
 - `apps` - List and manage apps in App Store Connect. App creation moved out of `asc apps`; use `asc web apps create` for the web-session path.
@@ -165,6 +165,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `release` - Run high-level App Store release workflows.
 - `workflow` - Run multi-step automation workflows.
 - `xcode` - Produce deterministic `.xcarchive` and `.ipa` artifacts with local Xcode build/export helpers (macOS only).
+- `distribute` - Plan, execute, inspect, and publish provider-neutral iOS release-testing bundles (experimental).
 - `versions` - Manage App Store versions.
 - `product-pages` - Manage custom product pages and product page experiments.
 - `routing-coverage` - Manage routing app coverage files.

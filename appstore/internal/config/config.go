@@ -157,6 +157,7 @@ type AdsCredential struct {
 	KeyID          string `json:"key_id"`
 	PrivateKeyPath string `json:"private_key_path"`
 	OrgID          string `json:"org_id,omitempty"`
+	AdAccountID    string `json:"ad_account_id,omitempty"`
 }
 
 // KeychainMetadata stores non-secret metadata for keychain-backed credentials.
@@ -170,12 +171,13 @@ type KeychainMetadata struct {
 
 // AdsKeychainMetadata stores non-secret metadata for keychain-backed Apple Ads credentials.
 type AdsKeychainMetadata struct {
-	Name       string `json:"name"`
-	ClientID   string `json:"client_id"`
-	TeamID     string `json:"team_id"`
-	KeyID      string `json:"key_id"`
-	OrgID      string `json:"org_id,omitempty"`
-	ModifiedAt string `json:"modified_at,omitempty"`
+	Name        string `json:"name"`
+	ClientID    string `json:"client_id"`
+	TeamID      string `json:"team_id"`
+	KeyID       string `json:"key_id"`
+	OrgID       string `json:"org_id,omitempty"`
+	AdAccountID string `json:"ad_account_id,omitempty"`
+	ModifiedAt  string `json:"modified_at,omitempty"`
 }
 
 // AdsConfig stores Apple Ads-specific auth configuration.
@@ -184,6 +186,7 @@ type AdsConfig struct {
 	Keys             []AdsCredential       `json:"keys,omitempty"`
 	KeychainMetadata []AdsKeychainMetadata `json:"keychain_metadata,omitempty"`
 	OrgID            string                `json:"org_id,omitempty"`
+	AdAccountID      string                `json:"ad_account_id,omitempty"`
 }
 
 // StoreKitCredential stores a named In-App Purchase API credential.

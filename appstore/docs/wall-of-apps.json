@@ -239,6 +239,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e0/22/11/e02211b9-8e91-5250-17ed-a6105cd42922/Chroma-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "ColorCub: AI Coloring Pages",
+    "link": "https://apps.apple.com/us/app/colorcub-ai-coloring-pages/id6745206164?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4a/7f/ae/4a7faef1-a45e-75d7-d90a-066eda390ea4/AppIcon-0-0-1x_U007emarketing-0-8-0-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Concert Memories 2: Countdown",
     "link": "https://apps.apple.com/us/app/concert-memories-2-countdown/id6744301154?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/6c/ce/a1/6ccea161-6da4-52c7-1260-f44955b0bc70/ConcertMemories2-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg"
@@ -453,6 +458,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/56/72/22/567222b9-40dd-cca2-1a58-01a46cfaa2d9/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Fax It: Send & Receive Fax",
+    "link": "https://apps.apple.com/us/app/fax-it-send-receive-fax/id1458261691?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0a/06/0b/0a060b1f-ecdb-8d01-84f0-5928690fd028/Icon_4-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "FeedFlow - RSS Feed Reader",
     "link": "https://apps.apple.com/us/app/feedflow-rss-feed-reader/id6447210518?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/d3/68/28/d3682840-58a5-7c5d-31e0-70cc0fa62fad/AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
@@ -637,9 +647,19 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/38/05/66/38056606-4649-101f-cdc3-a4ed626181dc/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "hora Calendar",
+    "link": "https://apps.apple.com/us/app/hora-calendar/id6761409895?mt=12&uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e5/c2/e3/e5c2e3ee-f9f0-c491-4f22-5f6282853823/Hora-0-0-85-220-0-6-0-2x-sRGB.png/512x512bb.png"
+  },
+  {
     "app": "HoverCalc",
     "link": "https://apps.apple.com/us/app/hovercalc/id6759318126?mt=12&uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4d/d5/0f/4dd50f26-4b76-e382-9774-5894156f11df/AppIcon-0-0-85-220-0-5-0-2x.png/512x512bb.png"
+  },
+  {
+    "app": "HowHigh · Barometer & Altimeter",
+    "link": "https://apps.apple.com/us/app/barometer-altimeter-howhigh/id921339656?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/79/66/ab/7966ab76-f237-ff79-e866-a51e96a530f3/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "HRM Battery",
@@ -1002,6 +1022,16 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/29/00/51/2900519e-a076-de61-c91c-7e0313faf41e/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-85-220-0.png/512x512bb.jpg"
   },
   {
+    "app": "oh? daily home screen widget",
+    "link": "https://apps.apple.com/us/app/oh-daily-home-screen-widget/id6789181341?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/01/c5/6b/01c56bf4-5653-758b-8eb0-e4253687f800/AppIcon-0-0-1x_U007epad-0-1-P3-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "P2P View",
+    "link": "https://apps.apple.com/us/app/p2p-view/id1643919225?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f3/cc/c0/f3ccc01d-a2ab-5a17-13d7-5095b55763cc/AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Pal Cal - AI Calorie Counting",
     "link": "https://apps.apple.com/us/app/pal-cal-ai-calorie-counting/id6758598728?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/02/b1/bf/02b1bf63-175e-cf12-6954-9bd80ecbe56c/ProteinIcon-0-0-1x_U007epad-0-1-P3-85-220.png/512x512bb.jpg"
@@ -1281,6 +1311,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/d4/6b/88/d46b88b6-e459-a316-6e0d-321ccb5c501a/Reps_AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "ReShoot · Video Reframe & Crop",
+    "link": "https://apps.apple.com/us/app/reshoot-video-reframe-crop/id6753581365?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/52/db/cc/52dbcc8f-c4aa-2cf0-36f9-bdeacf943fd7/AppIcon-0-1x_U007epad-0-11-0-85-220-0.png/512x512bb.jpg"
+  },
+  {
     "app": "Ripple News - AI Personal News",
     "link": "https://apps.apple.com/us/app/ripple-news-ai-personal-news/id6758356024?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/19/33/17/193317c5-5112-6151-9fd9-5b98ac41b52d/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -1386,6 +1421,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/98/db/d6/98dbd62d-1923-b384-c9fe-7233fcf3e8e7/AppIcon-0-0-1x_U007ephone-0-1-sRGB-85-220.png/512x512bb.jpg"
   },
   {
+    "app": "Sleep Analysis - Lunomia",
+    "link": "https://apps.apple.com/us/app/sleep-analysis-lunomia/id6741118991?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/64/36/fa/6436fa8f-de92-01a9-62a3-52a8c8bd8580/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-sRGB-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Slop Or Not - AI Fake Detector",
     "link": "https://apps.apple.com/us/app/slop-or-not-ai-fake-detector/id6744578596?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/fb/f9/05/fbf9052f-756b-1660-e575-62e7a85d73b7/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/512x512bb.jpg"
@@ -1489,6 +1529,11 @@
     "app": "Sticky Widgets",
     "link": "https://apps.apple.com/us/app/sticky-widgets/id1533254320",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/1e/b8/78/1eb878a7-0955-eb1a-f55a-09b630362b71/sw-0-1x_U007epad-0-0-0-1-0-0-sRGB-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "Stitch It · Long Screenshots",
+    "link": "https://apps.apple.com/us/app/stitch-it-long-screenshots/id554594252?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/7a/3e/737a3e1e-ccbe-8c01-1249-ac12fcec4a17/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Storyie - AI Journal & Diary",
@@ -1629,6 +1674,11 @@
     "app": "Torqs",
     "link": "https://apps.apple.com/us/app/torqs/id6754500631",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/1d/b0/ea/1db0eaa8-4504-cbe3-b472-5eab73d634c9/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg"
+  },
+  {
+    "app": "Trailbot: MTB Trail Conditions",
+    "link": "https://apps.apple.com/us/app/trailbot-mtb-trail-conditions/id1559573510?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/12/a4/56/12a456ea-73f0-3972-9677-904b25e8c2e3/TrailbotGlass-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Trip Atar",

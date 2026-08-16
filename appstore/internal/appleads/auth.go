@@ -34,6 +34,7 @@ type Credentials struct {
 	PrivateKeyPEM  string
 	AccessToken    string
 	OrgID          string
+	AdAccountID    string
 	Profile        string
 }
 

@@ -36,6 +36,7 @@ type credentialPayload struct {
 	PrivateKeyPath string `json:"private_key_path"`
 	PrivateKeyPEM  string `json:"private_key_pem,omitempty"`
 	OrgID          string `json:"org_id,omitempty"`
+	AdAccountID    string `json:"ad_account_id,omitempty"`
 }
 
 // ShouldBypassKeychain reports whether Apple Ads keychain usage is disabled.
@@ -58,7 +59,7 @@ func StoreCredentials(name string, credentials Credentials) error {
 	if !ShouldBypassKeychain() {
 		if err := storeInKeychain(name, payload); err == nil {
 			_ = removeFromConfigIfPresent(name)
-			return saveDefaultName(name, payload.OrgID)
+			return saveDefaultName(name, payload.OrgID, payload.AdAccountID)
 		} else if !isKeyringUnavailable(err) {
 			return err
 		}
@@ -85,12 +86,19 @@ func StoreCredentialsConfigAt(name string, credentials Credentials, path string)
 }
 
 func payloadFromCredentials(credentials Credentials, includePEM bool) (credentialPayload, error) {
+	if err := ValidateOrgID(credentials.OrgID); err != nil {
+		return credentialPayload{}, err
+	}
+	if err := ValidateAdAccountID(credentials.AdAccountID); err != nil {
+		return credentialPayload{}, err
+	}
 	payload := credentialPayload{
 		ClientID:       strings.TrimSpace(credentials.ClientID),
 		TeamID:         strings.TrimSpace(credentials.TeamID),
 		KeyID:          strings.TrimSpace(credentials.KeyID),
 		PrivateKeyPath: strings.TrimSpace(credentials.PrivateKeyPath),
 		OrgID:          strings.TrimSpace(credentials.OrgID),
+		AdAccountID:    strings.TrimSpace(credentials.AdAccountID),
 	}
 	if includePEM && strings.TrimSpace(credentials.PrivateKeyPEM) != "" {
 		payload.PrivateKeyPEM = strings.TrimSpace(credentials.PrivateKeyPEM)
@@ -221,7 +229,7 @@ func SetDefaultCredentials(name string) error {
 	}
 	for _, cred := range credentials {
 		if cred.Name == name {
-			return saveDefaultName(name, cred.OrgID)
+			return saveDefaultName(name, cred.OrgID, cred.AdAccountID)
 		}
 	}
 	return fmt.Errorf("credentials not found for profile %q", name)
@@ -338,11 +346,12 @@ func keyringKey(name string) string {
 
 func metadataDescription(payload credentialPayload) string {
 	data, err := json.Marshal(config.AdsKeychainMetadata{
-		ClientID:   strings.TrimSpace(payload.ClientID),
-		TeamID:     strings.TrimSpace(payload.TeamID),
-		KeyID:      strings.TrimSpace(payload.KeyID),
-		OrgID:      strings.TrimSpace(payload.OrgID),
-		ModifiedAt: time.Now().UTC().Format(time.RFC3339),
+		ClientID:    strings.TrimSpace(payload.ClientID),
+		TeamID:      strings.TrimSpace(payload.TeamID),
+		KeyID:       strings.TrimSpace(payload.KeyID),
+		OrgID:       strings.TrimSpace(payload.OrgID),
+		AdAccountID: strings.TrimSpace(payload.AdAccountID),
+		ModifiedAt:  time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		return ""
@@ -370,6 +379,7 @@ func storeInConfigAt(name string, payload credentialPayload, path string) error 
 		KeyID:          payload.KeyID,
 		PrivateKeyPath: payload.PrivateKeyPath,
 		OrgID:          payload.OrgID,
+		AdAccountID:    payload.AdAccountID,
 	}
 	replaced := false
 	for i := range cfg.Ads.Keys {
@@ -383,9 +393,8 @@ func storeInConfigAt(name string, payload credentialPayload, path string) error 
 		cfg.Ads.Keys = append(cfg.Ads.Keys, replacement)
 	}
 	cfg.Ads.DefaultKeyName = name
-	if payload.OrgID != "" {
-		cfg.Ads.OrgID = payload.OrgID
-	}
+	cfg.Ads.OrgID = payload.OrgID
+	cfg.Ads.AdAccountID = payload.AdAccountID
 	return config.SaveAt(path, cfg)
 }
 
@@ -413,6 +422,8 @@ func removeFromConfigIfPresent(name string) error {
 	cfg.Ads.Keys = filtered
 	if cfg.Ads.DefaultKeyName == name {
 		cfg.Ads.DefaultKeyName = ""
+		cfg.Ads.OrgID = ""
+		cfg.Ads.AdAccountID = ""
 	}
 	return config.SaveAt(path, cfg)
 }
@@ -433,10 +444,11 @@ func clearConfigCredentials() error {
 	cfg.Ads.Keys = nil
 	cfg.Ads.KeychainMetadata = nil
 	cfg.Ads.OrgID = ""
+	cfg.Ads.AdAccountID = ""
 	return config.SaveAt(path, cfg)
 }
 
-func saveDefaultName(name, orgID string) error {
+func saveDefaultName(name, orgID, adAccountID string) error {
 	path, err := config.Path()
 	if err != nil {
 		return err
@@ -449,9 +461,8 @@ func saveDefaultName(name, orgID string) error {
 		cfg = &config.Config{}
 	}
 	cfg.Ads.DefaultKeyName = strings.TrimSpace(name)
-	if strings.TrimSpace(orgID) != "" {
-		cfg.Ads.OrgID = strings.TrimSpace(orgID)
-	}
+	cfg.Ads.OrgID = strings.TrimSpace(orgID)
+	cfg.Ads.AdAccountID = strings.TrimSpace(adAccountID)
 	return config.SaveAt(path, cfg)
 }
 
@@ -469,6 +480,8 @@ func clearDefaultNameIf(name string) error {
 	}
 	if cfg.Ads.DefaultKeyName == name {
 		cfg.Ads.DefaultKeyName = ""
+		cfg.Ads.OrgID = ""
+		cfg.Ads.AdAccountID = ""
 		return config.SaveAt(path, cfg)
 	}
 	return nil
@@ -526,7 +539,10 @@ func storedCredentialsFromConfig(cfg *config.Config, path string) []StoredCreden
 			TeamID:         cred.TeamID,
 			KeyID:          cred.KeyID,
 			PrivateKeyPath: cred.PrivateKeyPath,
-			OrgID:          firstNonEmpty(cred.OrgID, cfg.Ads.OrgID),
+			// A named profile owns its context. Root Ads context is only a
+			// standalone fallback for profile-less authentication.
+			OrgID:       cred.OrgID,
+			AdAccountID: cred.AdAccountID,
 		}
 		credentials = append(credentials, storedFromPayload(cred.Name, payload, "config", path))
 	}
@@ -602,6 +618,7 @@ func storedFromPayload(name string, payload credentialPayload, source, sourcePat
 		PrivateKeyPath: payload.PrivateKeyPath,
 		PrivateKeyPEM:  payload.PrivateKeyPEM,
 		OrgID:          payload.OrgID,
+		AdAccountID:    payload.AdAccountID,
 		Profile:        name,
 	}
 	return StoredCredential{
@@ -651,13 +668,4 @@ func mergeCredentials(primary, secondary []StoredCredential) []StoredCredential 
 		}
 	}
 	return merged
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

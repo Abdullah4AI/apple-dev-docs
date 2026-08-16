@@ -37,6 +37,19 @@ type GlobalRatings struct {
 	ByCountry     []AppRatings  `json:"byCountry"`
 }
 
+type allRatingsLookupError struct {
+	appID string
+	cause error
+}
+
+func (e *allRatingsLookupError) Error() string {
+	return fmt.Sprintf("app not found in any country: %s", e.appID)
+}
+
+func (e *allRatingsLookupError) Unwrap() error {
+	return e.cause
+}
+
 // GetRatings fetches rating statistics for an app in a specific country.
 func (c *Client) GetRatings(ctx context.Context, appID, country string) (*AppRatings, error) {
 	normalizedCountry := strings.ToLower(strings.TrimSpace(country))
@@ -92,7 +105,7 @@ func (c *Client) fetchHistogram(ctx context.Context, appID, country string, rati
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("histogram request returned status %d", resp.StatusCode)
+		return &httpStatusError{operation: "histogram", statusCode: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -139,6 +152,8 @@ func (c *Client) GetAllRatings(
 		wg                 sync.WaitGroup
 		deadlineOnce       sync.Once
 		countryDeadlineErr error
+		httpFailureCount   int
+		httpFailures       = make(map[int]error)
 		results            []*AppRatings
 		appName            string
 		appIDInt           int64
@@ -177,6 +192,16 @@ func (c *Client) GetAllRatings(
 				return
 			}
 			if err != nil {
+				var statusError interface{ HTTPStatusCode() int }
+				if errors.As(err, &statusError) {
+					mu.Lock()
+					httpFailureCount++
+					status := statusError.HTTPStatusCode()
+					if _, exists := httpFailures[status]; !exists {
+						httpFailures[status] = err
+					}
+					mu.Unlock()
+				}
 				return
 			}
 
@@ -210,6 +235,9 @@ func (c *Client) GetAllRatings(
 		return nil, countryDeadlineErr
 	}
 	if !found {
+		if httpFailureCount == len(countries) {
+			return nil, &allRatingsLookupError{appID: appID, cause: preferredRatingsHTTPError(httpFailures)}
+		}
 		return nil, fmt.Errorf("app not found in any country: %s", appID)
 	}
 	if len(results) == 0 {
@@ -247,4 +275,20 @@ func (c *Client) GetAllRatings(
 		Histogram:     histogram,
 		ByCountry:     byCountry,
 	}, nil
+}
+
+func preferredRatingsHTTPError(failures map[int]error) error {
+	selectedStatus := 0
+	var selected error
+	for status, err := range failures {
+		// Server failures take precedence over client failures because they best
+		// represent a full-storefront outage. Within a class, use the lowest
+		// status so the result is stable regardless of goroutine completion order.
+		if selected == nil || (status >= 500 && selectedStatus < 500) ||
+			(status/100 == selectedStatus/100 && status < selectedStatus) {
+			selectedStatus = status
+			selected = err
+		}
+	}
+	return selected
 }

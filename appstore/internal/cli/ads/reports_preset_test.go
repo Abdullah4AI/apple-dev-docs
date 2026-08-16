@@ -1,10 +1,41 @@
 package ads
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestReportsPresetDeprecationWarningMatchesSelectedLevel(t *testing.T) {
+	tests := map[string]string{
+		"campaigns":             "reports apps campaigns",
+		"ad-groups":             "reports apps ad-groups",
+		"keywords":              "reports apps keywords",
+		"search-terms":          "reports apps search-terms",
+		"ads":                   "reports apps ads",
+		"ad-group-keywords":     "reports apps keywords",
+		"ad-group-search-terms": "reports apps search-terms",
+	}
+	for level, replacement := range tests {
+		t.Run(level, func(t *testing.T) {
+			command := ReportsPresetCommand()
+			if err := command.FlagSet.Parse([]string{"--level", level}); err != nil {
+				t.Fatal(err)
+			}
+			_, stderr := captureAdsDeprecationStreams(t, func() {
+				_ = command.Exec(context.Background(), nil)
+			})
+			want := "Warning: `asc ads v5 reports preset` is deprecated and retires on January 26, 2027. Use `asc ads " + replacement + "`.\n"
+			if !strings.HasPrefix(stderr, want) {
+				t.Fatalf("stderr = %q, want warning prefix %q", stderr, want)
+			}
+			if got := strings.Count(stderr, "Warning:"); got != 1 {
+				t.Fatalf("stderr contains %d warnings, want 1: %q", got, stderr)
+			}
+		})
+	}
+}
 
 func TestReportPresetDateRangeLastDays(t *testing.T) {
 	start, end, err := reportPresetDateRange("", "", 7, time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC), "UTC")
@@ -18,7 +49,7 @@ func TestReportPresetDateRangeLastDays(t *testing.T) {
 
 func TestReportsPresetCommandHelpShowsOperatorGuidance(t *testing.T) {
 	cmd := ReportsPresetCommand()
-	if !strings.Contains(cmd.ShortHelp, "Build and run Apple Ads report presets without JSON payloads.") {
+	if !strings.HasPrefix(cmd.ShortHelp, "DEPRECATED:") || !strings.Contains(cmd.LongHelp, "Build and run Apple Ads report presets without JSON payloads.") {
 		t.Fatalf("ShortHelp = %q, want preset workflow wording", cmd.ShortHelp)
 	}
 	for _, want := range []string{
@@ -30,8 +61,8 @@ func TestReportsPresetCommandHelpShowsOperatorGuidance(t *testing.T) {
 		"campaign, ad-group, and keyword report levels",
 		"Search-term report levels cannot",
 		"request row totals",
-		"asc ads reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions",
-		"asc ads reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions",
+		"asc ads v5 reports preset --level campaigns --from 2026-05-01 --to 2026-05-31 --fields campaignName,impressions,taps,localSpend --sort -impressions",
+		"asc ads v5 reports preset --level ads --campaign 12345 --from 2026-05-01 --to 2026-05-31 --sort -impressions",
 	} {
 		if !strings.Contains(cmd.LongHelp, want) {
 			t.Fatalf("LongHelp missing %q\n%s", want, cmd.LongHelp)

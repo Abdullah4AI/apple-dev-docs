@@ -14,6 +14,30 @@ type APIError struct {
 	Message     string
 	MessageCode string
 	Detail      string
+	Version     APIVersion
+	Code        string
+	Details     []APIErrorDetail
+	RateLimit   RateLimit
+}
+
+// APIErrorDetail describes one Apple Ads Platform API error detail.
+type APIErrorDetail struct {
+	Code    string         `json:"code,omitempty"`
+	Message string         `json:"message,omitempty"`
+	Info    map[string]any `json:"info,omitempty"`
+}
+
+type platformError struct {
+	Code    string           `json:"code"`
+	Message string           `json:"message"`
+	Details []APIErrorDetail `json:"details"`
+}
+
+// RateLimit preserves the Apple Ads Platform API rate-limit response headers.
+type RateLimit struct {
+	Limit     string `json:"limit,omitempty"`
+	Remaining string `json:"remaining,omitempty"`
+	Reset     string `json:"reset,omitempty"`
 }
 
 func (e *APIError) Error() string {
@@ -26,6 +50,8 @@ func (e *APIError) Error() string {
 	}
 	if strings.TrimSpace(e.MessageCode) != "" {
 		parts = append(parts, e.MessageCode)
+	} else if strings.TrimSpace(e.Code) != "" {
+		parts = append(parts, e.Code)
 	}
 	if strings.TrimSpace(e.Field) != "" {
 		parts = append(parts, e.Field)
@@ -54,6 +80,16 @@ func (e *APIError) HTTPStatusCode() int {
 }
 
 func parseError(body []byte, statusCode int) error {
+	return parseErrorForVersion(body, statusCode, nil, APIVersionCampaignV5)
+}
+
+func parseErrorForVersion(body []byte, statusCode int, headers http.Header, version APIVersion) error {
+	if version == APIVersionPlatformV1 {
+		if parsed := parsePlatformError(body, statusCode, headers); parsed != nil {
+			return parsed
+		}
+	}
+
 	var errResp struct {
 		Error struct {
 			Errors []struct {
@@ -70,6 +106,8 @@ func parseError(body []byte, statusCode int) error {
 			Field:       item.Field,
 			Message:     item.Message,
 			MessageCode: item.MessageCode,
+			Version:     version,
+			RateLimit:   rateLimitFromHeaders(headers),
 		}
 	}
 
@@ -80,6 +118,50 @@ func parseError(body []byte, statusCode int) error {
 	return &APIError{
 		StatusCode: statusCode,
 		Detail:     detail,
+		Version:    version,
+		RateLimit:  rateLimitFromHeaders(headers),
+	}
+}
+
+func parsePlatformError(body []byte, statusCode int, headers http.Header) *APIError {
+	var wrapped struct {
+		Error platformError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && platformErrorPresent(wrapped.Error) {
+		return platformAPIError(wrapped.Error, statusCode, headers)
+	}
+	var direct platformError
+	if err := json.Unmarshal(body, &direct); err == nil && platformErrorPresent(direct) {
+		return platformAPIError(direct, statusCode, headers)
+	}
+	return nil
+}
+
+func platformErrorPresent(err platformError) bool {
+	return strings.TrimSpace(err.Code) != "" || strings.TrimSpace(err.Message) != "" || len(err.Details) > 0
+}
+
+func platformAPIError(err platformError, statusCode int, headers http.Header) *APIError {
+	apiErr := &APIError{
+		StatusCode: statusCode,
+		Version:    APIVersionPlatformV1,
+		Code:       strings.TrimSpace(err.Code),
+		Message:    strings.TrimSpace(err.Message),
+		Details:    err.Details,
+		RateLimit:  rateLimitFromHeaders(headers),
+	}
+	if apiErr.Message == "" && len(apiErr.Details) > 0 {
+		apiErr.Field = strings.TrimSpace(apiErr.Details[0].Code)
+		apiErr.Detail = strings.TrimSpace(apiErr.Details[0].Message)
+	}
+	return apiErr
+}
+
+func rateLimitFromHeaders(headers http.Header) RateLimit {
+	return RateLimit{
+		Limit:     strings.TrimSpace(headerValue(headers, "RateLimit-Limit")),
+		Remaining: strings.TrimSpace(headerValue(headers, "RateLimit-Remaining")),
+		Reset:     strings.TrimSpace(headerValue(headers, "RateLimit-Reset")),
 	}
 }
 

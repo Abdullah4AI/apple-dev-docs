@@ -31,6 +31,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/completion"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/devices"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/diffcmd"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/distribute"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/docs"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/encryption"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/eula"
@@ -126,7 +127,7 @@ func NewCatalog(version string) *Catalog {
 		commandFactory("reviews", "List and manage App Store customer reviews.", reviews.ReviewsCommand),
 		commandFactory("review", "Manage App Store review details, attachments, and submissions.", reviews.ReviewCommand),
 		commandFactory("analytics", "Request and download analytics and sales reports.", analytics.AnalyticsCommand),
-		commandFactory("ads", "Manage Apple Ads Campaign Management API resources.", ads.AdsCommand),
+		commandFactory("ads", "Manage Apple Ads API resources.", ads.AdsCommand),
 		commandFactory("performance", "Access performance metrics and diagnostic logs.", performance.PerformanceCommand),
 		commandFactory("finance", "Download payments and financial reports.", finance.FinanceCommand),
 		commandFactory("apps", "List and manage apps in App Store Connect.", apps.AppsCommand),
@@ -153,6 +154,7 @@ func NewCatalog(version string) *Catalog {
 		commandFactory("release", "Run high-level App Store release workflows.", release.ReleaseCommand),
 		commandFactory("workflow", "Run multi-step automation workflows.", workflow.WorkflowCommand),
 		commandFactory("xcode", "Local Xcode build/archive/export helpers (macOS only).", xcode.XcodeCommand),
+		commandFactory("distribute", "Plan, execute, inspect, and publish iOS distribution artifacts. [experimental]", distribute.DistributeCommand),
 		commandFactory("versions", "Manage App Store versions.", versions.VersionsCommand),
 		commandFactory("product-pages", "Manage custom product pages and product page experiments.", productpages.ProductPagesCommand),
 		commandFactory("routing-coverage", "Manage routing app coverage files.", routingcoverage.RoutingCoverageCommand),

@@ -180,6 +180,7 @@ func XcodeExportCommand() *ffcli.Command {
 
 	archivePath := fs.String("archive-path", "", "Path to the .xcarchive input (required)")
 	exportOptions := fs.String("export-options", "", "Path to ExportOptions.plist (generated automatically when omitted)")
+	method := fs.String("method", "app-store-connect", "[experimental] Method for generated options: app-store-connect or release-testing")
 	signingStyle := fs.String("signing-style", "automatic", "Signing style for generated options: automatic or manual")
 	teamID := fs.String("team-id", "", "Apple Developer team ID for generated options (overrides archive metadata)")
 	ipaPath := fs.String("ipa-path", "", "Destination path for a local .ipa when one is produced (required)")
@@ -199,9 +200,10 @@ func XcodeExportCommand() *ffcli.Command {
 
 This command runs xcodebuild -exportArchive into a temporary directory.
 When --export-options is omitted, asc generates archive-adjacent options. It
-uses automatic signing by default and destination=upload with --wait, otherwise
-destination=export. Use --signing-style manual to match locally installed
-certificates and profiles; --team-id optionally overrides archive metadata.
+uses app-store-connect and automatic signing by default. Use
+--method release-testing for a local IPA installable on registered devices. Use
+--signing-style manual to match locally installed certificates and profiles;
+--team-id optionally overrides archive metadata.
 When ExportOptions.plist produces a local IPA, asc moves it to --ipa-path.
 When ExportOptions.plist uses destination=upload, xcodebuild uploads directly
 to App Store Connect and asc returns archive metadata without writing a local
@@ -210,6 +212,7 @@ finishes processing.
 
 Examples:
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --ipa-path .asc/artifacts/App.ipa
+  asc xcode export --archive-path .asc/artifacts/App.xcarchive --ipa-path .asc/artifacts/App.ipa --method release-testing --signing-style manual
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --ipa-path .asc/artifacts/App.ipa --signing-style manual --team-id TEAM_ID
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --ipa-path .asc/artifacts/App.ipa --timeout 10m
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --export-options UploadExportOptions.plist --ipa-path .asc/artifacts/App.ipa --wait
@@ -239,10 +242,14 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 			generationFlagsSet := false
+			methodSet := false
 			signingStyleSet := false
 			teamIDSet := false
 			fs.Visit(func(f *flag.Flag) {
 				switch f.Name {
+				case "method":
+					generationFlagsSet = true
+					methodSet = true
 				case "signing-style":
 					generationFlagsSet = true
 					signingStyleSet = true
@@ -251,6 +258,13 @@ Examples:
 					teamIDSet = true
 				}
 			})
+			if methodSet && strings.TrimSpace(*method) == "" {
+				return shared.UsageError("--method must be one of: app-store-connect, release-testing")
+			}
+			methodValue, err := localxcode.NormalizeExportOptionsMethod(*method)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
 			if signingStyleSet && strings.TrimSpace(*signingStyle) == "" {
 				return shared.UsageError("--signing-style must be one of: automatic, manual")
 			}
@@ -265,7 +279,10 @@ Examples:
 			trimmedArchivePath := strings.TrimSpace(*archivePath)
 			exportOptionsPath := strings.TrimSpace(*exportOptions)
 			if exportOptionsPath != "" && generationFlagsSet {
-				return shared.UsageError("--export-options cannot be combined with --signing-style or --team-id")
+				return shared.UsageError("--export-options cannot be combined with --method, --signing-style, or --team-id")
+			}
+			if *wait && methodValue == "release-testing" {
+				return shared.UsageError("--wait cannot be combined with --method release-testing")
 			}
 			if exportOptionsPath == "" {
 				destination := "export"
@@ -294,6 +311,7 @@ Examples:
 				generated, err := runGenerateExportOptions(ctx, localxcode.ExportOptionsGenerateOptions{
 					ArchivePath:  trimmedArchivePath,
 					OutputPath:   generatedPath,
+					Method:       methodValue,
 					Destination:  destination,
 					SigningStyle: signingStyleValue,
 					TeamID:       teamIDValue,

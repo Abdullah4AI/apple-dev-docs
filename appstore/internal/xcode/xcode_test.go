@@ -1906,6 +1906,11 @@ func TestRunXcodebuildDoesNotWaitForDescendantHoldingOutputPipes(t *testing.T) {
 	pidPath := filepath.Join(tempDir, "descendant.pid")
 
 	restore := overrideTestEnvironment(t)
+	// Race-instrumented helper binaries otherwise spend the race runtime's
+	// default one-second atexit delay in the direct child before it exits. That
+	// delay is unrelated to the descendant retaining the output descriptors and
+	// would hide the 250 ms pipe-wait bound this test is intended to exercise.
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	commandContextFn = helperCommandContext(t, filepath.Join(tempDir, "commands.log"))
 	t.Setenv("ASC_XCODE_HELPER_DESCENDANT_PID", pidPath)
 	t.Cleanup(restore)
@@ -2002,9 +2007,48 @@ func TestXcodeHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	if environmentLog := os.Getenv("ASC_XCODE_HELPER_ENV_LOG"); environmentLog != "" {
+		entry := fmt.Sprintf("%s ASC_ONLY=%s ASC_SHOULD_NOT_LEAK=%s\n", commandArgs[0], os.Getenv("ASC_ONLY"), os.Getenv("ASC_SHOULD_NOT_LEAK"))
+		file, err := os.OpenFile(environmentLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if _, err := file.WriteString(entry); err != nil {
+			_ = file.Close()
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := file.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 
 	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "-version" {
 		fmt.Fprintln(os.Stdout, "Xcode 16.2")
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcodebuild" && commandArgs[1] == "write-canary-after-delay" {
+		if err := os.WriteFile(os.Getenv("ASC_XCODE_HELPER_DESCENDANT_READY"), []byte("ready"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		delay := 700 * time.Millisecond
+		if value := os.Getenv("ASC_XCODE_HELPER_CANARY_DELAY"); value != "" {
+			parsed, err := time.ParseDuration(value)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			delay = parsed
+		}
+		time.Sleep(delay)
+		if err := os.WriteFile(os.Getenv("ASC_XCODE_HELPER_DESCENDANT_CANARY"), []byte("survived"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 		os.Exit(0)
 	}
 
@@ -2100,6 +2144,10 @@ func TestXcodeHelperProcess(t *testing.T) {
 	}
 
 	if len(commandArgs) >= 1 && commandArgs[0] == "xcodebuild" && helperContainsArg(commandArgs[1:], "-exportArchive") {
+		if os.Getenv("ASC_XCODE_HELPER_EXPORT_FAIL") == "1" {
+			fmt.Fprintln(os.Stderr, "requested export failure")
+			os.Exit(1)
+		}
 		exportPath, err := valueAfter(commandArgs[1:], "-exportPath")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -2114,7 +2162,74 @@ func TestXcodeHelperProcess(t *testing.T) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		if racingIPAPath := os.Getenv("ASC_XCODE_HELPER_RACING_IPA_PATH"); racingIPAPath != "" {
+			if err := os.WriteFile(racingIPAPath, []byte("racing ipa"), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		if canaryPath := os.Getenv("ASC_XCODE_HELPER_DESCENDANT_CANARY"); canaryPath != "" {
+			descendantArgs := []string{"-test.run=TestXcodeHelperProcess", "--", "xcodebuild", "write-canary-after-delay"}
+			descendant := exec.Command(os.Args[0], descendantArgs...)
+			descendant.Env = os.Environ()
+			descendant.Stdout = os.Stdout
+			descendant.Stderr = os.Stderr
+			if err := descendant.Start(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			readyPath := os.Getenv("ASC_XCODE_HELPER_DESCENDANT_READY")
+			deadline := time.Now().Add(time.Second)
+			for {
+				if _, err := os.Stat(readyPath); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					fmt.Fprintln(os.Stderr, "descendant did not become ready")
+					os.Exit(2)
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		if delay := os.Getenv("ASC_XCODE_HELPER_PARENT_DELAY"); delay != "" {
+			parsed, err := time.ParseDuration(delay)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			time.Sleep(parsed)
+		}
 		if isDirectUploadMode(exportOptionsPath) {
+			os.Exit(0)
+		}
+		switch os.Getenv("ASC_XCODE_HELPER_MALICIOUS_IPA") {
+		case "symlink":
+			targetPath := filepath.Join(exportPath, "target.bin")
+			if err := writeTestIPA(targetPath); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			if err := os.Symlink(filepath.Base(targetPath), filepath.Join(exportPath, "Exported.ipa")); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			os.Exit(0)
+		case "hardlink":
+			targetPath := filepath.Join(exportPath, "target.bin")
+			if err := writeTestIPA(targetPath); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			if err := os.Link(targetPath, filepath.Join(exportPath, "Exported.ipa")); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			os.Exit(0)
+		case "directory":
+			if err := os.Mkdir(filepath.Join(exportPath, "Exported.ipa"), 0o700); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
 			os.Exit(0)
 		}
 		if os.Getenv("ASC_XCODE_HELPER_INVALID_IPA") == "1" {

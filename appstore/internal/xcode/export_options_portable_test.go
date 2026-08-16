@@ -9,7 +9,7 @@ import (
 )
 
 func TestGenerateManualExportOptions_IsUnsupportedOutsideMacOS(t *testing.T) {
-	_, err := generateManualExportOptions(context.Background(), "Demo.xcarchive", "TEAM123")
+	_, err := generateManualExportOptions(context.Background(), "Demo.xcarchive", "TEAM123", exportOptionsMethodAppStoreConnect)
 	if err == nil || !strings.Contains(err.Error(), "only supported on macOS") {
 		t.Fatalf("expected clear unsupported-platform error, got %v", err)
 	}

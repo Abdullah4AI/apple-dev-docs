@@ -15,6 +15,7 @@ import (
 
 const (
 	exportOptionsMethodAppStoreConnect = "app-store-connect"
+	exportOptionsMethodReleaseTesting  = "release-testing"
 	exportOptionsDestinationExport     = "export"
 	exportOptionsDestinationUpload     = "upload"
 	exportOptionsSigningStyleAutomatic = "automatic"
@@ -26,6 +27,7 @@ const (
 type ExportOptionsGenerateOptions struct {
 	ArchivePath  string
 	OutputPath   string
+	Method       string
 	Destination  string
 	SigningStyle string
 	TeamID       string
@@ -124,7 +126,7 @@ func GenerateExportOptions(ctx context.Context, opts ExportOptionsGenerateOption
 		if err := preflightExportOptionsParentFn(opts.OutputPath); err != nil {
 			return nil, err
 		}
-		manual, err = manualExportOptionsGeneratorFn(ctx, opts.ArchivePath, teamID)
+		manual, err = manualExportOptionsGeneratorFn(ctx, opts.ArchivePath, teamID, opts.Method)
 		if err != nil {
 			return nil, fmt.Errorf("generate manual export options: %w", err)
 		}
@@ -141,7 +143,7 @@ func GenerateExportOptions(ctx context.Context, opts ExportOptionsGenerateOption
 	}
 
 	payload := buildExportOptionsPayload(opts, teamID, manual)
-	if err := validateExportOptionsPayload(payload, opts.SigningStyle); err != nil {
+	if err := validateExportOptionsPayload(payload, opts.Method, opts.SigningStyle); err != nil {
 		return nil, err
 	}
 	data, err := plist.MarshalIndent(payload, plist.XMLFormat, "\t")
@@ -152,7 +154,7 @@ func GenerateExportOptions(ctx context.Context, opts ExportOptionsGenerateOption
 	if _, err := plist.Unmarshal(data, &decoded); err != nil {
 		return nil, fmt.Errorf("decode generated export options plist: %w", err)
 	}
-	if err := validateExportOptionsPayload(decoded, opts.SigningStyle); err != nil {
+	if err := validateExportOptionsPayload(decoded, opts.Method, opts.SigningStyle); err != nil {
 		return nil, fmt.Errorf("validate generated export options plist: %w", err)
 	}
 
@@ -174,7 +176,7 @@ func GenerateExportOptions(ctx context.Context, opts ExportOptionsGenerateOption
 	result := &ExportOptionsGenerateResult{
 		Path:         opts.OutputPath,
 		ArchivePath:  opts.ArchivePath,
-		Method:       exportOptionsMethodAppStoreConnect,
+		Method:       opts.Method,
 		Destination:  opts.Destination,
 		SigningStyle: opts.SigningStyle,
 		TeamID:       teamID,
@@ -199,11 +201,29 @@ func NormalizeExportOptionsSigningStyle(value string) (string, error) {
 	}
 }
 
+// NormalizeExportOptionsMethod validates the public method enum shared by
+// export-options generation callers.
+func NormalizeExportOptionsMethod(value string) (string, error) {
+	method := strings.ToLower(strings.TrimSpace(value))
+	switch method {
+	case exportOptionsMethodAppStoreConnect, exportOptionsMethodReleaseTesting:
+		return method, nil
+	case "ad-hoc":
+		return method, fmt.Errorf("--method must be one of: app-store-connect, release-testing; use release-testing instead of deprecated ad-hoc")
+	default:
+		return method, fmt.Errorf("--method must be one of: app-store-connect, release-testing")
+	}
+}
+
 func normalizeExportOptionsGenerateOptions(opts ExportOptionsGenerateOptions) ExportOptionsGenerateOptions {
 	opts.ArchivePath = normalizeDirectoryPath(opts.ArchivePath)
 	opts.OutputPath = strings.TrimSpace(opts.OutputPath)
 	if opts.OutputPath != "" {
 		opts.OutputPath = filepath.Clean(opts.OutputPath)
+	}
+	opts.Method = strings.ToLower(strings.TrimSpace(opts.Method))
+	if opts.Method == "" {
+		opts.Method = exportOptionsMethodAppStoreConnect
 	}
 	opts.Destination = strings.ToLower(strings.TrimSpace(opts.Destination))
 	if opts.Destination == "" {
@@ -227,6 +247,9 @@ func validateExportOptionsGenerateOptions(opts ExportOptionsGenerateOptions) err
 	if opts.OutputPath == "" {
 		return fmt.Errorf("--output-path is required")
 	}
+	if _, err := NormalizeExportOptionsMethod(opts.Method); err != nil {
+		return err
+	}
 	switch opts.Destination {
 	case exportOptionsDestinationExport, exportOptionsDestinationUpload:
 	default:
@@ -234,6 +257,9 @@ func validateExportOptionsGenerateOptions(opts ExportOptionsGenerateOptions) err
 	}
 	if _, err := NormalizeExportOptionsSigningStyle(opts.SigningStyle); err != nil {
 		return err
+	}
+	if opts.Method == exportOptionsMethodReleaseTesting && opts.Destination != exportOptionsDestinationExport {
+		return fmt.Errorf("release-testing requires destination=export")
 	}
 	return nil
 }
@@ -285,9 +311,9 @@ func buildExportOptionsPayload(opts ExportOptionsGenerateOptions, teamID string,
 	return buildPlatformExportOptionsPayload(opts, teamID, manual)
 }
 
-func validateExportOptionsPayload(payload map[string]any, signingStyle string) error {
-	if method := exportOptionsString(payload["method"]); method != exportOptionsMethodAppStoreConnect {
-		return fmt.Errorf("export options method must be %q", exportOptionsMethodAppStoreConnect)
+func validateExportOptionsPayload(payload map[string]any, method, signingStyle string) error {
+	if got := exportOptionsString(payload["method"]); got != method {
+		return fmt.Errorf("export options method must be %q", method)
 	}
 	destination := exportOptionsString(payload["destination"])
 	if destination != exportOptionsDestinationExport && destination != exportOptionsDestinationUpload {

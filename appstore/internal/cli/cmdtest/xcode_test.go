@@ -391,6 +391,22 @@ func TestXcodeExportRequiresArchivePath(t *testing.T) {
 }
 
 func TestXcodeExportWithoutExportOptionsPreflightsBeforeGeneration(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		binDir := t.TempDir()
+		xcodebuildPath := filepath.Join(binDir, "xcodebuild")
+		script := "#!/bin/sh\n" +
+			"if [ \"$1\" = \"-version\" ]; then\n" +
+			"  printf 'Xcode 16.0\\nBuild version 16A1\\n'\n" +
+			"  exit 0\n" +
+			"fi\n" +
+			"printf 'unexpected xcodebuild invocation: %s\\n' \"$*\" >&2\n" +
+			"exit 1\n"
+		if err := os.WriteFile(xcodebuildPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake xcodebuild: %v", err)
+		}
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
 

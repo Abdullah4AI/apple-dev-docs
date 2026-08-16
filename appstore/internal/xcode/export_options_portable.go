@@ -12,6 +12,18 @@ import (
 // buildPlatformExportOptionsPayload uses the stable v1 typed model on hosts
 // without Xcode. This keeps automatic ExportOptions generation portable.
 func buildPlatformExportOptionsPayload(opts ExportOptionsGenerateOptions, teamID string, manual manualExportOptions) map[string]any {
+	if opts.Method == exportOptionsMethodReleaseTesting {
+		model := exportoptions.NewNonAppStoreOptions(exportoptions.MethodReleaseTesting)
+		model.TeamID = teamID
+		model.Destination = exportoptions.Destination(opts.Destination)
+		model.SigningStyle = exportoptions.SigningStyle(opts.SigningStyle)
+		if opts.SigningStyle == exportOptionsSigningStyleManual {
+			model.SigningCertificate = manual.SigningCertificate
+			model.BundleIDProvisioningProfileMapping = cloneProvisioningProfiles(manual.ProvisioningProfiles)
+			model.ICloudContainerEnvironment = exportoptions.ICloudContainerEnvironment(manual.ICloudContainerEnvironment)
+		}
+		return model.Hash()
+	}
 	model := exportoptions.NewAppStoreConnectOptions(exportoptions.MethodAppStoreConnect)
 	model.TeamID = teamID
 	model.Destination = exportoptions.Destination(opts.Destination)
@@ -24,6 +36,6 @@ func buildPlatformExportOptionsPayload(opts ExportOptionsGenerateOptions, teamID
 	return model.Hash()
 }
 
-func generateManualExportOptions(context.Context, string, string) (manualExportOptions, error) {
+func generateManualExportOptions(context.Context, string, string, string) (manualExportOptions, error) {
 	return manualExportOptions{}, fmt.Errorf("manual signing export options generation is only supported on macOS because it requires Xcode signing assets")
 }

@@ -22,9 +22,23 @@ import (
 
 var bitriseStdoutCaptureMu sync.Mutex
 
+var readArchiveExportInfoFn = readArchiveExportInfo
+
 // buildPlatformExportOptionsPayload uses Bitrise's current typed v2 model on
 // macOS, where xcodebuild and local signing asset resolution are available.
 func buildPlatformExportOptionsPayload(opts ExportOptionsGenerateOptions, teamID string, manual manualExportOptions) map[string]any {
+	if opts.Method == exportOptionsMethodReleaseTesting {
+		model := exportoptions.NewNonAppStoreOptions(exportoptions.MethodReleaseTesting)
+		model.TeamID = teamID
+		model.Destination = exportoptions.Destination(opts.Destination)
+		model.SigningStyle = exportoptions.SigningStyle(opts.SigningStyle)
+		if opts.SigningStyle == exportOptionsSigningStyleManual {
+			model.SigningCertificate = manual.SigningCertificate
+			model.BundleIDProvisioningProfileMapping = cloneProvisioningProfiles(manual.ProvisioningProfiles)
+			model.ICloudContainerEnvironment = exportoptions.ICloudContainerEnvironment(manual.ICloudContainerEnvironment)
+		}
+		return model.Hash()
+	}
 	model := exportoptions.NewAppStoreConnectOptions(exportoptions.MethodAppStoreConnect)
 	model.TeamID = teamID
 	model.Destination = exportoptions.Destination(opts.Destination)
@@ -37,7 +51,7 @@ func buildPlatformExportOptionsPayload(opts ExportOptionsGenerateOptions, teamID
 	return model.Hash()
 }
 
-func generateManualExportOptions(ctx context.Context, archivePath, teamID string) (manualExportOptions, error) {
+func generateManualExportOptions(ctx context.Context, archivePath, teamID, method string) (manualExportOptions, error) {
 	if err := contextError(ctx); err != nil {
 		return manualExportOptions{}, err
 	}
@@ -48,34 +62,64 @@ func generateManualExportOptions(ctx context.Context, archivePath, teamID string
 	if platform != "IOS" && platform != "TV_OS" {
 		return manualExportOptions{}, fmt.Errorf("manual signing export options generation only supports iOS and tvOS archives; archive platform is %s", platform)
 	}
-	archive, err := xcarchive.NewIosArchive(archivePath)
-	if err != nil {
-		return manualExportOptions{}, fmt.Errorf("read iOS archive: %w", err)
-	}
-	archiveInfo, err := exportoptionsgenerator.ReadArchiveExportInfo(archive)
-	if err != nil {
-		return manualExportOptions{}, fmt.Errorf("read archive export information: %w", err)
-	}
 	var generated legacyexportoptions.ExportOptions
 	if _, err := captureBitriseStdout(func() error {
+		archiveInfo, err := readArchiveExportInfoFn(archivePath)
+		if err != nil {
+			return err
+		}
 		generator := exportoptionsgenerator.New(
 			xcodeversion.NewXcodeVersionProvider(command.NewFactory(env.NewRepository())),
 			log.NewLogger(),
 		)
 		var generateErr error
+		exportMethod := manualExportOptionsResolverMethod(method)
 		generated, generateErr = generator.GenerateApplicationExportOptions(
 			exportoptionsgenerator.ExportProductApp,
 			archiveInfo,
 			// Bitrise v2's generator currently exposes these v1 argument types.
-			legacyexportoptions.MethodAppStoreConnect,
+			exportMethod,
 			legacyexportoptions.SigningStyleManual,
-			exportoptionsgenerator.Opts{TeamID: teamID},
+			manualExportOptionsResolverOptions(teamID, method),
 		)
 		return generateErr
 	}); err != nil {
 		return manualExportOptions{}, err
 	}
 	return manualExportOptionsFromHash(generated.Hash())
+}
+
+func readArchiveExportInfo(archivePath string) (exportoptionsgenerator.ArchiveInfo, error) {
+	archive, err := xcarchive.NewIosArchive(archivePath)
+	if err != nil {
+		return exportoptionsgenerator.ArchiveInfo{}, fmt.Errorf("read iOS archive: %w", err)
+	}
+	archiveInfo, err := exportoptionsgenerator.ReadArchiveExportInfo(archive)
+	if err != nil {
+		return exportoptionsgenerator.ArchiveInfo{}, fmt.Errorf("read archive export information: %w", err)
+	}
+	return archiveInfo, nil
+}
+
+func manualExportOptionsResolverOptions(teamID, method string) exportoptionsgenerator.Opts {
+	opts := exportoptionsgenerator.Opts{TeamID: teamID}
+	if method == exportOptionsMethodReleaseTesting {
+		// Distribution profiles carry production entitlements. Bitrise requires
+		// this value for non-App-Store CloudKit archives instead of inferring it.
+		opts.ContainerEnvironment = "Production"
+	}
+	return opts
+}
+
+// manualExportOptionsResolverMethod adapts ASC's current public Xcode method
+// name to the pinned resolver's profile classification. Bitrise still labels
+// installed ad hoc profiles as MethodAdHoc and filters by exact equality, even
+// though the final ExportOptions.plist must use MethodReleaseTesting.
+func manualExportOptionsResolverMethod(method string) legacyexportoptions.Method {
+	if method == exportOptionsMethodReleaseTesting {
+		return legacyexportoptions.MethodAdHoc
+	}
+	return legacyexportoptions.MethodAppStoreConnect
 }
 
 // captureBitriseStdout contains upstream status prints so structured CLI

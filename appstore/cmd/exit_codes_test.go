@@ -50,6 +50,11 @@ func TestExitCodeFromError(t *testing.T) {
 			expected: ExitUsage,
 		},
 		{
+			name:     "reported usage error returns usage",
+			err:      shared.NewReportedUsageError(shared.UsageErrorInvalidValue, "invalid selector"),
+			expected: ExitUsage,
+		},
+		{
 			name:     "ErrMissingAuth returns auth failure",
 			err:      shared.ErrMissingAuth,
 			expected: ExitAuth,
@@ -84,6 +89,34 @@ func TestExitCodeFromError(t *testing.T) {
 			err:      errors.New("something went wrong"),
 			expected: ExitError,
 		},
+		{
+			name:     "child exit code is preserved",
+			err:      shared.NewProcessExitError(42),
+			expected: 42,
+		},
+		{
+			name:     "wrapped child signal exit code is preserved",
+			err:      fmt.Errorf("cleanup failed: %w", shared.NewProcessExitError(143)),
+			expected: 143,
+		},
+		{
+			name:     "ordinary exec exit error remains generic",
+			err:      ordinaryExecExitError(t, 128),
+			expected: ExitError,
+		},
+		{
+			name:     "ordinary setup and cleanup failures remain generic",
+			err:      errors.Join(errors.New("setup failed"), errors.New("cleanup failed")),
+			expected: ExitError,
+		},
+		{
+			name: "child exit remains exact with a rendered companion",
+			err: errors.Join(
+				shared.NewProcessExitError(42),
+				shared.NewReportedError(errors.New("cleanup failed")),
+			),
+			expected: 42,
+		},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +127,33 @@ func TestExitCodeFromError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func ordinaryExecExitError(t *testing.T, code int) error {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExitCodeHelperProcess$")
+	cmd.Env = append(os.Environ(), "ASC_EXIT_CODE_HELPER="+strconv.Itoa(code))
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("helper unexpectedly exited successfully")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("helper error = %T, want *exec.ExitError", err)
+	}
+	return err
+}
+
+func TestExitCodeHelperProcess(t *testing.T) {
+	value := os.Getenv("ASC_EXIT_CODE_HELPER")
+	if value == "" {
+		return
+	}
+	code, err := strconv.Atoi(value)
+	if err != nil {
+		os.Exit(125)
+	}
+	os.Exit(code)
 }
 
 func TestExitCodeFromError_Conflict(t *testing.T) {
@@ -493,6 +553,111 @@ func TestBuildsListMissingAppExitCode(t *testing.T) {
 	stderr := string(output)
 	if !strings.Contains(stderr, "--app is required") {
 		t.Fatalf("expected --app required message, got %q", stderr)
+	}
+}
+
+func TestSigningReconcileInvalidDevicesFileExitsTwoWithoutSideEffects(t *testing.T) {
+	binaryPath := buildASCBlackboxBinary(t)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "malformed JSON", body: `{"schemaVersion":1,"devices":[`},
+		{name: "unknown field", body: `{"schemaVersion":1,"devices":[{"name":"Phone","udid":"ABCD1234","platform":"IOS","SECRET-UDID-Rudrank-Phone":true}]}`},
+		{name: "invalid UDID", body: `{"schemaVersion":1,"devices":[{"name":"Phone","udid":"ABC/DEF?123","platform":"IOS"}]}`},
+		{name: "duplicate device", body: `{"schemaVersion":1,"devices":[{"name":"One","udid":"00-aa-11-bb","platform":"IOS"},{"name":"Two","udid":"00aa11bb","platform":"IOS"}]}`},
+		{name: "unsupported platform", body: `{"schemaVersion":1,"devices":[{"name":"Phone","udid":"ABCD1234","platform":"MAC_OS"}]}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			devicesPath := filepath.Join(tmpDir, "devices.json")
+			if err := os.WriteFile(devicesPath, []byte(test.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stateDir := filepath.Join(tmpDir, "signing-state")
+
+			runCmd := exec.Command(
+				binaryPath,
+				"signing", "reconcile", "plan",
+				"--archive-path", filepath.Join(tmpDir, "App.xcarchive"),
+				"--devices-file", devicesPath,
+				"--state-dir", stateDir,
+			)
+			runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			runCmd.Stdout = &stdout
+			runCmd.Stderr = &stderr
+			err := runCmd.Run()
+			if err == nil {
+				t.Fatal("expected invalid devices file to fail")
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
+			}
+			if exitErr.ExitCode() != ExitUsage {
+				t.Fatalf("exit code = %d, want %d; stderr=%q", exitErr.ExitCode(), ExitUsage, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "invalid devices file") {
+				t.Fatalf("stderr = %q, want devices validation error", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "SECRET-UDID-Rudrank-Phone") {
+				t.Fatalf("stderr leaked untrusted devices content: %q", stderr.String())
+			}
+			if _, statErr := os.Stat(stateDir); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("state directory exists after invalid input: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestSigningReconcileProtectedDevicesFileExitsTwoWithoutLeakingPath(t *testing.T) {
+	binaryPath := buildASCBlackboxBinary(t)
+	tmpDir := t.TempDir()
+	const secret = "SECRET-UDID-Rudrank-Phone"
+	devicesPath := filepath.Join(tmpDir, secret, "devices.json")
+	stateDir := filepath.Join(tmpDir, "signing-state")
+
+	runCmd := exec.Command(
+		binaryPath,
+		"signing", "reconcile", "plan",
+		"--archive-path", filepath.Join(tmpDir, "App.xcarchive"),
+		"--devices-file", devicesPath,
+		"--state-dir", stateDir,
+	)
+	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runCmd.Stdout = &stdout
+	runCmd.Stderr = &stderr
+	err := runCmd.Run()
+	if err == nil {
+		t.Fatal("expected missing protected devices file to fail")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.ExitCode() != ExitUsage {
+		t.Fatalf("exit code = %d, want %d; stderr=%q", exitErr.ExitCode(), ExitUsage, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid devices file") {
+		t.Fatalf("stderr = %q, want protected input diagnostic", stderr.String())
+	}
+	if strings.Contains(stderr.String(), secret) || strings.Contains(stderr.String(), devicesPath) {
+		t.Fatalf("stderr leaked protected input path: %q", stderr.String())
+	}
+	if _, statErr := os.Stat(stateDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state directory exists after invalid input: %v", statErr)
 	}
 }
 
