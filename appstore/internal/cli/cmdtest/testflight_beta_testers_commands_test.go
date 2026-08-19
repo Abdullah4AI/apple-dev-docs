@@ -203,7 +203,7 @@ func TestTestFlightBetaTestersRemoveOutput(t *testing.T) {
 	root.FlagSet.SetOutput(io.Discard)
 
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"testflight", "testers", "remove", "--app", "app-1", "--email", "tester@example.com"}); err != nil {
+		if err := root.Parse([]string{"testflight", "testers", "remove", "--app", "app-1", "--email", "tester@example.com", "--confirm"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {

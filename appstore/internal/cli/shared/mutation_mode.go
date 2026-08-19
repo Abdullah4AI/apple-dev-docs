@@ -13,5 +13,9 @@ func RequireConfirmUnlessDryRun(dryRun, confirm bool) error {
 	if dryRun || confirm {
 		return nil
 	}
-	return UsageError("--confirm is required unless --dry-run is set")
+	return WithDiagnostic(
+		UsageError("--confirm is required unless --dry-run is set"),
+		DiagnosticRequiredInputMissing,
+		"--confirm",
+	)
 }

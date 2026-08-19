@@ -336,8 +336,9 @@ func TestPricePointEqualizationsWithoutPaginateUsesSinglePage(t *testing.T) {
 				}
 			})
 
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
+			wantWarning := "Warning: showing 1 results; more pages exist (use --paginate or --next where supported)\n"
+			if stderr != wantWarning {
+				t.Fatalf("expected truncation warning on stderr, got %q", stderr)
 			}
 			if requestCount != 1 {
 				t.Fatalf("expected exactly one request without --paginate, got %d", requestCount)

@@ -49,6 +49,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/nominations"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/notarization"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/notify"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/optimize"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/passtypeids"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/performance"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/preorders"
@@ -128,6 +129,7 @@ func NewCatalog(version string) *Catalog {
 		commandFactory("review", "Manage App Store review details, attachments, and submissions.", reviews.ReviewCommand),
 		commandFactory("analytics", "Request and download analytics and sales reports.", analytics.AnalyticsCommand),
 		commandFactory("ads", "Manage Apple Ads API resources.", ads.AdsCommand),
+		commandFactory("optimize", "Build cross-API optimization plans. [experimental]", optimize.OptimizeCommand),
 		commandFactory("performance", "Access performance metrics and diagnostic logs.", performance.PerformanceCommand),
 		commandFactory("finance", "Download payments and financial reports.", finance.FinanceCommand),
 		commandFactory("apps", "List and manage apps in App Store Connect.", apps.AppsCommand),

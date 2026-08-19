@@ -76,7 +76,7 @@ Examples:
 			pathValue := strings.TrimSpace(*sourcePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--path")
 			}
 
 			file, err := shared.OpenExistingNoFollow(pathValue)

@@ -246,7 +246,7 @@ Example:
 			}
 			if err := validateSigningReconcilePlanFlags(*archivePath, *devicesFile, *minimumValidityDays, *maxMutations, *stateDir); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return shared.MissingRequiredUsageError()
+				return signingReconcilePlanUsageError(err)
 			}
 			plan, err := executeSigningReconcilePlan(ctx, signingReconcilePlanOptions{
 				ArchivePath:         *archivePath,
@@ -291,11 +291,11 @@ Example:
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			if strings.TrimSpace(*planPath) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --plan is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--plan")
 			}
 			receipt, err := executeSigningReconcileApply(ctx, *planPath)
 			if err != nil {
@@ -308,27 +308,35 @@ Example:
 
 func validateSigningReconcilePlanFlags(archivePath, devicesFile string, minimumValidityDays, maxMutations int, stateDir string) error {
 	if strings.TrimSpace(archivePath) == "" {
-		return fmt.Errorf("--archive-path is required")
+		return shared.WithDiagnostic(fmt.Errorf("--archive-path is required"), shared.DiagnosticRequiredInputMissing, "--archive-path")
 	}
 	if !strings.EqualFold(filepath.Ext(strings.TrimSpace(archivePath)), ".xcarchive") {
-		return fmt.Errorf("--archive-path must end with .xcarchive")
+		return shared.WithDiagnostic(fmt.Errorf("--archive-path must end with .xcarchive"), shared.DiagnosticInvalidInput, "--archive-path")
 	}
 	if strings.TrimSpace(devicesFile) == "" {
-		return fmt.Errorf("--devices-file is required")
+		return shared.WithDiagnostic(fmt.Errorf("--devices-file is required"), shared.DiagnosticRequiredInputMissing, "--devices-file")
 	}
 	if minimumValidityDays < 0 {
-		return fmt.Errorf("--minimum-validity-days must be at least 0")
+		return shared.WithDiagnostic(fmt.Errorf("--minimum-validity-days must be at least 0"), shared.DiagnosticInvalidInput, "--minimum-validity-days")
 	}
 	if minimumValidityDays > reconcileMaximumValidityDays {
-		return fmt.Errorf("--minimum-validity-days must be at most %d", reconcileMaximumValidityDays)
+		return shared.WithDiagnostic(fmt.Errorf("--minimum-validity-days must be at most %d", reconcileMaximumValidityDays), shared.DiagnosticInvalidInput, "--minimum-validity-days")
 	}
 	if maxMutations < 1 {
-		return fmt.Errorf("--max-mutations must be at least 1")
+		return shared.WithDiagnostic(fmt.Errorf("--max-mutations must be at least 1"), shared.DiagnosticInvalidInput, "--max-mutations")
 	}
 	if strings.TrimSpace(stateDir) == "" {
-		return fmt.Errorf("--state-dir is required")
+		return shared.WithDiagnostic(fmt.Errorf("--state-dir is required"), shared.DiagnosticRequiredInputMissing, "--state-dir")
 	}
 	return nil
+}
+
+func signingReconcilePlanUsageError(err error) error {
+	diagnostic, ok := shared.DiagnosticFromError(err)
+	if !ok {
+		return flag.ErrHelp
+	}
+	return shared.WithDiagnostic(flag.ErrHelp, diagnostic.Code, diagnostic.Parameter)
 }
 
 func readProtectedFile(path string) ([]byte, error) {

@@ -42,6 +42,16 @@ type publicSearchPayload struct {
 	Results []itunes.SearchResult `json:"results"`
 }
 
+type publicRankPayload struct {
+	AppID       int64  `json:"appId"`
+	Term        string `json:"term"`
+	Country     string `json:"country"`
+	Platform    string `json:"platform"`
+	Found       bool   `json:"found"`
+	Rank        *int   `json:"rank,omitempty"`
+	ResultCount int    `json:"resultCount"`
+}
+
 func runCommand(t *testing.T, args []string) (string, string, error) {
 	t.Helper()
 
@@ -86,10 +96,26 @@ func TestAppsPublicHelpShowsSubcommands(t *testing.T) {
 	}
 
 	usage := publicCmd.UsageFunc(publicCmd)
-	for _, want := range []string{"view", "search", "prices", "descriptions", "storefronts", "No authentication is required."} {
+	for _, want := range []string{"view", "search", "rank", "prices", "descriptions", "storefronts", "No authentication is required."} {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("expected apps public help to contain %q, got %q", want, usage)
 		}
+	}
+}
+
+func TestAppsPublicRankHelpIsExperimental(t *testing.T) {
+	root := RootCommand("1.2.3")
+	rankCmd := findSubcommand(root, "apps", "public", "rank")
+	if rankCmd == nil {
+		t.Fatal("expected apps public rank command")
+		return
+	}
+
+	if !strings.HasPrefix(rankCmd.ShortHelp, "[experimental]") {
+		t.Fatalf("ShortHelp = %q, want experimental prefix", rankCmd.ShortHelp)
+	}
+	if !strings.HasPrefix(rankCmd.LongHelp, "[experimental]") {
+		t.Fatalf("LongHelp = %q, want experimental prefix", rankCmd.LongHelp)
 	}
 }
 
@@ -135,6 +161,51 @@ func TestAppsPublicValidationErrors(t *testing.T) {
 			wantErr: "unsupported country code",
 		},
 		{
+			name:    "rank missing app",
+			args:    []string{"apps", "public", "rank", "--term", "focus", "--platform", "IOS"},
+			wantErr: "--app is required",
+		},
+		{
+			name:    "rank invalid app",
+			args:    []string{"apps", "public", "rank", "--app", "abc", "--term", "focus", "--platform", "IOS"},
+			wantErr: "--app must be a numeric App Store app ID",
+		},
+		{
+			name:    "rank missing term",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--platform", "IOS"},
+			wantErr: "--term is required",
+		},
+		{
+			name:    "rank missing platform",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus"},
+			wantErr: "--platform is required",
+		},
+		{
+			name:    "rank rejects macOS",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "MAC_OS"},
+			wantErr: "--platform must be one of: IOS, TV_OS",
+		},
+		{
+			name:    "rank rejects visionOS",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "VISION_OS"},
+			wantErr: "--platform must be one of: IOS, TV_OS",
+		},
+		{
+			name:    "rank rejects unknown platform",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "ANDROID"},
+			wantErr: "--platform must be one of: IOS, TV_OS",
+		},
+		{
+			name:    "rank invalid country",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "IOS", "--country", "usa"},
+			wantErr: "unsupported country code",
+		},
+		{
+			name:    "rank rejects positional argument",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "IOS", "extra"},
+			wantErr: "public rank does not accept positional arguments",
+		},
+		{
 			name:    "prices invalid country",
 			args:    []string{"apps", "public", "prices", "--app", "123", "--country", "usa"},
 			wantErr: "unsupported country code",
@@ -157,6 +228,211 @@ func TestAppsPublicValidationErrors(t *testing.T) {
 			}
 			if !strings.Contains(stderr, test.wantErr) {
 				t.Fatalf("expected stderr to contain %q, got %q", test.wantErr, stderr)
+			}
+		})
+	}
+}
+
+func TestAppsPublicRankRejectsTVStorefrontWithoutNumericIDBeforeRequest(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request for unsupported TV storefront: %s", req.URL.String())
+		return nil, errors.New("unexpected request")
+	})
+
+	stdout, stderr, runErr := runCommand(t, []string{
+		"apps", "public", "rank",
+		"--app", "1234567890",
+		"--term", "focus timer",
+		"--country", "kz",
+		"--platform", "TV_OS",
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "TV_OS ranking is unavailable for storefront KZ") {
+		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+}
+
+func TestAppsPublicRankTVOSJSON(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", req.Method)
+		}
+		if req.URL.Host != "search.itunes.apple.com" {
+			t.Fatalf("host = %q, want search.itunes.apple.com", req.URL.Host)
+		}
+		if req.URL.Path != "/WebObjects/MZStore.woa/wa/search" {
+			t.Fatalf("path = %q, want MZStore search", req.URL.Path)
+		}
+		if got := req.URL.Query().Get("term"); got != "search" {
+			t.Fatalf("term = %q, want search", got)
+		}
+		if got := req.Header.Get("X-Apple-Store-Front"); got != itunes.Storefronts["us"]+",33" {
+			t.Fatalf("storefront header = %q, want %q", got, itunes.Storefronts["us"]+",33")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"pageData":{"bubbles":[{"results":[
+					{"id":"111","entity":"tvSoftware"},
+					{"id":"1234567890","entity":"tvSoftware"}
+				]}]}
+			}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	stdout, stderr, runErr := runCommand(t, []string{
+		"apps", "public", "rank",
+		"--term", "search",
+		"--country", "us",
+		"--app", "1234567890",
+		"--output", "json",
+		"--platform", "tv_os",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload publicRankPayload
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal rank: %v", err)
+	}
+	if payload.AppID != 1234567890 || payload.Term != "search" || payload.Country != "US" || payload.Platform != "TV_OS" {
+		t.Fatalf("unexpected rank identity: %+v", payload)
+	}
+	if !payload.Found || payload.Rank == nil || *payload.Rank != 2 || payload.ResultCount != 2 {
+		t.Fatalf("unexpected rank result: %+v", payload)
+	}
+}
+
+func TestAppsPublicRankIOSNormalizesPlatform(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "itunes.apple.com" || req.URL.Path != "/search" {
+			t.Fatalf("request URL = %s, want iTunes /search", req.URL.String())
+		}
+		if got := req.URL.Query().Get("limit"); got != "200" {
+			t.Fatalf("limit = %q, want 200", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"resultCount":1,
+				"results":[{"trackId":123,"trackName":"Alpha"}]
+			}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	stdout, stderr, runErr := runCommand(t, []string{
+		"apps", "public", "rank",
+		"--app", "123",
+		"--term", "alpha",
+		"--platform", "ios",
+		"--output", "json",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var payload publicRankPayload
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal rank: %v", err)
+	}
+	if payload.Platform != "IOS" || !payload.Found || payload.Rank == nil || *payload.Rank != 1 {
+		t.Fatalf("unexpected iOS rank payload: %+v", payload)
+	}
+}
+
+func TestAppsPublicRankNotFoundOutputs(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"pageData":{"bubbles":[{"results":[
+					{"id":"111","entity":"tvSoftware"}
+				]}]}
+			}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	baseArgs := []string{
+		"apps", "public", "rank",
+		"--app", "1234567890",
+		"--term", "missing",
+		"--platform", "TV_OS",
+	}
+
+	stdout, stderr, runErr := runCommand(t, append(append([]string{}, baseArgs...), "--output", "json"))
+	if runErr != nil {
+		t.Fatalf("JSON run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty JSON stderr, got %q", stderr)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		t.Fatalf("unmarshal raw rank: %v", err)
+	}
+	if _, ok := raw["rank"]; ok {
+		t.Fatalf("not-found JSON unexpectedly contains rank: %s", stdout)
+	}
+	var payload publicRankPayload
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal rank: %v", err)
+	}
+	if payload.Found || payload.Rank != nil || payload.ResultCount != 1 {
+		t.Fatalf("unexpected not-found payload: %+v", payload)
+	}
+
+	for _, output := range []string{"table", "markdown"} {
+		t.Run(output, func(t *testing.T) {
+			stdout, stderr, runErr := runCommand(t, append(append([]string{}, baseArgs...), "--output", output))
+			if runErr != nil {
+				t.Fatalf("run error: %v", runErr)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+			for _, want := range []string{"App ID", "Term", "Country", "Platform", "Found", "Rank", "Result Count", "1234567890", "TV_OS", "false", "-"} {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("expected %s output to contain %q, got %q", output, want, stdout)
+				}
 			}
 		})
 	}

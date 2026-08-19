@@ -84,7 +84,7 @@ Examples:
 			appValue := strings.TrimSpace(shared.ResolveAppID(*appID))
 			if appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -157,7 +157,7 @@ Examples:
 			idValue := strings.TrimSpace(*appClipID)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()

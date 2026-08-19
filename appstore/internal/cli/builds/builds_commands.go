@@ -28,11 +28,11 @@ func BuildsUploadCommand() *ffcli.Command {
 	pkgPath := fs.String("pkg", "", "Path to .pkg file (for macOS apps)")
 	version := fs.String("version", "", "CFBundleShortVersionString (e.g., 1.0.0, auto-extracted from IPA if not provided)")
 	buildNumber := fs.String("build-number", "", "CFBundleVersion (e.g., 123, auto-extracted from IPA if not provided)")
-	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS (auto-detected for --pkg)")
+	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS (auto-detected for --ipa and --pkg)")
 	dryRun := fs.Bool("dry-run", false, "Reserve upload operations without uploading the file")
 	concurrency := fs.Int("concurrency", asc.DefaultUploadConcurrency, "Upload concurrency")
 	verifyChecksum := fs.Bool("checksum", false, "Verify upload checksums if provided by API")
-	testNotes := fs.String("test-notes", "", "What to Test notes (requires build processing)")
+	testNotes := fs.String("test-notes", "", "What to Test notes (waits for build discovery)")
 	locale := fs.String("locale", "", "Locale for --test-notes (e.g., en-US)")
 	wait := fs.Bool("wait", false, "Wait for build processing to complete")
 	pollInterval := fs.Duration("poll-interval", shared.PublishDefaultPollInterval, "Polling interval for --wait and --test-notes")
@@ -50,19 +50,24 @@ By default, this command uploads the IPA/PKG to the presigned URLs and commits
 the file immediately. Use --verify-timeout to briefly watch for immediate
 post-commit processing failures, or --wait for full build discovery and
 processing.
+When --test-notes is set, the command waits only until the build appears, then
+creates or updates the requested localization. Add --wait when the invocation
+must also wait for processing to complete.
 Use --dry-run to only reserve the upload operations.
 Presigned URLs and request-header values are redacted from output by default.
 Pass --include-sensitive only when another tool must consume those capabilities.
 
-Use --ipa for iOS, tvOS, and visionOS apps. Use --pkg for macOS apps.
-When using --pkg, the platform is automatically set to MAC_OS.
+Use --ipa for iOS, tvOS, and visionOS apps. Its platform is detected from the
+top-level app Info.plist when available, with IOS retained as the compatibility
+default for older archives without platform metadata. Use --pkg for macOS apps;
+its platform is automatically set to MAC_OS.
 
 Examples:
   asc builds upload --app "123456789" --ipa "path/to/app.ipa"
   asc builds upload --ipa "app.ipa" --version "1.0.0" --build-number "123"
   asc builds upload --app "123456789" --ipa "app.ipa" --dry-run
   asc builds upload --app "123456789" --ipa "app.ipa" --dry-run --include-sensitive
-  asc builds upload --app "123456789" --ipa "app.ipa" --test-notes "Test flow" --locale "en-US" --wait
+  asc builds upload --app "123456789" --ipa "app.ipa" --test-notes "Test flow" --locale "en-US"
   asc builds upload --app "123456789" --pkg "path/to/app.pkg" --version "1.0.0" --build-number "123"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -71,7 +76,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			// Validate that exactly one of --ipa or --pkg is provided
@@ -79,7 +84,7 @@ Examples:
 			hasPKG := *pkgPath != ""
 			if !hasIPA && !hasPKG {
 				fmt.Fprintf(os.Stderr, "Error: --ipa or --pkg is required\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if hasIPA && hasPKG {
 				fmt.Fprintf(os.Stderr, "Error: --ipa and --pkg are mutually exclusive\n\n")
@@ -105,23 +110,22 @@ Examples:
 
 			// Validate file exists
 			var (
-				fileInfo os.FileInfo
-				err      error
+				artifactFile *os.File
+				fileInfo     os.FileInfo
+				err          error
 			)
 			if hasIPA {
-				fileInfo, err = shared.ValidateIPAPath(filePath)
+				artifactFile, fileInfo, err = shared.OpenValidatedIPAPath(filePath)
 				if err != nil {
 					return fmt.Errorf("builds upload: %w", err)
 				}
 			} else {
-				fileInfo, err = os.Stat(filePath)
+				artifactFile, fileInfo, err = shared.OpenValidatedPKGPath(filePath)
 				if err != nil {
-					return fmt.Errorf("builds upload: failed to stat PKG: %w", err)
-				}
-				if fileInfo.IsDir() {
-					return fmt.Errorf("builds upload: --pkg must be a file")
+					return fmt.Errorf("builds upload: %w", err)
 				}
 			}
+			defer artifactFile.Close()
 
 			// Determine platform
 			var platformValue asc.Platform
@@ -132,7 +136,8 @@ Examples:
 				}
 				platformValue = asc.PlatformMacOS
 			} else {
-				// For IPA files, default to IOS if not specified
+				// For IPA files, retain IOS as the compatibility default until
+				// metadata inspection can provide a more specific platform.
 				platformStr := strings.ToUpper(*platform)
 				if platformStr == "" {
 					platformStr = "IOS"
@@ -170,11 +175,11 @@ Examples:
 			localeValue := strings.TrimSpace(*locale)
 			if testNotesValue != "" && localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required with --test-notes")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 			if testNotesValue == "" && localeValue != "" {
 				fmt.Fprintln(os.Stderr, "Error: --test-notes is required with --locale")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--test-notes")
 			}
 			if testNotesValue != "" {
 				if *dryRun {
@@ -192,7 +197,7 @@ Examples:
 			buildNumberValue := strings.TrimSpace(*buildNumber)
 			var ipaBundleID string
 			if hasIPA {
-				ipaInfo, extractErr := shared.ExtractBundleInfoFromIPA(filePath)
+				ipaInfo, extractErr := shared.ExtractBundleInfoFromIPAFile(artifactFile)
 				if extractErr != nil {
 					return fmt.Errorf("builds upload: inspect IPA metadata: %w", extractErr)
 				}
@@ -205,6 +210,12 @@ Examples:
 				}
 				if buildNumberValue == "" {
 					buildNumberValue = ipaInfo.BuildNumber
+				}
+				if ipaInfo.Platform != "" {
+					if strings.TrimSpace(*platform) != "" && platformValue != ipaInfo.Platform {
+						return fmt.Errorf("builds upload: --platform %s does not match IPA platform %s", platformValue, ipaInfo.Platform)
+					}
+					platformValue = ipaInfo.Platform
 				}
 			} else if versionValue == "" || buildNumberValue == "" {
 				// PKG files require explicit version and build number
@@ -300,7 +311,7 @@ Examples:
 				}
 				fmt.Fprintf(os.Stderr, "Uploading %s (%d bytes) to App Store Connect...\n", fileInfo.Name(), fileInfo.Size())
 				uploadCtx, uploadCancel := shared.ContextWithUploadTimeout(ctx)
-				err = asc.ExecuteUploadOperations(uploadCtx, filePath, fileResp.Data.Attributes.UploadOperations, uploadOpts...)
+				err = asc.ExecuteUploadOperationsFromFile(uploadCtx, artifactFile, fileResp.Data.Attributes.UploadOperations, uploadOpts...)
 				uploadCancel()
 				if err != nil {
 					return fmt.Errorf("builds upload: upload failed: %w", err)
@@ -313,7 +324,7 @@ Examples:
 					if src == nil || (src.File == nil && src.Composite == nil) {
 						fmt.Fprintln(os.Stderr, "Warning: --checksum requested but API provided no checksums to verify; skipping")
 					} else {
-						checksums, err := asc.VerifySourceFileChecksums(filePath, src)
+						checksums, err := asc.VerifySourceFileChecksumsFromFile(artifactFile, src)
 						if err != nil {
 							return fmt.Errorf("builds upload: checksum verification failed: %w", err)
 						}
@@ -351,14 +362,16 @@ Examples:
 						return fmt.Errorf("builds upload: failed to resolve build for version %q build %q", versionValue, buildNumberValue)
 					}
 
-					fmt.Fprintf(os.Stderr, "Build %s discovered; waiting for processing...\n", buildResp.Data.ID)
-					buildResp, err = client.WaitForBuildProcessing(requestCtx, buildResp.Data.ID, *pollInterval)
-					if err != nil {
-						return fmt.Errorf("builds upload: %w", err)
+					if testNotesValue != "" {
+						fmt.Fprintf(os.Stderr, "Build %s discovered; setting What to Test notes...\n", buildResp.Data.ID)
+						if _, err := shared.UpsertBetaBuildLocalization(requestCtx, client, buildResp.Data.ID, localeValue, testNotesValue); err != nil {
+							return fmt.Errorf("builds upload: %w", err)
+						}
 					}
 
-					if testNotesValue != "" {
-						if _, err := shared.UpsertBetaBuildLocalization(requestCtx, client, buildResp.Data.ID, localeValue, testNotesValue); err != nil {
+					if *wait {
+						fmt.Fprintf(os.Stderr, "Build %s discovered; waiting for processing...\n", buildResp.Data.ID)
+						if _, err := client.WaitForBuildProcessing(requestCtx, buildResp.Data.ID, *pollInterval); err != nil {
 							return fmt.Errorf("builds upload: %w", err)
 						}
 					}
@@ -529,7 +542,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && nextValue == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -857,7 +870,7 @@ Examples:
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to expire build")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

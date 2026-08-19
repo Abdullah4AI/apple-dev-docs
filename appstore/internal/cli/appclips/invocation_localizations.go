@@ -66,7 +66,7 @@ Examples:
 			invocationValue := strings.TrimSpace(*invocationID)
 			if invocationValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --invocation-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--invocation-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -114,19 +114,19 @@ Examples:
 			invocationValue := strings.TrimSpace(*invocationID)
 			if invocationValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --invocation-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--invocation-id")
 			}
 
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 
 			titleValue := strings.TrimSpace(*title)
 			if titleValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --title is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--title")
 			}
 
 			client, err := shared.GetASCClient()
@@ -174,7 +174,7 @@ Examples:
 			locValue := strings.TrimSpace(*localizationID)
 			if locValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			visited := map[string]bool{}
@@ -183,7 +183,7 @@ Examples:
 			})
 			if !visited["title"] {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			titleValue := strings.TrimSpace(*title)
@@ -229,11 +229,11 @@ Examples:
 			locValue := strings.TrimSpace(*localizationID)
 			if locValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

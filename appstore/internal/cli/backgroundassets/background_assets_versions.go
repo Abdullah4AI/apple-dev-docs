@@ -67,7 +67,7 @@ Examples:
 			assetIDValue := strings.TrimSpace(*assetID)
 			if assetIDValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --background-asset-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--background-asset-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > backgroundAssetsMaxLimit) {
 				return fmt.Errorf("background-assets versions list: --limit must be between 1 and %d", backgroundAssetsMaxLimit)
@@ -140,7 +140,7 @@ Examples:
 			versionIDValue := strings.TrimSpace(*versionID)
 			if versionIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -182,7 +182,7 @@ Examples:
 			assetIDValue := strings.TrimSpace(*assetID)
 			if assetIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --background-asset-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--background-asset-id")
 			}
 
 			client, err := shared.GetASCClient()

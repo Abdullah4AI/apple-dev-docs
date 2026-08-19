@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestReviewSubmissionsListCommand_InvalidState(t *testing.T) {
@@ -17,5 +19,12 @@ func TestReviewSubmissionsListCommand_InvalidState(t *testing.T) {
 	}
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected flag.ErrHelp for invalid --state, got: %v", err)
+	}
+	diagnostic, ok := shared.DiagnosticFromError(err)
+	if !ok {
+		t.Fatal("expected structured diagnostic for invalid --state")
+	}
+	if diagnostic.Code != shared.DiagnosticInvalidInput || diagnostic.Parameter != "--state" {
+		t.Fatalf("diagnostic = %+v, want code %q parameter %q", diagnostic, shared.DiagnosticInvalidInput, "--state")
 	}
 }

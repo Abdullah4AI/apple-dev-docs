@@ -68,7 +68,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*packageID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --package-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--package-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -110,7 +110,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*appStoreVersionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-store-version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-store-version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -152,7 +152,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*appStoreVersionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-store-version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-store-version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -194,7 +194,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*variantID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --variant-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--variant-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -236,7 +236,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*deltaID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --delta-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--delta-id")
 			}
 
 			client, err := shared.GetASCClient()

@@ -69,7 +69,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("beta-license-agreements list: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("beta-license-agreements list: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("beta-license-agreements list: %w", err)
@@ -147,15 +151,15 @@ Examples:
 			}
 			if idValue == "" && appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id or --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if idValue != "" && strings.TrimSpace(*appID) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --id and --app are mutually exclusive")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 			if appValue != "" && (strings.TrimSpace(*appFields) != "" || strings.TrimSpace(*include) != "") {
 				fmt.Fprintln(os.Stderr, "Error: --app-fields and --include are only valid with --id")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 
 			client, err := shared.GetASCClient()
@@ -211,12 +215,12 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			textValue := strings.TrimSpace(*agreementText)
 			if textValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --agreement-text is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--agreement-text")
 			}
 
 			client, err := shared.GetASCClient()

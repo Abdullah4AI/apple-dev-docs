@@ -10,7 +10,8 @@ import (
 )
 
 // Storefronts maps a subset of public App Store country codes to Apple storefront IDs.
-// These IDs are required for the X-Apple-Store-Front header when fetching ratings histograms.
+// These IDs are required for X-Apple-Store-Front requests such as ratings
+// histograms and platform-specific storefront search.
 var Storefronts = map[string]string{
 	"ae": "143481", // United Arab Emirates
 	"ai": "143538", // Anguilla

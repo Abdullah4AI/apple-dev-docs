@@ -86,7 +86,7 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -159,7 +159,7 @@ Examples:
 			imageValue := strings.TrimSpace(*imageID)
 			if imageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
 			if err != nil {
@@ -207,12 +207,12 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			file, info, err := openImageFile(pathValue)
@@ -291,12 +291,12 @@ Examples:
 			imageValue := strings.TrimSpace(*imageID)
 			if imageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			file, info, err := openImageFile(pathValue)
@@ -394,11 +394,11 @@ Examples:
 			imageValue := strings.TrimSpace(*imageID)
 			if imageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

@@ -202,7 +202,7 @@ Examples:
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			if passTypeIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --pass-type-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 			if *certificatesLimit != 0 && (*certificatesLimit < 1 || *certificatesLimit > 50) {
 				return fmt.Errorf("pass-type-ids view: --limit-certificates must be between 1 and 50")
@@ -283,12 +283,12 @@ Examples:
 			identifierValue := strings.TrimSpace(*identifier)
 			if identifierValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --identifier is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--identifier")
 			}
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -335,12 +335,12 @@ Examples:
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			if passTypeIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --pass-type-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -386,11 +386,11 @@ Examples:
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			if passTypeIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --pass-type-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

@@ -199,6 +199,29 @@ func initializeEmptyDataSlice(responseValue reflect.Value) {
 	}
 }
 
+// PageDataLen reports how many items a page's Data collection holds.
+// It returns ok=false when the page is nil (including a typed nil pointer) or
+// when GetData does not expose a countable item slice — byte slices such as
+// json.RawMessage are payloads, not item lists, so they are not counted.
+func PageDataLen(page PaginatedResponse) (int, bool) {
+	if page == nil {
+		return 0, false
+	}
+
+	// Handle typed nil (non-nil interface containing nil pointer) before
+	// invoking interface methods, mirroring the PaginateAll guard.
+	pageValue := reflect.ValueOf(page)
+	if pageValue.Kind() == reflect.Pointer && pageValue.IsNil() {
+		return 0, false
+	}
+
+	data := reflect.ValueOf(page.GetData())
+	if !data.IsValid() || data.Kind() != reflect.Slice || data.Type().Elem().Kind() == reflect.Uint8 {
+		return 0, false
+	}
+	return data.Len(), true
+}
+
 // aggregatePageData appends page data to result by reflecting on the shared Data field.
 // This keeps pagination aggregation generic while still validating type compatibility.
 func aggregatePageData(result, page PaginatedResponse) error {

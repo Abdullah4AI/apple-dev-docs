@@ -118,18 +118,18 @@ Examples:
 			trimmedOfferCodeID := strings.TrimSpace(*offerCodeID)
 			if trimmedOfferCodeID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			trimmedCode := strings.TrimSpace(*code)
 			if trimmedCode == "" {
 				fmt.Fprintln(os.Stderr, "Error: --code is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--code")
 			}
 
 			if *quantity <= 0 {
 				fmt.Fprintln(os.Stderr, "Error: --quantity is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--quantity")
 			}
 
 			var normalizedExpiration *string

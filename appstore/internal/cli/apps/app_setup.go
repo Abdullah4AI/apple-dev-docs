@@ -27,8 +27,8 @@ func AppSetupCommand() *ffcli.Command {
 Examples:
   asc app-setup info set --app "APP_ID" --primary-locale "en-US" --bundle-id "com.example.app"
   asc app-setup categories set --app "APP_ID" --primary GAMES
-  asc app-setup availability edit --app "APP_ID" --territory "USA,GBR" --available true --available-in-new-territories true
-  asc app-setup availability edit --app "APP_ID" --all-territories --available true --available-in-new-territories true
+  asc app-setup availability edit --app "APP_ID" --territory "USA,GBR" --available true
+  asc app-setup availability edit --app "APP_ID" --all-territories --available true
   asc app-setup pricing set --app "APP_ID" --price-point "PRICE_POINT_ID" --base-territory "USA"
   asc app-setup pricing set --app "APP_ID" --free --start-date "2024-03-01"
   asc app-setup localizations upload --version "VERSION_ID" --path "./localizations"`,
@@ -104,7 +104,7 @@ Examples:
 			appIDValue := strings.TrimSpace(*appID)
 			if appIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			bundleIDValue := strings.TrimSpace(*bundleID)
@@ -140,7 +140,7 @@ Examples:
 			}
 			if hasLocalization && localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required for app info localization updates")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 			if localeValue != "" {
 				if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
@@ -293,8 +293,8 @@ func AppSetupAvailabilityCommand() *ffcli.Command {
 		LongHelp: `Edit app availability for territories.
 
 Examples:
-  asc app-setup availability edit --app "APP_ID" --territory "USA,GBR" --available true --available-in-new-territories true
-  asc app-setup availability edit --app "APP_ID" --all-territories --available true --available-in-new-territories true`,
+  asc app-setup availability edit --app "APP_ID" --territory "USA,GBR" --available true
+  asc app-setup availability edit --app "APP_ID" --all-territories --available true`,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			AppSetupAvailabilitySetCommand(),
@@ -315,11 +315,12 @@ func AppSetupAvailabilitySetCommand() *ffcli.Command {
 		LongHelp: `Edit app availability for territories.
 
 Examples:
-  asc app-setup availability edit --app "123456789" --territory "USA,GBR" --available true --available-in-new-territories true
-  asc app-setup availability edit --app "123456789" --all-territories --available true --available-in-new-territories true
+  asc app-setup availability edit --app "123456789" --territory "USA,GBR" --available true
+  asc app-setup availability edit --app "123456789" --all-territories --available true
 
 Note:
-  This command only updates an existing app availability. If the app has no availability record yet, initialize availability in App Store Connect first.`,
+  This command only updates an existing app availability. If the app has no availability record yet, initialize availability in App Store Connect first.
+  If --available-in-new-territories is supplied, it verifies the existing policy; Apple does not expose an update operation for that setting.`,
 		ErrorPrefix:                      "app-setup availability edit",
 		IncludeAvailableInNewTerritories: true,
 	})
@@ -416,7 +417,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*path) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--path")
 			}
 
 			normalizedType, err := shared.NormalizeLocalizationType(*locType)
@@ -430,7 +431,7 @@ Examples:
 			case shared.LocalizationTypeVersion:
 				if strings.TrimSpace(*versionID) == "" {
 					fmt.Fprintln(os.Stderr, "Error: --version is required for version localizations")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--version")
 				}
 
 				valuesByLocale, err := shared.ReadLocalizationStrings(*path, locales)
@@ -482,7 +483,7 @@ Examples:
 				resolvedAppID := shared.ResolveAppID(*appID)
 				if resolvedAppID == "" {
 					fmt.Fprintln(os.Stderr, "Error: --app is required for app-info localizations")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--app")
 				}
 				valuesByLocale, err := shared.ReadLocalizationStrings(*path, locales)
 				if err != nil {

@@ -33,6 +33,64 @@ var ErrKeychainAccessDenied = errors.New("keychain access denied")
 // default selection resolves for the current no-profile lookup.
 var ErrDefaultCredentialsNotFound = errors.New("default credentials not found")
 
+// PrivateKeyErrorKind classifies private-key failures without exposing key
+// material or filesystem paths to callers that only need recovery metadata.
+type PrivateKeyErrorKind string
+
+const (
+	PrivateKeyNotFound             PrivateKeyErrorKind = "not_found"
+	PrivateKeyPermissionDenied     PrivateKeyErrorKind = "permission_denied"
+	PrivateKeyPermissionsInsecure  PrivateKeyErrorKind = "permissions_insecure"
+	PrivateKeyInvalidFormat        PrivateKeyErrorKind = "invalid_format"
+	PrivateKeyUnsupportedAlgorithm PrivateKeyErrorKind = "unsupported_algorithm"
+	PrivateKeyAccessFailed         PrivateKeyErrorKind = "access_failed"
+)
+
+// PrivateKeyError preserves the existing user-facing error while carrying a
+// bounded reason that CLI diagnostics can classify without parsing text.
+type PrivateKeyError struct {
+	Kind PrivateKeyErrorKind
+	err  error
+}
+
+func (e *PrivateKeyError) Error() string {
+	if e == nil || e.err == nil {
+		return "private key error"
+	}
+	return e.err.Error()
+}
+
+func (e *PrivateKeyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// PrivateKeyErrorKindOf returns the structured kind carried by err.
+func PrivateKeyErrorKindOf(err error) (PrivateKeyErrorKind, bool) {
+	var keyErr *PrivateKeyError
+	if !errors.As(err, &keyErr) || keyErr == nil {
+		return "", false
+	}
+	return keyErr.Kind, true
+}
+
+func newPrivateKeyError(kind PrivateKeyErrorKind, err error) error {
+	return &PrivateKeyError{Kind: kind, err: err}
+}
+
+func privateKeyAccessErrorKind(err error) PrivateKeyErrorKind {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return PrivateKeyNotFound
+	case errors.Is(err, os.ErrPermission):
+		return PrivateKeyPermissionDenied
+	default:
+		return PrivateKeyAccessFailed
+	}
+}
+
 var (
 	invalidBypassKeychainWarningsMu sync.Mutex
 	invalidBypassKeychainWarnings   = map[string]struct{}{}
@@ -224,29 +282,29 @@ func ValidateKeyFile(path string) error {
 func validateKeyFileForOS(path, goos string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("failed to open key file: %w", err)
+		return newPrivateKeyError(privateKeyAccessErrorKind(err), fmt.Errorf("failed to open key file: %w", err))
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("failed to stat key file: %w", err)
+		return newPrivateKeyError(privateKeyAccessErrorKind(err), fmt.Errorf("failed to stat key file: %w", err))
 	}
 	if info.IsDir() {
-		return fmt.Errorf("private key path is a directory")
+		return newPrivateKeyError(PrivateKeyInvalidFormat, errors.New("private key path is a directory"))
 	}
 	if filePermissionsTooPermissiveForOS(info.Mode(), goos) {
-		return fmt.Errorf("private key file is too permissive; run: chmod 600 %q", path)
+		return newPrivateKeyError(PrivateKeyPermissionsInsecure, fmt.Errorf("private key file is too permissive; run: chmod 600 %q", path))
 	}
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		return fmt.Errorf("failed to read key file: %w", err)
+		return newPrivateKeyError(privateKeyAccessErrorKind(err), fmt.Errorf("failed to read key file: %w", err))
 	}
 
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return fmt.Errorf("invalid PEM data")
+		return newPrivateKeyError(PrivateKeyInvalidFormat, errors.New("invalid PEM data"))
 	}
 
 	var privateKey *ecdsa.PrivateKey
@@ -254,16 +312,19 @@ func validateKeyFileForOS(path, goos string) error {
 		var ok bool
 		privateKey, ok = key.(*ecdsa.PrivateKey)
 		if !ok {
-			return fmt.Errorf("private key is not ECDSA")
+			return newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key is not ECDSA"))
 		}
 	} else {
 		privateKey, err = x509.ParseECPrivateKey(block.Bytes)
 		if err != nil {
-			return fmt.Errorf("invalid private key format: %w", err)
+			if _, rsaErr := x509.ParsePKCS1PrivateKey(block.Bytes); rsaErr == nil {
+				return newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key is not ECDSA"))
+			}
+			return newPrivateKeyError(PrivateKeyInvalidFormat, fmt.Errorf("invalid private key format: %w", err))
 		}
 	}
 	if privateKey.Curve != elliptic.P256() {
-		return fmt.Errorf("private key must use the P-256 curve")
+		return newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key must use the P-256 curve"))
 	}
 
 	return nil
@@ -273,7 +334,7 @@ func validateKeyFileForOS(path, goos string) error {
 func LoadPrivateKey(path string) (*ecdsa.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read key file: %w", err)
+		return nil, newPrivateKeyError(privateKeyAccessErrorKind(err), fmt.Errorf("failed to read key file: %w", err))
 	}
 	return LoadPrivateKeyFromPEM(data)
 }
@@ -282,7 +343,7 @@ func LoadPrivateKey(path string) (*ecdsa.PrivateKey, error) {
 func LoadPrivateKeyFromPEM(data []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, fmt.Errorf("invalid PEM data")
+		return nil, newPrivateKeyError(PrivateKeyInvalidFormat, errors.New("invalid PEM data"))
 	}
 
 	// Try PKCS8 first.
@@ -290,7 +351,10 @@ func LoadPrivateKeyFromPEM(data []byte) (*ecdsa.PrivateKey, error) {
 	if err == nil {
 		ecdsaKey, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("private key is not ECDSA")
+			return nil, newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key is not ECDSA"))
+		}
+		if ecdsaKey.Curve != elliptic.P256() {
+			return nil, newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key must use the P-256 curve"))
 		}
 		return ecdsaKey, nil
 	}
@@ -298,7 +362,13 @@ func LoadPrivateKeyFromPEM(data []byte) (*ecdsa.PrivateKey, error) {
 	// Try SEC1 EC private key as fallback.
 	ecdsaKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("invalid private key: %w", err)
+		if _, rsaErr := x509.ParsePKCS1PrivateKey(block.Bytes); rsaErr == nil {
+			return nil, newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key is not ECDSA"))
+		}
+		return nil, newPrivateKeyError(PrivateKeyInvalidFormat, fmt.Errorf("invalid private key: %w", err))
+	}
+	if ecdsaKey.Curve != elliptic.P256() {
+		return nil, newPrivateKeyError(PrivateKeyUnsupportedAlgorithm, errors.New("private key must use the P-256 curve"))
 	}
 
 	return ecdsaKey, nil

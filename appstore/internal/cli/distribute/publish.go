@@ -123,7 +123,7 @@ Examples:
 			for _, item := range required {
 				if strings.TrimSpace(item.value) == "" {
 					fmt.Fprintf(os.Stderr, "Error: --%s is required\n", item.name)
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--" + item.name)
 				}
 			}
 			if _, err := core.ValidateEndpoint(*endpoint); err != nil {

@@ -69,25 +69,25 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return fmt.Errorf("review history: %w", shared.UsageError("unexpected positional arguments"))
+				return fmt.Errorf("review history: %w", shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return shared.UsageError("--limit must be between 1 and 200")
+				return shared.WithDiagnostic(shared.UsageError("--limit must be between 1 and 200"), shared.DiagnosticInvalidInput, "--limit")
 			}
 
 			platforms, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platform))
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--platform")
 			}
 			states, err := shared.NormalizeReviewSubmissionStates(shared.SplitCSVUpper(*state))
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--state")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()

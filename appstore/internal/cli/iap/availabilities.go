@@ -59,7 +59,7 @@ Examples:
 			id := strings.TrimSpace(*availabilityID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -112,7 +112,7 @@ Examples:
 			id := strings.TrimSpace(*availabilityID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()

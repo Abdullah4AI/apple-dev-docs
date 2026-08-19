@@ -38,11 +38,11 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*reviewID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --review-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--review-id")
 			}
 			if strings.TrimSpace(*response) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --response is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--response")
 			}
 
 			client, err := shared.GetASCClient()
@@ -111,7 +111,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*responseID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -155,11 +155,11 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*responseID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -207,7 +207,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*reviewID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --review-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--review-id")
 			}
 
 			client, err := shared.GetASCClient()

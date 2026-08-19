@@ -69,6 +69,82 @@ func TestBuildsUploadResolvesExactBundleIDAndChecksIPAIdentityBeforeReservation(
 	}
 }
 
+func TestBuildsUploadAutoDetectsIPAPlatformBeforeReservation(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	ipaPath := writeBuildUploadIPAWithPlatform(t, "com.example.demo", "appletvos", []string{"AppleTVOS"})
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"apps","id":"123456789","attributes":{"name":"Demo","bundleId":"com.example.demo"}}}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read reservation request: %v", err)
+			}
+			if !strings.Contains(string(body), `"platform":"TV_OS"`) {
+				t.Fatalf("expected auto-detected TV_OS platform in reservation body: %s", body)
+			}
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleShortVersionString":"1.0.0","cfBundleVersion":"42","platform":"TV_OS"}}}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploadFiles":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploadFiles","id":"file-1","attributes":{"fileName":"app.ipa","fileSize":1,"uti":"com.apple.itunes.ipa","assetType":"ASSET","uploadOperations":[]}}}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	if err := root.Parse([]string{
+		"builds", "upload",
+		"--app", "123456789",
+		"--ipa", ipaPath,
+		"--dry-run",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if err := root.Run(context.Background()); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+}
+
+func TestBuildsUploadRejectsExplicitIPAPlatformMismatchBeforeNetwork(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	ipaPath := writeBuildUploadIPAWithPlatform(t, "com.example.demo", "xros", []string{"XROS"})
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	if err := root.Parse([]string{
+		"builds", "upload",
+		"--app", "123456789",
+		"--ipa", ipaPath,
+		"--platform", "IOS",
+		"--dry-run",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := root.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected platform mismatch error")
+	}
+	if !strings.Contains(err.Error(), "--platform IOS does not match IPA platform VISION_OS") {
+		t.Fatalf("unexpected mismatch error: %v", err)
+	}
+}
+
 func TestBuildsUploadRejectsMissingOrAmbiguousExactAppBeforeReservation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -220,11 +296,18 @@ func TestBuildsUploadRequiresTopLevelIPABundleIDBeforeAppLookup(t *testing.T) {
 
 func writeBuildUploadIPA(t *testing.T, bundleID string) string {
 	t.Helper()
+	return writeBuildUploadIPAWithPlatform(t, bundleID, "", nil)
+}
+
+func writeBuildUploadIPAWithPlatform(t *testing.T, bundleID, platformName string, supportedPlatforms []string) string {
+	t.Helper()
 
 	plistData, err := plist.Marshal(map[string]any{
 		"CFBundleIdentifier":         bundleID,
 		"CFBundleShortVersionString": "1.0.0",
 		"CFBundleVersion":            "42",
+		"DTPlatformName":             platformName,
+		"CFBundleSupportedPlatforms": supportedPlatforms,
 	}, plist.XMLFormat)
 	if err != nil {
 		t.Fatalf("marshal Info.plist: %v", err)

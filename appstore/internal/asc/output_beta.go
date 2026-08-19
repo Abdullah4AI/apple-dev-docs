@@ -1,7 +1,9 @@
 package asc
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -82,6 +84,48 @@ type BuildBetaGroupMembershipFailure struct {
 type BetaFeedbackSubmissionDeleteResult struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
+}
+
+// BetaTestersExportSummary represents CLI output for beta tester CSV exports.
+type BetaTestersExportSummary struct {
+	AppID         string `json:"appId"`
+	OutputFile    string `json:"outputFile"`
+	Total         int    `json:"total"`
+	IncludeGroups bool   `json:"includeGroups"`
+}
+
+// BetaTestersImportFailure records one CSV row that could not be imported.
+type BetaTestersImportFailure struct {
+	Row   int    `json:"row"`
+	Email string `json:"email,omitempty"`
+	Error string `json:"error"`
+}
+
+// BetaTestersImportSummary represents CLI output for beta tester CSV imports.
+type BetaTestersImportSummary struct {
+	AppID           string                     `json:"appId"`
+	InputFile       string                     `json:"inputFile"`
+	DryRun          bool                       `json:"dryRun"`
+	Invite          bool                       `json:"invite"`
+	SkipExisting    bool                       `json:"skipExisting"`
+	ContinueOnError bool                       `json:"continueOnError"`
+	AppliedGroup    string                     `json:"appliedGroup,omitempty"`
+	Total           int                        `json:"total"`
+	Created         int                        `json:"created"`
+	Existed         int                        `json:"existed"`
+	Updated         int                        `json:"updated"`
+	Invited         int                        `json:"invited"`
+	Failed          int                        `json:"failed"`
+	Failures        []BetaTestersImportFailure `json:"failures,omitempty"`
+}
+
+// TestFlightSyncSummary represents CLI output for testflight sync pull.
+type TestFlightSyncSummary struct {
+	File    string `json:"file"`
+	App     string `json:"app"`
+	Groups  int    `json:"groups"`
+	Builds  int    `json:"builds"`
+	Testers int    `json:"testers"`
 }
 
 func formatBetaTesterName(attr BetaTesterAttributes) string {
@@ -201,4 +245,154 @@ func betaTesterInvitationResultRows(result *BetaTesterInvitationResult) ([]strin
 	headers := []string{"Invitation ID", "Tester ID", "App ID", "Email"}
 	rows := [][]string{{result.InvitationID, result.TesterID, result.AppID, result.Email}}
 	return headers, rows
+}
+
+func betaTestersExportSummaryRows(summary *BetaTestersExportSummary) ([]string, [][]string) {
+	headers := []string{"App ID", "Output File", "Total", "Include Groups"}
+	rows := [][]string{{
+		summary.AppID,
+		summary.OutputFile,
+		fmt.Sprintf("%d", summary.Total),
+		fmt.Sprintf("%t", summary.IncludeGroups),
+	}}
+	return headers, rows
+}
+
+func betaTestersImportSummaryRows(summary *BetaTestersImportSummary) ([]string, [][]string) {
+	headers := []string{"App ID", "Input File", "Dry Run", "Total", "Created", "Existed", "Updated", "Invited", "Failed"}
+	rows := [][]string{{
+		summary.AppID,
+		summary.InputFile,
+		fmt.Sprintf("%t", summary.DryRun),
+		fmt.Sprintf("%d", summary.Total),
+		fmt.Sprintf("%d", summary.Created),
+		fmt.Sprintf("%d", summary.Existed),
+		fmt.Sprintf("%d", summary.Updated),
+		fmt.Sprintf("%d", summary.Invited),
+		fmt.Sprintf("%d", summary.Failed),
+	}}
+	return headers, rows
+}
+
+func betaTestersImportFailureRows(failures []BetaTestersImportFailure) ([]string, [][]string) {
+	headers := []string{"Row", "Email", "Error"}
+	rows := make([][]string, 0, len(failures))
+	for _, failure := range failures {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", failure.Row),
+			failure.Email,
+			compactWhitespace(failure.Error),
+		})
+	}
+	return headers, rows
+}
+
+func testFlightSyncSummaryRows(summary *TestFlightSyncSummary) ([]string, [][]string) {
+	headers := []string{"File", "App", "Groups", "Builds", "Testers"}
+	rows := [][]string{{
+		summary.File,
+		compactWhitespace(summary.App),
+		fmt.Sprintf("%d", summary.Groups),
+		fmt.Sprintf("%d", summary.Builds),
+		fmt.Sprintf("%d", summary.Testers),
+	}}
+	return headers, rows
+}
+
+// BetaTesterUsagesPage is the printed page for tester usage metrics: the raw
+// metric data plus an optional resolved-testers sidecar keyed by tester ID.
+// The data elements stay byte-identical to Apple's response.
+type BetaTesterUsagesPage struct {
+	Data     []json.RawMessage                    `json:"data"`
+	Links    Links                                `json:"links"`
+	Included json.RawMessage                      `json:"included,omitempty"`
+	Meta     json.RawMessage                      `json:"meta,omitempty"`
+	Testers  map[string]BetaTesterUsageTesterInfo `json:"testers,omitempty"`
+}
+
+// BetaTesterUsageTesterInfo describes one resolved beta tester in the
+// testers sidecar keyed by tester ID.
+type BetaTesterUsageTesterInfo struct {
+	ID         string `json:"id"`
+	Email      string `json:"email,omitempty"`
+	FirstName  string `json:"firstName,omitempty"`
+	LastName   string `json:"lastName,omitempty"`
+	State      string `json:"state,omitempty"`
+	InviteType string `json:"inviteType,omitempty"`
+}
+
+func betaTesterUsagesPageTables(v *BetaTesterUsagesPage, render func([]string, [][]string)) error {
+	type metricEntry struct {
+		DataPoints []struct {
+			Start  string `json:"start"`
+			End    string `json:"end"`
+			Values struct {
+				SessionCount  *int `json:"sessionCount"`
+				CrashCount    *int `json:"crashCount"`
+				FeedbackCount *int `json:"feedbackCount"`
+			} `json:"values"`
+		} `json:"dataPoints"`
+		Dimensions struct {
+			BetaTesters struct {
+				Data string `json:"data"`
+			} `json:"betaTesters"`
+		} `json:"dimensions"`
+	}
+	formatCount := func(n *int) string {
+		if n == nil {
+			return ""
+		}
+		return fmt.Sprintf("%d", *n)
+	}
+	rows := make([][]string, 0, len(v.Data))
+	for _, raw := range v.Data {
+		var entry metricEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		for _, point := range entry.DataPoints {
+			rows = append(rows, []string{
+				entry.Dimensions.BetaTesters.Data,
+				point.Start,
+				point.End,
+				formatCount(point.Values.SessionCount),
+				formatCount(point.Values.CrashCount),
+				formatCount(point.Values.FeedbackCount),
+			})
+		}
+	}
+	render([]string{"Tester ID", "Start", "End", "Sessions", "Crashes", "Feedback"}, rows)
+
+	if len(v.Testers) > 0 {
+		ids := make([]string, 0, len(v.Testers))
+		for id := range v.Testers {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		testerRows := make([][]string, 0, len(ids))
+		for _, id := range ids {
+			tester := v.Testers[id]
+			testerRows = append(testerRows, []string{
+				tester.ID, tester.Email, tester.FirstName, tester.LastName, tester.State,
+			})
+		}
+		render([]string{"Tester ID", "Email", "First Name", "Last Name", "State"}, testerRows)
+	}
+	return nil
+}
+
+// GetLinks lets the usages page participate in pagination warnings.
+func (p *BetaTesterUsagesPage) GetLinks() *Links {
+	if p == nil {
+		return nil
+	}
+	return &p.Links
+}
+
+// GetData exposes the page's data array for page-size reporting.
+func (p *BetaTesterUsagesPage) GetData() any {
+	if p == nil {
+		return nil
+	}
+	return p.Data
 }

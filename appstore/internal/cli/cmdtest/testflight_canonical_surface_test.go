@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestTestFlightHelpShowsCanonicalSubcommands(t *testing.T) {
@@ -1010,19 +1012,22 @@ func TestTestFlightCrashesLogOutputByCrashLogID(t *testing.T) {
 
 func TestTestFlightCrashesLogRequiresExactlyOneLookupFlag(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		wantErr string
+		name     string
+		args     []string
+		wantErr  string
+		wantCode shared.DiagnosticCode
 	}{
 		{
-			name:    "missing all lookup flags",
-			args:    []string{"testflight", "crashes", "log"},
-			wantErr: "exactly one of --submission-id or --crash-log-id is required",
+			name:     "missing all lookup flags",
+			args:     []string{"testflight", "crashes", "log"},
+			wantErr:  "exactly one of --submission-id or --crash-log-id is required",
+			wantCode: shared.DiagnosticRequiredInputMissing,
 		},
 		{
-			name:    "both lookup flags",
-			args:    []string{"testflight", "crashes", "log", "--submission-id", "sub-1", "--crash-log-id", "log-1"},
-			wantErr: "exactly one of --submission-id or --crash-log-id is required",
+			name:     "both lookup flags",
+			args:     []string{"testflight", "crashes", "log", "--submission-id", "sub-1", "--crash-log-id", "log-1"},
+			wantErr:  "exactly one of --submission-id or --crash-log-id is required",
+			wantCode: shared.DiagnosticConflictingInput,
 		},
 	}
 
@@ -1041,6 +1046,13 @@ func TestTestFlightCrashesLogRequiresExactlyOneLookupFlag(t *testing.T) {
 
 			if !errors.Is(runErr, flag.ErrHelp) {
 				t.Fatalf("expected ErrHelp, got %v", runErr)
+			}
+			diagnostic, ok := shared.DiagnosticFromError(runErr)
+			if !ok {
+				t.Fatalf("expected structured diagnostic, got %v", runErr)
+			}
+			if diagnostic.Code != test.wantCode || diagnostic.Parameter != "" {
+				t.Fatalf("diagnostic = %+v, want code %q with empty parameter", diagnostic, test.wantCode)
 			}
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)

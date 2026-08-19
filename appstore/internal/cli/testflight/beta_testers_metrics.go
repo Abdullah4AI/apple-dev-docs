@@ -46,7 +46,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				fmt.Fprintln(os.Stderr, "Error: --limit must be between 1 and 200")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--limit")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("testflight beta-testers metrics: %w", err)
@@ -57,24 +57,27 @@ Examples:
 			if testerValue == "" {
 				testerValue = aliasValue
 			} else if aliasValue != "" && aliasValue != testerValue {
-				return fmt.Errorf("testflight beta-testers metrics: --tester-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers metrics: --tester-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 
 			periodValue, err := normalizeBetaTesterUsagePeriod(*period)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
-				return flag.ErrHelp
+				return err
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			nextValue := strings.TrimSpace(*next)
 			if nextValue == "" && testerValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester-id")
 			}
 			if nextValue == "" && resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -108,7 +111,11 @@ func normalizeBetaTesterUsagePeriod(value string) (string, error) {
 		return "", nil
 	}
 	if _, ok := betaTesterUsagePeriods[value]; !ok {
-		return "", fmt.Errorf("--period must be one of: %s", strings.Join(betaTesterUsagePeriodList(), ", "))
+		return "", shared.WithDiagnostic(
+			shared.NewValidationError(fmt.Errorf("--period must be one of: %s", strings.Join(betaTesterUsagePeriodList(), ", "))),
+			shared.DiagnosticInvalidInput,
+			"--period",
+		)
 	}
 	return value, nil
 }

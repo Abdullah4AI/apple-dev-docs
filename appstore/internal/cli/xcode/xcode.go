@@ -124,19 +124,19 @@ Examples:
 			}
 			if strings.TrimSpace(*workspacePath) == "" && strings.TrimSpace(*projectPath) == "" {
 				fmt.Fprintln(os.Stderr, "Error: exactly one of --workspace or --project is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if strings.TrimSpace(*workspacePath) != "" && strings.TrimSpace(*projectPath) != "" {
 				fmt.Fprintln(os.Stderr, "Error: exactly one of --workspace or --project is required")
-				return shared.MissingRequiredUsageError()
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 			if strings.TrimSpace(*scheme) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --scheme is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--scheme")
 			}
 			if strings.TrimSpace(*archivePath) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --archive-path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--archive-path")
 			}
 			if emptyFlag := firstExplicitlyEmptyFlag(fs, "configuration"); emptyFlag != "" {
 				return shared.UsageErrorf("--%s must not be empty", emptyFlag)
@@ -226,11 +226,11 @@ Examples:
 			}
 			if strings.TrimSpace(*archivePath) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --archive-path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--archive-path")
 			}
 			if strings.TrimSpace(*ipaPath) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --ipa-path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ipa-path")
 			}
 			if *wait && *pollInterval <= 0 {
 				return shared.UsageError("--poll-interval must be greater than 0")
@@ -465,7 +465,7 @@ Examples:
 			}
 			if trimmedIPAPath == "" {
 				fmt.Fprintln(os.Stderr, "Error: --ipa is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ipa")
 			}
 			if !strings.EqualFold(filepath.Ext(trimmedIPAPath), ".ipa") {
 				return shared.UsageError("--ipa must end with .ipa")

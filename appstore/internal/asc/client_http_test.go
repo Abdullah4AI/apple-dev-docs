@@ -2369,6 +2369,45 @@ func TestGetBetaTesters_WithAppFilter(t *testing.T) {
 	}
 }
 
+func TestGetBetaTesters_WithNameAndIDFilters(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"betaTesters","id":"1","attributes":{"firstName":"Ada","lastName":"Lovelace"}}]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/betaTesters" {
+			t.Fatalf("expected path /v1/betaTesters, got %s", req.URL.Path)
+		}
+		values := req.URL.Query()
+		if values.Get("filter[apps]") != "123" {
+			t.Fatalf("expected filter[apps]=123, got %q", values.Get("filter[apps]"))
+		}
+		if values.Get("filter[firstName]") != "Ada" {
+			t.Fatalf("expected filter[firstName]=Ada, got %q", values.Get("filter[firstName]"))
+		}
+		if values.Get("filter[lastName]") != "Lovelace" {
+			t.Fatalf("expected filter[lastName]=Lovelace, got %q", values.Get("filter[lastName]"))
+		}
+		if values.Get("filter[id]") != "tester-1,tester-2" {
+			t.Fatalf("expected filter[id]=tester-1,tester-2, got %q", values.Get("filter[id]"))
+		}
+		if values.Get("filter[email]") != "" {
+			t.Fatalf("expected no filter[email], got %q", values.Get("filter[email]"))
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.GetBetaTesters(
+		context.Background(),
+		"123",
+		WithBetaTestersFirstName(" Ada "),
+		WithBetaTestersLastName(" Lovelace "),
+		WithBetaTestersIDs([]string{"tester-1", "tester-2"}),
+	); err != nil {
+		t.Fatalf("GetBetaTesters() error: %v", err)
+	}
+}
+
 func TestGetBetaTesters_WithBuildFilter(t *testing.T) {
 	// API only allows one relationship filter; build filter takes precedence over apps.
 	response := jsonResponse(http.StatusOK, `{"data":[{"type":"betaTesters","id":"1","attributes":{"email":"tester@example.com"}}]}`)

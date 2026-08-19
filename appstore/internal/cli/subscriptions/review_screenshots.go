@@ -69,7 +69,7 @@ Examples:
 			id := strings.TrimSpace(*screenshotID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--screenshot-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -120,13 +120,13 @@ Examples:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
 				return shared.UsageError(err.Error())
@@ -186,13 +186,13 @@ Examples:
 			id := strings.TrimSpace(*screenshotID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--screenshot-id")
 			}
 
 			checksumValue := strings.TrimSpace(*checksum)
 			if checksumValue == "" && !uploaded.IsSet() {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -248,11 +248,11 @@ Examples:
 			id := strings.TrimSpace(*screenshotID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--screenshot-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

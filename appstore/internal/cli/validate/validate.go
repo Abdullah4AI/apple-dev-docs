@@ -93,27 +93,27 @@ Subscriptions:
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
 				fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n\n", args[0])
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "")
 			}
 			trimmedVersion := strings.TrimSpace(*version)
 			trimmedVersionID := strings.TrimSpace(*versionID)
 			if trimmedVersion == "" && trimmedVersionID == "" {
-				return shared.UsageError("--version or --version-id is required")
+				return shared.WithDiagnostic(shared.UsageError("--version or --version-id is required"), shared.DiagnosticRequiredInputMissing, "")
 			}
 			if trimmedVersion != "" && trimmedVersionID != "" {
-				return shared.UsageError("--version and --version-id are mutually exclusive")
+				return shared.WithDiagnostic(shared.UsageError("--version and --version-id are mutually exclusive"), shared.DiagnosticConflictingInput, "--version-id")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
+				return shared.WithDiagnostic(shared.UsageError("--app is required (or set ASC_APP_ID)"), shared.DiagnosticRequiredInputMissing, "--app")
 			}
 
 			var normalizedPlatform string
 			if strings.TrimSpace(*platform) != "" {
 				value, err := shared.NormalizeAppStoreVersionPlatform(*platform)
 				if err != nil {
-					return fmt.Errorf("validate: %w", err)
+					return shared.WithDiagnostic(fmt.Errorf("validate: %w", err), shared.DiagnosticInvalidInput, "--platform")
 				}
 				normalizedPlatform = value
 			}
@@ -139,7 +139,7 @@ func wrapValidateSubcommand(cmd *ffcli.Command, parentFlags *flag.FlagSet) *ffcl
 	originalExec := cmd.Exec
 	cmd.Exec = func(ctx context.Context, args []string) error {
 		if message := validateParentFlagUsageMessage(parentFlags); message != "" {
-			return shared.UsageError(message)
+			return shared.WithDiagnostic(shared.UsageError(message), shared.DiagnosticInvalidInput, "")
 		}
 		return originalExec(ctx, args)
 	}

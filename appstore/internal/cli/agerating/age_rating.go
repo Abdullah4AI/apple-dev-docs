@@ -117,7 +117,7 @@ Examples:
 			}
 			if appInfoValue == "" && versionValue == "" && appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			fieldValues, err := shared.NormalizeSelection(*fields, ageRatingSparseFields441, "--fields")
 			if err != nil {
@@ -232,7 +232,7 @@ Examples:
 				}
 				if appInfoValue == "" && versionValue == "" && appValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --id or --app is required (or set ASC_APP_ID)")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("")
 				}
 			}
 

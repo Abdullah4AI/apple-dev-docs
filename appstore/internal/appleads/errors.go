@@ -66,10 +66,47 @@ func (e *APIError) Error() string {
 	if message != "" {
 		parts = append(parts, message)
 	}
+	surfacedCode := strings.TrimSpace(e.MessageCode)
+	if surfacedCode == "" {
+		surfacedCode = strings.TrimSpace(e.Code)
+	}
+	if surfacedCode == "" {
+		surfacedCode = strings.TrimSpace(e.Field)
+	}
+	if details := formatAPIErrorDetails(e.Details, surfacedCode, message); details != "" {
+		parts = append(parts, details)
+	}
 	if len(parts) == 0 {
 		return "Apple Ads API request failed"
 	}
 	return strings.Join(parts, ": ")
+}
+
+func formatAPIErrorDetails(details []APIErrorDetail, surfacedCode, surfacedMessage string) string {
+	formatted := make([]string, 0, len(details))
+	for _, detail := range details {
+		parts := make([]string, 0, 3)
+		code := strings.TrimSpace(detail.Code)
+		message := strings.TrimSpace(detail.Message)
+		alreadySurfaced := code == strings.TrimSpace(surfacedCode) && message == strings.TrimSpace(surfacedMessage)
+		if !alreadySurfaced {
+			if code != "" {
+				parts = append(parts, code)
+			}
+			if message != "" {
+				parts = append(parts, message)
+			}
+		}
+		if len(detail.Info) > 0 {
+			if info, err := json.Marshal(detail.Info); err == nil {
+				parts = append(parts, string(info))
+			}
+		}
+		if len(parts) > 0 {
+			formatted = append(formatted, strings.Join(parts, ": "))
+		}
+	}
+	return strings.Join(formatted, "; ")
 }
 
 func (e *APIError) HTTPStatusCode() int {

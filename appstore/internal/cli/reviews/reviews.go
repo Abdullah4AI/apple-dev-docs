@@ -71,12 +71,12 @@ Examples:
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
-				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
+				return shared.WithDiagnostic(shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " ")), shared.DiagnosticInvalidInput, "")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
+				return shared.WithDiagnostic(shared.UsageError("--app is required (or set ASC_APP_ID)"), shared.DiagnosticRequiredInputMissing, "--app")
 			}
 
 			// Execute the list functionality directly
@@ -132,30 +132,30 @@ Examples:
 
 func executeReviewsList(ctx context.Context, appID, output string, pretty bool, stars int, territory, sort string, limit int, next string, paginate bool, responseState string, onlyUnresponded bool, includeResponse bool, responseFields string) error {
 	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("reviews: --limit must be between 1 and 200")
+		return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews: --limit must be between 1 and 200")), shared.DiagnosticInvalidInput, "--limit")
 	}
 	if stars != 0 && (stars < 1 || stars > 5) {
-		return fmt.Errorf("reviews: --stars must be between 1 and 5")
+		return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews: --stars must be between 1 and 5")), shared.DiagnosticInvalidInput, "--stars")
 	}
 	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("reviews: %w", err)
+		return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews: %w", err)), shared.DiagnosticInvalidInput, "--next")
 	}
 	if err := shared.ValidateSort(sort, "rating", "-rating", "createdDate", "-createdDate"); err != nil {
-		return fmt.Errorf("reviews: %w", err)
+		return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews: %w", err)), shared.DiagnosticInvalidInput, "--sort")
 	}
 	normalizedResponseState, err := normalizeReviewResponseState(responseState)
 	if err != nil {
-		return shared.UsageError(err.Error())
+		return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--response-state")
 	}
 	if onlyUnresponded {
 		if normalizedResponseState == reviewResponseStateResponded {
-			return shared.UsageError("--only-unresponded cannot be combined with --response-state responded")
+			return shared.WithDiagnostic(shared.UsageError("--only-unresponded cannot be combined with --response-state responded"), shared.DiagnosticConflictingInput, "")
 		}
 		normalizedResponseState = reviewResponseStateUnresponded
 	}
 	normalizedResponseFields, err := normalizeReviewResponseFields(responseFields)
 	if err != nil {
-		return shared.UsageError(err.Error())
+		return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--response-fields")
 	}
 
 	client, err := shared.GetASCClient()

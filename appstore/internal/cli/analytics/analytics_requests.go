@@ -40,11 +40,11 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			if strings.TrimSpace(*accessType) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --access-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--access-type")
 			}
 			normalizedAccessType, err := normalizeAnalyticsAccessType(*accessType)
 			if err != nil {
@@ -149,7 +149,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" && strings.TrimSpace(*requestID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -319,14 +319,14 @@ Examples:
 			id := strings.TrimSpace(*requestID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --request-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--request-id")
 			}
 			if err := validateAnalyticsRequestID(id); err != nil {
 				return fmt.Errorf("analytics requests delete: %w", err)
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -394,7 +394,7 @@ Examples:
 			})
 			if strings.TrimSpace(*requestID) == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --request-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--request-id")
 			}
 			if strings.TrimSpace(*requestID) != "" {
 				if err := validateAnalyticsRequestID(*requestID); err != nil {
@@ -555,11 +555,11 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*requestID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --request-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--request-id")
 			}
 			if strings.TrimSpace(*instanceID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--instance-id")
 			}
 			if err := validateAnalyticsRequestID(*requestID); err != nil {
 				return fmt.Errorf("analytics download: %w", err)

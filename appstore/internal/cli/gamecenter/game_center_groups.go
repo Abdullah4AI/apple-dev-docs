@@ -92,7 +92,7 @@ Examples:
 			nextURL := strings.TrimSpace(*next)
 			if resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -168,7 +168,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -253,12 +253,12 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			if strings.TrimSpace(*referenceName) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --reference-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 			value := strings.TrimSpace(*referenceName)
 
@@ -302,11 +302,11 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -391,7 +391,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -454,7 +454,7 @@ func GameCenterGroupAchievementsSetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 
 	groupID := fs.String("group-id", "", "Game Center group ID")
-	ids := fs.String("ids", "", "Comma-separated achievement IDs")
+	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated achievement IDs")
 	v2 := fs.Bool("v2", false, "Use v2 relationships endpoint")
 	output := shared.BindOutputFlags(fs)
 
@@ -473,12 +473,12 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
-			idsValue := shared.SplitCSV(*ids)
+			idsValue := shared.SplitCSV(ids.String())
 			if len(idsValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ids")
 			}
 
 			client, err := shared.GetASCClient()
@@ -565,7 +565,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -628,7 +628,7 @@ func GameCenterGroupLeaderboardsSetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 
 	groupID := fs.String("group-id", "", "Game Center group ID")
-	ids := fs.String("ids", "", "Comma-separated leaderboard IDs")
+	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated leaderboard IDs")
 	v2 := fs.Bool("v2", false, "Use v2 relationships endpoint")
 	output := shared.BindOutputFlags(fs)
 
@@ -647,12 +647,12 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
-			idsValue := shared.SplitCSV(*ids)
+			idsValue := shared.SplitCSV(ids.String())
 			if len(idsValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ids")
 			}
 
 			client, err := shared.GetASCClient()
@@ -737,7 +737,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -851,7 +851,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -952,7 +952,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1027,11 +1027,11 @@ Examples:
 
 			if strings.TrimSpace(*groupID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 			if len(shared.SplitCSV(*ids)) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ids")
 			}
 
 			outputFlagUsed := false
@@ -1107,7 +1107,7 @@ Examples:
 			nextURL := strings.TrimSpace(*next)
 			if id == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()

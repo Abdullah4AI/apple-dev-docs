@@ -38,7 +38,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*submissionID) == "" && strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id or --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if strings.TrimSpace(*submissionID) != "" && strings.TrimSpace(*versionID) != "" {
 				return shared.UsageError("--id and --version-id are mutually exclusive")
@@ -202,7 +202,11 @@ func resolveReviewSubmissionVersionIDFromItems(ctx context.Context, client *asc.
 		return "", nil
 	}
 
+	// include=, not just fields[]: the API only materialises relationship linkage for an included
+	// relationship, so without it every item arrives with no relationships and this resolver reports
+	// "no version" for a submission that plainly has one.
 	opts := []asc.ReviewSubmissionItemsOption{
+		asc.WithReviewSubmissionItemsInclude([]string{"appStoreVersion"}),
 		asc.WithReviewSubmissionItemsFields([]string{"appStoreVersion"}),
 		asc.WithReviewSubmissionItemsLimit(200),
 	}

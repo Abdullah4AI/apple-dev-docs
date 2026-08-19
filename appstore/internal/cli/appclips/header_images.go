@@ -61,7 +61,7 @@ Examples:
 			idValue := strings.TrimSpace(*imageID)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -106,13 +106,13 @@ Examples:
 			locValue := strings.TrimSpace(*localizationID)
 			if locValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			fileValue := strings.TrimSpace(*filePath)
 			if fileValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			client, err := shared.GetASCClient()
@@ -155,11 +155,11 @@ Examples:
 			idValue := strings.TrimSpace(*imageID)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

@@ -90,7 +90,7 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
 			client, err := shared.GetASCClient()

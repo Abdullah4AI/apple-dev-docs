@@ -24,8 +24,8 @@ func ReleaseStageCommand() *ffcli.Command {
 	allowDeletes := fs.Bool("allow-deletes", false, "Allow destructive delete operations when applying --metadata-dir (disables default locale fallback for missing locales)")
 	routingCoverageFile := fs.String("routing-coverage-file", "", "[experimental] Routing app coverage GeoJSON file to reconcile before readiness")
 	copyMetadataFrom := fs.String("copy-metadata-from", "", "Copy localization metadata from this source version string")
-	copyFields := fs.String("copy-fields", "", "Comma-separated metadata fields to copy: description, keywords, marketingUrl, promotionalText, supportUrl, whatsNew")
-	excludeFields := fs.String("exclude-fields", "", "Comma-separated metadata fields to exclude from copy")
+	copyFields := shared.BindOnceCSVFlag(fs, "copy-fields", "Comma-separated metadata fields to copy: description, keywords, marketingUrl, promotionalText, supportUrl, whatsNew")
+	excludeFields := shared.BindOnceCSVFlag(fs, "exclude-fields", "Comma-separated metadata fields to exclude from copy")
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	timeout := fs.Duration("timeout", releaseRunTimeout, "Maximum time to run the staging pipeline")
 	dryRun := fs.Bool("dry-run", false, "Preview deterministic plan without mutations")
@@ -86,11 +86,11 @@ Examples:
 				return shared.UsageError("--timeout must be greater than 0")
 			}
 
-			copyFieldsValue, err := shared.NormalizeVersionMetadataCopyFields(*copyFields, "--copy-fields")
+			copyFieldsValue, err := shared.NormalizeVersionMetadataCopyFields(copyFields.String(), "--copy-fields")
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
-			excludeFieldsValue, err := shared.NormalizeVersionMetadataCopyFields(*excludeFields, "--exclude-fields")
+			excludeFieldsValue, err := shared.NormalizeVersionMetadataCopyFields(excludeFields.String(), "--exclude-fields")
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}

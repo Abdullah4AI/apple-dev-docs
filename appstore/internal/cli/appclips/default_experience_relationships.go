@@ -57,7 +57,7 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -99,7 +99,7 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			client, err := shared.GetASCClient()

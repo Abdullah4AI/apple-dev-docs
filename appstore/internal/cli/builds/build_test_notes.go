@@ -260,7 +260,7 @@ Examples:
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 			if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
 				return fmt.Errorf("builds test-notes create: %w", err)
@@ -272,7 +272,7 @@ Examples:
 			whatsNewValue := strings.TrimSpace(*whatsNew)
 			if whatsNewValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --whats-new is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--whats-new")
 			}
 
 			client, err := shared.GetASCClient()
@@ -343,7 +343,7 @@ Examples:
 			whatsNewValue := strings.TrimSpace(*whatsNew)
 			if whatsNewValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--whats-new")
 			}
 
 			client, err := shared.GetASCClient()
@@ -420,7 +420,7 @@ Examples:
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

@@ -85,12 +85,12 @@ Examples:
 			pathValue := strings.TrimSpace(*path)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--path")
 			}
 			deviceValue := strings.TrimSpace(*deviceType)
 			if deviceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --device-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--device-type")
 			}
 
 			displayType, err := normalizeScreenshotDisplayType(deviceValue)

@@ -72,12 +72,12 @@ Examples:
 			subID := strings.TrimSpace(*subscriptionID)
 			if subID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 			price := strings.TrimSpace(*basePrice)
 			if price == "" {
 				fmt.Fprintln(os.Stderr, "Error: --base-price is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--base-price")
 			}
 			if err := shared.ValidateFinitePriceFlag("--base-price", price); err != nil {
 				return shared.UsageError(err.Error())

@@ -53,7 +53,7 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 			resolvedAppID := resolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return MissingRequiredUsageError()
+				return MissingRequiredUsageError("--app")
 			}
 			pricePointValue := strings.TrimSpace(*pricePointID)
 			tierValue := *tier
@@ -72,7 +72,7 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 			baseTerritoryInput := strings.TrimSpace(*baseTerritory)
 			if requiresExplicitBaseTerritory(config, baseTerritoryInput, tierValue, priceValue, freeValue) {
 				fmt.Fprintln(os.Stderr, "Error: --base-territory is required")
-				return MissingRequiredUsageError()
+				return MissingRequiredUsageError("--base-territory")
 			}
 			baseTerritoryValue := baseTerritoryInput
 			if baseTerritoryInput != "" {
@@ -89,7 +89,7 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 					startDateValue = time.Now().Format("2006-01-02")
 				} else {
 					fmt.Fprintln(os.Stderr, "Error: --start-date is required")
-					return MissingRequiredUsageError()
+					return MissingRequiredUsageError("--start-date")
 				}
 			}
 

@@ -81,7 +81,7 @@ Examples:
 
 			if idValue == "" && locID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id or --version-localization is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if idValue != "" && locID != "" {
 				return shared.UsageError("--id and --version-localization are mutually exclusive")
@@ -92,7 +92,7 @@ Examples:
 			if idValue != "" {
 				if outputFile == "" {
 					fmt.Fprintln(os.Stderr, "Error: --output is required with --id")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--output")
 				}
 				if strings.HasSuffix(outputFile, string(filepath.Separator)) {
 					return shared.UsageError("--output must be a file path")
@@ -101,7 +101,7 @@ Examples:
 			if locID != "" {
 				if outputDirValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --output-dir is required with --version-localization")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--output-dir")
 				}
 			}
 

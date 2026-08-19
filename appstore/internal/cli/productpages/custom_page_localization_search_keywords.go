@@ -60,7 +60,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -103,13 +103,13 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			keywordValues := shared.SplitCSV(*keywords)
 			if len(keywordValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --keywords is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--keywords")
 			}
 
 			client, err := shared.GetASCClient()
@@ -152,17 +152,17 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			keywordValues := shared.SplitCSV(*keywords)
 			if len(keywordValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --keywords is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--keywords")
 			}
 
 			client, err := shared.GetASCClient()

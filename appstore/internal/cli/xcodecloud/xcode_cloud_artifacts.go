@@ -140,12 +140,12 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			pathValue := strings.TrimSpace(*path)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--path")
 			}
 			if err := validateArtifactDestination(pathValue, *overwrite); err != nil {
 				return fmt.Errorf("xcode-cloud artifacts download: %w", err)

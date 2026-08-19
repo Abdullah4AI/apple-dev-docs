@@ -80,7 +80,7 @@ Examples:
 			appClipValue := strings.TrimSpace(*appClipID)
 			if appClipValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-clip-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-clip-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -153,7 +153,7 @@ Examples:
 			idValue := strings.TrimSpace(*experienceID)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			includeValue, err := normalizeAppClipDefaultExperienceInclude(*include)
@@ -209,7 +209,7 @@ Examples:
 			appClipValue := strings.TrimSpace(*appClipID)
 			if appClipValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-clip-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-clip-id")
 			}
 
 			templateValue := strings.TrimSpace(*templateID)
@@ -274,7 +274,7 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			visited := map[string]bool{}
@@ -284,7 +284,7 @@ Examples:
 
 			if !visited["action"] && !visited["release-version-id"] {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			var attrs *asc.AppClipDefaultExperienceUpdateAttributes
@@ -338,11 +338,11 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -388,7 +388,7 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -430,7 +430,7 @@ Examples:
 			experienceValue := strings.TrimSpace(*experienceID)
 			if experienceValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experience-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experience-id")
 			}
 
 			client, err := shared.GetASCClient()

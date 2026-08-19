@@ -58,7 +58,7 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -90,7 +90,7 @@ func IAPAvailabilitySetCommand() *ffcli.Command {
 
 	appID := addIAPLookupAppFlag(fs)
 	iapID := fs.String("iap-id", "", "In-app purchase ID, product ID, or exact current name")
-	territories := fs.String("territories", "", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
+	territories := shared.BindOnceCSVFlag(fs, "territories", "Territory inputs (comma-separated; accepts alpha-2, alpha-3, or exact English country names)")
 	availableInNew := fs.Bool("available-in-new-territories", false, "Include new territories automatically")
 	output := shared.BindOutputFlags(fs)
 
@@ -112,16 +112,16 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
-			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(territories.String())
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
 			if len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territories is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territories")
 			}
 
 			client, err := shared.GetASCClient()

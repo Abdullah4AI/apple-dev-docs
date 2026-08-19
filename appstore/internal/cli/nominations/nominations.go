@@ -102,7 +102,7 @@ Examples:
 			}
 			if len(statusValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --status is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--status")
 			}
 
 			typeValues, err := normalizeNominationTypes(shared.SplitCSVUpper(*nomType))
@@ -221,7 +221,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*nominationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *inAppEventsLimit != 0 && (*inAppEventsLimit < 1 || *inAppEventsLimit > 50) {
 				return fmt.Errorf("nominations view: --in-app-events-limit must be between 1 and 50")
@@ -333,29 +333,29 @@ Examples:
 			relatedApps := shared.SplitCSV(shared.ResolveAppID(*appID))
 			if len(relatedApps) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			trimmedName := strings.TrimSpace(*name)
 			if trimmedName == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			trimmedDescription := strings.TrimSpace(*description)
 			if trimmedDescription == "" {
 				fmt.Fprintln(os.Stderr, "Error: --description is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--description")
 			}
 
 			if !visited["submitted"] {
 				fmt.Fprintln(os.Stderr, "Error: --submitted is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--submitted")
 			}
 
 			if strings.TrimSpace(*nomType) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--type")
 			}
 
 			normalizedType, err := normalizeNominationType(*nomType)
@@ -488,7 +488,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*nominationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			visited := map[string]bool{}
@@ -514,11 +514,11 @@ Examples:
 
 			if !hasAttributeUpdates && !hasRelationshipUpdates {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if !visited["submitted"] && !visited["archived"] {
 				fmt.Fprintln(os.Stderr, "Error: --submitted or --archived is required by Apple's live API")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			var attrs *asc.NominationUpdateAttributes
@@ -531,7 +531,7 @@ Examples:
 				if visited["type"] {
 					if strings.TrimSpace(*nomType) == "" {
 						fmt.Fprintln(os.Stderr, "Error: --type is required")
-						return shared.MissingRequiredUsageError()
+						return shared.MissingRequiredUsageError("--type")
 					}
 					normalized, err := normalizeNominationType(*nomType)
 					if err != nil {
@@ -680,11 +680,11 @@ Examples:
 			trimmedID := strings.TrimSpace(*nominationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

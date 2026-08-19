@@ -100,40 +100,44 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 			})
 			if configVal == "" && inputVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --input is required when --config is not set")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--input")
 			}
 			if configVal != "" && inputVal != "" {
 				fmt.Fprintln(os.Stderr, "Error: use either --input or --config, not both")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--config")
 			}
 			if *watch && configVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --watch requires --config")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--watch")
 			}
 			if *watch && len(watchUnsupportedFlags) > 0 {
-				return shared.UsageError(fmt.Sprintf(
+				parameter := ""
+				if len(watchUnsupportedFlags) == 1 {
+					parameter = watchUnsupportedFlags[0]
+				}
+				return shared.WithDiagnostic(shared.UsageError(fmt.Sprintf(
 					"%s cannot be used with --watch; watch mode regenerates from the Koubou YAML config",
 					strings.Join(watchUnsupportedFlags, ", "),
-				))
+				)), shared.DiagnosticConflictingInput, parameter)
 			}
 			if !*watch {
 				switch {
 				case watchDebounceSet:
-					return shared.UsageError("--watch-debounce requires --watch")
+					return shared.WithDiagnostic(shared.UsageError("--watch-debounce requires --watch"), shared.DiagnosticConflictingInput, "--watch-debounce")
 				case watchReviewDirSet:
-					return shared.UsageError("--watch-review-dir requires --watch")
+					return shared.WithDiagnostic(shared.UsageError("--watch-review-dir requires --watch"), shared.DiagnosticConflictingInput, "--watch-review-dir")
 				case watchRawDirSet:
-					return shared.UsageError("--watch-raw-dir requires --watch")
+					return shared.WithDiagnostic(shared.UsageError("--watch-raw-dir requires --watch"), shared.DiagnosticConflictingInput, "--watch-raw-dir")
 				}
 			}
 			if watchRawDirSet && !watchReviewDirSet {
-				return shared.UsageError("--watch-raw-dir requires --watch-review-dir")
+				return shared.WithDiagnostic(shared.UsageError("--watch-raw-dir requires --watch-review-dir"), shared.DiagnosticConflictingInput, "--watch-raw-dir")
 			}
 			if watchReviewDirSet && strings.TrimSpace(*watchReviewDir) == "" {
-				return shared.UsageError("--watch-review-dir must not be empty")
+				return shared.WithDiagnostic(shared.UsageError("--watch-review-dir must not be empty"), shared.DiagnosticInvalidInput, "--watch-review-dir")
 			}
 			if watchDebounceSet && *watchDebounce <= 0 {
-				return shared.UsageError("--watch-debounce must be greater than 0")
+				return shared.WithDiagnostic(shared.UsageError("--watch-debounce must be greater than 0"), shared.DiagnosticInvalidInput, "--watch-debounce")
 			}
 			if configVal != "" {
 				absConfig, err := filepath.Abs(configVal)
@@ -165,21 +169,37 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 					"Error: --device must be one of: %s\n",
 					strings.Join(screenshots.FrameDeviceValues(), ", "),
 				)
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--device")
 			}
 
-			hasCanvasFlags := strings.TrimSpace(*title) != "" ||
-				strings.TrimSpace(*subtitle) != "" ||
-				strings.TrimSpace(*bgColor) != "" ||
-				strings.TrimSpace(*titleColor) != "" ||
-				strings.TrimSpace(*subtitleColor) != ""
+			canvasParameters := make([]string, 0, 5)
+			if strings.TrimSpace(*title) != "" {
+				canvasParameters = append(canvasParameters, "--title")
+			}
+			if strings.TrimSpace(*subtitle) != "" {
+				canvasParameters = append(canvasParameters, "--subtitle")
+			}
+			if strings.TrimSpace(*bgColor) != "" {
+				canvasParameters = append(canvasParameters, "--bg-color")
+			}
+			if strings.TrimSpace(*titleColor) != "" {
+				canvasParameters = append(canvasParameters, "--title-color")
+			}
+			if strings.TrimSpace(*subtitleColor) != "" {
+				canvasParameters = append(canvasParameters, "--subtitle-color")
+			}
+			hasCanvasFlags := len(canvasParameters) > 0
 			if hasCanvasFlags && configVal != "" {
 				fmt.Fprintf(os.Stderr, "Error: --title, --subtitle, --bg-color, --title-color, --subtitle-color cannot be used with --config; set these in the YAML config instead\n")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--config")
 			}
 			if hasCanvasFlags && !screenshots.IsCanvasDevice(deviceVal) {
 				fmt.Fprintf(os.Stderr, "Error: --title, --subtitle, --bg-color, --title-color, --subtitle-color only apply to canvas devices (e.g. --device mac)\n")
-				return flag.ErrHelp
+				parameter := ""
+				if len(canvasParameters) == 1 {
+					parameter = canvasParameters[0]
+				}
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, parameter)
 			}
 
 			absInput := ""
@@ -247,7 +267,11 @@ func resolveOutputPath(explicitPath, outputDir, name, inputPath, device string) 
 	}
 	baseName := strings.TrimSpace(name)
 	if baseName != "" && (baseName == "." || baseName == ".." || strings.ContainsAny(baseName, `/\`)) {
-		return "", fmt.Errorf("--name must be a file name without path separators")
+		return "", shared.WithDiagnostic(
+			shared.NewValidationError(fmt.Errorf("--name must be a file name without path separators")),
+			shared.DiagnosticInvalidInput,
+			"--name",
+		)
 	}
 	if baseName == "" {
 		trimmedInputPath := strings.TrimSpace(inputPath)

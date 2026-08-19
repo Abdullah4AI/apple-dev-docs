@@ -84,7 +84,7 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -155,7 +155,7 @@ Examples:
 			offerCodeValue := strings.TrimSpace(*offerCodeID)
 			if offerCodeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -203,13 +203,13 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			parsedEligibilities, err := parseOfferCodeEligibilities(*eligibilities)
@@ -228,7 +228,7 @@ Examples:
 			}
 			if len(priceEntries) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --prices is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--prices")
 			}
 
 			client, err := shared.GetASCClient()
@@ -281,11 +281,11 @@ Examples:
 			offerCodeValue := strings.TrimSpace(*offerCodeID)
 			if offerCodeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 			if !active.IsSet() {
 				fmt.Fprintln(os.Stderr, "Error: --active is required (true or false)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--active")
 			}
 
 			client, err := shared.GetASCClient()

@@ -64,7 +64,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			fieldsValue, err := normalizeMarketplaceSearchDetailFields(*fields)
@@ -112,13 +112,13 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			catalogURLValue := strings.TrimSpace(*catalogURL)
 			if catalogURLValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --catalog-url is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--catalog-url")
 			}
 
 			client, err := shared.GetASCClient()
@@ -161,7 +161,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*detailID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --search-detail-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--search-detail-id")
 			}
 
 			visited := map[string]bool{}
@@ -171,7 +171,7 @@ Examples:
 
 			if !visited["catalog-url"] {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			attrs := asc.MarketplaceSearchDetailUpdateAttributes{}
@@ -220,11 +220,11 @@ Examples:
 			trimmedID := strings.TrimSpace(*detailID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --search-detail-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--search-detail-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

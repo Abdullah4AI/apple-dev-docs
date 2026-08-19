@@ -65,7 +65,7 @@ Examples:
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			if trimmedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--build")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("performance diagnostics list: --limit must be between 1 and 200")
@@ -145,7 +145,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*signatureID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("performance diagnostics view: --limit must be between 1 and 200")

@@ -226,17 +226,17 @@ func ExecuteScreenshotSetUpload[T any](ctx context.Context, opts ScreenshotSetUp
 	trimmedLocalizationID := strings.TrimSpace(opts.LocalizationID)
 	if trimmedLocalizationID == "" {
 		fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-		return zero, shared.MissingRequiredUsageError()
+		return zero, shared.MissingRequiredUsageError("--localization-id")
 	}
 	trimmedPath := strings.TrimSpace(opts.Path)
 	if trimmedPath == "" {
 		fmt.Fprintln(os.Stderr, "Error: --path is required")
-		return zero, shared.MissingRequiredUsageError()
+		return zero, shared.MissingRequiredUsageError("--path")
 	}
 	trimmedDeviceType := strings.TrimSpace(opts.DeviceType)
 	if trimmedDeviceType == "" {
 		fmt.Fprintln(os.Stderr, "Error: --device-type is required")
-		return zero, shared.MissingRequiredUsageError()
+		return zero, shared.MissingRequiredUsageError("--device-type")
 	}
 	if opts.ClientFactory == nil {
 		return zero, fmt.Errorf("client factory is required")
@@ -307,7 +307,7 @@ Examples:
 			locID := strings.TrimSpace(*localizationID)
 			if locID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-localization is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-localization")
 			}
 
 			client, err := shared.GetASCClient()
@@ -551,7 +551,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	if locID == "" {
 		if !appModeRequested {
 			fmt.Fprintln(os.Stderr, "Error: choose an upload mode: --version-localization VERSION_LOCALIZATION_ID; (--app APP_ID or ASC_APP_ID) with --version VERSION or --version-id VERSION_ID; or --resume ARTIFACT_PATH")
-			return nil, shared.MissingRequiredUsageError()
+			return nil, shared.MissingRequiredUsageError("")
 		}
 	} else if appModeRequested {
 		fmt.Fprintln(os.Stderr, "Error: --version-localization cannot be combined with --app, --version, --version-id, or --platform")
@@ -562,11 +562,11 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 		resolvedAppValue := shared.ResolveAppID(appFlagValue)
 		if resolvedAppValue == "" {
 			fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-			return nil, shared.MissingRequiredUsageError()
+			return nil, shared.MissingRequiredUsageError("--app")
 		}
 		if versionValue == "" && versionIDValue == "" {
 			fmt.Fprintln(os.Stderr, "Error: --version or --version-id is required with --app")
-			return nil, shared.MissingRequiredUsageError()
+			return nil, shared.MissingRequiredUsageError("")
 		}
 		if versionValue != "" && versionIDValue != "" {
 			fmt.Fprintln(os.Stderr, "Error: --version and --version-id are mutually exclusive")
@@ -578,12 +578,12 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	pathValue := strings.TrimSpace(opts.Path)
 	if pathValue == "" {
 		fmt.Fprintln(os.Stderr, "Error: --path is required")
-		return nil, shared.MissingRequiredUsageError()
+		return nil, shared.MissingRequiredUsageError("--path")
 	}
 	deviceValue := strings.TrimSpace(opts.DeviceType)
 	if deviceValue == "" {
 		fmt.Fprintln(os.Stderr, "Error: --device-type is required")
-		return nil, shared.MissingRequiredUsageError()
+		return nil, shared.MissingRequiredUsageError("--device-type")
 	}
 	if opts.SkipExisting && opts.Replace {
 		fmt.Fprintln(os.Stderr, "Error: --skip-existing and --replace are mutually exclusive")
@@ -591,7 +591,7 @@ func executeScreenshotUploadCommand(ctx context.Context, opts screenshotUploadCo
 	}
 	if opts.Replace && !opts.DryRun && !opts.Confirm {
 		fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete existing screenshots with --replace")
-		return nil, shared.MissingRequiredUsageError()
+		return nil, shared.MissingRequiredUsageError("--confirm")
 	}
 	if opts.Confirm && !opts.Replace {
 		return nil, shared.UsageError("--confirm only applies to --replace")

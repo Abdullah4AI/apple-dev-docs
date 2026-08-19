@@ -77,7 +77,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*experimentID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experiment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experiment-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -154,7 +154,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*treatmentID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --treatment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--treatment-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -199,13 +199,13 @@ Examples:
 			trimmedID := strings.TrimSpace(*experimentID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --experiment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--experiment-id")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -250,14 +250,14 @@ Examples:
 			trimmedID := strings.TrimSpace(*treatmentID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --treatment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--treatment-id")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			appIconValue := strings.TrimSpace(*appIconName)
 			if nameValue == "" && appIconValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name or --app-icon-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			attrs := asc.AppStoreVersionExperimentTreatmentUpdateAttributes{}
@@ -308,11 +308,11 @@ Examples:
 			trimmedID := strings.TrimSpace(*treatmentID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --treatment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--treatment-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

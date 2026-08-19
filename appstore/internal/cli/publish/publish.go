@@ -126,7 +126,7 @@ Examples:
 			resolvedAppInput := shared.ResolveAppID(*appID)
 			if resolvedAppInput == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			setFlags := collectSetFlags(fs)
@@ -197,11 +197,11 @@ Examples:
 			if !*uploadOnly {
 				if len(parsedGroupIDs) == 0 {
 					fmt.Fprintf(os.Stderr, "Error: --group is required\n\n")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--group")
 				}
 				if *submit && !*confirm {
 					fmt.Fprintln(os.Stderr, "Error: --confirm is required with --submit")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--confirm")
 				}
 				if *confirm && !*submit {
 					fmt.Fprintln(os.Stderr, "Error: --confirm requires --submit")
@@ -210,11 +210,11 @@ Examples:
 
 				if testNotesValue != "" && localeValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --locale is required with --test-notes")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--locale")
 				}
 				if testNotesValue == "" && localeValue != "" {
 					fmt.Fprintln(os.Stderr, "Error: --test-notes is required with --locale")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--test-notes")
 				}
 				if testNotesValue != "" {
 					if err := shared.ValidateBuildLocalizationLocale(localeValue); err != nil {
@@ -526,13 +526,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *submit && !*confirm && !*dryRun {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required with --submit")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			resolvedAppInput := shared.ResolveAppID(*appID)
 			if resolvedAppInput == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			setFlags := collectSetFlags(fs)
@@ -568,7 +568,7 @@ Examples:
 				}
 			case ipaValue == "":
 				fmt.Fprintf(os.Stderr, "Error: --ipa is required\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ipa")
 			}
 			if *pollInterval <= 0 {
 				return shared.UsageError("--poll-interval must be greater than 0")

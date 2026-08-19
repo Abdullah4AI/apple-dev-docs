@@ -87,7 +87,7 @@ func SubscriptionsGroupsVersionsCreateCommand() *ffcli.Command {
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 			client, err := subscriptionGroupVersionClientFactory()
 			if err != nil {
@@ -195,7 +195,7 @@ func SubscriptionsGroupsVersionsListCommand() *ffcli.Command {
 			}
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 			if strings.TrimSpace(*next) != "" && subscriptionGroupAnyFlagSet(fs, "state", "include", "fields", "group-fields", "localization-fields", "limit", "localizations-limit") {
 				return shared.UsageError("subscriptions groups versions list: --next cannot be combined with query flags")
@@ -248,7 +248,7 @@ func SubscriptionsGroupsVersionsViewCommand() *ffcli.Command {
 			id := strings.TrimSpace(*versionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			opts, err := subscriptionGroupVersionOptions("", *include, *fields, *groupFields, *localizationFields, 0, *localizationsLimit, "")
 			if err != nil {
@@ -310,7 +310,7 @@ func subscriptionsGroupsVersionLinkagesCommand(name string, groupOwned bool) *ff
 			}
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintf(os.Stderr, "Error: %s is required\n", requiredFlag)
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError(requiredFlag)
 			}
 			if strings.TrimSpace(*next) != "" && subscriptionGroupAnyFlagSet(fs, "limit") {
 				return shared.UsageError("subscriptions groups versions links " + name + ": --next cannot be combined with --limit")

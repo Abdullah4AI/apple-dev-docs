@@ -2,6 +2,7 @@ package appleads
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -212,5 +213,138 @@ func TestPlatformReportsOptimizationPayloadGuidance(t *testing.T) {
 				t.Errorf("%s body hint = %q, want %q", strings.Join(test.path, " "), spec.BodyHint, want)
 			}
 		}
+	}
+}
+
+func TestPlatformReportsOptimizationStarterPayloads(t *testing.T) {
+	// Commands whose help must carry a starter payload verified against the
+	// worked examples in Apple's Platform API documentation.
+	required := [][]string{
+		{"reports", "apps", "campaigns"},
+		{"reports", "brands", "campaigns"},
+		{"insights", "impression-share", "find"},
+		{"insights", "search-term-popularity", "find"},
+		{"suggestions", "phrases", "find"},
+		{"suggestions", "keywords", "find"},
+		{"recommendations", "daily-budgets", "find"},
+		{"recommendations", "daily-budgets", "apply"},
+		{"recommendations", "target-cpas", "apply"},
+	}
+	for _, path := range required {
+		spec, ok := PlatformEndpointByCommandPath(path...)
+		if !ok {
+			t.Fatalf("missing %q", strings.Join(path, " "))
+		}
+		if strings.TrimSpace(spec.BodyExample) == "" {
+			t.Errorf("%s has no starter payload", strings.Join(path, " "))
+		}
+	}
+
+	for _, spec := range PlatformEndpointSpecs() {
+		example := strings.TrimSpace(spec.BodyExample)
+		if example == "" {
+			continue
+		}
+		var payload any
+		if err := json.Unmarshal([]byte(example), &payload); err != nil {
+			t.Errorf("%s starter payload is not valid JSON: %v", spec.Name, err)
+			continue
+		}
+		switch spec.BodyKind {
+		case BodyObject:
+			if _, ok := payload.(map[string]any); !ok {
+				t.Errorf("%s starter payload must be a JSON object", spec.Name)
+			}
+		case BodyArray:
+			if _, ok := payload.([]any); !ok {
+				t.Errorf("%s starter payload must be a JSON array", spec.Name)
+			}
+		}
+	}
+}
+
+func TestInsightStarterPayloadsUseUTCTimeZone(t *testing.T) {
+	paths := [][]string{
+		{"insights", "impression-share", "find"},
+		{"insights", "search-term-popularity", "find"},
+	}
+
+	for _, path := range paths {
+		t.Run(strings.Join(path, " "), func(t *testing.T) {
+			spec, ok := PlatformEndpointByCommandPath(path...)
+			if !ok {
+				t.Fatalf("missing %q", strings.Join(path, " "))
+			}
+
+			var payload struct {
+				TimeRange struct {
+					TimeZone string `json:"timeZone"`
+				} `json:"timeRange"`
+			}
+			if err := json.Unmarshal([]byte(spec.BodyExample), &payload); err != nil {
+				t.Fatalf("starter payload is not a JSON object: %v", err)
+			}
+			if payload.TimeRange.TimeZone != "UTC" {
+				t.Errorf("timeRange.timeZone = %q, want UTC", payload.TimeRange.TimeZone)
+			}
+		})
+	}
+}
+
+func TestSearchTermPopularityStarterPayloadUsesRuntimeSortKey(t *testing.T) {
+	spec, ok := PlatformEndpointByCommandPath("insights", "search-term-popularity", "find")
+	if !ok {
+		t.Fatal("missing search-term-popularity find")
+	}
+
+	var payload struct {
+		Sorting []map[string]json.RawMessage `json:"sorting"`
+	}
+	if err := json.Unmarshal([]byte(spec.BodyExample), &payload); err != nil {
+		t.Fatalf("starter payload is not a JSON object: %v", err)
+	}
+	if len(payload.Sorting) != 1 {
+		t.Fatalf("sorting has %d entries, want 1", len(payload.Sorting))
+	}
+	if _, ok := payload.Sorting[0]["order"]; ok {
+		t.Fatal("search term popularity starter payload uses documentation-only order key")
+	}
+	if got := string(payload.Sorting[0]["sortOrder"]); got != `"ASC"` {
+		t.Fatalf("sorting sortOrder = %s, want ASC", got)
+	}
+}
+
+func TestRecommendationDismissStarterPayloadsExcludeApplyOnlyFields(t *testing.T) {
+	tests := []struct {
+		path       []string
+		applyField string
+	}{
+		{path: []string{"recommendations", "daily-budgets", "dismiss"}, applyField: "appliedDailyBudget"},
+		{path: []string{"recommendations", "target-cpas", "dismiss"}, applyField: "appliedTargetCPA"},
+	}
+
+	for _, test := range tests {
+		t.Run(strings.Join(test.path, " "), func(t *testing.T) {
+			spec, ok := PlatformEndpointByCommandPath(test.path...)
+			if !ok {
+				t.Fatalf("missing %q", strings.Join(test.path, " "))
+			}
+
+			var payload []map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(spec.BodyExample), &payload); err != nil {
+				t.Fatalf("starter payload is not a JSON object array: %v", err)
+			}
+			if len(payload) != 1 {
+				t.Fatalf("starter payload has %d items, want 1", len(payload))
+			}
+			if _, ok := payload[0][test.applyField]; ok {
+				t.Fatalf("dismiss starter payload includes apply-only field %q", test.applyField)
+			}
+			for _, field := range []string{"id", "promotedObjectId", "promotedObjectType"} {
+				if _, ok := payload[0][field]; !ok {
+					t.Errorf("dismiss starter payload is missing %q", field)
+				}
+			}
+		})
 	}
 }

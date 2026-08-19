@@ -62,7 +62,7 @@ Examples:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			client, err := shared.GetASCClient()

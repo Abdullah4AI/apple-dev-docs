@@ -139,6 +139,7 @@ Use `asc <command> --help` for subcommands and flags.
 - `review` - Manage App Store review details, attachments, and submissions.
 - `analytics` - Request and download analytics and sales reports.
 - `ads` - Manage Apple Ads API resources.
+- `optimize` - Build cross-API optimization plans. [experimental]
 - `performance` - Access performance metrics and diagnostic logs.
 - `finance` - Download payments and financial reports.
 - `apps` - List and manage apps in App Store Connect. App creation moved out of `asc apps`; use `asc web apps create` for the web-session path.

@@ -89,6 +89,20 @@ func TestBuildsUploadCommandAppHelpDescribesExactIPAIdentityLookup(t *testing.T)
 	}
 }
 
+func TestBuildsUploadCommandTestNotesHelpDescribesDiscoveryOnlyWait(t *testing.T) {
+	cmd := BuildsUploadCommand()
+	testNotesFlag := cmd.FlagSet.Lookup("test-notes")
+	if testNotesFlag == nil {
+		t.Fatal("expected --test-notes flag to be registered")
+	}
+	if !strings.Contains(testNotesFlag.Usage, "build discovery") {
+		t.Fatalf("expected --test-notes usage to describe discovery wait, got %q", testNotesFlag.Usage)
+	}
+	if !strings.Contains(cmd.LongHelp, "Add --wait") {
+		t.Fatalf("expected long help to explain the optional processing wait, got %q", cmd.LongHelp)
+	}
+}
+
 func TestBuildsListCommand_ProcessingStateFlagDescription(t *testing.T) {
 	cmd := BuildsListCommand()
 

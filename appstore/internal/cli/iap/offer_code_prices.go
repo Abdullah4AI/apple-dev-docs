@@ -46,7 +46,7 @@ Examples:
 			id := strings.TrimSpace(*offerCodeID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			client, err := shared.GetASCClient()

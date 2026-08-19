@@ -70,7 +70,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("android-ios-mapping list: --limit must be between 1 and 200")
@@ -145,7 +145,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*id) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --mapping-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--mapping-id")
 			}
 			fieldValues, err := normalizeAndroidIosMappingFields(*fields)
 			if err != nil {
@@ -179,7 +179,7 @@ func AndroidIosMappingCreateCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	packageName := fs.String("android-package-name", "", "Android package name (e.g., com.example.android)")
-	fingerprints := fs.String("fingerprints", "", "Signing key fingerprints (comma-separated)")
+	fingerprints := shared.BindOnceCSVFlag(fs, "fingerprints", "Signing key fingerprints (comma-separated)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -196,17 +196,17 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			packageValue := strings.TrimSpace(*packageName)
 			if packageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --android-package-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--android-package-name")
 			}
-			fingerprintValues := shared.SplitCSV(*fingerprints)
+			fingerprintValues := shared.SplitCSV(fingerprints.String())
 			if len(fingerprintValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --fingerprints is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--fingerprints")
 			}
 
 			client, err := shared.GetASCClient()
@@ -236,7 +236,7 @@ func AndroidIosMappingUpdateCommand() *ffcli.Command {
 
 	id := fs.String("mapping-id", "", "Mapping ID")
 	packageName := fs.String("android-package-name", "", "Android package name (e.g., com.example.android)")
-	fingerprints := fs.String("fingerprints", "", "Signing key fingerprints (comma-separated)")
+	fingerprints := shared.BindOnceCSVFlag(fs, "fingerprints", "Signing key fingerprints (comma-separated)")
 	clearPackageName := fs.Bool("clear-android-package-name", false, "Clear the Android package name")
 	clearFingerprints := fs.Bool("clear-fingerprints", false, "Clear signing key fingerprints")
 	output := shared.BindOutputFlags(fs)
@@ -258,7 +258,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*id)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --mapping-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--mapping-id")
 			}
 
 			seen := map[string]bool{}
@@ -287,7 +287,7 @@ Examples:
 				attrs.PackageName = &asc.NullableString{}
 			}
 			if seen["fingerprints"] {
-				fingerprintValues := shared.SplitCSV(*fingerprints)
+				fingerprintValues := shared.SplitCSV(fingerprints.String())
 				if len(fingerprintValues) == 0 {
 					return fmt.Errorf("android-ios-mapping update: --fingerprints must include at least one value")
 				}
@@ -337,11 +337,11 @@ Examples:
 			trimmedID := strings.TrimSpace(*id)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --mapping-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--mapping-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

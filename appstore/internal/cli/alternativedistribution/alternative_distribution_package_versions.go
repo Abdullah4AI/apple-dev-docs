@@ -67,7 +67,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*packageID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --package-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--package-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
 				return fmt.Errorf("alternative-distribution packages versions list: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
@@ -137,7 +137,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -183,7 +183,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
 				return fmt.Errorf("alternative-distribution packages versions deltas: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
@@ -257,7 +257,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
 				return fmt.Errorf("alternative-distribution packages versions variants: --limit must be between 1 and %d", alternativeDistributionMaxLimit)

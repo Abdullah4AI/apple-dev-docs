@@ -170,15 +170,15 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if strings.TrimSpace(resolvedAppID) == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
+				return shared.WithDiagnostic(shared.UsageError("--app is required (or set ASC_APP_ID)"), shared.DiagnosticRequiredInputMissing, "--app")
 			}
 			if *filePath == "" {
-				return shared.UsageError("--file is required")
+				return shared.WithDiagnostic(shared.UsageError("--file is required"), shared.DiagnosticRequiredInputMissing, "--file")
 			}
 
 			normalizedResponseState, err := normalizeReviewResponseState(*responseState)
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--response-state")
 			}
 
 			if err := shared.RequireConfirmUnlessDryRun(*dryRun, *confirm); err != nil {
@@ -187,7 +187,14 @@ Examples:
 
 			targets, err := loadReviewBatchTargets(*filePath)
 			if err != nil {
-				return shared.UsageError(err.Error())
+				code := shared.DiagnosticFileInvalidFormat
+				switch {
+				case errors.Is(err, os.ErrNotExist):
+					code = shared.DiagnosticFileNotFound
+				case errors.Is(err, os.ErrPermission):
+					code = shared.DiagnosticFilePermissionDenied
+				}
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), code, "--file")
 			}
 
 			client, err := shared.GetASCClient()

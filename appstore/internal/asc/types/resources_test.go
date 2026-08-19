@@ -36,6 +36,25 @@ func TestResponseAccessors(t *testing.T) {
 	}
 }
 
+func TestResponseGetMeta(t *testing.T) {
+	r := &Response[struct{ Name string }]{
+		Meta: json.RawMessage(`{"paging":{"total":42,"limit":5}}`),
+	}
+
+	meta := r.GetMeta()
+	if string(meta) != `{"paging":{"total":42,"limit":5}}` {
+		t.Fatalf("unexpected meta payload: %s", meta)
+	}
+	if total, ok := ParsePagingTotalOK(meta); !ok || total != 42 {
+		t.Fatalf("expected paging total 42 from GetMeta, got %d (ok=%t)", total, ok)
+	}
+
+	empty := &Response[struct{ Name string }]{}
+	if got := empty.GetMeta(); len(got) != 0 {
+		t.Fatalf("expected empty meta, got %s", got)
+	}
+}
+
 func TestLinkagesResponseAccessors(t *testing.T) {
 	r := &LinkagesResponse{
 		Data: []ResourceData{

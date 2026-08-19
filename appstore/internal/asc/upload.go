@@ -301,6 +301,20 @@ func VerifySourceFileChecksums(filePath string, expected *Checksums) (*Checksums
 	if expected == nil {
 		return nil, nil
 	}
+	file, err := openUploadSourceFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("open file for checksum: %w", err)
+	}
+	defer file.Close()
+	return VerifySourceFileChecksumsFromFile(file, expected)
+}
+
+// VerifySourceFileChecksumsFromFile computes and compares API-provided
+// checksums against an already-opened source file.
+func VerifySourceFileChecksumsFromFile(file *os.File, expected *Checksums) (*Checksums, error) {
+	if expected == nil {
+		return nil, nil
+	}
 
 	computed := &Checksums{}
 	if expected.File != nil {
@@ -308,7 +322,7 @@ func VerifySourceFileChecksums(filePath string, expected *Checksums) (*Checksums
 		if expectedHash == "" {
 			return nil, errors.New("file checksum hash is missing")
 		}
-		sum, err := ComputeFileChecksum(filePath, expected.File.Algorithm)
+		sum, err := ComputeFileChecksumFromFile(file, expected.File.Algorithm)
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +336,7 @@ func VerifySourceFileChecksums(filePath string, expected *Checksums) (*Checksums
 		if expectedHash == "" {
 			return nil, errors.New("composite checksum hash is missing")
 		}
-		sum, err := ComputeFileChecksum(filePath, expected.Composite.Algorithm)
+		sum, err := ComputeFileChecksumFromFile(file, expected.Composite.Algorithm)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +359,15 @@ func ComputeFileChecksum(filePath string, algorithm ChecksumAlgorithm) (*Checksu
 		return nil, fmt.Errorf("open file for checksum: %w", err)
 	}
 	defer file.Close()
+	return ComputeFileChecksumFromFile(file, algorithm)
+}
 
+// ComputeFileChecksumFromFile computes a checksum from an already-opened file
+// without changing its current offset.
+func ComputeFileChecksumFromFile(file *os.File, algorithm ChecksumAlgorithm) (*Checksum, error) {
+	if file == nil {
+		return nil, errors.New("checksum source file is required")
+	}
 	var hash hash.Hash
 	switch algorithm {
 	case ChecksumAlgorithmMD5:
@@ -356,7 +378,12 @@ func ComputeFileChecksum(filePath string, algorithm ChecksumAlgorithm) (*Checksu
 		return nil, fmt.Errorf("unsupported checksum algorithm: %s", algorithm)
 	}
 
-	if _, err := io.Copy(hash, file); err != nil {
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat file for checksum: %w", err)
+	}
+	reader := io.NewSectionReader(file, 0, fileInfo.Size())
+	if _, err := io.Copy(hash, reader); err != nil {
 		return nil, fmt.Errorf("compute checksum: %w", err)
 	}
 

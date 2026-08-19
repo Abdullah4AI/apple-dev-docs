@@ -105,7 +105,7 @@ Examples:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -188,13 +188,13 @@ Examples:
 			subID := strings.TrimSpace(*subscriptionID)
 			if subID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			id := strings.TrimSpace(*offerID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -290,7 +290,7 @@ Timeouts:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			duration, err := normalizeSubscriptionOfferDuration(*offerDuration)
@@ -307,7 +307,7 @@ Timeouts:
 
 			if *numberOfPeriods <= 0 {
 				fmt.Fprintln(os.Stderr, "Error: --number-of-periods is required")
-				return shared.MissingRequiredUsageError()
+				return requiredPositiveIntegerUsageError(fs, "number-of-periods")
 			}
 
 			var normalizedStartDate string
@@ -765,11 +765,11 @@ Examples:
 			id := strings.TrimSpace(*offerID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if strings.TrimSpace(*endDate) == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--end-date")
 			}
 
 			normalizedEndDate, err := shared.NormalizeDate(*endDate, "--end-date")
@@ -822,11 +822,11 @@ Examples:
 			id := strings.TrimSpace(*offerID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

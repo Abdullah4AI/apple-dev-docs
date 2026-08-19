@@ -58,11 +58,15 @@ Examples:
 			if groupValue == "" {
 				groupValue = aliasValue
 			} else if aliasValue != "" && aliasValue != groupValue {
-				return fmt.Errorf("testflight beta-groups app view: --group-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-groups app view: --group-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if groupValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -130,11 +134,15 @@ Examples:
 			if groupValue == "" {
 				groupValue = aliasValue
 			} else if aliasValue != "" && aliasValue != groupValue {
-				return fmt.Errorf("testflight beta-groups beta-recruitment-criteria view: --group-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-groups beta-recruitment-criteria view: --group-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if groupValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -202,11 +210,15 @@ Examples:
 			if groupValue == "" {
 				groupValue = aliasValue
 			} else if aliasValue != "" && aliasValue != groupValue {
-				return fmt.Errorf("testflight beta-groups beta-recruitment-criterion-compatible-build-check view: --group-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-groups beta-recruitment-criterion-compatible-build-check view: --group-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if groupValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			client, err := shared.GetASCClient()

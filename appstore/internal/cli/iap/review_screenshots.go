@@ -71,7 +71,7 @@ Examples:
 			screenshotValue := strings.TrimSpace(*screenshotID)
 			if iapValue == "" && screenshotValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id or --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
 			if err != nil {
@@ -135,12 +135,12 @@ Examples:
 			iapValue := strings.TrimSpace(*iapID)
 			if iapValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			file, info, err := openImageFile(pathValue)
@@ -223,12 +223,12 @@ Examples:
 			screenshotValue := strings.TrimSpace(*screenshotID)
 			if screenshotValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--screenshot-id")
 			}
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			file, info, err := openImageFile(pathValue)
@@ -326,11 +326,11 @@ Examples:
 			screenshotValue := strings.TrimSpace(*screenshotID)
 			if screenshotValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --screenshot-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--screenshot-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

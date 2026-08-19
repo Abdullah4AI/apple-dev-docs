@@ -154,7 +154,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			includeValues, err := normalizeUsersInclude(*include)
@@ -190,8 +190,8 @@ func UsersUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 
 	id := fs.String("id", "", "User ID")
-	roles := fs.String("roles", "", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
-	visibleApps := fs.String("visible-app", "", "Comma-separated app IDs for visible apps")
+	roles := shared.BindOnceCSVFlag(fs, "roles", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
+	visibleApps := shared.BindOnceCSVFlag(fs, "visible-app", "Comma-separated app IDs for visible apps")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -209,20 +209,20 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
-			roleValues, err := normalizeUserRoles(*roles, "--roles")
+			roleValues, err := normalizeUserRoles(roles.String(), "--roles")
 			if err != nil {
 				return shared.UsageErrorf("users update: %v", err)
 			}
 			if len(roleValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --roles is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--roles")
 			}
 			warnDeprecatedUserRoles(roleValues)
 
-			visibleAppIDs := shared.SplitCSV(*visibleApps)
+			visibleAppIDs := shared.SplitCSV(visibleApps.String())
 
 			client, err := shared.GetASCClient()
 			if err != nil {
@@ -271,13 +271,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -309,9 +309,9 @@ func UsersInviteCommand() *ffcli.Command {
 	email := fs.String("email", "", "Email address to invite")
 	firstName := fs.String("first-name", "", "First name of the invitee (required)")
 	lastName := fs.String("last-name", "", "Last name of the invitee (required)")
-	roles := fs.String("roles", "", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
+	roles := shared.BindOnceCSVFlag(fs, "roles", "Comma-separated UserRole values: "+strings.Join(userRoleList(), ", "))
 	allApps := fs.Bool("all-apps", false, "Grant access to all apps")
-	visibleApps := fs.String("visible-app", "", "Comma-separated app IDs for visible apps")
+	visibleApps := shared.BindOnceCSVFlag(fs, "visible-app", "Comma-separated app IDs for visible apps")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -329,41 +329,41 @@ Examples:
 			emailValue := strings.TrimSpace(*email)
 			if emailValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --email is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--email")
 			}
 
 			firstNameValue := strings.TrimSpace(*firstName)
 			if firstNameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --first-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--first-name")
 			}
 
 			lastNameValue := strings.TrimSpace(*lastName)
 			if lastNameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --last-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--last-name")
 			}
 
-			roleValues, err := normalizeUserRoles(*roles, "--roles")
+			roleValues, err := normalizeUserRoles(roles.String(), "--roles")
 			if err != nil {
 				return shared.UsageErrorf("users invite: %v", err)
 			}
 			if len(roleValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --roles is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--roles")
 			}
 			warnDeprecatedUserRoles(roleValues)
 
-			if *allApps && strings.TrimSpace(*visibleApps) != "" {
+			if *allApps && strings.TrimSpace(visibleApps.String()) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --all-apps and --visible-app cannot be used together")
 				return flag.ErrHelp
 			}
 
-			visibleAppIDs := shared.SplitCSV(*visibleApps)
+			visibleAppIDs := shared.SplitCSV(visibleApps.String())
 
 			if !*allApps && len(visibleAppIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --all-apps or --visible-app is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -517,7 +517,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -559,13 +559,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()

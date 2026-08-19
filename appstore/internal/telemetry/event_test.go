@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestBuildEventSanitizesCommand(t *testing.T) {
@@ -51,6 +53,9 @@ func TestBuildEventSanitizesCommand(t *testing.T) {
 	if value, exists := payload["http_status"]; !exists || value != nil {
 		t.Fatalf("http_status = %v (exists=%t), want explicit null", value, exists)
 	}
+	if value, exists := payload["diagnostic_code"]; !exists || value != nil {
+		t.Fatalf("diagnostic_code = %v (exists=%t), want explicit null", value, exists)
+	}
 	if _, exists := payload["execution_context"]; exists {
 		t.Fatal("legacy execution_context field should not be emitted")
 	}
@@ -58,6 +63,65 @@ func TestBuildEventSanitizesCommand(t *testing.T) {
 		if _, exists := payload[forbiddenField]; exists {
 			t.Fatalf("event contains forbidden raw-argument field %q", forbiddenField)
 		}
+	}
+}
+
+func TestBuildEventWithContextEmitsAllowlistedDiagnosticCode(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	ev, ok := BuildEventWithContext(
+		"asc auth login",
+		"1.2.3",
+		0,
+		2,
+		EventContext{
+			DiagnosticCode: string(shared.DiagnosticFileInvalidFormat),
+		},
+	)
+	if !ok {
+		t.Fatal("expected event")
+	}
+	if ev.DiagnosticCode == nil || *ev.DiagnosticCode != string(shared.DiagnosticFileInvalidFormat) {
+		t.Fatalf("DiagnosticCode = %v, want %q", ev.DiagnosticCode, shared.DiagnosticFileInvalidFormat)
+	}
+
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v", err)
+	}
+	if payload["diagnostic_code"] != string(shared.DiagnosticFileInvalidFormat) {
+		t.Fatalf("diagnostic_code = %v, want %q", payload["diagnostic_code"], shared.DiagnosticFileInvalidFormat)
+	}
+}
+
+func TestBuildEventWithContextRejectsUnboundedDiagnosticCode(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	ev, ok := BuildEventWithContext(
+		"asc auth login",
+		"1.2.3",
+		0,
+		2,
+		EventContext{DiagnosticCode: "private-key-at-/Users/example/AuthKey.p8"},
+	)
+	if !ok {
+		t.Fatal("expected event")
+	}
+	if ev.DiagnosticCode != nil {
+		t.Fatalf("DiagnosticCode = %q, want nil", *ev.DiagnosticCode)
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if strings.Contains(string(data), "/Users/example/AuthKey.p8") {
+		t.Fatalf("payload leaked unbounded diagnostic code: %s", data)
 	}
 }
 
@@ -226,7 +290,7 @@ func TestSchemaV3SpoolRecordOmitsSchemaV4Fields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	for _, field := range []string{"outcome_kind", "http_status"} {
+	for _, field := range []string{"outcome_kind", "http_status", "diagnostic_code"} {
 		if strings.Contains(string(data), `"`+field+`"`) {
 			t.Fatalf("schema-v3 payload contains schema-v4 field %q: %s", field, data)
 		}
@@ -237,7 +301,7 @@ func TestBuildEventWithContextAllowsKnownFailureParameters(t *testing.T) {
 	clearContextEnv(t)
 	setTelemetryTestHome(t)
 
-	for _, parameter := range []string{"--id", "--app", "--app-id", "--key-type", "--export-xcodebuild-flag"} {
+	for _, parameter := range []string{"--id", "--app", "--app-id", "--key-type", "--export-xcodebuild-flag", "--active", "--availability-id", "--base-price", "--batch-id", "--bg-color", "--config", "--copy-metadata-from", "--copyright", "--country", "--custom-app-name", "--demo-account-password", "--detail-fields", "--end-date", "--external-testing", "--fields", "--group", "--iap-version-fields", "--include", "--input", "--item-fields", "--keywords", "--local", "--name", "--number-of-periods", "--offer-code", "--offer-code-id", "--older-than", "--path", "--pkg", "--price-id", "--price-point-id", "--prices", "--private-key", "--product-id", "--provider", "--reference-name", "--removed", "--resolved", "--response-fields", "--response-state", "--screenshot-id", "--skip-validation", "--stars", "--state", "--subtitle", "--subtitle-color", "--subscription-group-version-fields", "--subscription-version-fields", "--term", "--territories", "--territory", "--tester", "--test-notes", "--title-color", "--treatment-id", "--type", "--upload", "--uses-non-exempt-encryption", "--uses-third-party-content", "--visible-in-app-store", "--watch", "--watch-debounce", "--watch-raw-dir", "--watch-review-dir", "--whats-new", "--workers"} {
 		t.Run(parameter, func(t *testing.T) {
 			ev, ok := BuildEventWithContext(
 				"asc apps view",

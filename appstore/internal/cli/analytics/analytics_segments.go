@@ -57,7 +57,7 @@ Examples:
 			id := strings.TrimSpace(*segmentID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --segment-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--segment-id")
 			}
 			var err error
 			id, err = asc.ValidateResourcePathSegment(id)

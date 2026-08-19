@@ -110,7 +110,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("beta-groups list: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("beta-groups list: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("beta-groups list: %w", err)
@@ -121,7 +125,7 @@ Examples:
 
 			if *internal && *external {
 				fmt.Fprintln(os.Stderr, "Error: --internal and --external are mutually exclusive")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 			appIDSet := false
 			buildIDSet := false
@@ -138,15 +142,15 @@ Examples:
 			})
 			if buildIDSet && resolvedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id cannot be empty")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--build-id")
 			}
 			if resolvedBuildID != "" && appIDSet && strings.TrimSpace(*appID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app cannot be empty when used with --build-id")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--app")
 			}
 			if resolvedBuildID != "" && membershipPageControlSet {
 				fmt.Fprintln(os.Stderr, "Error: --global, --limit, --next, and --paginate cannot be used with --build-id; membership lookup always fetches all required pages")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 
 			if resolvedBuildID != "" {
@@ -177,13 +181,13 @@ Examples:
 			// Reject --global + --app combination (check explicit flag, not resolved value)
 			if *global && strings.TrimSpace(*appID) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --global and --app are mutually exclusive")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 
 			// Require one of --app or --global (unless --next is provided)
 			if !*global && resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app or --global is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -283,16 +287,7 @@ Examples:
 					}
 				}
 
-				filtered := *groups
-				filtered.Data = make([]asc.Resource[asc.BetaGroupAttributes], 0, len(groups.Data))
-				for _, g := range groups.Data {
-					if g.Attributes.IsInternalGroup == *internalFilter {
-						filtered.Data = append(filtered.Data, g)
-					}
-				}
-				if *limit > 0 && len(filtered.Data) > *limit {
-					filtered.Data = filtered.Data[:*limit]
-				}
+				filtered := filterBetaGroupsByInternal(groups, *internalFilter, *limit)
 
 				return shared.PrintOutput(&filtered, *output.Output, *output.Pretty)
 			}
@@ -323,6 +318,27 @@ Examples:
 			return shared.PrintOutput(groups, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+// filterBetaGroupsByInternal keeps only groups whose isInternalGroup matches
+// internal, truncating to limit when limit > 0. The app-scoped endpoint cannot
+// filter server-side, so every page is fetched and the limit is applied here;
+// when that truncation drops matches, warn on stderr so callers know the
+// printed set is incomplete.
+func filterBetaGroupsByInternal(groups *asc.BetaGroupsResponse, internal bool, limit int) asc.BetaGroupsResponse {
+	filtered := *groups
+	filtered.Data = make([]asc.Resource[asc.BetaGroupAttributes], 0, len(groups.Data))
+	for _, g := range groups.Data {
+		if g.Attributes.IsInternalGroup == internal {
+			filtered.Data = append(filtered.Data, g)
+		}
+	}
+	if limit > 0 && len(filtered.Data) > limit {
+		total := len(filtered.Data)
+		filtered.Data = filtered.Data[:limit]
+		fmt.Fprintf(os.Stderr, "Warning: showing %d of %d filtered groups (--limit %d); rerun without --limit for all\n", limit, total, limit)
+	}
+	return filtered
 }
 
 // BuildGroupsListCommandConfig configures the build-centric beta-group lookup
@@ -364,11 +380,11 @@ func BuildGroupsListCommand(config BuildGroupsListCommandConfig) *ffcli.Command 
 			})
 			if buildIDSet && resolvedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id cannot be empty")
-				return shared.MissingRequiredUsageError()
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--build-id")
 			}
 			if resolvedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			return runBuildGroupMembershipList(
@@ -452,11 +468,11 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			if strings.TrimSpace(*name) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -508,7 +524,7 @@ Examples:
 			}
 			if strings.TrimSpace(*id) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -557,7 +573,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*id)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			visited := map[string]bool{}
@@ -567,7 +583,7 @@ Examples:
 
 			if visited["public-link-limit"] && (*publicLinkLimit < 1 || *publicLinkLimit > 10000) {
 				fmt.Fprintln(os.Stderr, "Error: --public-link-limit must be between 1 and 10000")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--public-link-limit")
 			}
 
 			hasUpdates := strings.TrimSpace(*name) != "" ||
@@ -577,12 +593,12 @@ Examples:
 				visited["feedback-enabled"]
 			if !hasUpdates {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			if visited["public-link-limit-enabled"] && *publicLinkLimitEnabled && !visited["public-link-limit"] {
 				fmt.Fprintln(os.Stderr, "Error: --public-link-limit is required when enabling public link limit")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--public-link-limit")
 			}
 
 			client, err := shared.GetASCClient()
@@ -651,11 +667,11 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*id) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -681,8 +697,8 @@ func BetaGroupsAddTestersCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("add-testers", flag.ExitOnError)
 
 	group := fs.String("group", "", "Beta group ID")
-	tester := fs.String("tester", "", "Beta tester ID(s), comma-separated")
-	email := fs.String("email", "", "Beta tester email(s), comma-separated")
+	tester := shared.BindOnceCSVFlag(fs, "tester", "Beta tester ID(s), comma-separated")
+	email := shared.BindOnceCSVFlag(fs, "email", "Beta tester email(s), comma-separated")
 
 	return &ffcli.Command{
 		Name:       "add-testers",
@@ -700,14 +716,14 @@ Examples:
 			groupID := strings.TrimSpace(*group)
 			if groupID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group")
 			}
 
-			testerIDs := shared.SplitCSV(*tester)
-			testerEmails := shared.SplitCSV(*email)
+			testerIDs := shared.SplitCSV(tester.String())
+			testerEmails := shared.SplitCSV(email.String())
 			if len(testerIDs) == 0 && len(testerEmails) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --tester or --email is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -781,7 +797,7 @@ func BetaGroupsRemoveTestersCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("remove-testers", flag.ExitOnError)
 
 	group := fs.String("group", "", "Beta group ID")
-	tester := fs.String("tester", "", "Beta tester ID(s), comma-separated")
+	tester := shared.BindOnceCSVFlag(fs, "tester", "Beta tester ID(s), comma-separated")
 	confirm := fs.Bool("confirm", false, "Confirm removal")
 
 	return &ffcli.Command{
@@ -799,17 +815,17 @@ Examples:
 			groupID := strings.TrimSpace(*group)
 			if groupID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group")
 			}
 
-			testerIDs := shared.SplitCSV(*tester)
+			testerIDs := shared.SplitCSV(tester.String())
 			if len(testerIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --tester is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

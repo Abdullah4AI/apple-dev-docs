@@ -62,19 +62,19 @@ Examples:
 			bundle := strings.TrimSpace(*bundleID)
 			if bundle == "" {
 				fmt.Fprintln(os.Stderr, "Error: --bundle-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--bundle-id")
 			}
 
 			profType := strings.TrimSpace(*profileType)
 			if profType == "" {
 				fmt.Fprintln(os.Stderr, "Error: --profile-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--profile-type")
 			}
 			profType = strings.ToUpper(profType)
 			warnDeviceWithoutCreateMissing(*deviceIDs, *createMissing)
 			if *createMissing && isDevelopmentProfile(profType) && strings.TrimSpace(*deviceIDs) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --device is required for development profiles")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--device")
 			}
 
 			outputDir := strings.TrimSpace(*outputPath)

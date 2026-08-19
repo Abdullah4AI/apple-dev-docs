@@ -65,7 +65,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -169,15 +169,15 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			if strings.TrimSpace(*territory) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --territory is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory")
 			}
 			if strings.TrimSpace(*releaseDate) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --release-date is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--release-date")
 			}
 
 			if availableInNewTerritories.IsSet() {
@@ -300,7 +300,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*territoryAvailabilityID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --territory-availability is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory-availability")
 			}
 
 			attrs := asc.TerritoryAvailabilityUpdateAttributes{}
@@ -332,7 +332,7 @@ Examples:
 			}
 			if !hasAttr {
 				fmt.Fprintln(os.Stderr, "Error: at least one of --release-date, --pre-order-enabled, or --available is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -374,7 +374,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*territoryAvailabilityID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --territory-availability is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory-availability")
 			}
 
 			preOrderEnabled := false
@@ -421,11 +421,11 @@ Examples:
 			ids := shared.SplitCSV(*territoryAvailabilityIDs)
 			if len(ids) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territory-availability is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory-availability")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

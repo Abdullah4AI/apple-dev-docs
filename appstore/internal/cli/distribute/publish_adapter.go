@@ -109,7 +109,7 @@ func executePublish(ctx context.Context, request publishRequest) (publishExecuti
 	}
 	for _, item := range required {
 		if strings.TrimSpace(item.value) == "" {
-			return publishExecutionResult{}, shared.MissingRequiredUsageError()
+			return publishExecutionResult{}, shared.MissingRequiredUsageError("--" + item.name)
 		}
 	}
 	validatedEndpoint, err := core.ValidateEndpoint(request.Endpoint)

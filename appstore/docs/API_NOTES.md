@@ -6,6 +6,12 @@ Quirks and tips for specific App Store Connect API endpoints.
 
 - Apple Ads named profiles use only the context stored on that profile: they do not inherit `ads.org_id` or `ads.ad_account_id` from root config or another profile. This prevents a selected profile from silently sending a request to the wrong organization or ad account. Profile-less access-token and environment authentication can still use matching root context.
 
+## Public App Store Ranking
+
+- `asc apps public rank` is an unauthenticated experimental storefront command, not an App Store Connect OpenAPI operation or an Apple Ads metric.
+- iOS ranking inspects up to 200 results from the public iTunes `/search` endpoint. Apple TV ranking uses the undocumented MZStore search endpoint with `X-Apple-Store-Front: <numeric-storefront-id>,33`, so it is available only for countries with a known numeric storefront ID.
+- `found: false` means only that the app was absent from Apple's returned result window. Storefront order, window size, and the Apple TV response schema can change independently of the CLI.
+
 ## Analytics & Sales Reports
 
 - Although Apple's current Sales Reports documentation describes `YYYY-MM-DD` for non-daily dates, the live endpoint requires `YYYY-MM` for monthly reports and `YYYY` for yearly reports. The CLI accepts either form and reduces full monthly or yearly dates to those live period identifiers before the request.

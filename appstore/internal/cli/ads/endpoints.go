@@ -266,6 +266,14 @@ func endpointBodyHelp(spec appleads.EndpointSpec) string {
 		hint = strings.ReplaceAll(hint, "\n", "\n  ")
 		help += "\n  Guidance: " + hint
 	}
+	if strings.TrimSpace(spec.BodyExample) != "" {
+		fileName := strings.TrimSpace(spec.BodyFileExample)
+		if fileName == "" {
+			fileName = "payload.json"
+		}
+		example := strings.ReplaceAll(strings.TrimSpace(spec.BodyExample), "\n", "\n    ")
+		help += fmt.Sprintf("\n  Starter payload (%s):\n    %s", fileName, example)
+	}
 	return help
 }
 
@@ -392,7 +400,7 @@ func bindEndpointFlags(spec appleads.EndpointSpec, flagSetName string) (*flag.Fl
 		}
 	}
 	if spec.BodyKind != appleads.BodyNone {
-		values.file = fs.String("file", "", "Path to Apple Ads JSON payload")
+		values.file = fs.String("file", "", "Path to Apple Ads JSON payload ('-' reads stdin)")
 	}
 	if spec.RequiresConfirm || spec.RiskConfirm {
 		values.confirm = fs.Bool("confirm", false, confirmFlagUsage(spec))
@@ -721,7 +729,7 @@ func readBody(spec appleads.EndpointSpec, flags endpointFlagValues) (json.RawMes
 			return nil, nil
 		}
 		fmt.Fprintln(os.Stderr, "Error: --file is required")
-		return nil, shared.MissingRequiredUsageError()
+		return nil, shared.MissingRequiredUsageError("--file")
 	}
 	kind := shared.JSONPayloadObject
 	if spec.BodyKind == appleads.BodyArray {
@@ -810,6 +818,7 @@ type legacyPlatformQueryMembers struct {
 	conditions                 bool
 	values                     bool
 	orderBy                    bool
+	order                      bool
 	sortOrder                  bool
 	limit                      bool
 	selectorFields             bool
@@ -856,7 +865,11 @@ func validatePlatformQueryMigration(spec appleads.EndpointSpec, body json.RawMes
 	if legacy.orderBy {
 		migrations = append(migrations, `"orderBy" -> "sorting"`)
 	}
-	if legacy.sortOrder {
+	if spec.BodyType == "SearchTermPopularityQueryRequest" {
+		if legacy.order {
+			migrations = append(migrations, `sorting "order" -> "sortOrder" for Search Term Popularity`)
+		}
+	} else if legacy.sortOrder {
 		migrations = append(migrations, `sorting "sortOrder" -> "order"`)
 	}
 	if legacy.limit {
@@ -986,6 +999,9 @@ func inspectLegacyPlatformSorting(raw json.RawMessage, legacy *legacyPlatformQue
 		return
 	}
 	for _, entry := range entries {
+		if _, present := entry["order"]; present {
+			legacy.order = true
+		}
 		if _, present := entry["sortOrder"]; present {
 			legacy.sortOrder = true
 		}

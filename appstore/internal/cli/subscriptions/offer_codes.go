@@ -93,7 +93,7 @@ Examples:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -210,7 +210,7 @@ Examples:
 			id := strings.TrimSpace(*offerCodeID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -267,13 +267,13 @@ Examples:
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			eligibility, err := normalizeSubscriptionOfferEligibility(*offerEligibility, true)
@@ -302,7 +302,7 @@ Examples:
 
 			if *numberOfPeriods <= 0 {
 				fmt.Fprintln(os.Stderr, "Error: --number-of-periods is required")
-				return shared.MissingRequiredUsageError()
+				return requiredPositiveIntegerUsageError(fs, "number-of-periods")
 			}
 
 			priceEntries, err := parseSubscriptionOfferCodePrices(*prices, mode)
@@ -312,7 +312,7 @@ Examples:
 			}
 			if len(priceEntries) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --prices is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--prices")
 			}
 
 			client, err := shared.GetASCClient()
@@ -374,11 +374,11 @@ Examples:
 			id := strings.TrimSpace(*offerCodeID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 			if !active.IsSet() {
 				fmt.Fprintln(os.Stderr, "Error: --active is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--active")
 			}
 
 			client, err := shared.GetASCClient()
@@ -470,7 +470,7 @@ Examples:
 			id := strings.TrimSpace(*offerCodeID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -534,7 +534,7 @@ Examples:
 			id := strings.TrimSpace(*oneTimeCodeID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --batch-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--batch-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -594,7 +594,7 @@ Examples:
 			id := strings.TrimSpace(*offerCodeID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --offer-code-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--offer-code-id")
 			}
 
 			client, err := shared.GetASCClient()

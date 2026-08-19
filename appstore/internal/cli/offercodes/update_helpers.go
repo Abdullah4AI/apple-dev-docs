@@ -43,7 +43,7 @@ func newActiveUpdateCommand(config activeUpdateCommandConfig) *ffcli.Command {
 			trimmedID := strings.TrimSpace(*id)
 			if trimmedID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --%s is required\n", config.IDFlag)
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--" + config.IDFlag)
 			}
 
 			activeValue, err := shared.ParseOptionalBoolFlag("--active", *active)
@@ -52,7 +52,7 @@ func newActiveUpdateCommand(config activeUpdateCommandConfig) *ffcli.Command {
 			}
 			if activeValue == nil {
 				fmt.Fprintln(os.Stderr, "Error: --active is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--active")
 			}
 
 			client, err := shared.GetASCClient()

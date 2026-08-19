@@ -160,7 +160,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			includeValues, err := normalizeProfileInclude(*include)
@@ -217,22 +217,22 @@ Examples:
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			profileTypeValue := strings.ToUpper(strings.TrimSpace(*profileType))
 			if profileTypeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --profile-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--profile-type")
 			}
 			bundleValue := strings.TrimSpace(*bundleID)
 			if bundleValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --bundle is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--bundle")
 			}
 			certificateIDs := shared.SplitCSV(*certificates)
 			if len(certificateIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --certificate is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--certificate")
 			}
 			deviceIDs := shared.SplitCSV(*devices)
 
@@ -280,11 +280,11 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -331,12 +331,12 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			pathValue := strings.TrimSpace(*outputPath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --output is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--output")
 			}
 
 			client, err := shared.GetASCClient()

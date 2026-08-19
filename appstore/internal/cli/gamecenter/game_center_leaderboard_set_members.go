@@ -71,7 +71,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -119,7 +119,7 @@ func GameCenterLeaderboardSetMembersSetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 
 	setID := fs.String("set-id", "", "Game Center leaderboard set ID")
-	leaderboardIDs := fs.String("leaderboard-ids", "", "Comma-separated list of leaderboard IDs to set as members")
+	leaderboardIDs := shared.BindOnceCSVFlag(fs, "leaderboard-ids", "Comma-separated list of leaderboard IDs to set as members")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -140,10 +140,10 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
-			ids := shared.SplitUniqueCSV(*leaderboardIDs)
+			ids := shared.SplitUniqueCSV(leaderboardIDs.String())
 
 			client, err := shared.GetASCClient()
 			if err != nil {

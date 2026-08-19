@@ -27,36 +27,6 @@ type betaTestersCSVRow struct {
 	groups    []string // raw group values (names or IDs), trimmed
 }
 
-type betaTestersExportSummary struct {
-	AppID         string `json:"appId"`
-	OutputFile    string `json:"outputFile"`
-	Total         int    `json:"total"`
-	IncludeGroups bool   `json:"includeGroups"`
-}
-
-type betaTestersImportFailure struct {
-	Row   int    `json:"row"`
-	Email string `json:"email,omitempty"`
-	Error string `json:"error"`
-}
-
-type betaTestersImportSummary struct {
-	AppID           string                     `json:"appId"`
-	InputFile       string                     `json:"inputFile"`
-	DryRun          bool                       `json:"dryRun"`
-	Invite          bool                       `json:"invite"`
-	SkipExisting    bool                       `json:"skipExisting"`
-	ContinueOnError bool                       `json:"continueOnError"`
-	AppliedGroup    string                     `json:"appliedGroup,omitempty"`
-	Total           int                        `json:"total"`
-	Created         int                        `json:"created"`
-	Existed         int                        `json:"existed"`
-	Updated         int                        `json:"updated"`
-	Invited         int                        `json:"invited"`
-	Failed          int                        `json:"failed"`
-	Failures        []betaTestersImportFailure `json:"failures,omitempty"`
-}
-
 // BetaTestersExportCommand writes beta testers to a CSV file.
 func BetaTestersExportCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
@@ -96,21 +66,29 @@ Examples:
 				return err
 			}
 			if strings.TrimSpace(*group) != "" && strings.TrimSpace(*buildID) != "" {
-				return shared.UsageError("--group cannot be combined with --build-id")
+				return shared.WithDiagnostic(
+					shared.UsageError("--group cannot be combined with --build-id"),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			outputValue := strings.TrimSpace(*outputPath)
 			if outputValue == "" {
 				fmt.Fprintf(os.Stderr, "Error: --output is required\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--output")
 			}
 			if strings.HasSuffix(outputValue, string(filepath.Separator)) {
-				return shared.UsageError("--output must be a file path")
+				return shared.WithDiagnostic(
+					shared.UsageError("--output must be a file path"),
+					shared.DiagnosticInvalidInput,
+					"--output",
+				)
 			}
 
 			client, err := shared.GetASCClient()
@@ -224,7 +202,7 @@ Examples:
 				return fmt.Errorf("beta-testers export: %w", err)
 			}
 
-			summary := &betaTestersExportSummary{
+			summary := &asc.BetaTestersExportSummary{
 				AppID:         resolvedAppID,
 				OutputFile:    filepath.Clean(outputValue),
 				Total:         len(rows),
@@ -299,13 +277,13 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			inputValue := strings.TrimSpace(*inputPath)
 			if inputValue == "" {
 				fmt.Fprintf(os.Stderr, "Error: --input is required\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--input")
 			}
 
 			if err := shared.RequireConfirmUnlessDryRun(*dryRun, *confirm); err != nil {
@@ -356,7 +334,7 @@ Examples:
 			}
 
 			seenInput := make(map[string]int) // emailLower -> first row index seen
-			summary := &betaTestersImportSummary{
+			summary := &asc.BetaTestersImportSummary{
 				AppID:           resolvedAppID,
 				InputFile:       filepath.Clean(inputValue),
 				DryRun:          *dryRun,
@@ -373,7 +351,7 @@ Examples:
 				emailValue := strings.TrimSpace(row.email)
 				if emailValue == "" {
 					summary.Failed++
-					summary.Failures = append(summary.Failures, betaTestersImportFailure{
+					summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 						Row:   rowNumber,
 						Error: "email is required",
 					})
@@ -384,7 +362,7 @@ Examples:
 				}
 				if !isValidTesterEmail(emailValue) {
 					summary.Failed++
-					summary.Failures = append(summary.Failures, betaTestersImportFailure{
+					summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 						Row:   rowNumber,
 						Email: emailValue,
 						Error: "invalid email format",
@@ -398,7 +376,7 @@ Examples:
 				emailLower := strings.ToLower(emailValue)
 				if firstSeen, exists := seenInput[emailLower]; exists {
 					summary.Failed++
-					summary.Failures = append(summary.Failures, betaTestersImportFailure{
+					summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 						Row:   rowNumber,
 						Email: emailValue,
 						Error: fmt.Sprintf("duplicate email in input (already seen at row %d)", firstSeen),
@@ -415,7 +393,7 @@ Examples:
 					groupIDs, err = groupResolver.ResolveAll(row.groups)
 					if err != nil {
 						summary.Failed++
-						summary.Failures = append(summary.Failures, betaTestersImportFailure{
+						summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 							Row:   rowNumber,
 							Email: emailValue,
 							Error: err.Error(),
@@ -455,7 +433,7 @@ Examples:
 							continue
 						}
 						summary.Failed++
-						summary.Failures = append(summary.Failures, betaTestersImportFailure{
+						summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 							Row:   rowNumber,
 							Email: emailValue,
 							Error: err.Error(),
@@ -479,7 +457,7 @@ Examples:
 				cancel()
 				if err != nil {
 					summary.Failed++
-					summary.Failures = append(summary.Failures, betaTestersImportFailure{
+					summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 						Row:   rowNumber,
 						Email: emailValue,
 						Error: err.Error(),
@@ -493,7 +471,7 @@ Examples:
 				testerID := strings.TrimSpace(created.Data.ID)
 				if testerID == "" {
 					summary.Failed++
-					summary.Failures = append(summary.Failures, betaTestersImportFailure{
+					summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 						Row:   rowNumber,
 						Email: emailValue,
 						Error: "created tester returned empty id",
@@ -512,7 +490,7 @@ Examples:
 					cancel()
 					if err != nil {
 						summary.Failed++
-						summary.Failures = append(summary.Failures, betaTestersImportFailure{
+						summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 							Row:   rowNumber,
 							Email: emailValue,
 							Error: err.Error(),
@@ -524,7 +502,7 @@ Examples:
 					}
 					if invitation == nil || strings.TrimSpace(invitation.Data.ID) == "" {
 						summary.Failed++
-						summary.Failures = append(summary.Failures, betaTestersImportFailure{
+						summary.Failures = append(summary.Failures, asc.BetaTestersImportFailure{
 							Row:   rowNumber,
 							Email: emailValue,
 							Error: "invitation returned empty id",
@@ -558,7 +536,7 @@ Examples:
 	}
 }
 
-func renderImportSummaryTables(summary *betaTestersImportSummary, markdown bool) error {
+func renderImportSummaryTables(summary *asc.BetaTestersImportSummary, markdown bool) error {
 	if summary == nil {
 		return fmt.Errorf("summary is nil")
 	}
@@ -868,7 +846,11 @@ func readBetaTestersCSV(path string) ([]betaTestersCSVRow, error) {
 	header, err := reader.Read()
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, shared.UsageError("CSV file is empty")
+			return nil, shared.WithDiagnostic(
+				shared.UsageError("CSV file is empty"),
+				shared.DiagnosticFileInvalidFormat,
+				"--input",
+			)
 		}
 		return nil, fmt.Errorf("read header: %w", err)
 	}
@@ -924,34 +906,58 @@ func isAllEmpty(record []string) bool {
 
 func validateBetaTestersCSVHeader(header []string) (map[string]int, error) {
 	if len(header) == 0 {
-		return nil, shared.UsageError("CSV header row is required")
+		return nil, shared.WithDiagnostic(
+			shared.UsageError("CSV header row is required"),
+			shared.DiagnosticFileInvalidFormat,
+			"--input",
+		)
 	}
 
 	idx := make(map[string]int, len(header))
 	for i, raw := range header {
 		col := strings.ToLower(strings.TrimSpace(raw))
 		if col == "" {
-			return nil, shared.UsageError("CSV header contains an empty column name")
+			return nil, shared.WithDiagnostic(
+				shared.UsageError("CSV header contains an empty column name"),
+				shared.DiagnosticFileInvalidFormat,
+				"--input",
+			)
 		}
 		canonical, ok := canonicalBetaTestersCSVColumn(col)
 		if !ok {
-			return nil, shared.UsageErrorf("unknown CSV column %q (allowed: email, first_name, last_name, groups, %s)", col, betaTestersFormulaEscapingColumn)
+			return nil, shared.WithDiagnostic(
+				shared.UsageErrorf("unknown CSV column %q (allowed: email, first_name, last_name, groups, %s)", col, betaTestersFormulaEscapingColumn),
+				shared.DiagnosticFileInvalidFormat,
+				"--input",
+			)
 		}
 		col = canonical
 		if _, exists := idx[col]; exists {
-			return nil, shared.UsageErrorf("duplicate CSV column %q", col)
+			return nil, shared.WithDiagnostic(
+				shared.UsageErrorf("duplicate CSV column %q", col),
+				shared.DiagnosticFileInvalidFormat,
+				"--input",
+			)
 		}
 		idx[col] = i
 	}
 	if _, ok := idx["email"]; !ok {
-		return nil, shared.UsageError("CSV header must include required column \"email\"")
+		return nil, shared.WithDiagnostic(
+			shared.UsageError("CSV header must include required column \"email\""),
+			shared.DiagnosticFileInvalidFormat,
+			"--input",
+		)
 	}
 	return idx, nil
 }
 
 func parseBetaTestersCSVHeader(firstRow []string) (map[string]int, bool, error) {
 	if len(firstRow) == 0 {
-		return nil, false, shared.UsageError("CSV header row is required")
+		return nil, false, shared.WithDiagnostic(
+			shared.UsageError("CSV header row is required"),
+			shared.DiagnosticFileInvalidFormat,
+			"--input",
+		)
 	}
 	hasEmailToken := false
 	hasAtSignValue := false
@@ -1037,7 +1043,11 @@ func parseHeaderMappedBetaTesterCSVRow(record []string, headerIdx map[string]int
 
 func parseLegacyBetaTesterCSVRow(record []string) (betaTestersCSVRow, error) {
 	if len(record) < 3 || len(record) > 4 {
-		return betaTestersCSVRow{}, shared.UsageError("legacy CSV rows must have 3 or 4 columns: first_name,last_name,email[,groups]")
+		return betaTestersCSVRow{}, shared.WithDiagnostic(
+			shared.UsageError("legacy CSV rows must have 3 or 4 columns: first_name,last_name,email[,groups]"),
+			shared.DiagnosticFileInvalidFormat,
+			"--input",
+		)
 	}
 	row := betaTestersCSVRow{
 		firstName: strings.TrimSpace(record[0]),

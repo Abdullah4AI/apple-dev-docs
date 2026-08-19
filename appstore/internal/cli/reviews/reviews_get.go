@@ -32,7 +32,7 @@ Examples:
 			reviewValue := strings.TrimSpace(*reviewID)
 			if reviewValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()

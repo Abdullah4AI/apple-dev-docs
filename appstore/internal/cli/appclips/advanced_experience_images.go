@@ -60,7 +60,7 @@ Examples:
 			idValue := strings.TrimSpace(*imageID)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -109,7 +109,7 @@ Examples:
 			fileValue := strings.TrimSpace(*filePath)
 			if fileValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			client, err := appClipsClientFactory()

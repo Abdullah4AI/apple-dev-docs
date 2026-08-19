@@ -60,7 +60,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("testflight beta-testers apps list: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers apps list: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("testflight beta-testers apps list: %w", err)
@@ -71,11 +75,15 @@ Examples:
 			if testerValue == "" {
 				testerValue = aliasValue
 			} else if aliasValue != "" && aliasValue != testerValue {
-				return fmt.Errorf("testflight beta-testers apps list: --tester-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers apps list: --tester-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if testerValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -94,7 +102,7 @@ Examples:
 			if *paginate {
 				if testerValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--tester-id")
 				}
 				paginateOpts := append(opts, asc.WithBetaTesterAppsLimit(200))
 				resp, err := shared.PaginateWithSpinner(
@@ -169,7 +177,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("testflight beta-testers beta-groups list: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers beta-groups list: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("testflight beta-testers beta-groups list: %w", err)
@@ -180,11 +192,15 @@ Examples:
 			if testerValue == "" {
 				testerValue = aliasValue
 			} else if aliasValue != "" && aliasValue != testerValue {
-				return fmt.Errorf("testflight beta-testers beta-groups list: --tester-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers beta-groups list: --tester-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if testerValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -203,7 +219,7 @@ Examples:
 			if *paginate {
 				if testerValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--tester-id")
 				}
 				paginateOpts := append(opts, asc.WithBetaTesterBetaGroupsLimit(200))
 				resp, err := shared.PaginateWithSpinner(
@@ -278,7 +294,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("testflight beta-testers builds list: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers builds list: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("testflight beta-testers builds list: %w", err)
@@ -289,11 +309,15 @@ Examples:
 			if testerValue == "" {
 				testerValue = aliasValue
 			} else if aliasValue != "" && aliasValue != testerValue {
-				return fmt.Errorf("testflight beta-testers builds list: --tester-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers builds list: --tester-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 			if testerValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -312,7 +336,7 @@ Examples:
 			if *paginate {
 				if testerValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--tester-id")
 				}
 				paginateOpts := append(opts, asc.WithBetaTesterBuildsLimit(200))
 				resp, err := shared.PaginateWithSpinner(

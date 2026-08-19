@@ -43,7 +43,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if strings.TrimSpace(resolvedAppID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			fieldValues, err := normalizeSparseField(fs, *fields, appInfoSparseFields441, "--fields")
 			if err != nil {

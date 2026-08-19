@@ -63,12 +63,12 @@ Example:
 			fileValue := strings.TrimSpace(*filePath)
 			if fileValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 			brandValue := strings.TrimSpace(*brandID)
 			if brandValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --brand is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--brand")
 			}
 
 			file, size, fileName, contentType, err := openPlatformAssetUploadFile(fileValue)

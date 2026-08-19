@@ -160,7 +160,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := subscriptionGroupVersionClientFactory()
@@ -229,13 +229,13 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			name := strings.TrimSpace(*referenceName)
 			if name == "" {
 				fmt.Fprintln(os.Stderr, "Error: --reference-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -288,7 +288,7 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
 				return shared.UsageError("subscriptions groups view: --versions-limit must be between 1 and 50")
@@ -352,13 +352,13 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			name := strings.TrimSpace(*referenceName)
 			if name == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -405,11 +405,11 @@ Examples:
 			id := strings.TrimSpace(*groupID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -522,7 +522,7 @@ Examples:
 			}
 			if id == "" && resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id or --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := subscriptionQueryClientFactory()
@@ -654,19 +654,19 @@ Examples:
 			group := strings.TrimSpace(*groupID)
 			if group == "" {
 				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--group-id")
 			}
 
 			name := strings.TrimSpace(*referenceName)
 			if name == "" {
 				fmt.Fprintln(os.Stderr, "Error: --reference-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 
 			product := strings.TrimSpace(*productID)
 			if product == "" {
 				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--product-id")
 			}
 
 			period, err := normalizeSubscriptionPeriod(*subscriptionPeriod, false)
@@ -742,7 +742,7 @@ Examples:
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if err := validateRelationshipLimit("--versions-limit", *versionsLimit); err != nil {
 				return err
@@ -815,7 +815,7 @@ Examples:
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			name := strings.TrimSpace(*referenceName)
@@ -840,7 +840,7 @@ Examples:
 
 			if name == "" && note == "" && period == "" && !*familySharable && !groupLevel.IsSet() {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -933,11 +933,11 @@ Examples:
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1037,7 +1037,7 @@ Examples:
 			id := strings.TrimSpace(*subID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			var planTypeFilter asc.SubscriptionPlanType
@@ -1323,7 +1323,7 @@ equalized price matrix when repairing Apple's MISSING_METADATA state.`,
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			pricePoint := strings.TrimSpace(*pricePointID)
@@ -1350,12 +1350,12 @@ equalized price matrix when repairing Apple's MISSING_METADATA state.`,
 			if tierValue > 0 || priceValue != "" {
 				if territoryID == "" {
 					fmt.Fprintln(os.Stderr, "Error: --territory is required when using --tier or --price")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--territory")
 				}
 			}
 			if *force && territoryID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --territory is required with --force")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1476,11 +1476,11 @@ Examples:
 			id := strings.TrimSpace(*priceID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --price-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--price-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1562,7 +1562,7 @@ Examples:
 			subscriptionValue := strings.TrimSpace(*subscriptionID)
 			if availabilityValue == "" && subscriptionValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --availability-id or --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if availabilityValue != "" && subscriptionValue != "" {
 				fmt.Fprintln(os.Stderr, "Error: --availability-id and --subscription-id are mutually exclusive")
@@ -1644,7 +1644,7 @@ Examples:
 			subscriptionValue := strings.TrimSpace(*subscriptionID)
 			if availabilityValue == "" && subscriptionValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --availability-id or --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if availabilityValue != "" && subscriptionValue != "" {
 				return shared.UsageError("--availability-id and --subscription-id are mutually exclusive")
@@ -1744,7 +1744,7 @@ Examples:
 			id := strings.TrimSpace(*subID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--subscription-id")
 			}
 
 			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
@@ -1753,7 +1753,7 @@ Examples:
 			}
 			if len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territories is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territories")
 			}
 			normalizedBillingMode, err := normalizeSubscriptionBillingMode(*billingMode)
 			if err != nil {

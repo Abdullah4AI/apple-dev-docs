@@ -172,7 +172,7 @@ Examples:
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to apply screenshot uploads")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			result, err := executeScreenshotReviewPlan(ctx, screenshotReviewPlanOptions{

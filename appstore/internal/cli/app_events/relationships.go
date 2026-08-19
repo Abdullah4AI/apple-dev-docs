@@ -45,7 +45,7 @@ Examples:
 			id := strings.TrimSpace(*eventID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --event-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--event-id")
 			}
 
 			client, err := shared.GetASCClient()

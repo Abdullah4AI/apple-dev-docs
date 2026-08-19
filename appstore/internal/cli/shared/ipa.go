@@ -10,6 +10,7 @@ import (
 
 	"howett.net/plist"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/infoplist"
 )
 
@@ -17,22 +18,93 @@ type IPABundleInfo struct {
 	BundleID    string
 	Version     string
 	BuildNumber string
+	Platform    asc.Platform
 }
 
-// ValidateIPAPath ensures an IPA path points to a regular file and rejects
-// symlinks so upload commands don't accidentally dereference unexpected files.
+// ValidateIPAPath ensures an IPA path points to a non-empty regular file and
+// rejects symlinks so upload commands don't dereference unexpected files.
 func ValidateIPAPath(ipaPath string) (os.FileInfo, error) {
-	fileInfo, err := os.Lstat(ipaPath)
+	file, fileInfo, err := OpenValidatedIPAPath(ipaPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat IPA: %w", err)
+		return nil, err
 	}
-	if fileInfo.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("refusing to read symlink %q", ipaPath)
-	}
-	if fileInfo.IsDir() {
-		return nil, fmt.Errorf("--ipa must be a file")
-	}
+	_ = file.Close()
 	return fileInfo, nil
+}
+
+// ValidatePKGPath ensures a PKG path points to a non-empty regular file and
+// rejects symlinks before an upload reservation is created.
+func ValidatePKGPath(pkgPath string) (os.FileInfo, error) {
+	file, fileInfo, err := OpenValidatedPKGPath(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	_ = file.Close()
+	return fileInfo, nil
+}
+
+// OpenValidatedIPAPath opens and validates an IPA without following a symlink.
+// The returned handle pins the validated file across the upload lifecycle.
+func OpenValidatedIPAPath(ipaPath string) (*os.File, os.FileInfo, error) {
+	return openValidatedBuildArtifactPath(ipaPath, "IPA", "--ipa")
+}
+
+// OpenValidatedPKGPath opens and validates a PKG without following a symlink.
+// The returned handle pins the validated file across the upload lifecycle.
+func OpenValidatedPKGPath(pkgPath string) (*os.File, os.FileInfo, error) {
+	return openValidatedBuildArtifactPath(pkgPath, "PKG", "--pkg")
+}
+
+func openValidatedBuildArtifactPath(filePath, artifactName, flagName string) (*os.File, os.FileInfo, error) {
+	pathInfo, err := os.Lstat(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to stat %s: %w", artifactName, err)
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, buildArtifactSymlinkError(filePath, flagName)
+	}
+	if err := validateBuildArtifactInfo(pathInfo, flagName); err != nil {
+		return nil, nil, err
+	}
+
+	file, err := OpenExistingNoFollow(filePath)
+	if err != nil {
+		if latestInfo, statErr := os.Lstat(filePath); statErr == nil && latestInfo.Mode()&os.ModeSymlink != 0 {
+			return nil, nil, buildArtifactSymlinkError(filePath, flagName)
+		}
+		return nil, nil, fmt.Errorf("failed to open %s: %w", artifactName, err)
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("failed to stat opened %s: %w", artifactName, err)
+	}
+	if !os.SameFile(pathInfo, fileInfo) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("%s changed while being opened", flagName)
+	}
+	if err := validateBuildArtifactInfo(fileInfo, flagName); err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	return file, fileInfo, nil
+}
+
+func validateBuildArtifactInfo(fileInfo os.FileInfo, flagName string) error {
+	if fileInfo.IsDir() {
+		return fmt.Errorf("%s must be a file", flagName)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return fmt.Errorf("%s must be a regular file", flagName)
+	}
+	if fileInfo.Size() == 0 {
+		return fmt.Errorf("%s must not be empty", flagName)
+	}
+	return nil
+}
+
+func buildArtifactSymlinkError(filePath, flagName string) error {
+	return fmt.Errorf("refusing to read symlink %q from %s", filePath, flagName)
 }
 
 // ExtractBundleInfoFromIPA reads the top-level app's bundle identifier and
@@ -43,8 +115,27 @@ func ExtractBundleInfoFromIPA(ipaPath string) (IPABundleInfo, error) {
 		return IPABundleInfo{}, fmt.Errorf("open IPA: %w", err)
 	}
 	defer reader.Close()
+	return extractBundleInfoFromIPAFiles(reader.File)
+}
 
-	for _, file := range reader.File {
+// ExtractBundleInfoFromIPAFile reads top-level app metadata from an opened IPA.
+func ExtractBundleInfoFromIPAFile(file *os.File) (IPABundleInfo, error) {
+	if file == nil {
+		return IPABundleInfo{}, fmt.Errorf("open IPA: file is required")
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return IPABundleInfo{}, fmt.Errorf("stat IPA: %w", err)
+	}
+	reader, err := zip.NewReader(file, fileInfo.Size())
+	if err != nil {
+		return IPABundleInfo{}, fmt.Errorf("open IPA: %w", err)
+	}
+	return extractBundleInfoFromIPAFiles(reader.File)
+}
+
+func extractBundleInfoFromIPAFiles(files []*zip.File) (IPABundleInfo, error) {
+	for _, file := range files {
 		if file.FileInfo().IsDir() {
 			continue
 		}
@@ -95,11 +186,79 @@ func readBundleInfoFromInfoPlist(file *zip.File) (IPABundleInfo, error) {
 		return IPABundleInfo{}, fmt.Errorf("decode Info.plist: %w", err)
 	}
 
+	platform, err := detectIPAPlatform(info)
+	if err != nil {
+		return IPABundleInfo{}, err
+	}
+
 	return IPABundleInfo{
 		BundleID:    coercePlistValueToString(info["CFBundleIdentifier"]),
 		Version:     coercePlistValueToString(info["CFBundleShortVersionString"]),
 		BuildNumber: coercePlistValueToString(info["CFBundleVersion"]),
+		Platform:    platform,
 	}, nil
+}
+
+func detectIPAPlatform(info map[string]any) (asc.Platform, error) {
+	type platformMarker struct {
+		key   string
+		value string
+	}
+
+	markers := make([]platformMarker, 0, 3)
+	if value := coercePlistValueToString(info["DTPlatformName"]); value != "" {
+		markers = append(markers, platformMarker{key: "DTPlatformName", value: value})
+	}
+	for _, value := range plistStringValues(info["CFBundleSupportedPlatforms"]) {
+		markers = append(markers, platformMarker{key: "CFBundleSupportedPlatforms", value: value})
+	}
+
+	var detected asc.Platform
+	for _, marker := range markers {
+		platform, ok := appStorePlatformForIPA(marker.value)
+		if !ok {
+			return "", fmt.Errorf("unsupported IPA platform metadata %s=%q", marker.key, marker.value)
+		}
+		if detected != "" && detected != platform {
+			return "", fmt.Errorf("conflicting IPA platform metadata: %s and %s", detected, platform)
+		}
+		detected = platform
+	}
+	return detected, nil
+}
+
+func plistStringValues(value any) []string {
+	values := make([]string, 0, 1)
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if text := coercePlistValueToString(item); text != "" {
+				values = append(values, text)
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				values = append(values, text)
+			}
+		}
+	}
+	return values
+}
+
+func appStorePlatformForIPA(value string) (asc.Platform, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "iphoneos", "watchos":
+		return asc.PlatformIOS, true
+	case "appletvos":
+		return asc.PlatformTVOS, true
+	case "xros":
+		return asc.PlatformVisionOS, true
+	case "macosx":
+		return asc.PlatformMacOS, true
+	default:
+		return "", false
+	}
 }
 
 // ResolveBundleInfoForIPA fills missing version/build-number values from the IPA

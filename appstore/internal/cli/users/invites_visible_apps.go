@@ -62,7 +62,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("users invites visible-apps list: --limit must be between 1 and 200")
@@ -94,7 +94,7 @@ Examples:
 			if *paginate {
 				if idValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --id is required")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--id")
 				}
 				paginateOpts := append(opts, asc.WithUserInvitationVisibleAppsLimit(200))
 				firstPage, err := client.GetUserInvitationVisibleApps(requestCtx, idValue, paginateOpts...)

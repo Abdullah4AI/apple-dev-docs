@@ -68,7 +68,11 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("testflight beta-testers relationships view: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers relationships view: --limit must be between 1 and 200")),
+					shared.DiagnosticInvalidInput,
+					"--limit",
+				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("testflight beta-testers relationships view: %w", err)
@@ -77,13 +81,13 @@ Examples:
 			relationshipType := strings.TrimSpace(*relType)
 			if relationshipType == "" {
 				fmt.Fprintln(os.Stderr, "Error: --type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--type")
 			}
 
 			kind, ok := betaTesterRelationshipKinds[relationshipType]
 			if !ok {
 				fmt.Fprintf(os.Stderr, "Error: --type must be one of: %s\n", strings.Join(relationshipTypeList(betaTesterRelationshipKinds), ", "))
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--type")
 			}
 
 			testerValue := strings.TrimSpace(*testerID)
@@ -91,18 +95,22 @@ Examples:
 			if testerValue == "" {
 				testerValue = aliasValue
 			} else if aliasValue != "" && aliasValue != testerValue {
-				return fmt.Errorf("testflight beta-testers relationships view: --tester-id and --id must match")
+				return shared.WithDiagnostic(
+					shared.NewValidationError(fmt.Errorf("testflight beta-testers relationships view: --tester-id and --id must match")),
+					shared.DiagnosticConflictingInput,
+					"",
+				)
 			}
 
 			nextValue := strings.TrimSpace(*next)
 			if testerValue == "" && nextValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --tester-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester-id")
 			}
 
 			if kind == relationshipSingle && (nextValue != "" || *paginate || *limit != 0) {
 				fmt.Fprintln(os.Stderr, "Error: --limit, --next, and --paginate are only valid for to-many relationships")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 
 			client, err := shared.GetASCClient()
@@ -154,6 +162,10 @@ func getBetaTesterRelationshipList(ctx context.Context, client *asc.Client, rela
 	case "builds":
 		return client.GetBetaTesterBuildsRelationships(ctx, testerID, opts...)
 	default:
-		return nil, fmt.Errorf("unsupported relationship type %q", relationshipType)
+		return nil, shared.WithDiagnostic(
+			shared.NewValidationError(fmt.Errorf("unsupported relationship type %q", relationshipType)),
+			shared.DiagnosticInvalidInput,
+			"--type",
+		)
 	}
 }

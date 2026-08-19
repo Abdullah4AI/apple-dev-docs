@@ -84,7 +84,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := appEventsClientFactory()
@@ -147,7 +147,7 @@ Examples:
 			id := strings.TrimSpace(*eventID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --event-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--event-id")
 			}
 
 			client, err := appEventsClientFactory()
@@ -178,7 +178,7 @@ func AppEventsCreateCommand() *ffcli.Command {
 	start := fs.String("start", "", "Event start time (RFC3339)")
 	end := fs.String("end", "", "Event end time (RFC3339)")
 	publishStart := fs.String("publish-start", "", "Publish start time (RFC3339)")
-	territories := fs.String("territories", "", "Territory codes (comma-separated)")
+	territories := shared.BindOnceCSVFlag(fs, "territories", "Territory codes (comma-separated)")
 	deepLink := fs.String("deep-link", "", "Deep link URL")
 	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement (currently supported: "+supportedAppEventPurchaseRequirementValues()+")")
 	primaryLocale := fs.String("primary-locale", "", "Primary locale (e.g., en-US)")
@@ -203,13 +203,13 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			normalizedBadge, err := normalizeAppEventBadge(*eventType)
@@ -240,7 +240,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			schedule, scheduleProvided, err := normalizeAppEventTerritorySchedule(*start, *end, *publishStart, *territories)
+			schedule, scheduleProvided, err := normalizeAppEventTerritorySchedule(*start, *end, *publishStart, territories.String())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
 				return flag.ErrHelp
@@ -320,7 +320,7 @@ func AppEventsUpdateCommand() *ffcli.Command {
 	start := fs.String("start", "", "Event start time (RFC3339)")
 	end := fs.String("end", "", "Event end time (RFC3339)")
 	publishStart := fs.String("publish-start", "", "Publish start time (RFC3339)")
-	territories := fs.String("territories", "", "Territory codes (comma-separated)")
+	territories := shared.BindOnceCSVFlag(fs, "territories", "Territory codes (comma-separated)")
 	deepLink := fs.String("deep-link", "", "Deep link URL")
 	purchaseRequirement := fs.String("purchase-requirement", "", "Purchase requirement (currently supported: "+supportedAppEventPurchaseRequirementValues()+")")
 	primaryLocale := fs.String("primary-locale", "", "Primary locale (e.g., en-US)")
@@ -344,7 +344,7 @@ Examples:
 			id := strings.TrimSpace(*eventID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --event-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--event-id")
 			}
 
 			var (
@@ -421,7 +421,7 @@ Examples:
 				}
 			}
 
-			schedule, scheduleProvided, err := normalizeAppEventTerritorySchedule(*start, *end, *publishStart, *territories)
+			schedule, scheduleProvided, err := normalizeAppEventTerritorySchedule(*start, *end, *publishStart, territories.String())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
 				return flag.ErrHelp
@@ -433,7 +433,7 @@ Examples:
 
 			if !hasUpdate {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := appEventsClientFactory()
@@ -476,11 +476,11 @@ Examples:
 			id := strings.TrimSpace(*eventID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --event-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--event-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := appEventsClientFactory()

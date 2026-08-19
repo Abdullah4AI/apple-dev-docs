@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1138,14 +1140,19 @@ func printOutput(data any, format string, pretty bool) error {
 	}
 	switch format {
 	case "json":
-		return printJSONOutput(data, pretty)
+		err = printJSONOutput(data, pretty)
 	case "markdown":
-		return asc.PrintMarkdown(data)
+		err = asc.PrintMarkdown(data)
 	case "table":
-		return asc.PrintTable(data)
+		err = asc.PrintTable(data)
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
+	if err != nil {
+		return err
+	}
+	warnMorePages(data)
+	return nil
 }
 
 func printOutputWithRenderers(data any, format string, pretty bool, tableRenderer, markdownRenderer func() error) error {
@@ -1155,20 +1162,58 @@ func printOutputWithRenderers(data any, format string, pretty bool, tableRendere
 	}
 	switch format {
 	case "json":
-		return printJSONOutput(data, pretty)
+		err = printJSONOutput(data, pretty)
 	case "table":
 		if tableRenderer == nil {
 			return fmt.Errorf("table renderer is required")
 		}
-		return tableRenderer()
+		err = tableRenderer()
 	case "markdown":
 		if markdownRenderer == nil {
 			return fmt.Errorf("markdown renderer is required")
 		}
-		return markdownRenderer()
+		err = markdownRenderer()
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
+	if err != nil {
+		return err
+	}
+	warnMorePages(data)
+	return nil
+}
+
+// warnMorePages emits a stderr notice when rendered output is a single page of
+// a larger collection. PaginateAll clears links.next on aggregated results, so
+// a non-empty next link at print time means the output is one unpaginated page.
+func warnMorePages(data any) {
+	page, ok := data.(asc.PaginatedResponse)
+	if !ok {
+		return
+	}
+	// Guard typed nil (non-nil interface containing nil pointer) before
+	// calling interface methods that dereference the receiver.
+	pageValue := reflect.ValueOf(page)
+	if pageValue.Kind() == reflect.Pointer && pageValue.IsNil() {
+		return
+	}
+	links := page.GetLinks()
+	if links == nil || links.Next == "" {
+		return
+	}
+
+	count, countOK := asc.PageDataLen(page)
+	if countOK {
+		if withMeta, hasMeta := page.(interface{ GetMeta() json.RawMessage }); hasMeta {
+			if total, totalOK := asc.ParsePagingTotalOK(withMeta.GetMeta()); totalOK {
+				fmt.Fprintf(os.Stderr, "Warning: showing %d of %d results; more pages exist (use --paginate or --next where supported)\n", count, total)
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Warning: showing %d results; more pages exist (use --paginate or --next where supported)\n", count)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "Warning: more pages exist (use --paginate or --next where supported)")
 }
 
 func printJSONOutput(data any, pretty bool) error {

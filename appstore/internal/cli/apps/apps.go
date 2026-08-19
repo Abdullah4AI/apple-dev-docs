@@ -43,11 +43,13 @@ func AppsCommand() *ffcli.Command {
 Examples:
   asc apps
   asc apps list --bundle-id "com.example.app"
+  asc apps published
   asc web apps create --name "My App" --bundle-id "com.example.app" --sku "MYAPP123"
   asc apps wall
   asc apps wall submit --app "1234567890" --confirm
   asc apps public view --app "1234567890"
   asc apps public search --term "focus" --country us
+  asc apps public rank --app "1234567890" --term "focus timer" --country us --platform TV_OS
   asc apps public storefronts list
   asc apps registry pull --path ".asc/app-registry.json"
   asc apps view --id "APP_ID"
@@ -69,6 +71,7 @@ Examples:
 		UsageFunc: shared.VisibleUsageFunc,
 		Subcommands: []*ffcli.Command{
 			AppsListCommand(),
+			AppsPublishedCommand(),
 			AppsWallCommand(),
 			AppsPublicCommand(),
 			AppsRegistryCommand(),
@@ -158,7 +161,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			appInfoFieldValues, err := normalizeSparseField(fs, *appInfoFields, appInfoSparseFields441, "--app-info-fields")
 			if err != nil {
@@ -233,7 +236,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			attrs := asc.AppUpdateAttributes{}
@@ -256,7 +259,7 @@ Examples:
 			}
 			if attrs.BundleID == nil && attrs.PrimaryLocale == nil && attrs.ContentRightsDeclaration == nil {
 				fmt.Fprintln(os.Stderr, "Error: --bundle-id, --primary-locale, or --content-rights is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()

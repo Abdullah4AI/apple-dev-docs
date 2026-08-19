@@ -50,6 +50,7 @@ asc <subcommand> [flags]
 
 - `analytics` - Request and download analytics and sales reports.
 - `ads` - Manage Apple Ads API resources.
+- `optimize` - Build cross-API optimization plans. [experimental]
 - `insights` - Generate weekly and daily insights from App Store data sources.
 - `finance` - Download payments and financial reports.
 - `performance` - Access performance metrics and diagnostic logs.

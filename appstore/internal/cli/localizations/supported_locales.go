@@ -55,7 +55,7 @@ Examples:
 			vid := strings.TrimSpace(*versionID)
 			if vid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version")
 			}
 
 			client, err := shared.GetASCClient()

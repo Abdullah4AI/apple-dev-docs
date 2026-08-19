@@ -292,6 +292,83 @@ type unsupportedPaginatedResponse struct {
 func (r *unsupportedPaginatedResponse) GetLinks() *Links { return &r.links }
 func (r *unsupportedPaginatedResponse) GetData() any     { return r.data }
 
+// rawDataPaginatedResponse is a test-only type whose GetData returns raw JSON
+// bytes instead of an item slice.
+type rawDataPaginatedResponse struct {
+	links Links
+	data  json.RawMessage
+}
+
+func (r *rawDataPaginatedResponse) GetLinks() *Links { return &r.links }
+func (r *rawDataPaginatedResponse) GetData() any     { return r.data }
+
+// nonSliceDataPaginatedResponse is a test-only type whose GetData does not
+// return a slice at all.
+type nonSliceDataPaginatedResponse struct {
+	links Links
+}
+
+func (r *nonSliceDataPaginatedResponse) GetLinks() *Links { return &r.links }
+func (r *nonSliceDataPaginatedResponse) GetData() any     { return "not a slice" }
+
+func TestPageDataLen(t *testing.T) {
+	t.Run("counts resource slice", func(t *testing.T) {
+		page := makeBetaGroupsPage(1, 3, 2)
+		count, ok := PageDataLen(page)
+		if !ok || count != 3 {
+			t.Fatalf("PageDataLen() = (%d, %t), want (3, true)", count, ok)
+		}
+	})
+
+	t.Run("counts empty resource slice", func(t *testing.T) {
+		page := &BetaGroupsResponse{Data: []Resource[BetaGroupAttributes]{}}
+		count, ok := PageDataLen(page)
+		if !ok || count != 0 {
+			t.Fatalf("PageDataLen() = (%d, %t), want (0, true)", count, ok)
+		}
+	})
+
+	t.Run("counts non-resource item slice", func(t *testing.T) {
+		page := &unsupportedPaginatedResponse{data: []string{"a", "b"}}
+		count, ok := PageDataLen(page)
+		if !ok || count != 2 {
+			t.Fatalf("PageDataLen() = (%d, %t), want (2, true)", count, ok)
+		}
+	})
+
+	t.Run("nil interface not counted", func(t *testing.T) {
+		count, ok := PageDataLen(nil)
+		if ok || count != 0 {
+			t.Fatalf("PageDataLen(nil) = (%d, %t), want (0, false)", count, ok)
+		}
+	})
+
+	t.Run("typed nil not counted", func(t *testing.T) {
+		var typedNil *BetaGroupsResponse
+		var page PaginatedResponse = typedNil
+		count, ok := PageDataLen(page)
+		if ok || count != 0 {
+			t.Fatalf("PageDataLen(typed nil) = (%d, %t), want (0, false)", count, ok)
+		}
+	})
+
+	t.Run("raw JSON data not counted as bytes", func(t *testing.T) {
+		page := &rawDataPaginatedResponse{data: json.RawMessage(`[{"id":"a"},{"id":"b"}]`)}
+		count, ok := PageDataLen(page)
+		if ok || count != 0 {
+			t.Fatalf("PageDataLen(raw JSON data) = (%d, %t), want (0, false)", count, ok)
+		}
+	})
+
+	t.Run("non-slice data not counted", func(t *testing.T) {
+		page := &nonSliceDataPaginatedResponse{}
+		count, ok := PageDataLen(page)
+		if ok || count != 0 {
+			t.Fatalf("PageDataLen(non-slice data) = (%d, %t), want (0, false)", count, ok)
+		}
+	})
+}
+
 func TestPaginateAll_ContextCancelled(t *testing.T) {
 	firstPage := &AppsResponse{
 		Data: []Resource[AppAttributes]{

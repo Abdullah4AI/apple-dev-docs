@@ -219,6 +219,11 @@ func (r *Response[T]) GetLinks() *Links {
 	return &r.Links
 }
 
+// GetMeta returns the raw metadata field (e.g. paging totals).
+func (r *Response[T]) GetMeta() json.RawMessage {
+	return r.Meta
+}
+
 // GetData returns the data field for aggregation.
 func (r *Response[T]) GetData() any {
 	return r.Data

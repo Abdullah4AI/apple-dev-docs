@@ -154,7 +154,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			includeValues, err := normalizeCertificatesInclude(*include)
@@ -221,7 +221,7 @@ Examples:
 			certificateValue := strings.ToUpper(strings.TrimSpace(*certificateType))
 			if certificateValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --certificate-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--certificate-type")
 			}
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			isPassTypeCertificate := certificateValue == "PASS_TYPE_ID" || certificateValue == "PASS_TYPE_ID_WITH_NFC"
@@ -242,12 +242,12 @@ Examples:
 				keyOutValue := strings.TrimSpace(*keyOut)
 				if keyOutValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --key-out is required with --generate-csr")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--key-out")
 				}
 				csrOutValue := strings.TrimSpace(*csrOut)
 				if csrOutValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --csr-out is required with --generate-csr")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--csr-out")
 				}
 
 				_, csrPEM, err := generateCSRFiles(csrGenerateOptions{
@@ -275,7 +275,7 @@ Examples:
 				}
 				if csrValue == "" {
 					fmt.Fprintln(os.Stderr, "Error: --csr is required (or use --generate-csr with --key-out and --csr-out)")
-					return shared.MissingRequiredUsageError()
+					return shared.MissingRequiredUsageError("--csr")
 				}
 
 				var err error
@@ -342,7 +342,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			activatedValue, err := shared.ParseOptionalBoolFlag("--activated", *activated)
@@ -351,7 +351,7 @@ Examples:
 			}
 			if activatedValue == nil {
 				fmt.Fprintln(os.Stderr, "Error: --activated is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--activated")
 			}
 
 			client, err := shared.GetASCClient()
@@ -396,11 +396,11 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

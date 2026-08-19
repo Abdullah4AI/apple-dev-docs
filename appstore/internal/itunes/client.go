@@ -8,19 +8,24 @@ import (
 	"strings"
 )
 
-const defaultBaseURL = "https://itunes.apple.com"
+const (
+	defaultBaseURL                 = "https://itunes.apple.com"
+	defaultStorefrontSearchBaseURL = "https://search.itunes.apple.com"
+)
 
 // Client is an iTunes public API client.
 type Client struct {
-	HTTPClient *http.Client
-	BaseURL    string
+	HTTPClient              *http.Client
+	BaseURL                 string
+	StorefrontSearchBaseURL string
 }
 
 // NewClient creates a new iTunes API client.
 func NewClient() *Client {
 	return &Client{
-		HTTPClient: http.DefaultClient,
-		BaseURL:    defaultBaseURL,
+		HTTPClient:              http.DefaultClient,
+		BaseURL:                 defaultBaseURL,
+		StorefrontSearchBaseURL: defaultStorefrontSearchBaseURL,
 	}
 }
 
@@ -38,6 +43,17 @@ func (c *Client) baseURL() string {
 	base := strings.TrimSpace(c.BaseURL)
 	if base == "" {
 		return defaultBaseURL
+	}
+	return strings.TrimRight(base, "/")
+}
+
+func (c *Client) storefrontSearchBaseURL() string {
+	if c == nil {
+		return defaultStorefrontSearchBaseURL
+	}
+	base := strings.TrimSpace(c.StorefrontSearchBaseURL)
+	if base == "" {
+		return defaultStorefrontSearchBaseURL
 	}
 	return strings.TrimRight(base, "/")
 }

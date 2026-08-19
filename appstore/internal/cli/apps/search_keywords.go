@@ -52,7 +52,7 @@ func AppsSearchKeywordsSetCommand() *ffcli.Command {
 	version := fs.String("version", "", "App Store version string (required)")
 	locale := fs.String("locale", "", "Version localization locale (required; for example en-US)")
 	platform := fs.String("platform", "", "App Store version platform: IOS, MAC_OS, TV_OS, VISION_OS (required only when ambiguous)")
-	keywords := fs.String("keywords", "", "Version-localized keywords (comma-separated)")
+	keywords := shared.BindOnceCSVFlag(fs, "keywords", "Version-localized keywords (comma-separated)")
 	confirm := fs.Bool("confirm", false, "Confirm replacing the localization's keywords")
 	output := shared.BindOutputFlags(fs)
 
@@ -82,19 +82,19 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			versionValue := strings.TrimSpace(*version)
 			if versionValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version is required to select an App Store version; existing invocations must add --version and --locale")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version")
 			}
 
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required to select a version localization; existing invocations must add --version and --locale")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 			canonicalLocale, err := shared.CanonicalizeAppStoreLocalizationLocale(localeValue)
 			if err != nil {
@@ -111,13 +111,13 @@ Examples:
 
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
-			keywordValue := strings.TrimSpace(*keywords)
+			keywordValue := strings.TrimSpace(keywords.String())
 			if keywordValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --keywords is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--keywords")
 			}
 			if err := shared.ValidateVersionLocalizationAttributes(asc.AppStoreVersionLocalizationAttributes{Keywords: keywordValue}); err != nil {
 				return shared.UsageError(err.Error())
@@ -297,7 +297,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			platforms, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platform))

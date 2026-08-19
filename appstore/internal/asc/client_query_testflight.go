@@ -78,6 +78,9 @@ type betaGroupTestersQuery struct {
 type betaTestersQuery struct {
 	listQuery
 	email        string
+	firstName    string
+	lastName     string
+	ids          []string
 	groupIDs     []string
 	filterBuilds string
 }
@@ -217,6 +220,13 @@ func buildBetaTestersQuery(appID string, query *betaTestersQuery) (string, error
 	if strings.TrimSpace(query.email) != "" {
 		values.Set("filter[email]", strings.TrimSpace(query.email))
 	}
+	if strings.TrimSpace(query.firstName) != "" {
+		values.Set("filter[firstName]", strings.TrimSpace(query.firstName))
+	}
+	if strings.TrimSpace(query.lastName) != "" {
+		values.Set("filter[lastName]", strings.TrimSpace(query.lastName))
+	}
+	addCSV(values, "filter[id]", query.ids)
 	addLimit(values, query.limit)
 	return values.Encode(), nil
 }
@@ -636,6 +646,27 @@ func WithBetaTestersNextURL(next string) BetaTestersOption {
 func WithBetaTestersEmail(email string) BetaTestersOption {
 	return func(q *betaTestersQuery) {
 		q.email = strings.TrimSpace(email)
+	}
+}
+
+// WithBetaTestersFirstName filters beta testers by first name.
+func WithBetaTestersFirstName(firstName string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		q.firstName = strings.TrimSpace(firstName)
+	}
+}
+
+// WithBetaTestersLastName filters beta testers by last name.
+func WithBetaTestersLastName(lastName string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		q.lastName = strings.TrimSpace(lastName)
+	}
+}
+
+// WithBetaTestersIDs filters beta testers by tester ID(s).
+func WithBetaTestersIDs(ids []string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		q.ids = normalizeList(ids)
 	}
 }
 

@@ -137,6 +137,8 @@ func registerAllOutputRenderers() {
 	registerRows(buildIconsRows)
 	registerRowsWithSingleResourceAdapter(buildUploadsRows)
 	registerRows(buildsNextBuildNumberRows)
+	registerRows(dsymDownloadResultRows)
+	registerRows(buildWaitResultRows)
 	registerRowsWithSingleResourceAdapter(buildUploadFilesRows)
 	registerDirect(func(v *AppClipDomainStatusResult, render func([]string, [][]string)) error {
 		h, r := appClipDomainStatusMainRows(v)
@@ -420,6 +422,18 @@ func registerAllOutputRenderers() {
 	registerRows(betaAppLocalizationDeleteResultRows)
 	registerRows(betaBuildLocalizationDeleteResultRows)
 	registerRows(betaTesterInvitationResultRows)
+	registerRows(betaTestersExportSummaryRows)
+	registerDirect(func(v *BetaTestersImportSummary, render func([]string, [][]string)) error {
+		h, r := betaTestersImportSummaryRows(v)
+		render(h, r)
+		if len(v.Failures) > 0 {
+			fh, fr := betaTestersImportFailureRows(v.Failures)
+			render(fh, fr)
+		}
+		return nil
+	})
+	registerDirect(betaTesterUsagesPageTables)
+	registerRows(testFlightSyncSummaryRows)
 	registerRows(promotedPurchaseDeleteResultRows)
 	registerRows(appPromotedPurchasesLinkResultRows)
 	registerRows(sandboxTesterClearHistoryResultRows)

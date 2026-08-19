@@ -44,7 +44,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			nextValue := strings.TrimSpace(*next)
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("reviews summarizations: %w", err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews summarizations: %w", err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(
 				fs, *next, "reviews summarizations",
@@ -53,13 +53,13 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("reviews summarizations: --limit must be between 1 and 200")
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews summarizations: --limit must be between 1 and 200")), shared.DiagnosticInvalidInput, "--limit")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && nextValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			if nextValue != "" {
 				resolvedAppID = ""
@@ -67,16 +67,16 @@ Examples:
 
 			fieldsValue, err := normalizeReviewSummarizationFields(*fields)
 			if err != nil {
-				return fmt.Errorf("reviews summarizations: %w", err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews summarizations: %w", err)), shared.DiagnosticInvalidInput, "--fields")
 			}
 
 			platformValues, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platforms))
 			if err != nil {
-				return fmt.Errorf("reviews summarizations: %w", err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("reviews summarizations: %w", err)), shared.DiagnosticInvalidInput, "--platform")
 			}
 			if len(platformValues) == 0 && nextValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --platform is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--platform")
 			}
 
 			client, err := shared.GetASCClient()

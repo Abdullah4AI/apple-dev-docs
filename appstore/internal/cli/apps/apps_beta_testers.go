@@ -17,7 +17,7 @@ func AppsRemoveBetaTestersCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("remove-beta-testers", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
-	testers := fs.String("tester", "", "Comma-separated beta tester IDs")
+	testers := shared.BindOnceCSVFlag(fs, "tester", "Comma-separated beta tester IDs")
 	confirm := fs.Bool("confirm", false, "Confirm removal")
 	output := shared.BindOutputFlags(fs)
 
@@ -36,17 +36,17 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
-			testerIDs := shared.SplitCSV(*testers)
+			testerIDs := shared.SplitCSV(testers.String())
 			if len(testerIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --tester is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--tester")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

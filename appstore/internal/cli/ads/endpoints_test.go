@@ -288,6 +288,20 @@ func TestPlatformEndpointHelpIncludesAgentPayloadGuidance(t *testing.T) {
 			},
 		},
 		{
+			path: []string{"insights", "search-term-popularity", "find"},
+			want: []string{
+				"Starter payload (query.json):",
+				`"granularity": "WEEKLY_SUN_SAT"`,
+			},
+		},
+		{
+			path: []string{"reports", "apps", "campaigns"},
+			want: []string{
+				"Starter payload (report.json):",
+				`"timeZone": "ORTZ"`,
+			},
+		},
+		{
 			path: []string{"budget-orders", "create"},
 			want: []string{
 				"--confirm",
@@ -395,8 +409,16 @@ func TestPlatformKeywordQueriesRequireSelectorBodyBeforeAuth(t *testing.T) {
 		if !errors.Is(err, flag.ErrHelp) {
 			t.Errorf("%q missing body error = %v, want pre-auth --file usage error", strings.Join(path, " "), err)
 		}
-		if got, want := err.Error(), flag.ErrHelp.Error(); got != want {
+		if got, want := err.Error(), "--file"; got != want {
 			t.Errorf("%q missing body error = %q, want exact %q", strings.Join(path, " "), got, want)
+		}
+		diagnostic, ok := shared.DiagnosticFromError(err)
+		if !ok {
+			t.Errorf("%q missing body error has no structured diagnostic", strings.Join(path, " "))
+			continue
+		}
+		if diagnostic.Code != shared.DiagnosticRequiredInputMissing || diagnostic.Parameter != "--file" {
+			t.Errorf("%q diagnostic = %+v, want required_input_missing for --file", strings.Join(path, " "), diagnostic)
 		}
 	}
 }
@@ -444,10 +466,15 @@ func TestPlatformQueryMigrationValidation(t *testing.T) {
 	}
 
 	validV1 := json.RawMessage(`{"filters":[{"field":"id","operator":"EQUALS","value":"123"}],"sorting":[{"field":"id","order":"DESC"}],"pagination":{"offset":0,"pageSize":5}}`)
+	validSearchTermPopularity := json.RawMessage(`{"filters":[{"field":"countryOrRegion","operator":"EQUALS","value":"US"}],"sorting":[{"field":"rankInGenre","sortOrder":"DESC"}],"pagination":{"offset":0,"pageSize":5}}`)
 	legacyConditions := json.RawMessage(`{"conditions":null}`)
 	for _, spec := range querySpecs {
 		t.Run(strings.Join(spec.CommandPath, "-"), func(t *testing.T) {
-			if err := validateEndpointBody(spec, validV1, false); err != nil {
+			validBody := validV1
+			if spec.BodyType == "SearchTermPopularityQueryRequest" {
+				validBody = validSearchTermPopularity
+			}
+			if err := validateEndpointBody(spec, validBody, false); err != nil {
 				t.Fatalf("valid Platform v1 query rejected: %v", err)
 			}
 			fieldsErr := validatePlatformQueryMigration(spec, json.RawMessage(`{"fields":null}`))
@@ -471,6 +498,16 @@ func TestPlatformQueryMigrationValidation(t *testing.T) {
 	}
 	if err := validateEndpointBody(campaigns, json.RawMessage(`{"filters":[{"field":"name","operator":"STARTS_WITH","value":"x"}],"sorting":[{"field":"id","order":"DESC"}]}`), false); err != nil {
 		t.Fatalf("renamed v1 operator and sort order rejected: %v", err)
+	}
+	searchTermPopularity, ok := appleads.PlatformEndpointByCommandPath("insights", "search-term-popularity", "find")
+	if !ok {
+		t.Fatal("missing search term popularity find")
+	}
+	if err := validateEndpointBody(searchTermPopularity, json.RawMessage(`{"sorting":[{"field":"rankInGenre","sortOrder":"ASC"}]}`), false); err != nil {
+		t.Fatalf("runtime search term popularity sort key rejected: %v", err)
+	}
+	if err := validateEndpointBody(searchTermPopularity, json.RawMessage(`{"sorting":[{"field":"rankInGenre","order":"ASC"}]}`), false); err == nil || !strings.Contains(err.Error(), `sorting "order" -> "sortOrder"`) {
+		t.Fatalf("documentation-only search term popularity sort key error = %v, want runtime migration hint", err)
 	}
 	for _, test := range []struct {
 		name string
@@ -755,8 +792,8 @@ func TestPlatformCampaignAndBudgetRiskConfirmationPrecedesAuth(t *testing.T) {
 	}{
 		{name: "missing status", payload: `{ "name": "agent-test" }`, want: `--confirm is required unless status is explicitly "PAUSED"; otherwise acknowledge potential Apple Ads spend, billing, delivery, targeting, or access impact`},
 		{name: "enabled", payload: `{ "status": "ENABLED" }`, want: `--confirm is required unless status is explicitly "PAUSED"; otherwise acknowledge potential Apple Ads spend, billing, delivery, targeting, or access impact`},
-		{name: "paused", payload: `{ "status": "PAUSED" }`, want: "ads: configuration not found"},
-		{name: "enabled confirmed", payload: `{ "status": "ENABLED" }`, confirm: true, want: "ads: configuration not found"},
+		{name: "paused", payload: `{ "status": "PAUSED" }`, want: "ads: configuration not found; run 'asc ads auth login' to store Apple Ads credentials, set ASC_ADS_* environment credentials, or pass --ads-profile"},
+		{name: "enabled confirmed", payload: `{ "status": "ENABLED" }`, confirm: true, want: "ads: configuration not found; run 'asc ads auth login' to store Apple Ads credentials, set ASC_ADS_* environment credentials, or pass --ads-profile"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "campaign.json")
@@ -837,7 +874,7 @@ func TestPlatformCampaignUpdateAndBudgetUpdateConfirmBeforeAuth(t *testing.T) {
 		confirm bool
 		want    string
 	}{
-		{name: "paused name-only update is safe", payload: `{"name":"paused-name","status":"PAUSED"}`, want: "ads: configuration not found"},
+		{name: "paused name-only update is safe", payload: `{"name":"paused-name","status":"PAUSED"}`, want: "ads: configuration not found; run 'asc ads auth login' to store Apple Ads credentials, set ASC_ADS_* environment credentials, or pass --ads-profile"},
 		{name: "missing status", payload: `{"name":"name-only"}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
 		{name: "enabled status", payload: `{"status":"ENABLED"}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
 		{name: "daily budget", payload: `{"status":"PAUSED","dailyBudget":1}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
@@ -847,7 +884,7 @@ func TestPlatformCampaignUpdateAndBudgetUpdateConfirmBeforeAuth(t *testing.T) {
 		{name: "start", payload: `{"status":"PAUSED","start":"2026-08-15"}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
 		{name: "resume", payload: `{"status":"PAUSED","resume":true}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
 		{name: "enabled field", payload: `{"status":"PAUSED","enabled":true}`, want: `--confirm is required unless status is "PAUSED" and only non-spend fields are changed`},
-		{name: "confirmed spend update", payload: `{"status":"ENABLED","dailyBudget":1}`, confirm: true, want: "ads: configuration not found"},
+		{name: "confirmed spend update", payload: `{"status":"ENABLED","dailyBudget":1}`, confirm: true, want: "ads: configuration not found; run 'asc ads auth login' to store Apple Ads credentials, set ASC_ADS_* environment credentials, or pass --ads-profile"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1911,5 +1948,38 @@ func assertSpecFlags(t *testing.T, cmd *ffcli.Command, spec appleads.EndpointSpe
 	}
 	if spec.SupportsPaginate && cmd.FlagSet.Lookup("paginate") == nil {
 		t.Fatalf("asc ads %s missing --paginate", strings.Join(spec.CommandPath, " "))
+	}
+}
+
+func TestReadBodyReadsStdinPayload(t *testing.T) {
+	spec, ok := appleads.PlatformEndpointByCommandPath("insights", "search-term-popularity", "find")
+	if !ok {
+		t.Fatal("missing insights search-term-popularity find")
+	}
+
+	payload := `{"timeRange":{"start":"2026-07-05","end":"2026-08-08","granularity":"WEEKLY_SUN_SAT"}}`
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	previous := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = previous
+		reader.Close()
+	})
+	go func() {
+		defer writer.Close()
+		_, _ = writer.WriteString(payload)
+	}()
+
+	_, flags := bindEndpointFlags(spec, "insights search-term-popularity find")
+	*flags.file = "-"
+	body, err := readBody(spec, flags)
+	if err != nil {
+		t.Fatalf("readBody(stdin) error: %v", err)
+	}
+	if string(body) != payload {
+		t.Fatalf("readBody(stdin) = %q, want %q", string(body), payload)
 	}
 }

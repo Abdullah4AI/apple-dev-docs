@@ -39,7 +39,7 @@ func IAPVersionImagesListCommand() *ffcli.Command {
 			id := strings.TrimSpace(*versionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if err := rejectIAPVersionNextFlagConflicts(
 				fs, *next, "iap versions images list", "version-id", "limit", "image-fields",
@@ -94,12 +94,12 @@ func IAPVersionImagesCreateCommand() *ffcli.Command {
 			vid := strings.TrimSpace(*versionID)
 			if vid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			path := strings.TrimSpace(*filePath)
 			if path == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 			file, info, err := openImageFile(path)
 			if err != nil {
@@ -153,7 +153,7 @@ func IAPVersionImagesViewCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			fields, err := shared.NormalizeSelection(*imageFields, iapVersionImageFields, "--image-fields")
 			if err != nil {
@@ -188,11 +188,11 @@ func IAPVersionImagesUpdateCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			if !flagSet(fs, "uploaded") {
 				fmt.Fprintln(os.Stderr, "Error: --uploaded is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--uploaded")
 			}
 			uploadedValue, err := strconv.ParseBool(strings.TrimSpace(*uploaded))
 			if err != nil {
@@ -227,11 +227,11 @@ func IAPVersionImagesDeleteCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --image-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--image-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			client, err := iapVersionClientFactory()
 			if err != nil {

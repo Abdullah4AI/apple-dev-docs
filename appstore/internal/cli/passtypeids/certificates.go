@@ -89,7 +89,7 @@ Examples:
 			}
 			if passTypeIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --pass-type-id is required unless --next is provided")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 			if err := shared.ValidateSort(*sort, passTypeIDCertificatesSortList()...); err != nil {
 				return fmt.Errorf("pass-type-ids certificates list: %w", err)
@@ -206,7 +206,7 @@ Examples:
 			}
 			if passTypeIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --pass-type-id is required unless --next is provided")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 
 			client, err := shared.GetASCClient()

@@ -45,7 +45,7 @@ Examples:
 			appClipValue := strings.TrimSpace(*appClipID)
 			if appClipValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-clip-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-clip-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -120,7 +120,7 @@ Examples:
 			appClipValue := strings.TrimSpace(*appClipID)
 			if appClipValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app-clip-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app-clip-id")
 			}
 
 			client, err := shared.GetASCClient()

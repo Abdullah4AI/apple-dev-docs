@@ -109,7 +109,7 @@ Examples:
 			trimmedArchivePath := strings.TrimSpace(*archivePath)
 			if trimmedArchivePath == "" {
 				fmt.Fprintln(os.Stderr, "Error: --archive-path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--archive-path")
 			}
 			outputPathSet := false
 			fs.Visit(func(f *flag.Flag) {
@@ -126,7 +126,7 @@ Examples:
 			}
 			if trimmedOutputPath == "" {
 				fmt.Fprintln(os.Stderr, "Error: --output-path is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--output-path")
 			}
 
 			result, err := runGenerateExportOptions(ctx, localxcode.ExportOptionsGenerateOptions{

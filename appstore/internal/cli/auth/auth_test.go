@@ -12,14 +12,24 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	authsvc "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/auth"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/config"
 )
+
+type authRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn authRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestCommandWrapperReturnsAuthCommand(t *testing.T) {
 	cmd := AuthCommand()
@@ -250,6 +260,41 @@ func TestValidateStoredCredential_UsesPEMWhenPathMissing(t *testing.T) {
 	}
 }
 
+func TestValidateStoredCredential_ClassifiesUnauthorizedNetworkFailure(t *testing.T) {
+	keyPath := writeTempECDSAKeyFile(t)
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = authRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Status:     "401 Unauthorized",
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"errors":[{"status":"401","code":"NOT_AUTHORIZED","title":"Unauthorized"}]
+			}`)),
+			Request: req,
+		}, nil
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = previousTransport
+	})
+
+	err = validateStoredCredential(context.Background(), authsvc.Credential{
+		Name:          "unauthorized",
+		KeyID:         "KEY",
+		IssuerID:      "ISS",
+		PrivateKeyPEM: string(keyData),
+	})
+	if err == nil || !errors.Is(err, asc.ErrUnauthorized) {
+		t.Fatalf("expected unauthorized validation error, got %v", err)
+	}
+	assertAuthDiagnostic(t, err, shared.DiagnosticAuthenticationRejected, "")
+}
+
 func TestCredentialSigningIssuerIDClearsIndividualIssuer(t *testing.T) {
 	team := authsvc.Credential{
 		KeyID:    "KEY",
@@ -290,6 +335,7 @@ func TestValidateLoginCredentials(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "failed to generate JWT") {
 			t.Fatalf("expected jwt error, got %v", err)
 		}
+		assertAuthDiagnostic(t, err, shared.DiagnosticInternalError, "--private-key")
 	})
 
 	t.Run("network disabled succeeds", func(t *testing.T) {
@@ -328,6 +374,47 @@ func TestValidateLoginCredentials(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "network validation failed") {
 			t.Fatalf("expected network validation error, got %v", err)
 		}
+		assertAuthDiagnostic(t, err, shared.DiagnosticRequestFailed, "")
+	})
+
+	t.Run("network authentication rejected", func(t *testing.T) {
+		restoreJWT := SetLoginJWTGenerator(func(string, string, *ecdsa.PrivateKey) (string, error) {
+			return "token", nil
+		})
+		prevNetwork := loginNetworkValidate
+		loginNetworkValidate = func(context.Context, string, string, string) error {
+			return asc.ErrUnauthorized
+		}
+		t.Cleanup(func() {
+			restoreJWT()
+			loginNetworkValidate = prevNetwork
+		})
+
+		err := validateLoginCredentials(context.Background(), "KEY", "ISS", keyPath, true)
+		if err == nil || !strings.Contains(err.Error(), "network validation failed") {
+			t.Fatalf("expected network validation error, got %v", err)
+		}
+		assertAuthDiagnostic(t, err, shared.DiagnosticAuthenticationRejected, "")
+	})
+
+	t.Run("network authorization denied", func(t *testing.T) {
+		restoreJWT := SetLoginJWTGenerator(func(string, string, *ecdsa.PrivateKey) (string, error) {
+			return "token", nil
+		})
+		prevNetwork := loginNetworkValidate
+		loginNetworkValidate = func(context.Context, string, string, string) error {
+			return asc.ErrForbidden
+		}
+		t.Cleanup(func() {
+			restoreJWT()
+			loginNetworkValidate = prevNetwork
+		})
+
+		err := validateLoginCredentials(context.Background(), "KEY", "ISS", keyPath, true)
+		if err == nil || !strings.Contains(err.Error(), "network validation failed") {
+			t.Fatalf("expected network validation error, got %v", err)
+		}
+		assertAuthDiagnostic(t, err, shared.DiagnosticRequestFailed, "")
 	})
 }
 
@@ -373,6 +460,7 @@ func TestAuthLoginCommand(t *testing.T) {
 			if !errors.Is(err, flag.ErrHelp) {
 				t.Fatalf("expected flag.ErrHelp, got %v", err)
 			}
+			assertAuthDiagnostic(t, err, shared.DiagnosticInvalidInput, "--local")
 		})
 		if !strings.Contains(stderr, "--local requires --bypass-keychain") {
 			t.Fatalf("expected local/bypass error in stderr, got %q", stderr)
@@ -388,7 +476,69 @@ func TestAuthLoginCommand(t *testing.T) {
 		if !errors.Is(err, flag.ErrHelp) {
 			t.Fatalf("expected flag.ErrHelp, got %v", err)
 		}
+		assertAuthDiagnostic(t, err, shared.DiagnosticRequiredInputMissing, "--name")
 	})
+
+	t.Run("whitespace key id", func(t *testing.T) {
+		cmd := AuthLoginCommand()
+		if err := cmd.FlagSet.Parse([]string{
+			"--name", "demo",
+			"--key-id", "   ",
+			"--issuer-id", "ISS",
+			"--private-key", "/tmp/AuthKey.p8",
+		}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", err)
+			}
+			assertAuthDiagnostic(t, err, shared.DiagnosticRequiredInputMissing, "--key-id")
+		})
+		if !strings.Contains(stderr, "--key-id is required") {
+			t.Fatalf("expected key ID error in stderr, got %q", stderr)
+		}
+	})
+
+	for _, test := range []struct {
+		name      string
+		args      []string
+		parameter string
+	}{
+		{
+			name:      "whitespace name",
+			args:      []string{"--name", "   ", "--key-id", "KEY", "--issuer-id", "ISS", "--private-key", "/tmp/AuthKey.p8"},
+			parameter: "--name",
+		},
+		{
+			name:      "whitespace issuer id",
+			args:      []string{"--name", "demo", "--key-id", "KEY", "--issuer-id", "   ", "--private-key", "/tmp/AuthKey.p8"},
+			parameter: "--issuer-id",
+		},
+		{
+			name:      "whitespace private key",
+			args:      []string{"--name", "demo", "--key-id", "KEY", "--issuer-id", "ISS", "--private-key", "   "},
+			parameter: "--private-key",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := AuthLoginCommand()
+			if err := cmd.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			_, stderr := captureAuthOutput(t, func() {
+				err := cmd.Exec(context.Background(), []string{})
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected flag.ErrHelp, got %v", err)
+				}
+				assertAuthDiagnostic(t, err, shared.DiagnosticRequiredInputMissing, test.parameter)
+			})
+			if !strings.Contains(stderr, test.parameter+" is required") {
+				t.Fatalf("expected %s error in stderr, got %q", test.parameter, stderr)
+			}
+		})
+	}
 
 	t.Run("skip validation mutually exclusive with network", func(t *testing.T) {
 		cmd := AuthLoginCommand()
@@ -407,6 +557,7 @@ func TestAuthLoginCommand(t *testing.T) {
 			if !errors.Is(err, flag.ErrHelp) {
 				t.Fatalf("expected flag.ErrHelp, got %v", err)
 			}
+			assertAuthDiagnostic(t, err, shared.DiagnosticConflictingInput, "--skip-validation")
 		})
 		if !strings.Contains(stderr, "mutually exclusive") {
 			t.Fatalf("expected mutual exclusion error in stderr, got %q", stderr)
@@ -430,6 +581,33 @@ func TestAuthLoginCommand(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "invalid private key") {
 				t.Fatalf("expected invalid key error, got %v", err)
 			}
+			assertAuthDiagnostic(t, err, shared.DiagnosticFileNotFound, "--private-key")
+		})
+	})
+
+	t.Run("insecure private key permissions", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not expose POSIX key permissions")
+		}
+		withTempRepo(t, func(string) {
+			keyPath := writeTempECDSAKeyFile(t)
+			if err := os.Chmod(keyPath, 0o644); err != nil {
+				t.Fatalf("set key permissions: %v", err)
+			}
+			cmd := AuthLoginCommand()
+			if err := cmd.FlagSet.Parse([]string{
+				"--name", "demo",
+				"--key-id", "KEY",
+				"--issuer-id", "ISS",
+				"--private-key", keyPath,
+			}); err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			err := cmd.Exec(context.Background(), []string{})
+			if err == nil || !strings.Contains(err.Error(), "private key file is too permissive") {
+				t.Fatalf("expected insecure permissions error, got %v", err)
+			}
+			assertAuthDiagnostic(t, err, shared.DiagnosticFilePermissionsInsecure, "--private-key")
 		})
 	})
 
@@ -462,6 +640,17 @@ func TestAuthLoginCommand(t *testing.T) {
 			}
 		})
 	})
+}
+
+func assertAuthDiagnostic(t *testing.T, err error, code shared.DiagnosticCode, parameter string) {
+	t.Helper()
+	diagnostic, ok := shared.DiagnosticFromError(err)
+	if !ok {
+		t.Fatalf("DiagnosticFromError(%v) did not find metadata", err)
+	}
+	if diagnostic.Code != code || diagnostic.Parameter != parameter {
+		t.Fatalf("diagnostic = %+v, want code %q parameter %q", diagnostic, code, parameter)
+	}
 }
 
 func TestAuthSwitchCommand(t *testing.T) {
@@ -1015,6 +1204,78 @@ func TestAuthStatusCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("validate preserves private-key diagnostic", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), "config.json")
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", cfgPath)
+		missingKeyPath := filepath.Join(t.TempDir(), "missing.p8")
+
+		restore := SetListStoredCredentials(func() ([]authsvc.Credential, error) {
+			return []authsvc.Credential{{
+				Name:           "demo",
+				KeyID:          "KEY",
+				IssuerID:       "ISS",
+				PrivateKeyPath: missingKeyPath,
+			}}, nil
+		})
+		t.Cleanup(restore)
+
+		cmd := AuthStatusCommand()
+		if err := cmd.FlagSet.Parse([]string{"--output", "table", "--validate"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		var runErr error
+		captureAuthOutput(t, func() {
+			runErr = cmd.Exec(context.Background(), []string{})
+		})
+		if runErr == nil || !strings.Contains(runErr.Error(), "validation failed for 1 credential") {
+			t.Fatalf("expected validation failure summary, got %v", runErr)
+		}
+		diagnostic, ok := shared.DiagnosticFromError(runErr)
+		if !ok {
+			t.Fatalf("DiagnosticFromError(%v) did not find metadata", runErr)
+		}
+		if diagnostic.Code != shared.DiagnosticFileNotFound || diagnostic.Parameter != "--private-key" {
+			t.Fatalf("diagnostic = %+v, want file_not_found for --private-key", diagnostic)
+		}
+	})
+
+	t.Run("validate omits diagnostic for mixed aggregate failures", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), "config.json")
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", cfgPath)
+
+		restoreList := SetListStoredCredentials(func() ([]authsvc.Credential, error) {
+			return []authsvc.Credential{
+				{Name: "missing", KeyID: "KEY1", IssuerID: "ISS"},
+				{Name: "rejected", KeyID: "KEY2", IssuerID: "ISS"},
+			}, nil
+		})
+		t.Cleanup(restoreList)
+		restoreValidate := SetStatusValidateCredential(func(_ context.Context, cred authsvc.Credential) error {
+			if cred.Name == "missing" {
+				return shared.WithDiagnostic(errors.New("missing key"), shared.DiagnosticFileNotFound, "--private-key")
+			}
+			return shared.WithDiagnostic(errors.New("rejected"), shared.DiagnosticAuthenticationRejected, "")
+		})
+		t.Cleanup(restoreValidate)
+
+		cmd := AuthStatusCommand()
+		if err := cmd.FlagSet.Parse([]string{"--output", "table", "--validate"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		var runErr error
+		captureAuthOutput(t, func() {
+			runErr = cmd.Exec(context.Background(), []string{})
+		})
+		if runErr == nil || !strings.Contains(runErr.Error(), "validation failed for 2 credential(s)") {
+			t.Fatalf("expected validation failure summary, got %v", runErr)
+		}
+		if diagnostic, ok := shared.DiagnosticFromError(runErr); ok {
+			t.Fatalf("diagnostic = %+v, want no diagnostic for mixed aggregate failures", diagnostic)
+		}
+	})
+
 	t.Run("validate permission warning does not fail", func(t *testing.T) {
 		cfgPath := filepath.Join(t.TempDir(), "config.json")
 		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
@@ -1180,6 +1441,13 @@ func TestAuthTokenCommand(t *testing.T) {
 		err := cmd.Exec(context.Background(), []string{})
 		if err == nil || !strings.Contains(err.Error(), "private key file is too permissive") {
 			t.Fatalf("expected insecure key file error, got %v", err)
+		}
+		diagnostic, ok := shared.DiagnosticFromError(err)
+		if !ok {
+			t.Fatalf("DiagnosticFromError(%v) did not find metadata", err)
+		}
+		if diagnostic.Code != shared.DiagnosticFilePermissionsInsecure || diagnostic.Parameter != "--private-key" {
+			t.Fatalf("diagnostic = %+v, want file_permissions_insecure for --private-key", diagnostic)
 		}
 	})
 

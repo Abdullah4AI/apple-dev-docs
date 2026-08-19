@@ -60,7 +60,7 @@ Examples:
 			versionValue := strings.TrimSpace(*versionID)
 			if versionValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -102,7 +102,7 @@ Examples:
 			coverageValue := strings.TrimSpace(*coverageID)
 			if coverageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -145,13 +145,13 @@ Examples:
 			versionValue := strings.TrimSpace(*versionID)
 			if versionValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			pathValue := strings.TrimSpace(*filePath)
 			if pathValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			prepared, err := PrepareRoutingCoverageFile(pathValue)
@@ -196,11 +196,11 @@ Examples:
 			coverageValue := strings.TrimSpace(*coverageID)
 			if coverageValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

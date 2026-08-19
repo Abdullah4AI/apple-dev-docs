@@ -422,6 +422,11 @@ func TestRun_UsageValidationErrorsReturnExitUsage(t *testing.T) {
 			wantErr: "--limit must be between 1 and 200",
 		},
 		{
+			name:    "apps public rank invalid platform",
+			args:    []string{"apps", "public", "rank", "--app", "123", "--term", "focus", "--platform", "MAC_OS"},
+			wantErr: "--platform must be one of: IOS, TV_OS",
+		},
+		{
 			name:    "reviews ratings rejects positional args",
 			args:    []string{"reviews", "ratings", "--app", "123", "extra"},
 			wantErr: "reviews ratings does not accept positional arguments",

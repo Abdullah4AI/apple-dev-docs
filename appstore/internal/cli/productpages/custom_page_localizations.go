@@ -79,7 +79,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --custom-page-version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--custom-page-version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -143,7 +143,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -188,13 +188,13 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --custom-page-version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--custom-page-version-id")
 			}
 
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 
 			client, err := shared.GetASCClient()
@@ -237,13 +237,13 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			promoValue := strings.TrimSpace(*promotionalText)
 			if promoValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --promotional-text is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--promotional-text")
 			}
 
 			attrs := asc.AppCustomProductPageLocalizationUpdateAttributes{
@@ -290,11 +290,11 @@ Examples:
 			trimmedID := strings.TrimSpace(*localizationID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

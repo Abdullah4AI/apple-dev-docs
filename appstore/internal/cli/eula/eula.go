@@ -73,7 +73,7 @@ Examples:
 			}
 			if idValue == "" && appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id or --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if idValue != "" && strings.TrimSpace(*appID) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --id and --app are mutually exclusive")
@@ -124,7 +124,7 @@ Examples:
 			appValue := shared.ResolveAppID(*appID)
 			if appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -151,7 +151,7 @@ func EULACreateCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	agreementText := fs.String("agreement-text", "", "Agreement text")
-	territories := fs.String("territory", "", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
+	territories := shared.BindOnceCSVFlag(fs, "territory", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -168,21 +168,21 @@ Examples:
 			appValue := shared.ResolveAppID(*appID)
 			if appValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			agreementValue := strings.TrimSpace(*agreementText)
 			if agreementValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --agreement-text is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--agreement-text")
 			}
 
-			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(territories.String())
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
 			if len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --territory is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--territory")
 			}
 
 			client, err := shared.GetASCClient()
@@ -209,7 +209,7 @@ func EULAUpdateCommand() *ffcli.Command {
 
 	id := fs.String("id", "", "EULA ID")
 	agreementText := fs.String("agreement-text", "", "Agreement text")
-	territories := fs.String("territory", "", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
+	territories := shared.BindOnceCSVFlag(fs, "territory", "Territory inputs, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -227,7 +227,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			var agreementValue *string
@@ -236,13 +236,13 @@ Examples:
 				agreementValue = &value
 			}
 
-			territoryIDs, err := shared.NormalizeASCTerritoryCSV(*territories)
+			territoryIDs, err := shared.NormalizeASCTerritoryCSV(territories.String())
 			if err != nil {
 				return shared.UsageError(err.Error())
 			}
 			if agreementValue == nil && len(territoryIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --agreement-text or --territory is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -285,11 +285,11 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

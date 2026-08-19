@@ -822,6 +822,9 @@ func TestBuildBetaTestersQuery(t *testing.T) {
 	opts := []BetaTestersOption{
 		WithBetaTestersLimit(25),
 		WithBetaTestersEmail("tester@example.com"),
+		WithBetaTestersFirstName("Ada"),
+		WithBetaTestersLastName("Lovelace"),
+		WithBetaTestersIDs([]string{"tester-1", " tester-2 "}),
 	}
 	for _, opt := range opts {
 		opt(query)
@@ -840,6 +843,15 @@ func TestBuildBetaTestersQuery(t *testing.T) {
 	}
 	if got := values.Get("filter[email]"); got != "tester@example.com" {
 		t.Fatalf("expected filter[email]=tester@example.com, got %q", got)
+	}
+	if got := values.Get("filter[firstName]"); got != "Ada" {
+		t.Fatalf("expected filter[firstName]=Ada, got %q", got)
+	}
+	if got := values.Get("filter[lastName]"); got != "Lovelace" {
+		t.Fatalf("expected filter[lastName]=Lovelace, got %q", got)
+	}
+	if got := values.Get("filter[id]"); got != "tester-1,tester-2" {
+		t.Fatalf("expected filter[id]=tester-1,tester-2, got %q", got)
 	}
 	if got := values.Get("filter[betaGroups]"); got != "" {
 		t.Fatalf("expected no filter[betaGroups], got %q", got)

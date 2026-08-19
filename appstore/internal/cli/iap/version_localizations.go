@@ -40,7 +40,7 @@ func IAPVersionLocalizationsListCommand() *ffcli.Command {
 			id := strings.TrimSpace(*versionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if err := rejectIAPVersionNextFlagConflicts(
 				fs, *next, "iap versions localizations list",
@@ -113,17 +113,17 @@ func IAPVersionLocalizationsCreateCommand() *ffcli.Command {
 			vid := strings.TrimSpace(*versionID)
 			if vid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 			client, err := iapVersionClientFactory()
 			if err != nil {
@@ -160,7 +160,7 @@ func IAPVersionLocalizationsViewCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			includes, err := shared.NormalizeSelection(*include, []string{"version"}, "--include")
 			if err != nil {
@@ -221,7 +221,7 @@ func IAPVersionLocalizationsUpdateCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			nameSet, descriptionSet := flagSet(fs, "name"), flagSet(fs, "description")
 			if nameSet && *clearName {
@@ -232,7 +232,7 @@ func IAPVersionLocalizationsUpdateCommand() *ffcli.Command {
 			}
 			if !nameSet && !descriptionSet && !*clearName && !*clearDescription {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			attrs := asc.InAppPurchaseLocalizationUpdateAttributes{}
 			if nameSet {
@@ -276,11 +276,11 @@ func IAPVersionLocalizationsDeleteCommand() *ffcli.Command {
 			value := strings.TrimSpace(*id)
 			if value == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			client, err := iapVersionClientFactory()
 			if err != nil {

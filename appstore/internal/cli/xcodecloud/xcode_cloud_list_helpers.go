@@ -78,7 +78,7 @@ func runXcodeCloudPaginatedParentList(
 	resolvedParentID := strings.TrimSpace(parentID)
 	if resolvedParentID == "" && strings.TrimSpace(next) == "" {
 		fmt.Fprintf(os.Stderr, "Error: --%s is required\n", parentFlag)
-		return shared.MissingRequiredUsageError()
+		return shared.MissingRequiredUsageError("--" + parentFlag)
 	}
 
 	return runXcodeCloudPaginatedList(

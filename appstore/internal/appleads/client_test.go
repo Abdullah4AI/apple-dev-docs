@@ -559,6 +559,9 @@ func TestParsePlatformErrorAcceptsDirectEnvelopeAndStructuredInfo(t *testing.T) 
 	if apiErr.RateLimit.Limit != "50" {
 		t.Fatalf("rate limit = %+v", apiErr.RateLimit)
 	}
+	if got := apiErr.Error(); !strings.Contains(got, "BAD_FILTER") || !strings.Contains(got, "Invalid filter") || !strings.Contains(got, `"index":2`) {
+		t.Fatalf("APIError.Error() = %q, want structured validation details", got)
+	}
 }
 
 func TestParsePlatformErrorSurfacesDetailsOnlyEnvelope(t *testing.T) {
@@ -577,6 +580,21 @@ func TestParsePlatformErrorSurfacesDetailsOnlyEnvelope(t *testing.T) {
 	}
 	if got := apiErr.Error(); !strings.Contains(got, "BAD_FILTER") || !strings.Contains(got, "Invalid filter") {
 		t.Fatalf("APIError.Error() = %q, want structured detail", got)
+	} else if strings.Count(got, "BAD_FILTER") != 1 || strings.Count(got, "Invalid filter") != 1 {
+		t.Fatalf("APIError.Error() = %q, want detail surfaced once", got)
+	}
+}
+
+func TestParsePlatformErrorDoesNotRepeatTopLevelDetail(t *testing.T) {
+	err := parseErrorForVersion(
+		[]byte(`{"code":"INVALID_VALUE","message":"One or more validation errors occurred.","details":[{"code":"INVALID_VALUE","message":"One or more validation errors occurred."}]}`),
+		400,
+		nil,
+		APIVersionPlatformV1,
+	)
+	got := err.Error()
+	if strings.Count(got, "INVALID_VALUE") != 1 || strings.Count(got, "One or more validation errors occurred.") != 1 {
+		t.Fatalf("APIError.Error() = %q, want repeated top-level detail surfaced once", got)
 	}
 }
 

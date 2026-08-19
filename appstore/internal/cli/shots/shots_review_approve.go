@@ -45,7 +45,7 @@ Selectors:
 			deviceVal := strings.TrimSpace(*device)
 			if !*allReady && len(keys) == 0 && id == "" && localeVal == "" && deviceVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: provide at least one selector: --all-ready, --key, --id, --locale, or --device")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticRequiredInputMissing, "")
 			}
 
 			result, err := screenshots.ApproveReview(ctx, screenshots.ReviewApproveRequest{

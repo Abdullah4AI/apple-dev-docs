@@ -76,7 +76,7 @@ Examples:
 			bundleValue := strings.TrimSpace(*bundleID)
 			if bundleValue == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --bundle is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--bundle")
 			}
 
 			client, err := shared.GetASCClient()
@@ -144,12 +144,12 @@ Examples:
 			bundleValue := strings.TrimSpace(*bundleID)
 			if bundleValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --bundle is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--bundle")
 			}
 			capabilityValue := strings.ToUpper(strings.TrimSpace(*capability))
 			if capabilityValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --capability is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--capability")
 			}
 
 			settingsValue, err := parseCapabilitySettings(*settings)
@@ -207,7 +207,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			capabilityValue := strings.ToUpper(strings.TrimSpace(*capabilityType))
@@ -219,7 +219,7 @@ Examples:
 			// Treat empty settings arrays as no-op updates.
 			if capabilityValue == "" && len(settingsValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: at least one update field is required (--capability or --settings)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -266,11 +266,11 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

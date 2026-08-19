@@ -60,7 +60,7 @@ Examples:
 			contentValue := strings.TrimSpace(*contentID)
 			if iapValue == "" && contentValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id or --content-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if iapValue != "" && contentValue != "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id and --content-id are mutually exclusive")

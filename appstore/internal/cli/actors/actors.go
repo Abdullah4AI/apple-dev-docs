@@ -70,7 +70,7 @@ Examples:
 			}
 			if strings.TrimSpace(*ids) == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			fieldsValue, err := normalizeActorFields(*fields)
@@ -145,7 +145,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			fieldsValue, err := normalizeActorFields(*fields)

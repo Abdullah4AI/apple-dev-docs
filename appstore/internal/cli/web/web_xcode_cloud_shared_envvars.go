@@ -96,7 +96,7 @@ Examples:
 			pid := strings.TrimSpace(*productID)
 			if pid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--product-id")
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -149,7 +149,7 @@ func webXcodeCloudEnvVarsSharedSetCommand() *ffcli.Command {
 	value := fs.String("value", "", "Environment variable value (required)")
 	secret := fs.Bool("secret", false, "Encrypt the value as a secret (keep value redacted)")
 	locked := fs.Bool("locked", false, "Restrict editing of this variable")
-	workflowIDs := fs.String("workflow-ids", "", "Comma-separated workflow IDs to link (optional)")
+	workflowIDs := shared.BindOnceCSVFlag(fs, "workflow-ids", "Comma-separated workflow IDs to link (optional)")
 
 	return &ffcli.Command{
 		Name:       "set",
@@ -175,17 +175,17 @@ Examples:
 			pid := strings.TrimSpace(*productID)
 			if pid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--product-id")
 			}
 			varName := strings.TrimSpace(*name)
 			if varName == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			varValue := *value
 			if varValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --value is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--value")
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -218,7 +218,7 @@ Examples:
 					envValue = webcore.CIEnvironmentVariableValue{Plaintext: &varValue}
 				}
 
-				wfIDs := parseWorkflowIDs(*workflowIDs)
+				wfIDs := parseWorkflowIDs(workflowIDs.String())
 				if wfIDs == nil {
 					wfIDs = []string{}
 				}
@@ -310,16 +310,16 @@ Examples:
 			pid := strings.TrimSpace(*productID)
 			if pid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--product-id")
 			}
 			varName := strings.TrimSpace(*name)
 			if varName == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)

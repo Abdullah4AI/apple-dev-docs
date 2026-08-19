@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -81,23 +82,23 @@ Examples:
 			}
 			if strings.TrimSpace(*name) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			if strings.TrimSpace(*clientID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --client-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--client-id")
 			}
 			if strings.TrimSpace(*teamID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --team-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--team-id")
 			}
 			if strings.TrimSpace(*keyID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --key-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--key-id")
 			}
 			if strings.TrimSpace(*privateKey) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --private-key is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--private-key")
 			}
 			if *skipValidation && *network {
 				return shared.UsageError("--skip-validation and --network are mutually exclusive")
@@ -392,10 +393,7 @@ func statusActiveContext() adsAuthContext {
 }
 
 func isNoAdsCredentialError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return err.Error() == "default credentials not found"
+	return errors.Is(err, appleads.ErrDefaultCredentialsNotFound)
 }
 
 func storageDescription(rows []adsAuthStatusRow) string {
@@ -755,7 +753,7 @@ Examples:
 			}
 			if strings.TrimSpace(*name) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 			if err := appleads.SetDefaultCredentials(*name); err != nil {
 				return fmt.Errorf("ads auth switch: %w", err)

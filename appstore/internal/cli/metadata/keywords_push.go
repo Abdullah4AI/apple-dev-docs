@@ -91,13 +91,13 @@ Examples:
 			vid := strings.TrimSpace(*versionID)
 			if vid == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			inputValue := strings.TrimSpace(*inputPath)
 			if inputValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --input is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--input")
 			}
 
 			entries, err := readMetadataKeywordsPushEntries(inputValue)

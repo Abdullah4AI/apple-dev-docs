@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/telemetry"
 )
 
@@ -22,8 +23,6 @@ func TestRun_BuiltBinaryEmitsSchemaV4Payload(t *testing.T) {
 		"attach-build",
 		"--version-id",
 		"VERSION_ID",
-		"--app-id",
-		"BUILD_ID",
 	)
 	command.Env = telemetryBlackboxEnv(home, false, "https://127.0.0.1:1/events")
 	output, err := command.CombinedOutput()
@@ -49,8 +48,8 @@ func TestRun_BuiltBinaryEmitsSchemaV4Payload(t *testing.T) {
 	if event.SchemaVersion != 4 || event.OutcomeKind != telemetry.OutcomeUsageError {
 		t.Fatalf("unexpected schema-v4 payload: %+v", event)
 	}
-	if event.FailureParameter == nil || *event.FailureParameter != "--app-id" {
-		t.Fatalf("FailureParameter = %v, want --app-id", event.FailureParameter)
+	if event.FailureParameter == nil || *event.FailureParameter != "--build-id" {
+		t.Fatalf("FailureParameter = %v, want --build-id", event.FailureParameter)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(record.Event, &payload); err != nil {
@@ -58,6 +57,9 @@ func TestRun_BuiltBinaryEmitsSchemaV4Payload(t *testing.T) {
 	}
 	if value, exists := payload["http_status"]; !exists || value != nil {
 		t.Fatalf("http_status = %v (exists=%t), want explicit null", value, exists)
+	}
+	if value, exists := payload["diagnostic_code"]; !exists || value != string(shared.DiagnosticRequiredInputMissing) {
+		t.Fatalf("diagnostic_code = %v (exists=%t), want %q", value, exists, shared.DiagnosticRequiredInputMissing)
 	}
 }
 

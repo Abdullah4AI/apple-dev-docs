@@ -55,7 +55,7 @@ Examples:
 				if subcommand == "view" {
 					return removedReviewItemDetailUsageError("asc review items view")
 				}
-				return shared.UsageErrorf("unexpected argument(s): %s", shared.SanitizeTerminal(subcommand))
+				return shared.WithDiagnostic(shared.UsageErrorf("unexpected argument(s): %s", shared.SanitizeTerminal(subcommand)), shared.DiagnosticInvalidInput, "")
 			}
 			return flag.ErrHelp
 		},
@@ -63,10 +63,10 @@ Examples:
 }
 
 func removedReviewItemDetailUsageError(command string) error {
-	return shared.UsageErrorf(
+	return shared.WithDiagnostic(shared.UsageErrorf(
 		"`%s` was removed in 4.0.0; use `asc review items list --submission \"SUBMISSION_ID\"` instead",
 		command,
-	)
+	), shared.DiagnosticInvalidInput, "")
 }
 
 // ReviewItemsListCommand returns the review items list subcommand.
@@ -101,10 +101,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("unexpected positional arguments"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("%s: %w", errorPrefix, err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("%s: %w", errorPrefix, err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(
 				fs, *next, errorPrefix,
@@ -115,11 +115,11 @@ Examples:
 			}
 			opts, err := reviewItemsListOptions(*limit, *next, *fields, *include, *iapVersionFields, *subscriptionVersionFields, *subscriptionGroupVersionFields)
 			if err != nil {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError(err.Error()))
+				return fmt.Errorf("%s: %w", errorPrefix, err)
 			}
 			if strings.TrimSpace(*submissionID) == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --submission is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--submission")
 			}
 
 			client, err := reviewItemsClientFactory()
@@ -168,7 +168,7 @@ func rejectReviewNextFlagConflicts(fs *flag.FlagSet, next, command string, names
 	})
 	for _, name := range names {
 		if _, ok := provided[name]; ok {
-			return shared.UsageErrorf("%s: --next cannot be combined with --%s", command, name)
+			return shared.WithDiagnostic(shared.UsageErrorf("%s: --next cannot be combined with --%s", command, name), shared.DiagnosticConflictingInput, "")
 		}
 	}
 	return nil
@@ -191,35 +191,35 @@ var (
 
 func reviewItemsListOptions(limit int, next, fields, include, iapVersionFields, subscriptionVersionFields, subscriptionGroupVersionFields string) ([]asc.ReviewSubmissionItemsOption, error) {
 	if limit != 0 && (limit < 1 || limit > 200) {
-		return nil, fmt.Errorf("--limit must be between 1 and 200")
+		return nil, shared.WithDiagnostic(shared.UsageError("--limit must be between 1 and 200"), shared.DiagnosticInvalidInput, "--limit")
 	}
 	if err := shared.ValidateNextURL(next); err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--next")
 	}
 	if strings.TrimSpace(next) != "" && (limit != 0 || strings.TrimSpace(fields) != "" || strings.TrimSpace(include) != "" ||
 		strings.TrimSpace(iapVersionFields) != "" || strings.TrimSpace(subscriptionVersionFields) != "" || strings.TrimSpace(subscriptionGroupVersionFields) != "") {
-		return nil, fmt.Errorf("--next cannot be combined with --limit, --fields, --include, or version sparse-field flags")
+		return nil, shared.WithDiagnostic(shared.UsageError("--next cannot be combined with --limit, --fields, --include, or version sparse-field flags"), shared.DiagnosticConflictingInput, "")
 	}
 
 	itemFields, err := shared.NormalizeSelection(fields, reviewSubmissionItemFields, "--fields")
 	if err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--fields")
 	}
 	includes, err := shared.NormalizeSelection(include, reviewSubmissionItemIncludes, "--include")
 	if err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--include")
 	}
 	iapFields, err := shared.NormalizeSelection(iapVersionFields, reviewSubmissionItemIAPVersionFields, "--iap-version-fields")
 	if err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--iap-version-fields")
 	}
 	subscriptionFields, err := shared.NormalizeSelection(subscriptionVersionFields, reviewSubmissionItemSubscriptionVersionFields, "--subscription-version-fields")
 	if err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--subscription-version-fields")
 	}
 	groupFields, err := shared.NormalizeSelection(subscriptionGroupVersionFields, reviewSubmissionItemSubscriptionGroupVersionFields, "--subscription-group-version-fields")
 	if err != nil {
-		return nil, err
+		return nil, shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--subscription-group-version-fields")
 	}
 	addVersionRelationship := func(versionFields []string, relationship string) {
 		if len(versionFields) == 0 {
@@ -277,24 +277,24 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("unexpected positional arguments"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			if strings.TrimSpace(*submissionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --submission is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--submission")
 			}
 			if strings.TrimSpace(*itemType) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --item-type is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--item-type")
 			}
 			if strings.TrimSpace(*itemID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --item-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--item-id")
 			}
 
 			normalizedType, err := normalizeReviewSubmissionItemType(*itemType)
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--item-type")
 			}
 
 			client, err := reviewItemsClientFactory()
@@ -346,23 +346,23 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("unexpected positional arguments"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			trimmedID := strings.TrimSpace(*itemID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			resolvedProvided := reviewFlagWasProvided(fs, "resolved")
 			removedProvided := reviewFlagWasProvided(fs, "removed")
 			if resolvedProvided && *clearResolved {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("--resolved cannot be combined with --clear-resolved"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("--resolved cannot be combined with --clear-resolved"), shared.DiagnosticConflictingInput, ""))
 			}
 			if removedProvided && *clearRemoved {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("--removed cannot be combined with --clear-removed"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("--removed cannot be combined with --clear-removed"), shared.DiagnosticConflictingInput, ""))
 			}
 			if !resolvedProvided && !removedProvided && !*clearResolved && !*clearRemoved {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("at least one of --resolved, --removed, --clear-resolved, or --clear-removed is required"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("at least one of --resolved, --removed, --clear-resolved, or --clear-removed is required"), shared.DiagnosticRequiredInputMissing, ""))
 			}
 
 			attrs := asc.ReviewSubmissionItemUpdateAttributes{}
@@ -381,7 +381,7 @@ Examples:
 					return fmt.Errorf("%s: %w", errorPrefix, err)
 				}
 				if value && !*confirm {
-					return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("--confirm is required when --removed=true"))
+					return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("--confirm is required when --removed=true"), shared.DiagnosticRequiredInputMissing, "--confirm"))
 				}
 				attrs.Removed = &asc.NullableBool{Value: &value}
 			} else if *clearRemoved {
@@ -427,7 +427,7 @@ func parseReviewSubmissionItemBool(value, name string) (bool, error) {
 	case "false":
 		return false, nil
 	default:
-		return false, shared.UsageErrorf("%s must be true or false", name)
+		return false, shared.WithDiagnostic(shared.UsageErrorf("%s must be true or false", name), shared.DiagnosticInvalidInput, name)
 	}
 }
 
@@ -455,15 +455,15 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return fmt.Errorf("%s: %w", errorPrefix, shared.UsageError("unexpected positional arguments"))
+				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to remove")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			if strings.TrimSpace(*itemID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := reviewItemsClientFactory()

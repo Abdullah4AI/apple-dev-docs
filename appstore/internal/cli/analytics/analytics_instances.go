@@ -60,7 +60,7 @@ Examples:
 			id := strings.TrimSpace(*instanceID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--instance-id")
 			}
 			var err error
 			id, err = asc.ValidateResourcePathSegment(id)
@@ -118,7 +118,7 @@ Examples:
 			id := strings.TrimSpace(*instanceID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --instance-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--instance-id")
 			}
 			if id != "" {
 				var err error

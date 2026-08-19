@@ -36,7 +36,7 @@ Supported actions: launch, tap, type, wait, wait_for (polling), screenshot.`,
 			planPathVal := strings.TrimSpace(*planPath)
 			if planPathVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --plan is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--plan")
 			}
 
 			absPlanPath, err := filepath.Abs(planPathVal)

@@ -197,11 +197,11 @@ Examples:
 
 			if strings.TrimSpace(*versionID) == "" && (strings.TrimSpace(inputs.DeliverfileConfig.AppVersion) == "" || strings.TrimSpace(inputs.DeliverfileConfig.Platform) == "") {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required (or set Deliverfile app_version and platform)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if strings.TrimSpace(*appID) == "" && strings.TrimSpace(inputs.DeliverfileConfig.AppIdentifier) == "" && shared.ResolveAppID("") == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID or Deliverfile app_identifier)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			preparedLocalizations, err := prepareVersionLocalizations(localizations)
 			if err != nil {
@@ -448,17 +448,17 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if strings.TrimSpace(*outputDir) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --output-dir is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--output-dir")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1060,7 +1060,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*fastlaneDir) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --fastlane-dir is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--fastlane-dir")
 			}
 
 			workDir, err := os.Getwd()

@@ -90,7 +90,7 @@ Examples:
 			nextURL := strings.TrimSpace(*next)
 			if group == "" && resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -163,7 +163,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -217,19 +217,19 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if group == "" && resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			name := strings.TrimSpace(*referenceName)
 			if name == "" {
 				fmt.Fprintln(os.Stderr, "Error: --reference-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 
 			vendor := strings.TrimSpace(*vendorID)
 			if vendor == "" {
 				fmt.Fprintln(os.Stderr, "Error: --vendor-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--vendor-id")
 			}
 			if group != "" && !strings.HasPrefix(vendor, "grp.") {
 				fmt.Fprintln(os.Stderr, "Error: --vendor-id must start with \"grp.\" when using --group-id")
@@ -290,7 +290,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			attrs := asc.GameCenterLeaderboardSetUpdateAttributes{}
@@ -304,7 +304,7 @@ Examples:
 
 			if !hasUpdate {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--reference-name")
 			}
 
 			client, err := shared.GetASCClient()
@@ -347,11 +347,11 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -433,7 +433,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -481,7 +481,7 @@ func GameCenterLeaderboardSetMembersV2SetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 
 	setID := fs.String("set-id", "", "Game Center leaderboard set ID")
-	leaderboardIDs := fs.String("leaderboard-ids", "", "Comma-separated leaderboard IDs to set as members")
+	leaderboardIDs := shared.BindOnceCSVFlag(fs, "leaderboard-ids", "Comma-separated leaderboard IDs to set as members")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -499,10 +499,10 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
-			ids := shared.SplitUniqueCSV(*leaderboardIDs)
+			ids := shared.SplitUniqueCSV(leaderboardIDs.String())
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("game-center leaderboard-sets v2 members set: %w", err)
@@ -586,7 +586,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -650,7 +650,7 @@ Examples:
 			id := strings.TrimSpace(*versionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -692,7 +692,7 @@ Examples:
 			id := strings.TrimSpace(*setID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--set-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -773,7 +773,7 @@ Examples:
 			id := strings.TrimSpace(*versionID)
 			if id == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -837,7 +837,7 @@ Examples:
 			id := strings.TrimSpace(*localizationID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -881,19 +881,19 @@ Examples:
 			id := strings.TrimSpace(*versionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			localeVal := strings.TrimSpace(*locale)
 			if localeVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--locale")
 			}
 
 			nameVal := strings.TrimSpace(*name)
 			if nameVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			attrs := asc.GameCenterLeaderboardSetLocalizationCreateAttributes{
@@ -941,13 +941,13 @@ Examples:
 			id := strings.TrimSpace(*localizationID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			nameVal := strings.TrimSpace(*name)
 			if nameVal == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			attrs := asc.GameCenterLeaderboardSetLocalizationUpdateAttributes{
@@ -994,11 +994,11 @@ Examples:
 			id := strings.TrimSpace(*localizationID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1075,13 +1075,13 @@ Examples:
 			locID := strings.TrimSpace(*localizationID)
 			if locID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--localization-id")
 			}
 
 			file := strings.TrimSpace(*filePath)
 			if file == "" {
 				fmt.Fprintln(os.Stderr, "Error: --file is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--file")
 			}
 
 			client, err := shared.GetASCClient()
@@ -1126,7 +1126,7 @@ Examples:
 			locID := strings.TrimSpace(*localizationID)
 			if id == "" && locID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id or --localization-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if id != "" && locID != "" {
 				fmt.Fprintln(os.Stderr, "Error: --id cannot be used with --localization-id")
@@ -1181,11 +1181,11 @@ Examples:
 			id := strings.TrimSpace(*imageID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

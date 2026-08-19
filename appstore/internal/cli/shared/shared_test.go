@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/auth"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/config"
 )
@@ -675,6 +677,184 @@ func TestPrintOutputWithRenderers_RequiresMarkdownRenderer(t *testing.T) {
 	err := PrintOutputWithRenderers(struct{}{}, "markdown", false, func() error { return nil }, nil)
 	if err == nil || !strings.Contains(err.Error(), "markdown renderer is required") {
 		t.Fatalf("expected markdown renderer required error, got %v", err)
+	}
+}
+
+type testPageAttributes struct {
+	Name string `json:"name"`
+}
+
+func makeTruncatedTestPage(items int, next string, meta string) *asc.Response[testPageAttributes] {
+	data := make([]asc.Resource[testPageAttributes], 0, items)
+	for i := range items {
+		data = append(data, asc.Resource[testPageAttributes]{
+			Type:       asc.ResourceTypeApps,
+			ID:         fmt.Sprintf("item-%d", i),
+			Attributes: testPageAttributes{Name: fmt.Sprintf("Item %d", i)},
+		})
+	}
+	page := &asc.Response[testPageAttributes]{
+		Data:  data,
+		Links: asc.Links{Next: next},
+	}
+	if meta != "" {
+		page.Meta = json.RawMessage(meta)
+	}
+	return page
+}
+
+func TestPrintOutput_WarnsWithTotalWhenMorePagesExist(t *testing.T) {
+	page := makeTruncatedTestPage(2, "https://api.appstoreconnect.apple.com/v1/apps?cursor=abc", `{"paging":{"total":7,"limit":2}}`)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := PrintOutput(page, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	want := "Warning: showing 2 of 7 results; more pages exist (use --paginate or --next where supported)\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+	if !strings.Contains(stdout, `"item-0"`) || !strings.Contains(stdout, `"item-1"`) {
+		t.Fatalf("expected JSON payload on stdout, got %q", stdout)
+	}
+	if strings.Contains(stdout, "Warning") {
+		t.Fatalf("warning must not leak into stdout, got %q", stdout)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("stdout is no longer valid JSON: %v (%q)", err, stdout)
+	}
+}
+
+func TestPrintOutput_WarnsWithCountWhenTotalUnavailable(t *testing.T) {
+	page := makeTruncatedTestPage(3, "https://api.appstoreconnect.apple.com/v1/apps?cursor=abc", "")
+
+	_, stderr := captureOutput(t, func() {
+		if err := PrintOutput(page, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	want := "Warning: showing 3 results; more pages exist (use --paginate or --next where supported)\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestPrintOutput_NoWarningWhenNoNextLink(t *testing.T) {
+	// PaginateAll erases links.next on aggregated results, so this models a
+	// fully paginated response.
+	page := makeTruncatedTestPage(4, "", `{"paging":{"total":4,"limit":200}}`)
+
+	_, stderr := captureOutput(t, func() {
+		if err := PrintOutput(page, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected no warning for aggregated page, got %q", stderr)
+	}
+}
+
+func TestPrintOutput_NoWarningForNonPaginatedData(t *testing.T) {
+	_, stderr := captureOutput(t, func() {
+		if err := PrintOutput(map[string]string{"status": "ok"}, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected no warning for non-paginated data, got %q", stderr)
+	}
+}
+
+func TestPrintOutput_TypedNilPaginatedResponseDoesNotPanic(t *testing.T) {
+	var typedNil *asc.Response[testPageAttributes]
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := PrintOutput(typedNil, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected no warning for typed nil response, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "null") {
+		t.Fatalf("expected null JSON output for typed nil, got %q", stdout)
+	}
+}
+
+// rawOnlyPage implements asc.PaginatedResponse without a countable item slice
+// to exercise the generic truncation notice.
+type rawOnlyPage struct {
+	links asc.Links
+	data  json.RawMessage
+}
+
+func (r *rawOnlyPage) GetLinks() *asc.Links { return &r.links }
+func (r *rawOnlyPage) GetData() any         { return r.data }
+
+func TestPrintOutput_GenericWarningWhenCountUnavailable(t *testing.T) {
+	page := &rawOnlyPage{
+		links: asc.Links{Next: "https://api.appstoreconnect.apple.com/v1/apps?cursor=abc"},
+		data:  json.RawMessage(`[{"id":"a"}]`),
+	}
+
+	_, stderr := captureOutput(t, func() {
+		if err := PrintOutput(page, "json", false); err != nil {
+			t.Errorf("PrintOutput() error = %v", err)
+		}
+	})
+
+	want := "Warning: more pages exist (use --paginate or --next where supported)\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestPrintOutputWithRenderers_WarnsAfterTableRender(t *testing.T) {
+	page := makeTruncatedTestPage(1, "https://api.appstoreconnect.apple.com/v1/apps?cursor=abc", `{"paging":{"total":9,"limit":1}}`)
+
+	_, stderr := captureOutput(t, func() {
+		if err := PrintOutputWithRenderers(
+			page,
+			"table",
+			false,
+			func() error { return nil },
+			func() error { t.Error("markdown renderer should not run"); return nil },
+		); err != nil {
+			t.Errorf("PrintOutputWithRenderers() error = %v", err)
+		}
+	})
+
+	want := "Warning: showing 1 of 9 results; more pages exist (use --paginate or --next where supported)\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestPrintOutputWithRenderers_NoWarningWhenRendererFails(t *testing.T) {
+	page := makeTruncatedTestPage(1, "https://api.appstoreconnect.apple.com/v1/apps?cursor=abc", "")
+
+	_, stderr := captureOutput(t, func() {
+		err := PrintOutputWithRenderers(
+			page,
+			"table",
+			false,
+			func() error { return errors.New("render failed") },
+			func() error { return nil },
+		)
+		if err == nil || !strings.Contains(err.Error(), "render failed") {
+			t.Errorf("expected renderer error, got %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected no warning after failed render, got %q", stderr)
 	}
 }
 

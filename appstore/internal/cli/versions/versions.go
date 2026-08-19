@@ -92,7 +92,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := shared.GetASCClient()
@@ -170,7 +170,7 @@ Examples:
 			trimmedID := strings.TrimSpace(*versionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			includeValues, err := normalizeAppStoreVersionInclude(*include)
@@ -290,7 +290,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*versionString) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version")
 			}
 
 			normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
@@ -301,7 +301,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			copyMetadataFromValue := strings.TrimSpace(*copyMetadataFrom)
@@ -317,7 +317,7 @@ Examples:
 			}
 			if copyMetadataFromValue == "" && (len(copyFieldsValue) > 0 || len(excludeFieldsValue) > 0) {
 				fmt.Fprintln(os.Stderr, "Error: --copy-metadata-from is required when using --copy-fields or --exclude-fields")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--copy-metadata-from")
 			}
 
 			selectedCopyFields := []string(nil)
@@ -418,7 +418,7 @@ Examples:
 			}
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 
 			normalizedReleaseType, err := normalizeAppStoreVersionReleaseType(*releaseType)
@@ -429,7 +429,7 @@ Examples:
 			// Check that at least one update field is provided
 			if *copyright == "" && normalizedReleaseType == "" && *earliestReleaseDate == "" && *versionString == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one of --copyright, --release-type, --earliest-release-date, or --version is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -493,11 +493,11 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to delete a version")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -551,11 +551,11 @@ Examples:
 			}
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if strings.TrimSpace(*buildID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			client, err := shared.GetASCClient()

@@ -197,7 +197,7 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			fieldsValue, err := normalizeDeviceFields(*fields)
@@ -281,7 +281,7 @@ Examples:
 			nameValue := strings.TrimSpace(*name)
 			if nameValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--name")
 			}
 
 			udidValue := strings.TrimSpace(*udid)
@@ -298,7 +298,7 @@ Examples:
 			}
 			if udidValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --udid is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--udid")
 			}
 
 			platformValue := strings.TrimSpace(*platform)
@@ -307,7 +307,7 @@ Examples:
 			}
 			if platformValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --platform is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--platform")
 			}
 			if *udidFromSystem && strings.ToUpper(platformValue) != "MAC_OS" {
 				fmt.Fprintln(os.Stderr, "Error: --udid-from-system requires --platform MAC_OS")
@@ -420,14 +420,14 @@ Examples:
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			nameValue := strings.TrimSpace(*name)
 			statusRaw := strings.TrimSpace(*status)
 			if nameValue == "" && statusRaw == "" {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			statusValue, err := normalizeDeviceStatus(statusRaw)

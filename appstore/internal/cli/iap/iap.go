@@ -129,7 +129,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 			client, err := iapQueryClientFactory()
 			if err != nil {
@@ -234,7 +234,7 @@ Examples:
 			id := strings.TrimSpace(*iapID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
 				return shared.UsageError("iap view: --versions-limit must be between 1 and 50")
@@ -315,7 +315,7 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			normalizedType, err := normalizeIAPType(*iapType)
@@ -327,13 +327,13 @@ Examples:
 			name := strings.TrimSpace(*refName)
 			if name == "" {
 				fmt.Fprintln(os.Stderr, "Error: --ref-name is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--ref-name")
 			}
 
 			product := strings.TrimSpace(*productID)
 			if product == "" {
 				fmt.Fprintln(os.Stderr, "Error: --product-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--product-id")
 			}
 
 			client, err := shared.GetASCClient()
@@ -387,13 +387,13 @@ Examples:
 			id := strings.TrimSpace(*iapID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			name := strings.TrimSpace(*refName)
 			if name == "" && !*familySharable {
 				fmt.Fprintln(os.Stderr, "Error: at least one update flag is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 
 			client, err := shared.GetASCClient()
@@ -445,11 +445,11 @@ Examples:
 			id := strings.TrimSpace(*iapID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -536,7 +536,7 @@ Examples:
 			}
 			if resolvedID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--iap-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("iap localizations list: --limit must be between 1 and 200")

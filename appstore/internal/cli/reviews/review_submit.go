@@ -62,23 +62,23 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			if strings.TrimSpace(*buildID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--build")
 			}
 			if strings.TrimSpace(*version) == "" && strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version or --version-id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			if strings.TrimSpace(*version) != "" && strings.TrimSpace(*versionID) != "" {
-				return shared.UsageError("--version and --version-id are mutually exclusive")
+				return shared.WithDiagnostic(shared.UsageError("--version and --version-id are mutually exclusive"), shared.DiagnosticConflictingInput, "")
 			}
 			if !*confirm && !*dryRun {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required unless --dry-run is set")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			visited := map[string]bool{}
@@ -90,7 +90,7 @@ Examples:
 			if strings.TrimSpace(*version) != "" || visited["platform"] {
 				normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
 				if err != nil {
-					return shared.UsageError(err.Error())
+					return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--platform")
 				}
 				requestedPlatform = normalizedPlatform
 			}
@@ -115,7 +115,11 @@ Examples:
 
 				effectivePlatform, err = shared.NormalizeAppStoreVersionPlatform(string(versionData.Attributes.Platform))
 				if err != nil {
-					return fmt.Errorf("review submit: version %q returned unsupported platform %q", resolvedVersionID, string(versionData.Attributes.Platform))
+					return shared.WithDiagnostic(
+						fmt.Errorf("review submit: version %q returned unsupported platform %q", resolvedVersionID, string(versionData.Attributes.Platform)),
+						shared.DiagnosticDependencyFailed,
+						"",
+					)
 				}
 				versionString = strings.TrimSpace(versionData.Attributes.VersionString)
 			} else {

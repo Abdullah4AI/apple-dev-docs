@@ -639,6 +639,14 @@ func validationFailureContext(analysis invocationAnalysis, err error) telemetry.
 	case shared.UsageErrorInvalidValue:
 		kind = telemetry.ErrorKindInvalidValue
 	}
+	if diagnostic, ok := shared.DiagnosticFromError(err); ok {
+		switch diagnostic.Code {
+		case shared.DiagnosticRequiredInputMissing:
+			kind = telemetry.ErrorKindMissingRequired
+		case shared.DiagnosticInvalidInput, shared.DiagnosticConflictingInput:
+			kind = telemetry.ErrorKindInvalidValue
+		}
+	}
 	if analysis.shape == telemetry.InvocationShapeUnknownChild {
 		kind = telemetry.ErrorKindOther
 	}
@@ -647,6 +655,7 @@ func validationFailureContext(analysis invocationAnalysis, err error) telemetry.
 		ErrorKind:        kind,
 		FailureStage:     telemetry.FailureStageValidation,
 		FailureParameter: failureParameterFromError(err),
+		DiagnosticCode:   diagnosticCodeFromError(err),
 		OutcomeKind:      telemetry.OutcomeUsageError,
 	}
 }
@@ -660,8 +669,12 @@ func runtimeFailureContext(analysis invocationAnalysis, err error, exitCode int)
 		InvocationShape:  analysis.shape,
 		ErrorKind:        telemetry.ErrorKindOther,
 		FailureStage:     telemetry.FailureStageExecution,
+		DiagnosticCode:   diagnosticCodeFromError(err),
 		HTTPStatus:       httpStatusFromError(err),
 		PublicStorefront: isPublicStorefrontError(err),
+	}
+	if diagnostic, ok := shared.DiagnosticFromError(err); ok {
+		eventContext.FailureParameter = diagnostic.Parameter
 	}
 	switch {
 	case errors.Is(err, shared.ErrMissingAuth):
@@ -743,6 +756,9 @@ func failureParameterFromError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if diagnostic, ok := shared.DiagnosticFromError(err); ok {
+		return diagnostic.Parameter
+	}
 	for _, field := range strings.Fields(err.Error()) {
 		candidate := strings.Trim(field, "`'\"(),:;.")
 		if strings.HasPrefix(candidate, "--") {
@@ -750,6 +766,14 @@ func failureParameterFromError(err error) string {
 		}
 	}
 	return ""
+}
+
+func diagnosticCodeFromError(err error) string {
+	diagnostic, ok := shared.DiagnosticFromError(err)
+	if !ok {
+		return ""
+	}
+	return string(diagnostic.Code)
 }
 
 func shouldRenderGroupHelp(analysis invocationAnalysis, err error) bool {

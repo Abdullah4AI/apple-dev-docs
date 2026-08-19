@@ -232,7 +232,26 @@ func MissingRequiredUsageError(parameters ...string) error {
 	if len(parameters) > 0 {
 		parameter = strings.TrimSpace(parameters[0])
 	}
-	return classifiedUsageError{kind: UsageErrorMissingRequired, message: parameter}
+	return WithDiagnostic(
+		classifiedUsageError{kind: UsageErrorMissingRequired, message: parameter},
+		DiagnosticRequiredInputMissing,
+		parameter,
+	)
+}
+
+// InvalidValueUsageError classifies an invalid or conflicting input after the
+// command has already written its diagnostic to stderr. It preserves the
+// flag.ErrHelp contract so ffcli continues to render the command usage page.
+func InvalidValueUsageError(parameters ...string) error {
+	parameter := ""
+	if len(parameters) > 0 {
+		parameter = strings.TrimSpace(parameters[0])
+	}
+	return WithDiagnostic(
+		classifiedUsageError{kind: UsageErrorInvalidValue},
+		DiagnosticInvalidInput,
+		parameter,
+	)
 }
 
 func ClassifyUsageError(err error) UsageErrorKind {

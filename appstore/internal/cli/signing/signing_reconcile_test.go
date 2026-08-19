@@ -39,15 +39,17 @@ func TestSigningReconcilePlanValidatesBeforeAuth(t *testing.T) {
 	}))
 
 	tests := []struct {
-		name string
-		args []string
-		want string
+		name      string
+		args      []string
+		want      string
+		wantCode  shared.DiagnosticCode
+		wantParam string
 	}{
-		{name: "archive", args: []string{"--devices-file", "devices.json"}, want: "Error: --archive-path is required"},
-		{name: "devices", args: []string{"--archive-path", "App.xcarchive"}, want: "Error: --devices-file is required"},
-		{name: "validity", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--minimum-validity-days", "-1"}, want: "Error: --minimum-validity-days must be at least 0"},
-		{name: "validity max", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--minimum-validity-days", "3651"}, want: "Error: --minimum-validity-days must be at most 3650"},
-		{name: "mutations", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--max-mutations", "0"}, want: "Error: --max-mutations must be at least 1"},
+		{name: "archive", args: []string{"--devices-file", "devices.json"}, want: "Error: --archive-path is required", wantCode: shared.DiagnosticRequiredInputMissing, wantParam: "--archive-path"},
+		{name: "devices", args: []string{"--archive-path", "App.xcarchive"}, want: "Error: --devices-file is required", wantCode: shared.DiagnosticRequiredInputMissing, wantParam: "--devices-file"},
+		{name: "validity", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--minimum-validity-days", "-1"}, want: "Error: --minimum-validity-days must be at least 0", wantCode: shared.DiagnosticInvalidInput, wantParam: "--minimum-validity-days"},
+		{name: "validity max", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--minimum-validity-days", "3651"}, want: "Error: --minimum-validity-days must be at most 3650", wantCode: shared.DiagnosticInvalidInput, wantParam: "--minimum-validity-days"},
+		{name: "mutations", args: []string{"--archive-path", "App.xcarchive", "--devices-file", "devices.json", "--max-mutations", "0"}, want: "Error: --max-mutations must be at least 1", wantCode: shared.DiagnosticInvalidInput, wantParam: "--max-mutations"},
 	}
 
 	for _, test := range tests {
@@ -57,12 +59,17 @@ func TestSigningReconcilePlanValidatesBeforeAuth(t *testing.T) {
 			if err := cmd.Parse(test.args); err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
+			var runErr error
 			stdout, stderr := captureOutput(t, func() {
-				err := cmd.Run(context.Background())
-				if !errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("Run() error = %v, want usage error", err)
+				runErr = cmd.Run(context.Background())
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("Run() error = %v, want usage error", runErr)
 				}
 			})
+			diagnostic, ok := shared.DiagnosticFromError(runErr)
+			if !ok || diagnostic.Code != test.wantCode || diagnostic.Parameter != test.wantParam {
+				t.Fatalf("DiagnosticFromError() = %+v, %t; want code %q parameter %q", diagnostic, ok, test.wantCode, test.wantParam)
+			}
 			if stdout != "" {
 				t.Fatalf("stdout = %q, want empty", stdout)
 			}

@@ -85,10 +85,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("review submissions-list: %w", err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("review submissions-list: %w", err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(
 				fs, *next, "review submissions-list",
@@ -97,24 +97,24 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return shared.UsageError("--limit must be between 1 and 200")
+				return shared.WithDiagnostic(shared.UsageError("--limit must be between 1 and 200"), shared.DiagnosticInvalidInput, "--limit")
 			}
 
 			platforms, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platform))
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--platform")
 			}
 			states, err := shared.NormalizeReviewSubmissionStates(shared.SplitCSVUpper(*state))
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--state")
 			}
 			normalizedItemFields, err := shared.NormalizeSelection(*itemFields, reviewSubmissionItemFields, "--item-fields")
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--item-fields")
 			}
 			normalizedIncludes, err := shared.NormalizeSelection(*include, reviewSubmissionIncludes, "--include")
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--include")
 			}
 			if len(normalizedItemFields) != 0 && !slices.Contains(normalizedIncludes, "items") {
 				normalizedIncludes = append(normalizedIncludes, "items")
@@ -125,12 +125,12 @@ Examples:
 			// Require one of --app or --global (unless --next is provided)
 			if !*global && resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app or --global is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("")
 			}
 			// Top-level /v1/reviewSubmissions requires filter[app].
 			if *global && resolvedAppID == "" && nextURL == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required with --global (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			client, err := reviewSubmissionsClientFactory()
@@ -229,22 +229,22 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			normalizedItemFields, err := shared.NormalizeSelection(*itemFields, reviewSubmissionItemFields, "--item-fields")
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--item-fields")
 			}
 			normalizedIncludes, err := shared.NormalizeSelection(*include, reviewSubmissionIncludes, "--include")
 			if err != nil {
-				return shared.UsageError(err.Error())
+				return shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--include")
 			}
 			if len(normalizedItemFields) != 0 && !slices.Contains(normalizedIncludes, "items") {
 				normalizedIncludes = append(normalizedIncludes, "items")
 			}
 			if strings.TrimSpace(*submissionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := reviewSubmissionsClientFactory()
@@ -298,17 +298,17 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--app")
 			}
 
 			normalizedPlatform, err := shared.NormalizeAppStoreVersionPlatform(*platform)
 			if err != nil {
-				return fmt.Errorf("review submissions-create: %w", shared.UsageError(err.Error()))
+				return fmt.Errorf("review submissions-create: %w", shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--platform"))
 			}
 
 			client, err := reviewSubmissionsClientFactory()
@@ -361,44 +361,44 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			trimmedID := strings.TrimSpace(*submissionID)
 			if trimmedID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			platformProvided := reviewFlagWasProvided(fs, "platform")
 			submittedProvided := reviewFlagWasProvided(fs, "submitted")
 			canceledProvided := reviewFlagWasProvided(fs, "canceled")
 			if platformProvided && *clearPlatform {
-				return shared.UsageError("--platform cannot be combined with --clear-platform")
+				return shared.WithDiagnostic(shared.UsageError("--platform cannot be combined with --clear-platform"), shared.DiagnosticConflictingInput, "")
 			}
 			if submittedProvided && *clearSubmitted {
-				return shared.UsageError("--submitted cannot be combined with --clear-submitted")
+				return shared.WithDiagnostic(shared.UsageError("--submitted cannot be combined with --clear-submitted"), shared.DiagnosticConflictingInput, "")
 			}
 			if canceledProvided && *clearCanceled {
-				return shared.UsageError("--canceled cannot be combined with --clear-canceled")
+				return shared.WithDiagnostic(shared.UsageError("--canceled cannot be combined with --clear-canceled"), shared.DiagnosticConflictingInput, "")
 			}
 			if !platformProvided && !submittedProvided && !canceledProvided && !*clearPlatform && !*clearSubmitted && !*clearCanceled {
-				return shared.UsageError("at least one update flag is required: --platform, --submitted, --canceled, or a matching --clear-* flag")
+				return shared.WithDiagnostic(shared.UsageError("at least one update flag is required: --platform, --submitted, --canceled, or a matching --clear-* flag"), shared.DiagnosticRequiredInputMissing, "")
 			}
 			if canceledProvided && *canceled && !*confirm {
-				return shared.UsageError("--confirm is required when --canceled=true")
+				return shared.WithDiagnostic(shared.UsageError("--confirm is required when --canceled=true"), shared.DiagnosticRequiredInputMissing, "--confirm")
 			}
 			if submittedProvided && *submitted && !*confirm {
-				return shared.UsageError("--confirm is required when --submitted=true")
+				return shared.WithDiagnostic(shared.UsageError("--confirm is required when --submitted=true"), shared.DiagnosticRequiredInputMissing, "--confirm")
 			}
 			if submittedProvided && *submitted && canceledProvided && *canceled {
-				return shared.UsageError("--submitted=true cannot be combined with --canceled=true")
+				return shared.WithDiagnostic(shared.UsageError("--submitted=true cannot be combined with --canceled=true"), shared.DiagnosticConflictingInput, "")
 			}
 
 			attrs := asc.ReviewSubmissionUpdateAttributes{}
 			if platformProvided {
 				normalized, err := shared.NormalizeAppStoreVersionPlatform(*platform)
 				if err != nil {
-					return fmt.Errorf("review submissions-update: %w", shared.UsageError(err.Error()))
+					return fmt.Errorf("review submissions-update: %w", shared.WithDiagnostic(shared.UsageError(err.Error()), shared.DiagnosticInvalidInput, "--platform"))
 				}
 				value := asc.Platform(normalized)
 				attrs.Platform = &asc.NullablePlatform{Value: &value}
@@ -454,15 +454,15 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to submit")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			if strings.TrimSpace(*submissionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := reviewSubmissionsClientFactory()
@@ -503,15 +503,15 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required to cancel")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 			if strings.TrimSpace(*submissionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 
 			client, err := reviewSubmissionsClientFactory()
@@ -555,10 +555,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) != 0 {
-				return shared.UsageError("unexpected positional arguments")
+				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("review submissions-items-ids: %w", err)
+				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("review submissions-items-ids: %w", err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(fs, *next, "review submissions-items-ids", "id", "limit"); err != nil {
 				return err
@@ -566,10 +566,10 @@ Examples:
 			trimmedID := strings.TrimSpace(*submissionID)
 			if trimmedID == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
-				return shared.MissingRequiredUsageError()
+				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("review submissions-items-ids: %w", shared.UsageError("--limit must be between 1 and 200"))
+				return fmt.Errorf("review submissions-items-ids: %w", shared.WithDiagnostic(shared.UsageError("--limit must be between 1 and 200"), shared.DiagnosticInvalidInput, "--limit"))
 			}
 
 			client, err := reviewSubmissionsClientFactory()
