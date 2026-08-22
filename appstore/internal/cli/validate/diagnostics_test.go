@@ -30,9 +30,9 @@ func TestValidationFailuresExposeStructuredDiagnostics(t *testing.T) {
 				return ValidateTestFlightCommand()
 			},
 			args:      []string{"--app", "app-1"},
-			wantError: "--build",
+			wantError: "--build-id",
 			wantCode:  shared.DiagnosticRequiredInputMissing,
-			wantParam: "--build",
+			wantParam: "--build-id",
 		},
 		{
 			name: "validate missing version selector",

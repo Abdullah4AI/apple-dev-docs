@@ -617,13 +617,13 @@ func TestAppsRegistryPullInvalidOutputDoesNotWriteRegistry(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
-	if !errors.Is(runErr, flag.ErrHelp) {
+	if !isUsageClassError(runErr) {
 		t.Fatalf("expected help error, got %v", runErr)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: pull") {
+	if !strings.Contains(stderr, `(got "pull")`) {
 		t.Fatalf("expected unsupported output error, got %q", stderr)
 	}
 	if callCount != 0 {
@@ -657,7 +657,7 @@ func TestAppsRegistryPullInvalidFlagValues(t *testing.T) {
 		{
 			name:    "output value equals subcommand",
 			args:    []string{"apps", "registry", "pull", "--path", filepath.Join(t.TempDir(), "registry.json"), "--dry-run", "--output", "pull"},
-			wantErr: "unsupported format: pull",
+			wantErr: `(got "pull")`,
 		},
 		{
 			name:    "pretty with table output",
@@ -679,7 +679,7 @@ func TestAppsRegistryPullInvalidFlagValues(t *testing.T) {
 				runErr = root.Run(context.Background())
 			})
 
-			if !errors.Is(runErr, flag.ErrHelp) {
+			if !isUsageClassError(runErr) {
 				t.Fatalf("expected help error, got %v", runErr)
 			}
 			if stdout != "" {

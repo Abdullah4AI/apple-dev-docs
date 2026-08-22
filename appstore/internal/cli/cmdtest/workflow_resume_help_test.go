@@ -22,16 +22,16 @@ func TestWorkflowHelp_ResumeExamplesUseTheirOwnRunID(t *testing.T) {
 		{"workflow", "run", "--help"},
 	} {
 		var code int
-		_, stderr := captureOutput(t, func() {
+		stdout, _ := captureOutput(t, func() {
 			code = rootcmd.Run(args, "1.2.3")
 		})
 		if code != rootcmd.ExitSuccess {
 			t.Fatalf("%v: exit code = %d, want %d", args, code, rootcmd.ExitSuccess)
 		}
 
-		matches := resumeExamplePattern.FindAllStringSubmatch(stderr, -1)
+		matches := resumeExamplePattern.FindAllStringSubmatch(stdout, -1)
 		if len(matches) == 0 {
-			t.Fatalf("%v: expected help to document a --resume example, got %q", args, stderr)
+			t.Fatalf("%v: expected help to document a --resume example, got %q", args, stdout)
 		}
 		for _, match := range matches {
 			workflowName, runID := match[1], match[2]

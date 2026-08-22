@@ -200,6 +200,12 @@ func SubscriptionsLocalizationsCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("localizations create", flag.ExitOnError)
 
 	subscriptionID := fs.String("subscription-id", "", "Subscription ID, product ID, or exact current name")
+	legacyProductID := shared.BindDeprecatedStringFlagAlias(fs, "product-id", "subscription-id")
+	rejectedVersionID := bindSubscriptionLocalizationRejectedSelector(
+		fs,
+		"version-id",
+		"REJECTED: use --subscription-id, or `asc subscriptions versions localizations create`",
+	)
 	appID := addSubscriptionLookupAppFlag(fs)
 	locale := fs.String("locale", "", "Locale (e.g., en-US)")
 	name := fs.String("name", "", "Localized name")
@@ -217,6 +223,17 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectSubscriptionLocalizationSelector(
+				rejectedVersionID,
+				subscriptionLocalizationCreateVersionSelectorGuidance,
+				"--version-id",
+			); err != nil {
+				return err
+			}
+			if err := legacyProductID.Apply(subscriptionID); err != nil {
+				return err
+			}
+
 			id := strings.TrimSpace(*subscriptionID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --subscription-id is required")
@@ -341,6 +358,11 @@ func SubscriptionsLocalizationsUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("localizations update", flag.ExitOnError)
 
 	localizationID := fs.String("id", "", "Subscription localization ID")
+	rejectedSubscriptionID := bindSubscriptionLocalizationRejectedSelector(
+		fs,
+		"subscription-id",
+		"REJECTED: --id is the localization ID; find it with `asc subscriptions localizations list --subscription-id`",
+	)
 	name := fs.String("name", "", "Localized name")
 	description := fs.String("description", "", "Localized description")
 	output := shared.BindOutputFlags(fs)
@@ -356,6 +378,14 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := rejectSubscriptionLocalizationSelector(
+				rejectedSubscriptionID,
+				subscriptionLocalizationUpdateSubscriptionSelectorGuidance,
+				"--subscription-id",
+			); err != nil {
+				return err
+			}
+
 			id := strings.TrimSpace(*localizationID)
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")

@@ -3,6 +3,8 @@ package shared
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -32,6 +34,102 @@ func TestRunReconciledMutationReadsAgainBeforeReplay(t *testing.T) {
 	}
 	if value != "localization-id" || status != ReconciledMutationRecovered || mutations != 1 || readbacks != 2 {
 		t.Fatalf("unexpected recovery: value=%q status=%q mutations=%d readbacks=%d", value, status, mutations, readbacks)
+	}
+}
+
+func TestRunReconciledMutationDoesNotRetryRateLimitRejection(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	mutations := 0
+	readbacks := 0
+	_, _, err := RunReconciledMutation(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", &asc.RetryableError{
+				Err: &asc.APIError{Code: "RATE_LIMIT_EXCEEDED", StatusCode: http.StatusTooManyRequests},
+			}
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "", false, nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected rate-limit error, got nil")
+	}
+	if mutations != 1 {
+		t.Fatalf("expected one mutation invocation after the client retry budget was exhausted, got %d", mutations)
+	}
+	if readbacks != 1 {
+		t.Fatalf("expected one reconciliation readback for a rejected request, got %d", readbacks)
+	}
+	if !asc.IsRetryable(err) {
+		t.Fatalf("expected retryable rate-limit error, got %v", err)
+	}
+	var statusErr interface{ HTTPStatusCode() int }
+	if !errors.As(err, &statusErr) || statusErr.HTTPStatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("expected status 429 to remain inspectable, got %v", err)
+	}
+}
+
+func TestIsTransientMutationErrorRejectsUnhonoredRetryDelay(t *testing.T) {
+	_, err := asc.WithRetry(context.Background(), func() (struct{}, error) {
+		return struct{}{}, &asc.RetryableError{
+			Err:        &asc.APIError{Code: "RATE_LIMIT_EXCEEDED", StatusCode: http.StatusTooManyRequests},
+			RetryAfter: time.Hour,
+		}
+	}, asc.RetryOptions{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Second})
+	if err == nil {
+		t.Fatal("expected unhonored Retry-After error, got nil")
+	}
+	if !asc.IsRetryDelayExceeded(err) {
+		t.Fatalf("expected retry-delay marker, got %v", err)
+	}
+	if !asc.IsRetryable(err) {
+		t.Fatalf("expected original retryable cause to remain inspectable, got %v", err)
+	}
+	if IsTransientMutationError(context.Background(), err) {
+		t.Fatalf("expected unhonored Retry-After to be terminal to mutation recovery, got %v", err)
+	}
+}
+
+func TestRunReconciledMutationDoesNotReplayRateLimitAfterRetryCancellation(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	rateErr := &asc.RetryableError{
+		RetryAfter: time.Hour,
+		Err:        &asc.APIError{Code: "RATE_LIMIT_EXCEEDED", StatusCode: http.StatusTooManyRequests},
+	}
+	mutationErr := fmt.Errorf("retry cancelled: %w", errors.Join(context.DeadlineExceeded, rateErr))
+	mutations := 0
+	readbacks := 0
+	_, _, err := RunReconciledMutation(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", mutationErr
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "", false, nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected retry cancellation error, got nil")
+	}
+	if mutations != 1 || readbacks != 1 {
+		t.Fatalf("expected one mutation and one reconciliation readback, got mutations=%d readbacks=%d", mutations, readbacks)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || !asc.IsRetryable(err) {
+		t.Fatalf("expected timeout and retryable causes to remain inspectable, got %v", err)
+	}
+	if got := asc.GetRetryAfter(err); got != time.Hour {
+		t.Fatalf("expected Retry-After to remain inspectable, got %s", got)
 	}
 }
 

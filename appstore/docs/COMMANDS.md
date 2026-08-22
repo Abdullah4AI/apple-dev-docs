@@ -138,6 +138,7 @@ asc <subcommand> [flags]
 
 ### Utility
 
+- `system-status` - [experimental] Check Apple Developer service health.
 - `diff` - Generate deterministic non-mutating diff plans.
 - `capabilities` - Show CLI, API, web-only, and public-API-limited capability coverage.
 - `search` - Search asc commands and examples for agent-oriented command discovery.
@@ -184,7 +185,7 @@ asc distribute status --run RUN_ID --state-dir .asc/distribution/runs --output j
 asc distribute verify --run RUN_ID --state-dir .asc/distribution/runs --timeout 30s --output json
 
 # Stage an App Store version before submission
-asc release stage --app "123456789" --version "1.2.3" --build "BUILD_ID" --copy-metadata-from "1.2.2" --dry-run
+asc release stage --app "123456789" --version "1.2.3" --build-id "BUILD_ID" --copy-metadata-from "1.2.2" --dry-run
 
 # Publish an App Store version (high-level)
 asc publish appstore --app "123456789" --ipa "/path/to/MyApp.ipa" --version "1.2.3"

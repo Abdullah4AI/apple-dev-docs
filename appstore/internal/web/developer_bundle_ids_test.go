@@ -62,56 +62,49 @@ func TestEnsureDeveloperPortalSessionRejectsDifferentPortRedirect(t *testing.T) 
 	}
 }
 
-func TestEnableDeveloperBundleIDCapabilityPreservesFullPayload(t *testing.T) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookiejar.New() error: %v", err)
-	}
-
+func TestEnableDeveloperBundleIDCapabilityPreservesWritablePayloadAndGraph(t *testing.T) {
 	var patchBody []byte
+	var err error
 	requestCount := 0
-	client := &Client{
-		httpClient: &http.Client{
-			Jar: jar,
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				requestCount++
-				for _, header := range []string{"Accept", "Content-Type", "Referer", "User-Agent", "X-Requested-With"} {
-					if strings.TrimSpace(r.Header.Get(header)) == "" {
-						t.Fatalf("request %d missing %s header", requestCount, header)
-					}
-				}
+	handler := func(r *http.Request) *http.Response {
+		requestCount++
+		for _, header := range []string{"Accept", "Content-Type", "Referer", "User-Agent", "X-Requested-With"} {
+			if strings.TrimSpace(r.Header.Get(header)) == "" {
+				t.Fatalf("request %d missing %s header", requestCount, header)
+			}
+		}
 
-				switch requestCount {
-				case 1:
-					if r.Method != http.MethodPost || r.URL.Path != "/services-account/QH65B2/account/listTeams.action" {
-						t.Fatalf("unexpected bootstrap request %s %s", r.Method, r.URL.String())
-					}
-					return developerPortalTestResponse(http.StatusOK, developerPortalTeamsFixture(), http.Header{"csrf": []string{"bootstrap-csrf"}, "csrf_ts": []string{"bootstrap-ts"}}), nil
-				case 2:
-					if r.Method != http.MethodPost || r.URL.Path != "/services-account/v1/capabilities" {
-						t.Fatalf("unexpected metadata request %s %s", r.Method, r.URL.String())
-					}
-					if got := r.Header.Get("X-HTTP-Method-Override"); got != http.MethodGet {
-						t.Fatalf("metadata method override = %q", got)
-					}
-					proxy := decodeDeveloperPortalProxyReadRequest(t, r)
-					if proxy.TeamID != "TEAM123456" {
-						t.Fatalf("metadata teamId = %q", proxy.TeamID)
-					}
-					query, err := url.ParseQuery(proxy.URLEncodedQueryParams)
-					if err != nil {
-						t.Fatalf("metadata query: %v", err)
-					}
-					if got := query.Get("filter[capabilityType]"); got != "capability,service" {
-						t.Fatalf("filter[capabilityType] = %q", got)
-					}
-					if got := query.Get("filter[includeRequestable]"); got != "true" {
-						t.Fatalf("filter[includeRequestable] = %q", got)
-					}
-					if r.Header.Get("csrf") != "bootstrap-csrf" || r.Header.Get("csrf_ts") != "bootstrap-ts" {
-						t.Fatalf("metadata request missing bootstrap CSRF headers")
-					}
-					return developerPortalTestResponse(http.StatusOK, `{
+		switch requestCount {
+		case 1:
+			if r.Method != http.MethodPost || r.URL.Path != "/services-account/QH65B2/account/listTeams.action" {
+				t.Fatalf("unexpected bootstrap request %s %s", r.Method, r.URL.String())
+			}
+			return developerPortalTestResponse(http.StatusOK, developerPortalTeamsFixture(), http.Header{"csrf": []string{"bootstrap-csrf"}, "csrf_ts": []string{"bootstrap-ts"}})
+		case 2:
+			if r.Method != http.MethodPost || r.URL.Path != "/services-account/v1/capabilities" {
+				t.Fatalf("unexpected metadata request %s %s", r.Method, r.URL.String())
+			}
+			if got := r.Header.Get("X-HTTP-Method-Override"); got != http.MethodGet {
+				t.Fatalf("metadata method override = %q", got)
+			}
+			proxy := decodeDeveloperPortalProxyReadRequest(t, r)
+			if proxy.TeamID != "TEAM123456" {
+				t.Fatalf("metadata teamId = %q", proxy.TeamID)
+			}
+			query, err := url.ParseQuery(proxy.URLEncodedQueryParams)
+			if err != nil {
+				t.Fatalf("metadata query: %v", err)
+			}
+			if got := query.Get("filter[capabilityType]"); got != "capability,service" {
+				t.Fatalf("filter[capabilityType] = %q", got)
+			}
+			if got := query.Get("filter[includeRequestable]"); got != "true" {
+				t.Fatalf("filter[includeRequestable] = %q", got)
+			}
+			if r.Header.Get("csrf") != "bootstrap-csrf" || r.Header.Get("csrf_ts") != "bootstrap-ts" {
+				t.Fatalf("metadata request missing bootstrap CSRF headers")
+			}
+			return developerPortalTestResponse(http.StatusOK, `{
 						"data":[{
 							"type":"capabilities",
 							"id":"PRIVATE_CLOUD_COMPUTE",
@@ -123,34 +116,34 @@ func TestEnableDeveloperBundleIDCapabilityPreservesFullPayload(t *testing.T) {
 								"canRequestFromPortal":false
 							}
 						}]
-					}`, http.Header{"csrf": []string{"secret-csrf"}, "csrf_ts": []string{"secret-ts"}}), nil
-				case 3:
-					if r.Method != http.MethodPost || r.URL.Path != "/services-account/v1/bundleIds/bundle-1" {
-						t.Fatalf("unexpected bundle request %s %s", r.Method, r.URL.String())
-					}
-					if got := r.Header.Get("X-HTTP-Method-Override"); got != http.MethodGet {
-						t.Fatalf("bundle method override = %q", got)
-					}
-					proxy := decodeDeveloperPortalProxyReadRequest(t, r)
-					query, err := url.ParseQuery(proxy.URLEncodedQueryParams)
-					if err != nil {
-						t.Fatalf("bundle query: %v", err)
-					}
-					if got := query.Get("fields[bundleIds]"); got != "name,identifier,platform,seedId,wildcard,~permissions.delete,~permissions.edit" {
-						t.Fatalf("fields[bundleIds] = %q", got)
-					}
-					include := query.Get("include")
-					for _, relationship := range []string{
-						"bundleIdCapabilities",
-						"bundleIdCapabilities.capability",
-						"bundleIdCapabilities.appGroups",
-						"bundleIdCapabilities.cloudContainers",
-					} {
-						if !strings.Contains(include, relationship) {
-							t.Fatalf("include missing %q: %q", relationship, include)
-						}
-					}
-					return developerPortalTestResponse(http.StatusOK, `{
+					}`, http.Header{"csrf": []string{"secret-csrf"}, "csrf_ts": []string{"secret-ts"}})
+		case 3:
+			if r.Method != http.MethodPost || r.URL.Path != "/services-account/v1/bundleIds/bundle-1" {
+				t.Fatalf("unexpected bundle request %s %s", r.Method, r.URL.String())
+			}
+			if got := r.Header.Get("X-HTTP-Method-Override"); got != http.MethodGet {
+				t.Fatalf("bundle method override = %q", got)
+			}
+			proxy := decodeDeveloperPortalProxyReadRequest(t, r)
+			query, err := url.ParseQuery(proxy.URLEncodedQueryParams)
+			if err != nil {
+				t.Fatalf("bundle query: %v", err)
+			}
+			if got := query.Get("fields[bundleIds]"); got != "name,identifier,platform,seedId,wildcard,~permissions.delete,~permissions.edit" {
+				t.Fatalf("fields[bundleIds] = %q", got)
+			}
+			include := query.Get("include")
+			for _, relationship := range []string{
+				"bundleIdCapabilities",
+				"bundleIdCapabilities.capability",
+				"bundleIdCapabilities.appGroups",
+				"bundleIdCapabilities.cloudContainers",
+			} {
+				if !strings.Contains(include, relationship) {
+					t.Fatalf("include missing %q: %q", relationship, include)
+				}
+			}
+			return developerPortalTestResponse(http.StatusOK, `{
 						"data":{
 							"id":"bundle-1",
 							"type":"bundleIds",
@@ -175,32 +168,55 @@ func TestEnableDeveloperBundleIDCapabilityPreservesFullPayload(t *testing.T) {
 						"included":[{
 							"type":"bundleIdCapabilities",
 							"id":"icloud-1",
-							"attributes":{"enabled":true,"settings":[{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6","enabled":true}]}]},
+							"attributes":{"enabled":true,"settings":[{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6","enabled":true}]}],"ownerType":"BUNDLE","editable":true,"inputs":[],"responseId":"response-1"},
 							"relationships":{
 								"capability":{"data":{"type":"capabilities","id":"ICLOUD"}},
 								"appGroups":{"data":[{"type":"appGroups","id":"group-1"}]},
 								"cloudContainers":{"data":[{"type":"cloudContainers","id":"cloud-1"}]}
 							}
 						}]
-					}`, nil), nil
-				case 4:
-					if r.Method != http.MethodPatch || r.URL.Path != "/services-account/v1/bundleIds/bundle-1" {
-						t.Fatalf("unexpected patch request %s %s", r.Method, r.URL.String())
-					}
-					if r.Header.Get("csrf") != "secret-csrf" || r.Header.Get("csrf_ts") != "secret-ts" {
-						t.Fatalf("missing CSRF headers")
-					}
-					patchBody, err = io.ReadAll(r.Body)
-					if err != nil {
-						t.Fatalf("ReadAll() error: %v", err)
-					}
-					return developerPortalTestResponse(http.StatusOK, `{"data":{"type":"bundleIds","id":"bundle-1"}}`, nil), nil
-				default:
-					t.Fatalf("unexpected request %d: %s %s", requestCount, r.Method, r.URL.String())
-					return nil, nil
-				}
-			}),
-		},
+					}`, nil)
+		case 4:
+			if r.Method != http.MethodPatch || r.URL.Path != "/services-account/v1/bundleIds/bundle-1" {
+				t.Fatalf("unexpected patch request %s %s", r.Method, r.URL.String())
+			}
+			if r.Header.Get("csrf") != "secret-csrf" || r.Header.Get("csrf_ts") != "secret-ts" {
+				t.Fatalf("missing CSRF headers")
+			}
+			patchBody, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("ReadAll() error: %v", err)
+			}
+			return developerPortalTestResponse(http.StatusOK, `{"data":{"type":"bundleIds","id":"bundle-1"}}`, nil)
+		default:
+			t.Fatalf("unexpected request %d: %s %s", requestCount, r.Method, r.URL.String())
+			return nil
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		response := handler(request)
+		if response == nil {
+			t.Error("test Developer Portal handler returned a nil response")
+			http.Error(writer, "missing test response", http.StatusInternalServerError)
+			return
+		}
+		for name, values := range response.Header {
+			for _, value := range values {
+				writer.Header().Add(name, value)
+			}
+		}
+		writer.WriteHeader(response.StatusCode)
+		if response.Body != nil {
+			defer func() { _ = response.Body.Close() }()
+			if _, err := io.Copy(writer, response.Body); err != nil {
+				t.Errorf("write test Developer Portal response: %v", err)
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := &Client{
+		httpClient:         server.Client(),
+		developerPortalURL: server.URL,
 	}
 
 	result, err := client.EnableDeveloperBundleIDCapability(context.Background(), DeveloperBundleIDCapabilityEnableRequest{
@@ -231,8 +247,13 @@ func TestEnableDeveloperBundleIDCapabilityPreservesFullPayload(t *testing.T) {
 	if payload.Data.ID != "bundle-1" || payload.Data.Type != "bundleIds" {
 		t.Fatalf("unexpected resource identity: %+v", payload.Data)
 	}
-	if payload.Data.Attributes["platform"] != "IOS" || payload.Data.Attributes["seedId"] != "TEAMID" || payload.Data.Attributes["~permissions.edit"] != true {
-		t.Fatalf("bundle attributes were not preserved: %+v", payload.Data.Attributes)
+	if payload.Data.Attributes["platform"] != "IOS" || payload.Data.Attributes["seedId"] != "TEAMID" {
+		t.Fatalf("writable Bundle ID attributes were not preserved: %+v", payload.Data.Attributes)
+	}
+	for _, key := range []string{"permissions", "~permissions.delete", "~permissions.edit"} {
+		if _, ok := payload.Data.Attributes[key]; ok {
+			t.Fatalf("read-only Bundle ID attribute %q was sent in PATCH: %+v", key, payload.Data.Attributes)
+		}
 	}
 	if payload.Data.Attributes["teamId"] != "TEAM123456" {
 		t.Fatalf("Developer Portal teamId = %v", payload.Data.Attributes["teamId"])
@@ -255,6 +276,21 @@ func TestEnableDeveloperBundleIDCapabilityPreservesFullPayload(t *testing.T) {
 	existing := capabilityRelationship.Data[0]
 	if existing.ID != "icloud-1" || existing.Attributes["enabled"] != true {
 		t.Fatalf("existing capability changed: %+v", existing)
+	}
+	if len(existing.Attributes) != 2 {
+		t.Fatalf("PATCH contained read-only capability attributes: %+v", existing.Attributes)
+	}
+	settings, ok := existing.Attributes["settings"].([]any)
+	if !ok {
+		t.Fatalf("PATCH omitted or changed existing capability settings: %+v", existing.Attributes)
+	}
+	encodedSettings, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("encode existing capability settings: %v", err)
+	}
+	const wantSettings = `[{"key":"ICLOUD_VERSION","options":[{"enabled":true,"key":"XCODE_6"}]}]`
+	if string(encodedSettings) != wantSettings {
+		t.Fatalf("PATCH changed existing capability settings: got %s, want %s", encodedSettings, wantSettings)
 	}
 	if _, ok := existing.Relationships["appGroups"]; !ok {
 		t.Fatalf("existing appGroups relationship was not preserved: %+v", existing.Relationships)
@@ -481,8 +517,11 @@ func TestEnableDeveloperBundleIDCapabilityUpdatesDisabledTargetOnce(t *testing.T
 	if err := json.Unmarshal(caps[0].Attributes, &attributes); err != nil {
 		t.Fatalf("decode attributes: %v", err)
 	}
-	if attributes["enabled"] != true || attributes["portalOwned"] != "keep" {
-		t.Fatalf("target attributes not preserved: %+v", attributes)
+	if attributes["enabled"] != true {
+		t.Fatalf("target enabled state not updated: %+v", attributes)
+	}
+	if _, ok := attributes["portalOwned"]; ok {
+		t.Fatalf("read-only target attribute was sent in PATCH: %+v", attributes)
 	}
 	settings, ok := attributes["settings"].([]any)
 	if !ok || len(settings) != 1 {

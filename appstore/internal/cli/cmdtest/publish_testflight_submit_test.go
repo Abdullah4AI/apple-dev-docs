@@ -85,7 +85,7 @@ func TestPublishTestflightSubmitCreatesBetaReviewSubmissionForExternalGroups(t *
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-external",
 			"--submit",
 			"--confirm",
@@ -175,7 +175,7 @@ func TestPublishTestflightSubmitWaitsForProcessingBeforeAddingGroups(t *testing.
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-external",
 			"--poll-interval", "1ms",
 			"--submit",
@@ -245,7 +245,7 @@ func TestPublishTestflightSubmitSkipsBetaReviewSubmissionForInternalGroups(t *te
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--submit",
 			"--confirm",
@@ -319,7 +319,7 @@ func TestPublishTestflightSubmitTreatsExistingSubmissionAsAlreadyDone(t *testing
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-external",
 			"--submit",
 			"--confirm",
@@ -399,7 +399,7 @@ func TestPublishTestflightSubmitPreservesPartialSuccessWhenSubmissionFails(t *te
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-external",
 			"--submit",
 			"--confirm",

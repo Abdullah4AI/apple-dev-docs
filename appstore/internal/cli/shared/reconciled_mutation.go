@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -49,7 +50,7 @@ func RunReconciledMutation[T any](
 		if matches {
 			return value, ReconciledMutationRecovered, nil
 		}
-		if !IsTransientMutationError(ctx, mutationErr) || retry >= retryOpts.MaxRetries {
+		if isRateLimitRejection(mutationErr) || !IsTransientMutationError(ctx, mutationErr) || retry >= retryOpts.MaxRetries {
 			return zero, "", mutationErr
 		}
 
@@ -67,6 +68,14 @@ func RunReconciledMutation[T any](
 	}
 }
 
+func isRateLimitRejection(err error) bool {
+	if !asc.IsRetryable(err) {
+		return false
+	}
+	var statusErr interface{ HTTPStatusCode() int }
+	return errors.As(err, &statusErr) && statusErr.HTTPStatusCode() == http.StatusTooManyRequests
+}
+
 func runMutationWithFreshTimeout[T any](ctx context.Context, mutate func(context.Context) (T, error)) (T, error) {
 	requestCtx, cancel := ContextWithTimeout(ctx)
 	defer cancel()
@@ -80,6 +89,12 @@ func runMutationReadback[T any](ctx context.Context, readback func(context.Conte
 // IsTransientMutationError reports whether a mutation can be retried after
 // state readback while the parent operation remains healthy.
 func IsTransientMutationError(parent context.Context, err error) bool {
+	if asc.IsRetryBudgetExhausted(err) {
+		return false
+	}
+	if asc.IsRetryDelayExceeded(err) {
+		return false
+	}
 	if asc.IsRetryable(err) {
 		return true
 	}

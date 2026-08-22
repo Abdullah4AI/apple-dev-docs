@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestNotaryClient(t *testing.T, serverURL string) *Client {
@@ -56,6 +57,20 @@ func TestGenerateNotaryJWT(t *testing.T) {
 	if len(parts) != 3 {
 		t.Fatalf("expected 3 token parts, got %d", len(parts))
 	}
+}
+
+func TestGenerateNotaryJWT_BackdatesIssuedAtForClockSkew(t *testing.T) {
+	privateKey := testJWTPrivateKey(t)
+
+	before := time.Now()
+	tokenString, err := GenerateNotaryJWT("KEY123", "ISS456", privateKey)
+	if err != nil {
+		t.Fatalf("GenerateNotaryJWT() error: %v", err)
+	}
+	after := time.Now()
+
+	claims := parseJWTClaims(t, tokenString, privateKey)
+	assertJWTIssuedAtSkew(t, claims.IssuedAt, claims.ExpiresAt, before, after, tokenLifetime)
 }
 
 func TestGenerateNotaryJWT_NormalizesIdentifiers(t *testing.T) {

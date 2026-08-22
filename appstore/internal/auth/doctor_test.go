@@ -98,6 +98,104 @@ func TestDoctorEnvironmentWarnsForInvalidKeyType(t *testing.T) {
 	}
 }
 
+func TestDoctorEnvironmentWarnsWhenCredentialIdentifiersLookSwapped(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("ASC_KEY_ID", "69a6de00-aaaa-bbbb-cccc-123456789abc")
+	t.Setenv("ASC_ISSUER_ID", "39MX87M9Y4")
+	t.Setenv("ASC_KEY_TYPE", "team")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+
+	report := Doctor(DoctorOptions{})
+	section := findDoctorSection(t, report, "Environment")
+	if !sectionHasStatus(section, DoctorWarn, "ASC_KEY_ID looks like an issuer ID — the values may be swapped") {
+		t.Fatalf("expected swapped key ID warning, got %#v", section.Checks)
+	}
+	if !sectionHasStatus(section, DoctorWarn, "ASC_ISSUER_ID looks like a key ID — the values may be swapped") {
+		t.Fatalf("expected swapped issuer ID warning, got %#v", section.Checks)
+	}
+	for _, check := range section.Checks {
+		if strings.Contains(check.Message, "69a6de00") || strings.Contains(check.Message, "39MX87M9Y4") {
+			t.Fatalf("credential identifier leaked in message: %q", check.Message)
+		}
+	}
+}
+
+func TestDoctorEnvironmentWarnsForNonUUIDIssuerID(t *testing.T) {
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("ASC_KEY_ID", "39MX87M9Y4")
+	t.Setenv("ASC_ISSUER_ID", "not-a-uuid")
+	t.Setenv("ASC_KEY_TYPE", "team")
+	t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+
+	report := Doctor(DoctorOptions{})
+	section := findDoctorSection(t, report, "Environment")
+	if !sectionHasStatus(section, DoctorWarn, "ASC_ISSUER_ID is not a UUID") {
+		t.Fatalf("expected issuer ID shape warning, got %#v", section.Checks)
+	}
+	if sectionHasStatus(section, DoctorWarn, "ASC_KEY_ID looks like an issuer ID") {
+		t.Fatalf("expected no key ID warning for a plausible key ID, got %#v", section.Checks)
+	}
+}
+
+func TestDoctorEnvironmentIgnoresIssuerShapeForIndividualKey(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		keyID    string
+		issuerID string
+	}{
+		{name: "stale issuer is ignored", keyID: "39MX87M9Y4", issuerID: "stale-team-value"},
+		{name: "uuid-shaped key without issuer", keyID: "69a6de00-aaaa-bbbb-cccc-123456789abc"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+			t.Setenv("ASC_KEY_ID", test.keyID)
+			t.Setenv("ASC_ISSUER_ID", test.issuerID)
+			t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+			t.Setenv("ASC_KEY_TYPE", "individual")
+
+			report := Doctor(DoctorOptions{})
+			section := findDoctorSection(t, report, "Environment")
+			for _, check := range section.Checks {
+				if check.Status == DoctorWarn && (strings.Contains(check.Message, "ASC_ISSUER_ID") || strings.Contains(check.Message, "issuer ID") || strings.Contains(check.Message, "swapped")) {
+					t.Fatalf("unexpected team credential warning for individual key: %q", check.Message)
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorEnvironmentAcceptsUnusualButValidCredentialShapes(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		keyID    string
+		issuerID string
+	}{
+		{name: "digits only key id", keyID: "1234567890", issuerID: "69a6de00-aaaa-bbbb-cccc-123456789abc"},
+		{name: "mixed case key id", keyID: "39Mx87M9y4", issuerID: "09f4080c-6ee7-4e52-8103-e1241eaaa58a"},
+		{name: "uppercase issuer uuid", keyID: "39MX87M9Y4", issuerID: "A7EFEF21-3432-404F-A488-083800B570FF"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+			t.Setenv("ASC_KEY_ID", test.keyID)
+			t.Setenv("ASC_ISSUER_ID", test.issuerID)
+			t.Setenv("ASC_KEY_TYPE", "team")
+			t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+
+			report := Doctor(DoctorOptions{})
+			section := findDoctorSection(t, report, "Environment")
+			for _, check := range section.Checks {
+				if check.Status == DoctorWarn && (strings.Contains(check.Message, "swapped") || strings.Contains(check.Message, "not a UUID")) {
+					t.Fatalf("unexpected credential shape warning: %q", check.Message)
+				}
+			}
+		})
+	}
+}
+
 func TestDoctorTempFilesWarns(t *testing.T) {
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
@@ -454,7 +552,7 @@ func TestDoctorMigrationHintsPrefillsVersionFromXcodeAndAppID(t *testing.T) {
 	if !sliceContains(report.Migration.SuggestedCommands, `asc versions create --app "123456789" --version "2.3.4"`) {
 		t.Fatalf("expected personalized version create command, got %#v", report.Migration.SuggestedCommands)
 	}
-	if !sliceContains(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
+	if !sliceContains(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
 		t.Fatalf("expected review submit step for upload-only migration hints, got %#v", report.Migration.SuggestedCommands)
 	}
 	if !sliceContains(report.Migration.SuggestedCommands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`) {
@@ -462,7 +560,7 @@ func TestDoctorMigrationHintsPrefillsVersionFromXcodeAndAppID(t *testing.T) {
 	}
 	attachIdx := sliceIndex(report.Migration.SuggestedCommands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`)
 	validateIdx := sliceIndex(report.Migration.SuggestedCommands, `asc validate --app "123456789" --version-id "VERSION_ID"`)
-	reviewSubmitIdx := sliceIndex(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
+	reviewSubmitIdx := sliceIndex(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
 	if attachIdx < 0 || validateIdx <= attachIdx || reviewSubmitIdx <= validateIdx {
 		t.Fatalf("expected attach-build -> validate -> review submit ordering, got %#v", report.Migration.SuggestedCommands)
 	}
@@ -567,7 +665,7 @@ func TestBuildSuggestedCommandsUploadOnlyUsesUploadedBuildPlaceholder(t *testing
 		}
 	})
 
-	if !sliceContains(commands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
+	if !sliceContains(commands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
 		t.Fatalf("expected review submit guidance to use placeholder IDs, got %#v", commands)
 	}
 	if !sliceContains(commands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`) {
@@ -575,11 +673,11 @@ func TestBuildSuggestedCommandsUploadOnlyUsesUploadedBuildPlaceholder(t *testing
 	}
 	attachIdx := sliceIndex(commands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`)
 	validateIdx := sliceIndex(commands, `asc validate --app "123456789" --version-id "VERSION_ID"`)
-	reviewSubmitIdx := sliceIndex(commands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
+	reviewSubmitIdx := sliceIndex(commands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
 	if attachIdx < 0 || validateIdx <= attachIdx || reviewSubmitIdx <= validateIdx {
 		t.Fatalf("expected attach-build -> validate -> review submit ordering, got %#v", commands)
 	}
-	if sliceContains(commands, `asc review submit --app "123456789" --version-id "version-id-123" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
+	if sliceContains(commands, `asc review submit --app "123456789" --version-id "version-id-123" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
 		t.Fatalf("expected upload-only guidance to avoid a platform-agnostic resolved version ID, got %#v", commands)
 	}
 	if !sliceContains(commands, `asc versions create --app "123456789" --version "1.2.3"`) {

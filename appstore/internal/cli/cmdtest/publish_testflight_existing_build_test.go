@@ -72,7 +72,7 @@ func TestPublishTestflightExistingBuildIDSkipsUpload(t *testing.T) {
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-1",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -141,7 +141,7 @@ func TestPublishTestflightExistingBuildDoesNotRetryPostUploadPropagationError(t 
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-1",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -223,7 +223,7 @@ func TestPublishTestflightExistingBuildIDAllowsInternalGroup(t *testing.T) {
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -334,7 +334,7 @@ func TestPublishTestflightExistingBuildIDNotifyUsesBuildBetaNotificationsEndpoin
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--notify",
 		}); err != nil {
@@ -428,7 +428,7 @@ func TestPublishTestflightExistingBuildIDAddsInternalGroupWithAccessToAllBuilds(
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -554,7 +554,7 @@ func TestPublishTestflightExistingBuildIDWithInternalAllBuildsGroupStillNotifies
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--notify",
 		}); err != nil {
@@ -658,7 +658,7 @@ func TestPublishTestflightExistingBuildIDNotifySkipsManualNotificationWhenAutoNo
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--notify",
 		}); err != nil {
@@ -756,7 +756,7 @@ func TestPublishTestflightExistingBuildIDAddsInternalAndExternalGroupsWhenIntern
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal,group-external",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -869,7 +869,7 @@ func TestPublishTestflightExistingBuildIDNotifyTreatsAutoNotifyConflictAsAlready
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--notify",
 		}); err != nil {
@@ -974,7 +974,7 @@ func TestPublishTestflightExistingBuildIDNotifyPreservesPartialSuccessMessageWhe
 		if err := root.Parse([]string{
 			"publish", "testflight",
 			"--app", "123",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--group", "group-internal",
 			"--notify",
 		}); err != nil {

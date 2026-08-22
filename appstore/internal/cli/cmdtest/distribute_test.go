@@ -87,7 +87,7 @@ func TestDistributeApplyWellFormedUnequalConfirmationExitsUsage(t *testing.T) {
 
 func TestDistributeInspectRequiresIPAAndRejectsInvalidOutput(t *testing.T) {
 	assertUsageExit(t, []string{"distribute", "inspect"}, "--ipa is required")
-	assertUsageExit(t, []string{"distribute", "inspect", "--ipa", "missing.ipa", "--output", "yaml"}, "unsupported format")
+	assertUsageExit(t, []string{"distribute", "inspect", "--ipa", "missing.ipa", "--output", "yaml"}, `--output must be one of`)
 	assertUsageExit(t, []string{"distribute", "inspect", "unexpected", "--ipa", "missing.ipa"}, "does not accept positional arguments")
 }
 

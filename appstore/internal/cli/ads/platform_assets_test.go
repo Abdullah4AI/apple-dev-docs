@@ -238,12 +238,12 @@ func TestPlatformAssetUploadValidatesOutputBeforeMutation(t *testing.T) {
 		{
 			name: "unsupported format",
 			args: []string{"--file", asset, "--brand", "BRAND", "--ad-account", "ACCOUNT", "--output", "yaml"},
-			want: "unsupported format: yaml",
+			want: `(got "yaml")`,
 		},
 		{
 			name: "pretty table",
 			args: []string{"--file", asset, "--brand", "BRAND", "--ad-account", "ACCOUNT", "--output", "table", "--pretty"},
-			want: "unsupported format: table",
+			want: `(got "table")`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

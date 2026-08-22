@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -46,7 +47,9 @@ Examples:
 func CategoriesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("categories list", flag.ExitOnError)
 
-	limit := fs.Int("limit", 200, "Maximum results to fetch (1-200)")
+	limit := fs.Int("limit", 200, "Maximum results per page (1-200)")
+	next := fs.String("next", "", "Fetch next page using a links.next URL")
+	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -60,10 +63,19 @@ and secondary categories.
 
 Examples:
   asc categories list
-  asc categories list --output table`,
+  asc categories list --output table
+  asc categories list --paginate
+  asc categories list --next "<links.next>"
+  asc categories list --paginate --next "<links.next>"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("categories list: %w", err)
+			}
+			if err := rejectCategoriesListNextFlagConflicts(fs, *next); err != nil {
+				return err
+			}
 			if *limit < 1 || *limit > 200 {
 				return fmt.Errorf("categories list: --limit must be between 1 and 200")
 			}
@@ -76,7 +88,26 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			categories, err := client.GetAppCategories(requestCtx, asc.WithAppCategoriesLimit(*limit))
+			opts := []asc.AppCategoriesOption{
+				asc.WithAppCategoriesLimit(*limit),
+				asc.WithAppCategoriesNextURL(*next),
+			}
+
+			if *paginate {
+				firstPage, err := client.GetAppCategories(requestCtx, opts...)
+				if err != nil {
+					return fmt.Errorf("categories list: %w", err)
+				}
+				categories, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+					return client.GetAppCategories(ctx, asc.WithAppCategoriesNextURL(nextURL))
+				})
+				if err != nil {
+					return fmt.Errorf("categories list: %w", err)
+				}
+				return shared.PrintOutput(categories, *output.Output, *output.Pretty)
+			}
+
+			categories, err := client.GetAppCategories(requestCtx, opts...)
 			if err != nil {
 				return fmt.Errorf("categories list: %w", err)
 			}
@@ -84,6 +115,25 @@ Examples:
 			return shared.PrintOutput(categories, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+// rejectCategoriesListNextFlagConflicts rejects --limit when a --next cursor
+// URL is supplied, because the cursor already encodes the page size and the
+// CLI must never accept and silently ignore a flag.
+func rejectCategoriesListNextFlagConflicts(fs *flag.FlagSet, next string) error {
+	if strings.TrimSpace(next) == "" {
+		return nil
+	}
+	conflict := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "limit" {
+			conflict = true
+		}
+	})
+	if conflict {
+		return shared.UsageError("categories list: --next cannot be combined with --limit")
+	}
+	return nil
 }
 
 // CategoriesSetCommand returns the categories set subcommand.

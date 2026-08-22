@@ -385,9 +385,9 @@ func buildDeveloperAppGroupAssignmentPatchRequest(current developerBundleIDRespo
 		updated = append(updated, capability)
 	}
 
-	relationship, err := json.Marshal(developerResourceRelationship{Data: updated})
+	relationship, err := marshalDeveloperBundleIDCapabilitiesForPatch(updated)
 	if err != nil {
-		return developerBundleIDPatchRequest{}, false, fmt.Errorf("failed to build Bundle ID capability relationships: %w", err)
+		return developerBundleIDPatchRequest{}, false, err
 	}
 	relationships := cloneRawMessageMap(current.Data.Relationships)
 	if relationships == nil {

@@ -1,10 +1,14 @@
 package cmdtest
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cmdpkg "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -73,6 +78,7 @@ func TestScreenshotsDownload_ByID_WritesFile(t *testing.T) {
 	type item struct {
 		ID           string `json:"id"`
 		OutputPath   string `json:"outputPath"`
+		Unchanged    *bool  `json:"unchanged"`
 		BytesWritten int64  `json:"bytesWritten"`
 	}
 	type result struct {
@@ -114,6 +120,9 @@ func TestScreenshotsDownload_ByID_WritesFile(t *testing.T) {
 	if got.Items[0].BytesWritten != int64(len("PNGDATA")) {
 		t.Fatalf("expected bytesWritten %d, got %d", len("PNGDATA"), got.Items[0].BytesWritten)
 	}
+	if got.Items[0].Unchanged == nil || *got.Items[0].Unchanged {
+		t.Fatalf("expected unchanged=false in item JSON, got %v", got.Items[0].Unchanged)
+	}
 
 	data, err := os.ReadFile(outPath)
 	if err != nil {
@@ -121,6 +130,98 @@ func TestScreenshotsDownload_ByID_WritesFile(t *testing.T) {
 	}
 	if string(data) != "PNGDATA" {
 		t.Fatalf("unexpected file contents: %q", string(data))
+	}
+}
+
+func TestScreenshotsDownload_ByID_PreservesEquivalentPNGOnOverwrite(t *testing.T) {
+	setupAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	existingPNG := screenshotTestPNG(t, "asset-id-existing", "same-pixels")
+	downloadedPNG := screenshotTestPNG(t, "asset-id-downloaded", "same-pixels")
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "api.appstoreconnect.apple.com":
+			body := `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"shot.png","fileSize":7,"imageAsset":{"templateUrl":"https://example.com/assets/{w}x{h}bb.{f}","width":1242,"height":2688}}}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case "example.com":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(string(downloadedPNG))),
+				Header:     http.Header{"Content-Type": []string{"image/png"}},
+			}, nil
+		default:
+			t.Fatalf("unexpected host: %s", req.URL.Host)
+			return nil, nil
+		}
+	})
+
+	outPath := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(outPath, existingPNG, 0o600); err != nil {
+		t.Fatalf("write existing screenshot: %v", err)
+	}
+	originalModTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(outPath, originalModTime, originalModTime); err != nil {
+		t.Fatalf("set existing screenshot timestamps: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var got struct {
+		Total      int `json:"total"`
+		Downloaded int `json:"downloaded"`
+		Unchanged  int `json:"unchanged"`
+		Failed     int `json:"failed"`
+		Items      []struct {
+			Unchanged    bool  `json:"unchanged"`
+			BytesWritten int64 `json:"bytesWritten"`
+		} `json:"items"`
+	}
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"screenshots", "download", "--id", "shot-1", "--output", outPath, "--overwrite"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v (stdout=%q, stderr=%q)", runErr, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode stdout JSON: %v (stdout=%q)", err, stdout)
+	}
+	if got.Total != 1 || got.Downloaded != 1 || got.Unchanged != 1 || got.Failed != 0 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if len(got.Items) != 1 || !got.Items[0].Unchanged || got.Items[0].BytesWritten != 0 {
+		t.Fatalf("unexpected item result: %+v", got.Items)
+	}
+
+	after, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read preserved screenshot: %v", err)
+	}
+	if string(after) != string(existingPNG) {
+		t.Fatal("equivalent download replaced the existing screenshot")
+	}
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("stat preserved screenshot: %v", err)
+	}
+	if !info.ModTime().Equal(originalModTime) {
+		t.Fatalf("modification time = %s, want %s", info.ModTime(), originalModTime)
 	}
 }
 
@@ -680,4 +781,43 @@ func writeJSONResponse(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, body)
+}
+
+func screenshotTestPNG(t *testing.T, metadata, pixels string) []byte {
+	t.Helper()
+
+	signature := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	chunk := func(chunkType string, data []byte) []byte {
+		t.Helper()
+		result := make([]byte, 12+len(data))
+		binary.BigEndian.PutUint32(result[:4], uint32(len(data)))
+		copy(result[4:8], chunkType)
+		copy(result[8:8+len(data)], data)
+		binary.BigEndian.PutUint32(result[8+len(data):], crc32.ChecksumIEEE(result[4:8+len(data)]))
+		return result
+	}
+
+	png := append([]byte(nil), signature...)
+	header := make([]byte, 13)
+	binary.BigEndian.PutUint32(header[:4], 1)
+	binary.BigEndian.PutUint32(header[4:8], 1)
+	header[8] = 8
+	header[9] = 6
+	row := make([]byte, 5)
+	binary.BigEndian.PutUint32(row[1:], crc32.ChecksumIEEE([]byte(pixels)))
+	var compressed bytes.Buffer
+	compressor := zlib.NewWriter(&compressed)
+	if _, err := compressor.Write(row); err != nil {
+		t.Fatalf("compress screenshot PNG row: %v", err)
+	}
+	if err := compressor.Close(); err != nil {
+		t.Fatalf("close screenshot PNG compressor: %v", err)
+	}
+	textData := append([]byte("date:modify"), 0, 0, 0, 0, 0)
+	textData = append(textData, metadata...)
+	png = append(png, chunk("IHDR", header)...)
+	png = append(png, chunk("iTXt", textData)...)
+	png = append(png, chunk("IDAT", compressed.Bytes())...)
+	png = append(png, chunk("IEND", nil)...)
+	return png
 }

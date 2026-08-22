@@ -31,7 +31,7 @@ Examples:
   asc encryption declarations view --id "DECL_ID"
   asc encryption declarations create --app "APP_ID" --app-description "Uses TLS" --contains-proprietary-cryptography=false --contains-third-party-cryptography=true --available-on-french-store=true
   asc encryption declarations exempt-declare --plist ./Info.plist
-  asc encryption declarations assign-builds --id "DECL_ID" --build "BUILD_ID"
+  asc encryption declarations assign-builds --id "DECL_ID" --build-id "BUILD_ID"
   asc encryption documents view --id "DOC_ID"
   asc encryption documents upload --declaration "DECL_ID" --file ./export.pdf`,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -58,7 +58,7 @@ Examples:
   asc encryption declarations view --id "DECL_ID"
   asc encryption declarations create --app "APP_ID" --app-description "Uses TLS" --contains-proprietary-cryptography=false --contains-third-party-cryptography=true --available-on-french-store=true
   asc encryption declarations exempt-declare --plist ./Info.plist
-  asc encryption declarations assign-builds --id "DECL_ID" --build "BUILD_ID"`,
+  asc encryption declarations assign-builds --id "DECL_ID" --build-id "BUILD_ID"`,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			EncryptionDeclarationsListCommand(),
@@ -80,7 +80,8 @@ func EncryptionDeclarationsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("encryption declarations list", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	builds := fs.String("build", "", "Filter by build IDs (comma-separated)")
+	builds := fs.String("build-id", "", "Filter by build IDs (comma-separated)")
+	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	fields := fs.String("fields", "", "Fields to include: "+strings.Join(encryptionDeclarationFieldList(), ", "))
 	documentFields := fs.String("document-fields", "", "Document fields to include: "+strings.Join(encryptionDocumentFieldList(), ", "))
 	include := fs.String("include", "", "Include relationships: "+strings.Join(encryptionDeclarationIncludeList(), ", "))
@@ -103,6 +104,9 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuilds.Apply(builds); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("encryption declarations list: --limit must be between 1 and 200")
 			}
@@ -541,21 +545,26 @@ func EncryptionDeclarationsAssignBuildsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("encryption declarations assign-builds", flag.ExitOnError)
 
 	declarationID := fs.String("id", "", "Encryption declaration ID (required)")
-	builds := fs.String("build", "", "Build IDs to assign (comma-separated)")
+	builds := fs.String("build-id", "", "Build IDs to assign (comma-separated)")
+	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "assign-builds",
-		ShortUsage: "asc encryption declarations assign-builds --id \"DECL_ID\" --build \"BUILD_ID[,BUILD_ID...]\"",
+		ShortUsage: "asc encryption declarations assign-builds --id \"DECL_ID\" --build-id \"BUILD_ID[,BUILD_ID...]\"",
 		ShortHelp:  "Assign builds to an encryption declaration.",
 		LongHelp: `Assign builds to an encryption declaration.
 
 Examples:
-  asc encryption declarations assign-builds --id "DECL_ID" --build "BUILD_ID"
-  asc encryption declarations assign-builds --id "DECL_ID" --build "BUILD_ID1,BUILD_ID2"`,
+  asc encryption declarations assign-builds --id "DECL_ID" --build-id "BUILD_ID"
+  asc encryption declarations assign-builds --id "DECL_ID" --build-id "BUILD_ID1,BUILD_ID2"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuilds.Apply(builds); err != nil {
+				return err
+			}
+
 			declarationValue := strings.TrimSpace(*declarationID)
 			if declarationValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
@@ -564,8 +573,8 @@ Examples:
 
 			buildIDs := shared.SplitCSV(*builds)
 			if len(buildIDs) == 0 {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			client, err := shared.GetASCClient()

@@ -160,6 +160,30 @@ def compact_parameters(
     return compact
 
 
+def get_operation_action(schemas: dict, operation_id: str, response_ref: str):
+    response = resolve_ref(schemas, response_ref) if response_ref else None
+    if response:
+        data = response.get("properties", {}).get("data", {})
+        if "$ref" in data:
+            data = resolve_ref(schemas, data["$ref"])
+        if data:
+            if data.get("type") == "array":
+                return "list"
+            return "get"
+
+    suffix = operation_id.rsplit("_", 1)[-1]
+    if suffix in {
+        "getInstance",
+        "getToOneRelated",
+        "getToOneRelationship",
+        "getMetrics",
+    }:
+        return "get"
+    if suffix in {"getCollection", "getToManyRelated", "getToManyRelationship"}:
+        return "list"
+    return None
+
+
 def build_index(spec: dict) -> list[dict]:
     schemas = spec.get("components", {}).get("schemas", {})
     parameter_components = spec.get("components", {}).get("parameters", {})
@@ -205,6 +229,15 @@ def build_index(spec: dict) -> list[dict]:
                 if rs and "$ref" in rs:
                     entry["responseSchema"] = rs["$ref"].split("/")[-1]
                     break
+
+            if method == "get":
+                get_action = get_operation_action(
+                    schemas,
+                    details.get("operationId", ""),
+                    rs.get("$ref", "") if rs else "",
+                )
+                if get_action:
+                    entry["getAction"] = get_action
 
             index.append(entry)
 

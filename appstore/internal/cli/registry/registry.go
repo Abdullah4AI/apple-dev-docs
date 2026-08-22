@@ -72,6 +72,7 @@ import (
 	storekitcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/storekit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/submit"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/subscriptions"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/systemstatus"
 	telemetrycmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/telemetry"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/testflight"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/users"
@@ -122,6 +123,7 @@ func NewCatalog(version string) *Catalog {
 		commandFactory("init", "Initialize asc helper docs in the current repo.", initcmd.InitCommand),
 		commandFactory("docs", "Access embedded documentation guides and reference helpers.", docs.DocsCommand),
 		commandFactory("diff", "Generate deterministic non-mutating diff plans.", diffcmd.DiffCommand),
+		commandFactory("system-status", "[experimental] Check Apple Developer service health.", systemstatus.Command),
 		commandFactory("status", "Show a release pipeline dashboard for an app.", status.StatusCommand),
 		commandFactory("insights", "Generate weekly and daily insights from App Store data sources.", insights.InsightsCommand),
 		commandFactory("release-notes", "Generate and manage App Store release notes.", releasenotes.ReleaseNotesCommand),

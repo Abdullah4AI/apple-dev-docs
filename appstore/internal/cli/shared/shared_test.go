@@ -505,7 +505,8 @@ func TestValidateOutputFormat(t *testing.T) {
 		{name: "json allows pretty", input: "json", pretty: true, wantFormat: "json"},
 		{name: "md alias", input: "md", pretty: false, wantFormat: "markdown"},
 		{name: "table pretty rejected", input: "table", pretty: true, wantErr: "--pretty is only valid with JSON output"},
-		{name: "unsupported rejected", input: "yaml", pretty: false, wantErr: "unsupported format: yaml"},
+		{name: "unsupported rejected", input: "yaml", pretty: false, wantErr: `(got "yaml")`},
+		{name: "unsupported preserves whitespace", input: " yaml ", pretty: false, wantErr: `(got " yaml ")`},
 	}
 
 	for _, tc := range tests {
@@ -538,7 +539,7 @@ func TestValidateOutputFormatAllowed(t *testing.T) {
 	}{
 		{name: "text allowed", input: "text", pretty: false, allowed: []string{"text", "json"}, wantFormat: "text"},
 		{name: "json default allowed", input: "", pretty: false, allowed: []string{"text", "json"}, wantFormat: "json"},
-		{name: "md unsupported when not allowed", input: "md", pretty: false, allowed: []string{"text", "json"}, wantErr: "unsupported format: markdown"},
+		{name: "md unsupported when not allowed", input: "md", pretty: false, allowed: []string{"text", "json"}, wantErr: `--output must be one of: text, json (got "md")`},
 		{name: "alias allowed when markdown allowed", input: "md", pretty: false, allowed: []string{"markdown", "json"}, wantFormat: "markdown"},
 		{name: "pretty rejected for text", input: "text", pretty: true, allowed: []string{"text", "json"}, wantErr: "--pretty is only valid with JSON output"},
 	}
@@ -572,7 +573,7 @@ func TestValidateOutputFormatAllowed_EmptyAllowedFallsBackToDefaultSet(t *testin
 	}
 
 	_, err = ValidateOutputFormatAllowed("yaml", false)
-	if err == nil || !strings.Contains(err.Error(), "unsupported format: yaml") {
+	if err == nil || !strings.Contains(err.Error(), `(got "yaml")`) {
 		t.Fatalf("expected unsupported format error, got %v", err)
 	}
 }

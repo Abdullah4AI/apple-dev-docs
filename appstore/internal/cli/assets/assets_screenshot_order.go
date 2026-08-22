@@ -18,6 +18,10 @@ type screenshotUploadProgress struct {
 }
 
 func uploadScreenshotsToSetFromRoot(ctx context.Context, client *asc.Client, setID string, files []string, sourceRootPath string, preserveExistingOrder bool) ([]asc.AssetUploadResultItem, error) {
+	return uploadScreenshotsToSetFromRootWithOpenedFiles(ctx, client, setID, files, sourceRootPath, preserveExistingOrder, nil)
+}
+
+func uploadScreenshotsToSetFromRootWithOpenedFiles(ctx context.Context, client *asc.Client, setID string, files []string, sourceRootPath string, preserveExistingOrder bool, openedFiles openedScreenshotFiles) ([]asc.AssetUploadResultItem, error) {
 	orderedIDs := make([]string, 0, len(files))
 	if preserveExistingOrder {
 		existingIDs, err := GetOrderedAppScreenshotIDs(ctx, client, setID)
@@ -27,7 +31,7 @@ func uploadScreenshotsToSetFromRoot(ctx context.Context, client *asc.Client, set
 		orderedIDs = append(orderedIDs, existingIDs...)
 	}
 
-	progress, err := uploadScreenshotsWithOrderState(ctx, client, setID, orderedIDs, files, sourceRootPath, false, true)
+	progress, err := uploadScreenshotsWithOrderStateWithOpenedFiles(ctx, client, setID, orderedIDs, files, sourceRootPath, false, true, openedFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -35,13 +39,24 @@ func uploadScreenshotsToSetFromRoot(ctx context.Context, client *asc.Client, set
 }
 
 func uploadScreenshotsWithOrderState(ctx context.Context, client *asc.Client, setID string, orderedIDs, files []string, sourceRootPath string, syncIfNoNew, syncAfterUpload bool) (screenshotUploadProgress, error) {
+	return uploadScreenshotsWithOrderStateWithOpenedFiles(ctx, client, setID, orderedIDs, files, sourceRootPath, syncIfNoNew, syncAfterUpload, nil)
+}
+
+func uploadScreenshotsWithOrderStateWithOpenedFiles(ctx context.Context, client *asc.Client, setID string, orderedIDs, files []string, sourceRootPath string, syncIfNoNew, syncAfterUpload bool, openedFiles openedScreenshotFiles) (screenshotUploadProgress, error) {
 	progress := screenshotUploadProgress{
 		Results:    make([]asc.AssetUploadResultItem, 0, len(files)),
 		OrderedIDs: append([]string(nil), orderedIDs...),
 	}
 
 	for idx, filePath := range files {
-		item, pending, err := uploadScreenshotAsset(ctx, client, setID, sourceRootPath, filePath)
+		var item asc.AssetUploadResultItem
+		var pending screenshotPendingAsset
+		var err error
+		if openedFile := openedScreenshotFileForPath(openedFiles, filePath); openedFile != nil {
+			item, pending, err = uploadScreenshotAssetFromFile(ctx, client, setID, filePath, openedFile)
+		} else {
+			item, pending, err = uploadScreenshotAsset(ctx, client, setID, sourceRootPath, filePath)
+		}
 		if err != nil {
 			progress.PendingFiles = append([]string{filePath}, files[idx+1:]...)
 			if strings.TrimSpace(pending.AssetID) != "" {
@@ -136,7 +151,7 @@ func reconcilePendingScreenshotAsset(ctx context.Context, client *asc.Client, pe
 		if err := validatePendingScreenshotChecksum(sourceRootPath, pending); err != nil {
 			return asc.AssetUploadResultItem{}, pending, false, err
 		}
-		return completedPendingScreenshotResult(pending), screenshotPendingAsset{}, false, nil
+		return waitForPendingScreenshotDelivery(ctx, client, pending)
 	case "FAILED":
 		if err := client.DeleteAppScreenshot(ctx, pending.AssetID); err != nil {
 			return asc.AssetUploadResultItem{}, pending, false, fmt.Errorf("delete failed screenshot reservation %s: %w", pending.AssetID, err)

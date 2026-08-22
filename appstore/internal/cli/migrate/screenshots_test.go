@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -55,6 +56,29 @@ func TestDiscoverScreenshotPlanForUploadRejectsReplacedFile(t *testing.T) {
 	}
 	if bytes.Equal(replacement, original) {
 		t.Fatal("test setup did not replace the pathname")
+	}
+}
+
+func TestDiscoverScreenshotPlanForUploadRejectsFormatExtensionMismatch(t *testing.T) {
+	screenshotsDir := t.TempDir()
+	localeDir := filepath.Join(screenshotsDir, "en-US")
+	if err := os.MkdirAll(localeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	writeJPEG(t, filepath.Join(localeDir, "iphone_65_1.png"), 1242, 2688)
+
+	plans, _, err := discoverScreenshotPlanForUpload(screenshotsDir)
+	defer closeScreenshotPlans(plans)
+	if err == nil {
+		t.Fatal("discoverScreenshotPlanForUpload() = nil error, want format mismatch")
+	}
+	for _, want := range []string{"iphone_65_1.png", "JPEG", "iphone_65_1.jpg", "PNG"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("discoverScreenshotPlanForUpload() error = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none", plans)
 	}
 }
 
@@ -413,6 +437,24 @@ func TestInferScreenshotDisplayType_IPad13InchFilenameHintWithoutCatalogDimensio
 				t.Fatalf("display type = %q, want APP_IPAD_PRO_3GEN_129", displayType)
 			}
 		})
+	}
+}
+
+func writeJPEG(t *testing.T, path string, width, height int) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: 10, G: 20, B: 30, A: 255})
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create jpeg: %v", err)
+	}
+	defer file.Close()
+	if err := jpeg.Encode(file, img, nil); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
 	}
 }
 

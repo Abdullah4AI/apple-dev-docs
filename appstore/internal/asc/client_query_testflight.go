@@ -65,6 +65,8 @@ type betaGroupsQuery struct {
 	appIDs          []string
 	buildIDs        []string
 	fields          []string
+	name            string
+	sort            string
 }
 
 type betaGroupBuildsQuery struct {
@@ -97,7 +99,8 @@ type betaAppReviewSubmissionsQuery struct {
 
 type buildBetaDetailsQuery struct {
 	listQuery
-	buildIDs []string
+	buildIDs     []string
+	includeBuild bool
 }
 
 type betaRecruitmentCriterionOptionsQuery struct {
@@ -181,7 +184,9 @@ func buildBetaGroupsQuery(query *betaGroupsQuery) string {
 	values := url.Values{}
 	addCSV(values, "filter[app]", query.appIDs)
 	addCSV(values, "filter[builds]", query.buildIDs)
+	addValue(values, "filter[name]", query.name)
 	addCSV(values, "fields[betaGroups]", query.fields)
+	addValue(values, "sort", query.sort)
 	addLimit(values, query.limit)
 	if query.isInternalGroup != nil {
 		values.Set("filter[isInternalGroup]", strconv.FormatBool(*query.isInternalGroup))
@@ -253,6 +258,9 @@ func buildBetaAppReviewSubmissionsQuery(query *betaAppReviewSubmissionsQuery) st
 func buildBuildBetaDetailsQuery(query *buildBetaDetailsQuery) string {
 	values := url.Values{}
 	addCSV(values, "filter[build]", query.buildIDs)
+	if query.includeBuild {
+		values.Set("include", "build")
+	}
 	addLimit(values, query.limit)
 	return values.Encode()
 }
@@ -581,6 +589,20 @@ func WithBetaGroupsBuilds(buildIDs []string) BetaGroupsOption {
 	}
 }
 
+// WithBetaGroupsName filters beta groups by group name.
+func WithBetaGroupsName(name string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.name = strings.TrimSpace(name)
+	}
+}
+
+// WithBetaGroupsSort sets the beta groups sort order.
+func WithBetaGroupsSort(sort string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.sort = strings.TrimSpace(sort)
+	}
+}
+
 // WithBetaGroupsFields selects a sparse beta group fieldset.
 func WithBetaGroupsFields(fields []string) BetaGroupsOption {
 	return func(q *betaGroupsQuery) {
@@ -810,6 +832,13 @@ func WithBuildBetaDetailsNextURL(next string) BuildBetaDetailsOption {
 func WithBuildBetaDetailsBuildIDs(ids []string) BuildBetaDetailsOption {
 	return func(q *buildBetaDetailsQuery) {
 		q.buildIDs = normalizeList(ids)
+	}
+}
+
+// WithBuildBetaDetailsIncludeBuild includes each detail's related build.
+func WithBuildBetaDetailsIncludeBuild() BuildBetaDetailsOption {
+	return func(q *buildBetaDetailsQuery) {
+		q.includeBuild = true
 	}
 }
 

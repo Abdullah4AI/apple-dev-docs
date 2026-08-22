@@ -267,7 +267,7 @@ func SubscriptionsIntroductoryOffersCreateCommand() *ffcli.Command {
 	territory := fs.String("territory", "", "Territory for the offer (accepts alpha-2, alpha-3, or exact English country name; required unless --all-territories)")
 	allTerritories := fs.Bool("all-territories", false, "Create introductory offers for all current subscription availability territories")
 	pricePoint := fs.String("price-point", "", "Subscription price point ID")
-	dryRun := fs.Bool("dry-run", false, "Resolve territories and print summary without creating offers")
+	dryRun := fs.Bool("dry-run", false, "Print a summary without creating offers; single-territory mode makes no network requests")
 	continueOnError := fs.Bool("continue-on-error", true, "Continue creating offers after a territory fails")
 	output := shared.BindOutputFlags(fs)
 
@@ -281,6 +281,7 @@ Examples:
   asc subscriptions offers introductory create --subscription-id "SUB_ID" --territory "USA" --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
   asc subscriptions offers introductory create --subscription-id "SUB_ID" --all-territories --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
   asc subscriptions offers introductory create --subscription-id "SUB_ID" --all-territories --dry-run --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
+  asc subscriptions offers introductory create --subscription-id "SUB_ID" --territory "USA" --dry-run --offer-duration ONE_MONTH --offer-mode FREE_TRIAL --number-of-periods 1
 
 Timeouts:
   An explicit ASC_TIMEOUT caps the full create operation. Without an override, the operation uses a 5m fallback while individual requests retain the standard request timeout.`,
@@ -368,6 +369,23 @@ Timeouts:
 				}
 			}
 
+			if err := shared.RequireAppForStableSelector(shared.ResolveAppID(*appID), id, "--subscription-id"); err != nil {
+				return err
+			}
+
+			if *dryRun && !useAllTerritories {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return summarizeSubscriptionIntroductoryOfferCreateDryRun(
+					id,
+					territoryID,
+					*continueOnError,
+					*output.Output,
+					*output.Pretty,
+				)
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("subscriptions introductory-offers create: %w", err)
@@ -430,28 +448,29 @@ func subscriptionIntroductoryOfferSelectorUsageError(kind shared.UsageErrorKind,
 	return shared.NewReportedUsageError(kind, message)
 }
 
-type subscriptionIntroductoryOfferCreateBulkSummary struct {
-	SubscriptionID  string                                                  `json:"subscriptionId"`
-	AvailabilityID  string                                                  `json:"availabilityId,omitempty"`
-	AllTerritories  bool                                                    `json:"allTerritories"`
-	DryRun          bool                                                    `json:"dryRun"`
-	ContinueOnError bool                                                    `json:"continueOnError"`
-	Total           int                                                     `json:"total"`
-	Created         int                                                     `json:"created"`
-	Skipped         int                                                     `json:"skipped"`
-	Failed          int                                                     `json:"failed"`
-	Skips           []subscriptionIntroductoryOfferCreateBulkSummarySkip    `json:"skips,omitempty"`
-	Failures        []subscriptionIntroductoryOfferCreateBulkSummaryFailure `json:"failures,omitempty"`
-}
+// summarizeSubscriptionIntroductoryOfferCreateDryRun reports what a single-territory
+// create would do, using the same summary shape as the all-territories path so both
+// dry runs read alike. It performs no requests: the territory is already resolved
+// locally, and the availability lookup the bulk path needs to enumerate territories
+// would be wasted work here.
+func summarizeSubscriptionIntroductoryOfferCreateDryRun(
+	subscriptionID string,
+	territoryID string,
+	continueOnError bool,
+	output string,
+	pretty bool,
+) error {
+	summary := &asc.SubscriptionIntroductoryOfferCreateSummary{
+		SubscriptionID:  subscriptionID,
+		Territory:       territoryID,
+		AllTerritories:  false,
+		DryRun:          true,
+		ContinueOnError: continueOnError,
+		Total:           1,
+		Created:         1,
+	}
 
-type subscriptionIntroductoryOfferCreateBulkSummarySkip struct {
-	Territory string `json:"territory"`
-	Reason    string `json:"reason"`
-}
-
-type subscriptionIntroductoryOfferCreateBulkSummaryFailure struct {
-	Territory string `json:"territory"`
-	Error     string `json:"error"`
+	return shared.PrintOutput(summary, output, pretty)
 }
 
 func createSubscriptionIntroductoryOffersForAllTerritories(
@@ -474,7 +493,7 @@ func createSubscriptionIntroductoryOffersForAllTerritories(
 		return fmt.Errorf("subscriptions introductory-offers create: %w", err)
 	}
 
-	summary := &subscriptionIntroductoryOfferCreateBulkSummary{
+	summary := &asc.SubscriptionIntroductoryOfferCreateSummary{
 		SubscriptionID:  subscriptionID,
 		AvailabilityID:  availabilityID,
 		AllTerritories:  true,
@@ -519,13 +538,7 @@ func createSubscriptionIntroductoryOffersForAllTerritories(
 		summary.Created++
 	}
 
-	if err := shared.PrintOutputWithRenderers(
-		summary,
-		output,
-		pretty,
-		func() error { return renderSubscriptionIntroductoryOfferCreateBulkSummary(summary, false) },
-		func() error { return renderSubscriptionIntroductoryOfferCreateBulkSummary(summary, true) },
-	); err != nil {
+	if err := shared.PrintOutput(summary, output, pretty); err != nil {
 		return err
 	}
 	if operationErr != nil {
@@ -672,68 +685,26 @@ func introductoryOfferTerritoryIDFromEncodedID(id string) string {
 	return territoryID
 }
 
-func appendSubscriptionIntroductoryOfferCreateBulkSkip(summary *subscriptionIntroductoryOfferCreateBulkSummary, territoryID, reason string) {
+func appendSubscriptionIntroductoryOfferCreateBulkSkip(summary *asc.SubscriptionIntroductoryOfferCreateSummary, territoryID, reason string) {
 	if summary == nil {
 		return
 	}
 	summary.Skipped++
-	summary.Skips = append(summary.Skips, subscriptionIntroductoryOfferCreateBulkSummarySkip{
+	summary.Skips = append(summary.Skips, asc.SubscriptionIntroductoryOfferCreateSummarySkip{
 		Territory: territoryID,
 		Reason:    reason,
 	})
 }
 
-func appendSubscriptionIntroductoryOfferCreateBulkFailure(summary *subscriptionIntroductoryOfferCreateBulkSummary, territoryID string, err error) {
+func appendSubscriptionIntroductoryOfferCreateBulkFailure(summary *asc.SubscriptionIntroductoryOfferCreateSummary, territoryID string, err error) {
 	if summary == nil || err == nil {
 		return
 	}
 	summary.Failed++
-	summary.Failures = append(summary.Failures, subscriptionIntroductoryOfferCreateBulkSummaryFailure{
+	summary.Failures = append(summary.Failures, asc.SubscriptionIntroductoryOfferCreateSummaryFailure{
 		Territory: territoryID,
 		Error:     err.Error(),
 	})
-}
-
-func renderSubscriptionIntroductoryOfferCreateBulkSummary(summary *subscriptionIntroductoryOfferCreateBulkSummary, markdown bool) error {
-	if summary == nil {
-		return fmt.Errorf("summary is nil")
-	}
-
-	render := asc.RenderTable
-	if markdown {
-		render = asc.RenderMarkdown
-	}
-
-	render(
-		[]string{"Subscription ID", "Availability ID", "Dry Run", "Total", "Created", "Skipped", "Failed"},
-		[][]string{{
-			summary.SubscriptionID,
-			summary.AvailabilityID,
-			fmt.Sprintf("%t", summary.DryRun),
-			fmt.Sprintf("%d", summary.Total),
-			fmt.Sprintf("%d", summary.Created),
-			fmt.Sprintf("%d", summary.Skipped),
-			fmt.Sprintf("%d", summary.Failed),
-		}},
-	)
-
-	if len(summary.Skips) > 0 {
-		rows := make([][]string, 0, len(summary.Skips))
-		for _, skip := range summary.Skips {
-			rows = append(rows, []string{skip.Territory, skip.Reason})
-		}
-		render([]string{"Skipped Territory", "Reason"}, rows)
-	}
-
-	if len(summary.Failures) > 0 {
-		rows := make([][]string, 0, len(summary.Failures))
-		for _, failure := range summary.Failures {
-			rows = append(rows, []string{failure.Territory, failure.Error})
-		}
-		render([]string{"Failed Territory", "Error"}, rows)
-	}
-
-	return nil
 }
 
 func pluralizeIntroductoryOfferCreateTerritories(n int) string {

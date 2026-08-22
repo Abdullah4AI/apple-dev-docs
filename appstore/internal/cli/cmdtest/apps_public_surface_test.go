@@ -87,6 +87,39 @@ func TestAppsHelpShowsPublicSubcommand(t *testing.T) {
 	}
 }
 
+func TestAppsListHelpShowsFeatureExamples(t *testing.T) {
+	root := RootCommand("1.2.3")
+	appsCmd := findSubcommand(root, "apps")
+	listCmd := findSubcommand(root, "apps", "list")
+	if appsCmd == nil || listCmd == nil {
+		t.Fatal("expected apps and apps list commands")
+	}
+
+	for name, command := range map[string]*ffcli.Command{
+		"apps":      appsCmd,
+		"apps list": listCmd,
+	} {
+		usage := command.UsageFunc(command)
+		for _, want := range []string{
+			"[experimental] Filter by App Store version state(s)",
+			"[experimental] Filter by review submission state(s)",
+		} {
+			if !strings.Contains(usage, want) {
+				t.Errorf("%s help missing lifecycle marker %q, got %q", name, want, usage)
+			}
+		}
+		for _, want := range []string{
+			"--sort sku",
+			"--version-state IN_REVIEW,WAITING_FOR_REVIEW",
+			"--review-submission-state IN_REVIEW",
+		} {
+			if !strings.Contains(usage, want) {
+				t.Errorf("%s help missing feature example %q, got %q", name, want, usage)
+			}
+		}
+	}
+}
+
 func TestAppsPublicHelpShowsSubcommands(t *testing.T) {
 	root := RootCommand("1.2.3")
 	publicCmd := findSubcommand(root, "apps", "public")

@@ -275,8 +275,8 @@ func WinBackOffersCreateCommand() *ffcli.Command {
 	endDate := fs.String("end-date", "", "End date (YYYY-MM-DD)")
 	priority := fs.String("priority", "", "Offer priority: "+strings.Join(winBackOfferPriorityValues, ", "))
 	promotionIntent := fs.String("promotion-intent", "", "Promotion intent: "+strings.Join(winBackOfferPromotionIntentValues, ", "))
-	priceIDs := fs.String("price", "", "Subscription price point ID(s), comma-separated (required for paid offer modes)")
-	territories := fs.String("territory", "", "Territories for FREE_TRIAL offers, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
+	priceIDs := shared.BindOnceCSVFlag(fs, "price", "Subscription price point ID(s), comma-separated (required for paid offer modes)")
+	territories := shared.BindOnceCSVFlag(fs, "territory", "Territories for FREE_TRIAL offers, comma-separated (accepts alpha-2, alpha-3, or exact English country names)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -390,14 +390,14 @@ Examples:
 			isFreeTrial := offerModeValue == asc.SubscriptionOfferModeFreeTrial
 			priceProvided := false
 			fs.Visit(func(f *flag.Flag) { priceProvided = priceProvided || f.Name == "price" })
-			prices := shared.SplitCSV(*priceIDs)
+			prices := shared.SplitCSV(priceIDs.String())
 			var freeTrialTerritories []string
 			if isFreeTrial {
 				if priceProvided {
 					fmt.Fprintln(os.Stderr, "Error: --price is not supported when --offer-mode is FREE_TRIAL; use --territory to choose territories")
 					return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--price")
 				}
-				freeTrialTerritories, err = shared.NormalizeASCTerritoryCSV(*territories)
+				freeTrialTerritories, err = shared.NormalizeASCTerritoryCSV(territories.String())
 				if err != nil {
 					return shared.UsageError(fmt.Sprintf("win-back-offers create: %v", err))
 				}
@@ -406,7 +406,7 @@ Examples:
 					return shared.MissingRequiredUsageError("--territory")
 				}
 			} else {
-				if strings.TrimSpace(*territories) != "" {
+				if strings.TrimSpace(territories.String()) != "" {
 					fmt.Fprintln(os.Stderr, "Error: --territory is only supported when --offer-mode is FREE_TRIAL")
 					return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--territory")
 				}

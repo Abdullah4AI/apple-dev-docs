@@ -46,12 +46,14 @@ Examples:
   asc xcode-cloud run --source-run-id "BUILD_RUN_ID" --clean
   asc xcode-cloud run --app "APP_ID" --workflow "Deploy" --branch "main" --wait
   asc xcode-cloud status --run-id "BUILD_RUN_ID"
-  asc xcode-cloud status --run-id "BUILD_RUN_ID" --wait`,
+  asc xcode-cloud status --run-id "BUILD_RUN_ID" --wait
+  asc xcode-cloud doctor --run-id "BUILD_RUN_ID" --wait`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			XcodeCloudRunCommand(),
 			XcodeCloudStatusCommand(),
+			XcodeCloudDoctorCommand(),
 			XcodeCloudProductsCommand(),
 			XcodeCloudWorkflowsCommand(),
 			XcodeCloudScmCommand(),
@@ -82,6 +84,7 @@ func XcodeCloudRunCommand() *ffcli.Command {
 	sourceRunID := fs.String("source-run-id", "", "Source build run ID to rerun")
 	clean := fs.Bool("clean", false, "Request a clean build")
 	wait := fs.Bool("wait", false, "Wait for build to complete")
+	doctor := fs.Bool("doctor", false, "[experimental] After waiting, diagnose the completed run and inspect failure logs")
 	pollInterval := fs.Duration("poll-interval", 10*time.Second, "Poll interval when waiting")
 	timeout := fs.Duration("timeout", 0, "Timeout for Xcode Cloud requests (0 = use ASC_TIMEOUT or 30m default)")
 	output := shared.BindOutputFlags(fs)
@@ -99,12 +102,17 @@ Standard mode:
 Rerun mode:
 - Use --source-run-id to rerun from an existing build run (without workflow/source selectors)
 
+Diagnostic mode:
+- Add --wait and the experimental --doctor flag to return the combined doctor report after completion
+- A failed build is report data in diagnostic mode and does not make the command exit non-zero
+
 Examples:
   asc xcode-cloud run --app "123456789" --workflow "CI" --branch "main"
   asc xcode-cloud run --workflow-id "WORKFLOW_ID" --git-reference-id "REF_ID"
   asc xcode-cloud run --workflow-id "WORKFLOW_ID" --pull-request-id "PR_ID"
   asc xcode-cloud run --source-run-id "BUILD_RUN_ID" --clean
   asc xcode-cloud run --app "123456789" --workflow "Deploy" --branch "release/1.0" --wait
+  asc xcode-cloud run --app "123456789" --workflow "Deploy" --branch "main" --wait --doctor
   asc xcode-cloud run --app "123456789" --workflow "CI" --branch "main" --wait --poll-interval 30s --timeout 1h`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -148,6 +156,12 @@ Examples:
 			}
 			if *wait && *pollInterval <= 0 {
 				return shared.UsageError("--poll-interval must be greater than 0")
+			}
+			if *doctor && !*wait {
+				return shared.UsageError("--doctor requires --wait")
+			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return err
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -307,6 +321,16 @@ Examples:
 
 			if !*wait {
 				return shared.PrintOutput(result, *output.Output, *output.Pretty)
+			}
+			if *doctor {
+				doctorResult, err := diagnoseXcodeCloudRun(requestCtx, client, resp.Data.ID, xcodeCloudDoctorOptions{
+					Wait:         true,
+					PollInterval: *pollInterval,
+				})
+				if err != nil {
+					return fmt.Errorf("xcode-cloud run: diagnose build: %w", err)
+				}
+				return printXcodeCloudDoctorResult(doctorResult, *output.Output, *output.Pretty)
 			}
 
 			// Wait for completion

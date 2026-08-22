@@ -80,7 +80,7 @@ func GenerateJWT(keyID, issuerID string, privateKey *ecdsa.PrivateKey) (string, 
 	now := time.Now()
 	claims := jwt.RegisteredClaims{
 		Audience:  jwt.ClaimStrings{"appstoreconnect-v1"},
-		IssuedAt:  jwt.NewNumericDate(now),
+		IssuedAt:  jwt.NewNumericDate(now.Add(-jwtIssuedAtSkew)),
 		ExpiresAt: jwt.NewNumericDate(now.Add(tokenLifetime)),
 	}
 	if issuerID == "" {
@@ -103,26 +103,16 @@ func GenerateJWT(keyID, issuerID string, privateKey *ecdsa.PrivateKey) (string, 
 
 // do performs an HTTP request and returns the response.
 // GET/HEAD requests use retry logic for transient failures by default.
+// Mutating requests are throttled and retried only when App Store Connect
+// rejects them with 429; see isRateLimitRejection.
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([]byte, error) {
 	if err := validateMutatingRequestTarget(method, path); err != nil {
 		return nil, err
 	}
 
-	var bodyBytes []byte
-	if body != nil {
-		var err error
-		bodyBytes, err = io.ReadAll(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read request body: %w", err)
-		}
-	}
-
-	request := func(requestCtx context.Context) ([]byte, error) {
-		var reader io.Reader
-		if bodyBytes != nil {
-			reader = bytes.NewReader(bodyBytes)
-		}
-		return c.doOnce(requestCtx, method, path, reader)
+	request, err := c.replayableRequest(method, path, body)
+	if err != nil {
+		return nil, err
 	}
 
 	if shouldRetryMethod(method) {
@@ -132,7 +122,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([
 		}, retryOpts)
 	}
 	if shouldLimitMutatingMethod(method) {
-		return c.doWithMutatingRequestLimiter(ctx, request)
+		return c.doMutation(ctx, request, isRateLimitRejection)
 	}
 
 	return request(ctx)
@@ -142,6 +132,35 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([
 // the same transient-failure retry policy used by reads. Callers must only use
 // this for operations whose exact payload can be safely replayed.
 func (c *Client) doIdempotentMutation(ctx context.Context, method, path string, body io.Reader) ([]byte, error) {
+	if err := validateMutatingRequestTarget(method, path); err != nil {
+		return nil, err
+	}
+
+	request, err := c.replayableRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	if !shouldLimitMutatingMethod(method) {
+		return WithRetry(ctx, func() ([]byte, error) {
+			return request(ctx)
+		}, ResolveRetryOptions())
+	}
+	return c.doMutation(ctx, request, IsRetryable)
+}
+
+// doMutation sends a mutating request under the write concurrency limiter,
+// replaying it while shouldRetry accepts the failure. Each attempt re-acquires
+// a limiter slot so backoff never holds write capacity.
+func (c *Client) doMutation(ctx context.Context, request func(context.Context) ([]byte, error), shouldRetry func(error) bool) ([]byte, error) {
+	return withRetry(ctx, func() ([]byte, error) {
+		return c.doWithMutatingRequestLimiter(ctx, request)
+	}, ResolveRetryOptions(), shouldRetry)
+}
+
+// replayableRequest buffers the request body so every attempt sends the
+// identical payload from a fresh reader.
+func (c *Client) replayableRequest(method, path string, body io.Reader) (func(context.Context) ([]byte, error), error) {
 	var bodyBytes []byte
 	if body != nil {
 		var err error
@@ -151,13 +170,26 @@ func (c *Client) doIdempotentMutation(ctx context.Context, method, path string, 
 		}
 	}
 
-	return WithRetry(ctx, func() ([]byte, error) {
+	return func(requestCtx context.Context) ([]byte, error) {
 		var reader io.Reader
 		if bodyBytes != nil {
 			reader = bytes.NewReader(bodyBytes)
 		}
-		return c.do(ctx, method, path, reader)
-	}, ResolveRetryOptions())
+		return c.doOnce(requestCtx, method, path, reader)
+	}, nil
+}
+
+// isRateLimitRejection reports whether err is a 429 from App Store Connect.
+// A 429 rejects the request before it is processed, so replaying the identical
+// payload cannot apply a mutation twice. Every other retryable failure
+// (transport errors, 408, 5xx) leaves the outcome of a write unknown and must
+// not be replayed automatically.
+func isRateLimitRejection(err error) bool {
+	retryable, ok := errors.AsType[*RetryableError](err)
+	if !ok {
+		return false
+	}
+	return retryable.HTTPStatusCode() == http.StatusTooManyRequests
 }
 
 func (c *Client) doWithMutatingRequestLimiter(ctx context.Context, request func(context.Context) ([]byte, error)) ([]byte, error) {
@@ -359,20 +391,24 @@ func shouldLimitMutatingMethod(method string) bool {
 }
 
 func buildRetryableError(statusCode int, retryAfter time.Duration, respBody []byte) error {
+	return buildRetryableErrorWithSource(statusCode, retryAfter, respBody, "App Store Connect")
+}
+
+func buildRetryableErrorWithSource(statusCode int, retryAfter time.Duration, respBody []byte, source string) error {
 	base := "API request failed"
 	switch statusCode {
 	case http.StatusRequestTimeout:
-		base = "App Store Connect request timeout"
+		base = fmt.Sprintf("%s request timeout", source)
 	case http.StatusTooManyRequests:
-		base = "rate limited by App Store Connect"
+		base = fmt.Sprintf("rate limited by %s", source)
 	case http.StatusInternalServerError:
-		base = "App Store Connect internal server error"
+		base = fmt.Sprintf("%s internal server error", source)
 	case http.StatusBadGateway:
-		base = "App Store Connect bad gateway"
+		base = fmt.Sprintf("%s bad gateway", source)
 	case http.StatusServiceUnavailable:
-		base = "App Store Connect service unavailable"
+		base = fmt.Sprintf("%s service unavailable", source)
 	case http.StatusGatewayTimeout:
-		base = "App Store Connect gateway timeout"
+		base = fmt.Sprintf("%s gateway timeout", source)
 	}
 
 	message := fmt.Sprintf("%s (status %d)", base, statusCode)
@@ -421,8 +457,27 @@ func parseRetryAfterHeader(value string) time.Duration {
 	}
 
 	// Try to parse as seconds first
-	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
+	const maxRetryAfterDuration = time.Duration(1<<63 - 1)
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds > 0 {
+			if seconds > int64(maxRetryAfterDuration/time.Second) {
+				return maxRetryAfterDuration
+			}
+			return time.Duration(seconds) * time.Second
+		}
+	} else if isPositiveDecimal(value) {
+		// ParseInt reports ErrRange for values above MaxInt64. ParseUint still
+		// accepts the portion that fits in uint64; values beyond that range
+		// report ErrRange there as well. Both cases are an unambiguously huge
+		// positive delay and must saturate instead of falling back to backoff.
+		if _, unsignedErr := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64); unsignedErr == nil {
+			return maxRetryAfterDuration
+		} else {
+			var numberErr *strconv.NumError
+			if errors.As(unsignedErr, &numberErr) && errors.Is(numberErr.Err, strconv.ErrRange) {
+				return maxRetryAfterDuration
+			}
+		}
 	}
 
 	// Try to parse as HTTP-date (try multiple formats)
@@ -441,6 +496,21 @@ func parseRetryAfterHeader(value string) time.Duration {
 	}
 
 	return 0
+}
+
+func isPositiveDecimal(value string) bool {
+	value = strings.TrimPrefix(value, "+")
+	if value == "" {
+		return false
+	}
+	positive := false
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+		positive = positive || value[i] != '0'
+	}
+	return positive
 }
 
 // validateNextURL validates that a pagination URL is safe to use.

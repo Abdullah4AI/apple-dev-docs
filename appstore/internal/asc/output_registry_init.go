@@ -6,6 +6,13 @@ package asc
 // commands that never render registry output (for example `asc --version`)
 // do not pay the ~450-type registration cost at process start.
 func registerAllOutputRenderers() {
+	registerDirect(func(v *DeveloperSystemStatusReport, render func([]string, [][]string)) error {
+		h, r := developerSystemStatusSummaryRows(v)
+		render(h, r)
+		sh, sr := developerSystemStatusServiceRows(v)
+		render(sh, sr)
+		return nil
+	})
 	registerRows(feedbackRows)
 	registerRows(crashesRows)
 	registerRowsWithSingleResourceAdapter(reviewsRows)
@@ -151,6 +158,19 @@ func registerAllOutputRenderers() {
 	})
 	registerRows(winBackOfferDeleteResultRows)
 	registerRows(subscriptionPriceDeleteResultRows)
+	registerDirect(func(v *SubscriptionIntroductoryOfferCreateSummary, render func([]string, [][]string)) error {
+		h, r := subscriptionIntroductoryOfferCreateSummaryRows(v)
+		render(h, r)
+		if len(v.Skips) > 0 {
+			sh, sr := subscriptionIntroductoryOfferCreateSummarySkipRows(v)
+			render(sh, sr)
+		}
+		if len(v.Failures) > 0 {
+			fh, fr := subscriptionIntroductoryOfferCreateSummaryFailureRows(v)
+			render(fh, fr)
+		}
+		return nil
+	})
 	registerRowsErr(offerCodePricesRows)
 	registerRows(appAvailabilityRows)
 	registerRows(territoryAvailabilitiesRows)
@@ -161,6 +181,7 @@ func registerAllOutputRenderers() {
 	registerRows(appInfoLocalizationsRows)
 	registerRowsWithSingleResourceAdapter(appScreenshotSetsRows)
 	registerRowsWithSingleResourceAdapter(appScreenshotsRows)
+	registerRows(appScreenshotSetListResultRows)
 	registerRowsWithSingleResourceAdapter(appPreviewSetsRows)
 	registerRowsWithSingleResourceAdapter(appPreviewsRows)
 	registerRowsWithSingleResourceAdapter(betaGroupsRows)
@@ -170,6 +191,15 @@ func registerAllOutputRenderers() {
 	registerRowsWithSingleResourceAdapter(actorsRows)
 	registerRowsWithSingleResourceAdapter(devicesRows)
 	registerRows(deviceLocalUDIDRows)
+	registerDirect(func(v *DeviceBatchRegistrationSummary, render func([]string, [][]string)) error {
+		h, r := deviceBatchRegistrationSummaryRows(v)
+		render(h, r)
+		if len(v.Results) > 0 {
+			ih, ir := deviceBatchRegistrationItemRows(v.Results)
+			render(ih, ir)
+		}
+		return nil
+	})
 	registerRowsWithSingleResourceAdapter(userInvitationsRows)
 	registerRows(userDeleteResultRows)
 	registerRows(userInvitationRevokeResultRows)
@@ -453,6 +483,7 @@ func registerAllOutputRenderers() {
 	registerRows(signingFetchResultRows)
 	registerRows(xcodeCloudRunResultRows)
 	registerRows(xcodeCloudStatusResultRows)
+	registerDirect(xcodeCloudDoctorResultTables)
 	registerRowsWithSingleToListAdapter[CiProductResponse, CiProductsResponse](ciProductsRows)
 	registerRowsWithSingleToListAdapter[CiWorkflowResponse, CiWorkflowsResponse](ciWorkflowsRows)
 	registerRowsWithSingleToListAdapter[ScmProviderResponse, ScmProvidersResponse](scmProvidersRows)

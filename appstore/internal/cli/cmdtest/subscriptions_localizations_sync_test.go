@@ -396,7 +396,7 @@ func TestSubscriptionsLocalizationSyncRejectsUnsafeInvocationBeforeHTTP(t *testi
 			name:    "unsupported output",
 			args:    []string{"subscriptions", "localizations", "sync", "--subscription-id", "8000000001", "--output", "yaml"},
 			input:   `{"en-US":{"name":"English"}}`,
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "pretty table",
@@ -445,7 +445,7 @@ func TestSubscriptionsLocalizationSyncRejectsUnsafeInvocationBeforeHTTP(t *testi
 				if err := root.Parse(args); err != nil {
 					t.Fatalf("parse: %v", err)
 				}
-				if err := root.Run(context.Background()); !errors.Is(err, flag.ErrHelp) {
+				if err := root.Run(context.Background()); !isUsageClassError(err) {
 					t.Fatalf("expected usage error, got %T %v", err, err)
 				}
 			})
@@ -556,7 +556,7 @@ func TestRunSubscriptionsLocalizationsSyncExitCodes(t *testing.T) {
 				t.Fatalf("expected exit %d, got %d", rootcmd.ExitUsage, code)
 			}
 		})
-		if stdout != "" || !strings.Contains(stderr, "unsupported format: yaml") {
+		if stdout != "" || !strings.Contains(stderr, `(got "yaml")`) {
 			t.Fatalf("unexpected usage output: stdout=%q stderr=%q", stdout, stderr)
 		}
 	})
@@ -569,7 +569,7 @@ func TestSubscriptionsLocalizationsSyncBuiltBinaryInvalidOutputExitUsage(t *test
 		"--subscription-id", "8000000001",
 		"--input", input,
 		"--output", "yaml",
-	}, "unsupported format: yaml")
+	}, `(got "yaml")`)
 }
 
 func TestSubscriptionsLocalizationSyncPreflightsEveryCreateBeforeMutating(t *testing.T) {

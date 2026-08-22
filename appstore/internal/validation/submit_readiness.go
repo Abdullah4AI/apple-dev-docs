@@ -84,7 +84,7 @@ func buildEncryptionChecks(build *Build) []CheckResult {
 				ResourceType: "build",
 				ResourceID:   strings.TrimSpace(build.ID),
 				Message:      "build uses non-exempt encryption but has no attached encryption declaration",
-				Remediation:  fmt.Sprintf("Attach an encryption declaration: asc encryption declarations assign-builds --id DECLARATION_ID --build %s", strings.TrimSpace(build.ID)),
+				Remediation:  fmt.Sprintf("Attach an encryption declaration: asc encryption declarations assign-builds --id DECLARATION_ID --build-id %s", strings.TrimSpace(build.ID)),
 			},
 		}
 	}
@@ -113,7 +113,7 @@ func buildEncryptionChecks(build *Build) []CheckResult {
 				ResourceType: "build",
 				ResourceID:   strings.TrimSpace(build.ID),
 				Message:      fmt.Sprintf("attached encryption declaration %s is %s", declarationID, declarationState),
-				Remediation:  fmt.Sprintf("Attach an approved encryption declaration: asc encryption declarations assign-builds --id DECLARATION_ID --build %s", strings.TrimSpace(build.ID)),
+				Remediation:  fmt.Sprintf("Attach an approved encryption declaration: asc encryption declarations assign-builds --id DECLARATION_ID --build-id %s", strings.TrimSpace(build.ID)),
 			},
 		}
 	case "":

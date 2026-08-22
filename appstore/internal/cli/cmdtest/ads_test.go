@@ -542,7 +542,7 @@ func TestAdsV5RawRequestSafetyGuardsPrecedeAuthAndNetwork(t *testing.T) {
 		{
 			name:    "invalid output",
 			args:    []string{"ads", "v5", "api", "request", "--method", "GET", "--path", "v5/campaigns", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 	}
 
@@ -566,7 +566,7 @@ func TestAdsV5RawRequestSafetyGuardsPrecedeAuthAndNetwork(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("stdout = %q, want empty", stdout)
 			}
-			if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(stderr, test.wantErr) {
+			if !isUsageClassError(runErr) || !strings.Contains(stderr, test.wantErr) {
 				t.Fatalf("run error = %v stderr = %q, want %q before auth", runErr, stderr, test.wantErr)
 			}
 			if strings.Contains(stderr, "configuration not found") {
@@ -744,12 +744,12 @@ func TestAdsCampaignPauseValidatesBeforeNetwork(t *testing.T) {
 		{
 			name:    "parent output conflicts with child pretty",
 			args:    []string{"ads", "v5", "campaigns", "--output", "table", "pause", "--campaign", "123", "--confirm", "--pretty"},
-			wantErr: "unsupported format: table",
+			wantErr: `(got "table")`,
 		},
 		{
 			name:    "parent pretty conflicts with child output",
 			args:    []string{"ads", "v5", "campaigns", "--pretty", "resume", "--campaign", "123", "--confirm", "--output", "table"},
-			wantErr: "unsupported format: table",
+			wantErr: `(got "table")`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -761,7 +761,7 @@ func TestAdsCampaignPauseValidatesBeforeNetwork(t *testing.T) {
 			_, stderr := captureOutput(t, func() {
 				runErr = root.Run(context.Background())
 			})
-			if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(stderr, tc.wantErr) {
+			if !isUsageClassError(runErr) || !strings.Contains(stderr, tc.wantErr) {
 				t.Fatalf("run error = %v stderr = %q, want %q", runErr, stderr, tc.wantErr)
 			}
 		})
@@ -932,7 +932,7 @@ func TestAdsPlatformAPIRequestRejectsInvalidOutputBeforeNetwork(t *testing.T) {
 	}))
 
 	stdout, stderr, err := runAdsEvalCommand(t, "ads", "api", "request", "--path", "v1/me", "--output", "invalid")
-	if !errors.Is(err, flag.ErrHelp) || stdout != "" || !strings.Contains(stderr, "unsupported format: invalid") {
+	if !isUsageClassError(err) || stdout != "" || !strings.Contains(stderr, `(got "invalid")`) {
 		t.Fatalf("stdout=%q stderr=%q error=%v, want preflight output error", stdout, stderr, err)
 	}
 }
@@ -969,7 +969,7 @@ func TestAdsEndpointRejectsInvalidOutputBeforeReadingBody(t *testing.T) {
 	}))
 
 	stdout, stderr, err := runAdsEvalCommand(t, "ads", "ad-accounts", "create", "--file", filepath.Join(t.TempDir(), "does-not-exist.json"), "--output", "invalid")
-	if !errors.Is(err, flag.ErrHelp) || stdout != "" || !strings.Contains(stderr, "unsupported format: invalid") {
+	if !isUsageClassError(err) || stdout != "" || !strings.Contains(stderr, `(got "invalid")`) {
 		t.Fatalf("stdout=%q stderr=%q error=%v, want output preflight before body read", stdout, stderr, err)
 	}
 }

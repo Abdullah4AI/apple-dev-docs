@@ -126,7 +126,7 @@ func TestGameCenterEnabledVersionsOutputErrors(t *testing.T) {
 		{
 			name:    "enabled-versions list unsupported output",
 			args:    []string{"game-center", "enabled-versions", "list", "--app", "APP_ID", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "enabled-versions list pretty with table",
@@ -141,7 +141,7 @@ func TestGameCenterEnabledVersionsOutputErrors(t *testing.T) {
 		{
 			name:    "enabled-versions compatible unsupported output",
 			args:    []string{"game-center", "enabled-versions", "compatible-versions", "--id", "ENABLED_VERSION_ID", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "enabled-versions compatible pretty with table",
@@ -165,7 +165,7 @@ func TestGameCenterEnabledVersionsOutputErrors(t *testing.T) {
 					t.Fatalf("parse error: %v", err)
 				}
 				err := root.Run(context.Background())
-				if !errors.Is(err, flag.ErrHelp) {
+				if !isUsageClassError(err) {
 					t.Fatalf("expected ErrHelp, got %v", err)
 				}
 			})

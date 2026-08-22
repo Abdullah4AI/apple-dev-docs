@@ -24,7 +24,7 @@ func PerformanceDiagnosticsCommand() *ffcli.Command {
 		LongHelp: `Work with diagnostic signatures and logs.
 
 Examples:
-  asc performance diagnostics list --build "BUILD_ID"
+  asc performance diagnostics list --build-id "BUILD_ID"
   asc performance diagnostics view --id "SIGNATURE_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -42,7 +42,8 @@ Examples:
 func PerformanceDiagnosticsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("diagnostics list", flag.ExitOnError)
 
-	buildID := fs.String("build", "", "Build ID to list diagnostics for")
+	buildID := fs.String("build-id", "", "Build ID to list diagnostics for")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	diagnosticType := fs.String("diagnostic-type", "", "Diagnostic type filter (comma-separated: "+strings.Join(diagnosticSignatureTypeList(), ", ")+")")
 	fields := fs.String("fields", "", "Fields to return (comma-separated: "+strings.Join(diagnosticSignatureFieldList(), ", ")+")")
 	limit := fs.Int("limit", 0, "Limit number of signatures (max 200)")
@@ -52,20 +53,24 @@ func PerformanceDiagnosticsListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc performance diagnostics list --build \"BUILD_ID\"",
+		ShortUsage: "asc performance diagnostics list --build-id \"BUILD_ID\"",
 		ShortHelp:  "List diagnostic signatures for a build.",
 		LongHelp: `List diagnostic signatures for a build.
 
 Examples:
-  asc performance diagnostics list --build "BUILD_ID"
-  asc performance diagnostics list --build "BUILD_ID" --diagnostic-type "HANGS" --limit 50`,
+  asc performance diagnostics list --build-id "BUILD_ID"
+  asc performance diagnostics list --build-id "BUILD_ID" --diagnostic-type "HANGS" --limit 50`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			if trimmedBuildID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("performance diagnostics list: --limit must be between 1 and 200")

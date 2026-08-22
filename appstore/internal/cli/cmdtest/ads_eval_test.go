@@ -334,7 +334,7 @@ func TestAdsAuthDiscoverRejectsInvalidOutput(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: invalid") {
+	if !strings.Contains(stderr, `(got "invalid")`) {
 		t.Fatalf("stderr = %q, want invalid --output usage error", stderr)
 	}
 }

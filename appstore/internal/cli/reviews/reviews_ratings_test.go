@@ -185,7 +185,7 @@ func TestNormalizeRatingsOutput(t *testing.T) {
 		{name: "markdown alias md", input: "md", pretty: false, wantFormat: "markdown"},
 		{name: "trim and lowercase", input: "  TABLE  ", pretty: false, wantFormat: "table"},
 		{name: "pretty table rejected", input: "table", pretty: true, wantErr: "--pretty is only valid with JSON output"},
-		{name: "unsupported format rejected", input: "yaml", pretty: false, wantErr: "unsupported format: yaml"},
+		{name: "unsupported format rejected", input: "yaml", pretty: false, wantErr: `(got "yaml")`},
 	}
 
 	for _, tc := range tests {

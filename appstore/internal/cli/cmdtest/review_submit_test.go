@@ -22,32 +22,32 @@ func TestReviewSubmitValidationErrors(t *testing.T) {
 	}{
 		{
 			name:    "missing app",
-			args:    []string{"review", "submit", "--version", "1.2.3", "--build", "build-1", "--confirm"},
+			args:    []string{"review", "submit", "--version", "1.2.3", "--build-id", "build-1", "--confirm"},
 			wantErr: "--app is required",
 		},
 		{
 			name:    "missing build",
 			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--confirm"},
-			wantErr: "--build is required",
+			wantErr: "--build-id is required",
 		},
 		{
 			name:    "missing version selector",
-			args:    []string{"review", "submit", "--app", "app-1", "--build", "build-1", "--confirm"},
+			args:    []string{"review", "submit", "--app", "app-1", "--build-id", "build-1", "--confirm"},
 			wantErr: "--version or --version-id is required",
 		},
 		{
 			name:    "conflicting version selectors",
-			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--version-id", "version-1", "--build", "build-1", "--confirm"},
+			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--version-id", "version-1", "--build-id", "build-1", "--confirm"},
 			wantErr: "--version and --version-id are mutually exclusive",
 		},
 		{
 			name:    "missing confirm",
-			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--build", "build-1"},
+			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--build-id", "build-1"},
 			wantErr: "--confirm is required unless --dry-run is set",
 		},
 		{
 			name:    "invalid platform",
-			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--build", "build-1", "--platform", "watchos", "--confirm"},
+			args:    []string{"review", "submit", "--app", "app-1", "--version", "1.2.3", "--build-id", "build-1", "--platform", "watchos", "--confirm"},
 			wantErr: "--platform must be one of",
 		},
 	}
@@ -121,7 +121,7 @@ func TestReviewSubmitLocalizationPreflightUsesReviewSubmitGuidance(t *testing.T)
 			"review", "submit",
 			"--app", "app-1",
 			"--version-id", "version-1",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -194,7 +194,7 @@ func TestReviewSubmitSubscriptionPreflightUsesReviewSubmitGuidance(t *testing.T)
 			"review", "submit",
 			"--app", "app-1",
 			"--version-id", "version-1",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--dry-run",
 			"--output", "json",
 		}); err != nil {
@@ -275,7 +275,7 @@ func TestReviewSubmitDryRunPreviewsWithoutMutations(t *testing.T) {
 			"review", "submit",
 			"--app", "app-1",
 			"--version-id", "version-1",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--dry-run",
 			"--output", "json",
 		}); err != nil {
@@ -407,7 +407,7 @@ func TestReviewSubmitUsesModernReviewSubmissionFlow(t *testing.T) {
 			"review", "submit",
 			"--app", "app-1",
 			"--version", "1.2.3",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--confirm",
 			"--output", "json",
 		}); err != nil {
@@ -534,7 +534,7 @@ func TestReviewSubmitAlreadySubmittedSkipsPreflightAndBuildAttachment(t *testing
 			"review", "submit",
 			"--app", "app-1",
 			"--version-id", "version-1",
-			"--build", "build-2",
+			"--build-id", "build-2",
 			"--confirm",
 			"--output", "json",
 		}); err != nil {

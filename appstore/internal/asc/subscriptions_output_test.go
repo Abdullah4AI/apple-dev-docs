@@ -84,6 +84,64 @@ func TestPrintMarkdown_SubscriptionPriceDeleteResult(t *testing.T) {
 	}
 }
 
+func TestPrintTable_SubscriptionIntroductoryOfferCreateSummary(t *testing.T) {
+	result := &SubscriptionIntroductoryOfferCreateSummary{
+		SubscriptionID: "sub-1",
+		AvailabilityID: "availability-1",
+		AllTerritories: true,
+		DryRun:         true,
+		Total:          3,
+		Created:        1,
+		Skipped:        1,
+		Failed:         1,
+		Skips: []SubscriptionIntroductoryOfferCreateSummarySkip{{
+			Territory: "USA",
+			Reason:    "already exists",
+		}},
+		Failures: []SubscriptionIntroductoryOfferCreateSummaryFailure{{
+			Territory: "CAN",
+			Error:     "provider rejected request",
+		}},
+	}
+
+	output := captureStdout(t, func() error { return PrintTable(result) })
+	for _, want := range []string{
+		"Subscription ID", "sub-1", "Availability ID", "availability-1",
+		"Dry Run", "true", "Total", "3", "Created", "1", "Skipped", "1", "Failed", "1",
+		"Skipped Territory", "USA", "already exists", "Failed Territory", "CAN", "provider rejected request",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output, got: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "Territory\n") {
+		t.Fatalf("all-territories summary should not expose a single-territory column: %s", output)
+	}
+}
+
+func TestPrintMarkdown_SubscriptionIntroductoryOfferCreateSummary(t *testing.T) {
+	result := &SubscriptionIntroductoryOfferCreateSummary{
+		SubscriptionID: "sub-1",
+		Territory:      "USA",
+		DryRun:         true,
+		Total:          1,
+		Created:        1,
+	}
+
+	output := captureStdout(t, func() error { return PrintMarkdown(result) })
+	for _, want := range []string{
+		"Subscription ID", "sub-1", "Territory", "USA", "Dry Run", "true",
+		"Total", "1", "Created", "1", "Skipped", "0", "Failed", "0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output, got: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "Availability ID") {
+		t.Fatalf("single-territory summary should not expose availability column: %s", output)
+	}
+}
+
 func TestPrintTable_SubscriptionGracePeriod(t *testing.T) {
 	resp := &SubscriptionGracePeriodResponse{
 		Data: Resource[SubscriptionGracePeriodAttributes]{

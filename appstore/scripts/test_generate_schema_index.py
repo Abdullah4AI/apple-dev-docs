@@ -78,6 +78,54 @@ class GenerateSchemaIndexTests(unittest.TestCase):
             endpoint["requestRelationships"]["reviewSubmission"]["required"]
         )
 
+    def test_build_index_includes_action_for_get_cardinality(self) -> None:
+        endpoints = generate_schema_index.build_index(self.spec)
+        endpoint = next(
+            endpoint
+            for endpoint in endpoints
+            if endpoint["method"] == "GET"
+            and endpoint["path"] == "/v1/builds/{id}/appStoreVersion"
+        )
+        self.assertEqual(endpoint["getAction"], "get")
+
+    def test_build_index_classifies_array_valued_metrics_as_list(self) -> None:
+        endpoints = generate_schema_index.build_index(self.spec)
+        endpoint = next(
+            endpoint
+            for endpoint in endpoints
+            if endpoint["method"] == "GET"
+            and endpoint["path"] == "/v1/apps/{id}/metrics/betaTesterUsages"
+        )
+        self.assertEqual(endpoint["getAction"], "list")
+
+    def test_get_operation_action_falls_back_for_unresolved_data_ref(self) -> None:
+        schemas = {
+            "CollectionResponse": {
+                "properties": {
+                    "data": {"$ref": "#/components/schemas/MissingResource"}
+                }
+            }
+        }
+        action = generate_schema_index.get_operation_action(
+            schemas,
+            "widgets_getCollection",
+            "#/components/schemas/CollectionResponse",
+        )
+        self.assertEqual(action, "list")
+
+    def test_every_get_operation_has_an_indexed_action(self) -> None:
+        endpoints = generate_schema_index.build_index(self.spec)
+        get_endpoints = [
+            endpoint for endpoint in endpoints if endpoint["method"] == "GET"
+        ]
+        self.assertGreater(len(get_endpoints), 0)
+        self.assertTrue(
+            all(
+                endpoint.get("getAction") in {"get", "list"}
+                for endpoint in get_endpoints
+            )
+        )
+
     def test_every_request_relationship_in_snapshot_is_indexed(self) -> None:
         endpoints = generate_schema_index.build_index(self.spec)
         indexed = {

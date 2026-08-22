@@ -62,6 +62,7 @@ func LocalizationsListCommand() *ffcli.Command {
 	appInfoID := fs.String("app-info", "", "App Info ID (optional override)")
 	locType := fs.String("type", shared.LocalizationTypeVersion, "Localization type: version (default) or app-info")
 	appInfoFields := fs.String("app-info-fields", "", "Sparse app info fields for app-info localizations: kidsAgeBand (deprecated; prefer age-rating data)")
+	include := shared.BindOnceCSVFlag(fs, "include", "Include related resources for version localizations, comma-separated: "+strings.Join(versionLocalizationIncludeList(), ", "))
 	locale := fs.String("locale", "", "Filter by locale(s), comma-separated")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
@@ -78,6 +79,7 @@ Examples:
   asc localizations list --version "VERSION_ID"
   asc localizations list --app "APP_ID" --type app-info --app-info-fields kidsAgeBand
   asc localizations list --version "VERSION_ID" --locale "en-US,ja"
+  asc localizations list --version "VERSION_ID" --include "appScreenshotSets,appPreviewSets"
   asc localizations list --version "VERSION_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -97,9 +99,29 @@ Examples:
 				return fmt.Errorf("localizations list: %w", err)
 			}
 			appInfoFieldsProvided := false
-			fs.Visit(func(f *flag.Flag) { appInfoFieldsProvided = appInfoFieldsProvided || f.Name == "app-info-fields" })
+			includeProvided := false
+			fs.Visit(func(f *flag.Flag) {
+				appInfoFieldsProvided = appInfoFieldsProvided || f.Name == "app-info-fields"
+				includeProvided = includeProvided || f.Name == "include"
+			})
 			if strings.TrimSpace(*next) != "" && appInfoFieldsProvided {
 				return shared.UsageError("--next cannot be combined with --app-info-fields")
+			}
+			// A links.next cursor already carries the query it was created with,
+			// so honoring --include here would silently drop the requested
+			// relationships instead of changing the request.
+			if strings.TrimSpace(*next) != "" && includeProvided {
+				return shared.UsageError("--next cannot be combined with --include")
+			}
+			if includeProvided && normalizedType != shared.LocalizationTypeVersion {
+				return shared.UsageError("--include requires --type version")
+			}
+			includeValues, err := shared.NormalizeSelection(include.String(), versionLocalizationIncludeList(), "--include")
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if includeProvided && len(includeValues) == 0 {
+				return shared.UsageError("--include must not be empty")
 			}
 			appInfoFieldValues, err := shared.NormalizeSelection(*appInfoFields, []string{"kidsAgeBand"}, "--app-info-fields")
 			if err != nil {
@@ -136,9 +158,14 @@ Examples:
 				if len(locales) > 0 {
 					opts = append(opts, asc.WithAppStoreVersionLocalizationLocales(locales))
 				}
+				if len(includeValues) > 0 {
+					opts = append(opts, asc.WithAppStoreVersionLocalizationsInclude(includeValues))
+				}
 
 				if *paginate {
-					// Fetch first page with limit set for consistent pagination
+					// Fetch first page with limit set for consistent pagination.
+					// Later pages ride links.next, which preserves include, and
+					// PaginateAll merges the included resources per page.
 					paginateOpts := append(opts, asc.WithAppStoreVersionLocalizationsLimit(200))
 					firstPage, err := client.GetAppStoreVersionLocalizations(requestCtx, strings.TrimSpace(*versionID), paginateOpts...)
 					if err != nil {
@@ -222,6 +249,12 @@ Examples:
 			}
 		},
 	}
+}
+
+// versionLocalizationIncludeList reports the relationships the App Store
+// version localizations endpoint accepts for include.
+func versionLocalizationIncludeList() []string {
+	return []string{"appStoreVersion", "appScreenshotSets", "appPreviewSets", "searchKeywords"}
 }
 
 // LocalizationsDownloadCommand returns the download localizations subcommand.

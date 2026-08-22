@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -581,13 +582,13 @@ func TestSubscriptionsReviewScreenshotCreateDoesNotCommitAfterUploadFailure(t *t
 	}
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = originalTransport })
-	puts := 0
+	var puts atomic.Int32
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/appStoreReviewScreenshot":
 			return jsonHTTPResponse(http.StatusOK, subscriptionReviewScreenshotResponseWithOperations("shot-1", filepath.Base(path), int64(len(content)), operations)), nil
 		case req.Method == http.MethodPut && req.URL.Host == "upload.example":
-			puts++
+			puts.Add(1)
 			if req.URL.Path == "/part-2" {
 				return jsonHTTPResponse(http.StatusBadRequest, ``), nil
 			}
@@ -602,8 +603,8 @@ func TestSubscriptionsReviewScreenshotCreateDoesNotCommitAfterUploadFailure(t *t
 	if err == nil || !strings.Contains(err.Error(), "upload request failed") {
 		t.Fatalf("expected upload failure, got %v", err)
 	}
-	if stdout != "" || stderr != "" || puts != 2 {
-		t.Fatalf("unexpected failed upload result: puts=%d stdout=%q stderr=%q", puts, stdout, stderr)
+	if stdout != "" || stderr != "" || puts.Load() != 2 {
+		t.Fatalf("unexpected failed upload result: puts=%d stdout=%q stderr=%q", puts.Load(), stdout, stderr)
 	}
 }
 
@@ -670,7 +671,7 @@ func TestSubscriptionsReviewScreenshotCreateRejectsUnsafeInvocationBeforeHTTP(t 
 		wantErr string
 	}{
 		{name: "positional", extra: []string{"stray"}, wantErr: "does not accept positional arguments"},
-		{name: "unsupported output", extra: []string{"--output", "yaml"}, wantErr: "unsupported format: yaml"},
+		{name: "unsupported output", extra: []string{"--output", "yaml"}, wantErr: `(got "yaml")`},
 		{name: "pretty table", extra: []string{"--output", "table", "--pretty"}, wantErr: "--pretty is only valid with JSON output"},
 	}
 	for _, tt := range tests {

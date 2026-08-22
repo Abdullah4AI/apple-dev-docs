@@ -448,12 +448,38 @@ func TestLimitScreenshotUploadFilesForExistingSetValidatesReplaceBeforeDelete(t 
 		files[i] = fmt.Sprintf("%02d.png", i+1)
 	}
 
-	_, err := limitScreenshotUploadFilesForExistingSet(files, 0, nil, true, "set-1")
+	_, err := limitScreenshotUploadFilesForExistingSet(files, 0, nil, true, "set-1", "", "")
 	if err == nil {
 		t.Fatal("expected replacement upload above Apple maximum to fail")
 	}
 	if !strings.Contains(err.Error(), "allow at most 10") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLimitScreenshotUploadFilesForFullSetRejectsExplicitLimitWithUsableRemediation(t *testing.T) {
+	existing := make([]asc.Resource[asc.AppScreenshotAttributes], appScreenshotSetMaxScreenshots)
+	for i := range existing {
+		existing[i].ID = fmt.Sprintf("existing-%d", i+1)
+	}
+
+	_, err := limitScreenshotUploadFilesForExistingSet(
+		[]string{"new.png"},
+		appScreenshotSetMaxScreenshots,
+		existing,
+		false,
+		"set-1",
+		screenshotInspectionCommand("LOC_123"),
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected full screenshot set error")
+	}
+	if strings.Contains(err.Error(), "choose a higher limit") || strings.Contains(err.Error(), "--max-screenshots 0") {
+		t.Fatalf("expected usable full-set remediation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "--max-screenshots cannot create capacity") {
+		t.Fatalf("expected explicit capacity guidance, got %v", err)
 	}
 }
 

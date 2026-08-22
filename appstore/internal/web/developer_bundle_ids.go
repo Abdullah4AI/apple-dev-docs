@@ -384,9 +384,9 @@ func buildDeveloperBundleIDCapabilityPatchRequest(current developerBundleIDRespo
 		updated = append(updated, newDeveloperBundleIDCapability(req.Capability))
 	}
 
-	relationshipBody, err := json.Marshal(developerResourceRelationship{Data: updated})
+	relationshipBody, err := marshalDeveloperBundleIDCapabilitiesForPatch(updated)
 	if err != nil {
-		return developerBundleIDPatchRequest{}, false, fmt.Errorf("failed to build Bundle ID capability relationships: %w", err)
+		return developerBundleIDPatchRequest{}, false, err
 	}
 	relationships := cloneRawMessageMap(current.Data.Relationships)
 	if relationships == nil {
@@ -412,6 +412,11 @@ func addDeveloperPortalTeamID(payload developerBundleIDPatchRequest, teamID stri
 	if attributes == nil {
 		attributes = make(map[string]json.RawMessage)
 	}
+	for key := range attributes {
+		if key == "permissions" || strings.HasPrefix(key, "~permissions.") {
+			delete(attributes, key)
+		}
+	}
 	encodedTeamID, err := json.Marshal(strings.TrimSpace(teamID))
 	if err != nil {
 		return payload, fmt.Errorf("failed to encode Developer Portal team: %w", err)
@@ -423,6 +428,35 @@ func addDeveloperPortalTeamID(payload developerBundleIDPatchRequest, teamID stri
 	}
 	payload.Data.Attributes = encodedAttributes
 	return payload, nil
+}
+
+func marshalDeveloperBundleIDCapabilitiesForPatch(capabilities []developerResource) (json.RawMessage, error) {
+	for index := range capabilities {
+		if len(capabilities[index].Attributes) == 0 {
+			continue
+		}
+		var attributes map[string]json.RawMessage
+		if err := json.Unmarshal(capabilities[index].Attributes, &attributes); err != nil {
+			return nil, fmt.Errorf("failed to parse Bundle ID capability %q attributes for patch: %w", capabilities[index].ID, err)
+		}
+		writable := make(map[string]json.RawMessage, 2)
+		for _, key := range []string{"enabled", "settings"} {
+			if value, ok := attributes[key]; ok {
+				writable[key] = append(json.RawMessage(nil), value...)
+			}
+		}
+		encoded, err := json.Marshal(writable)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Bundle ID capability %q attributes for patch: %w", capabilities[index].ID, err)
+		}
+		capabilities[index].Attributes = encoded
+	}
+
+	encoded, err := json.Marshal(developerResourceRelationship{Data: capabilities})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Bundle ID capability relationships: %w", err)
+	}
+	return encoded, nil
 }
 
 func developerBundleIDCapabilities(current developerBundleIDResponse) ([]developerResource, error) {

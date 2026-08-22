@@ -198,8 +198,8 @@ func ProfilesCreateCommand() *ffcli.Command {
 	name := fs.String("name", "", "Profile name")
 	profileType := fs.String("profile-type", "", "Profile type (e.g., IOS_APP_DEVELOPMENT)")
 	bundleID := fs.String("bundle", "", "Bundle ID")
-	certificates := fs.String("certificate", "", "Certificate ID(s), comma-separated")
-	devices := fs.String("device", "", "Device ID(s), comma-separated (optional)")
+	certificates := shared.BindOnceCSVFlag(fs, "certificate", "Certificate ID(s), comma-separated")
+	devices := shared.BindOnceCSVFlag(fs, "device", "Device ID(s), comma-separated (optional)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -229,12 +229,12 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --bundle is required")
 				return shared.MissingRequiredUsageError("--bundle")
 			}
-			certificateIDs := shared.SplitCSV(*certificates)
+			certificateIDs := shared.SplitCSV(certificates.String())
 			if len(certificateIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --certificate is required")
 				return shared.MissingRequiredUsageError("--certificate")
 			}
-			deviceIDs := shared.SplitCSV(*devices)
+			deviceIDs := shared.SplitCSV(devices.String())
 
 			client, err := shared.GetASCClient()
 			if err != nil {

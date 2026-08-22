@@ -120,7 +120,7 @@ func TestAuthDoctorCommandFlagValidation(t *testing.T) {
 				t.Fatalf("expected flag.ErrHelp, got %v", err)
 			}
 		})
-		if !strings.Contains(stderr, "unsupported format") {
+		if !strings.Contains(stderr, "--output must be one of") {
 			t.Fatalf("expected unsupported format error in stderr, got %q", stderr)
 		}
 	})
@@ -894,7 +894,7 @@ func TestAuthExportToConfigCommand(t *testing.T) {
 				t.Fatalf("expected flag.ErrHelp, got %v", err)
 			}
 		})
-		if !strings.Contains(stderr, "unsupported format: yaml") {
+		if !strings.Contains(stderr, `(got "yaml")`) {
 			t.Fatalf("expected unsupported format error, got %q", stderr)
 		}
 	})
@@ -1176,7 +1176,7 @@ func TestAuthStatusCommand(t *testing.T) {
 		if stdout != "" {
 			t.Fatalf("expected empty stdout, got %q", stdout)
 		}
-		if !strings.Contains(stderr, "unsupported format: yaml") {
+		if !strings.Contains(stderr, `(got "yaml")`) {
 			t.Fatalf("expected unsupported format error, got %q", stderr)
 		}
 	})

@@ -44,7 +44,7 @@ func testflightBuildChecks(buildID string, build *Build) []CheckResult {
 				ResourceType: "build",
 				ResourceID:   buildID,
 				Message:      message,
-				Remediation:  "Pass a valid build ID with --build",
+				Remediation:  "Pass a valid build ID with --build-id",
 			},
 		}
 	}

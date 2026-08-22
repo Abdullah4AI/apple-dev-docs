@@ -1321,6 +1321,11 @@
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/52/db/cc/52dbcc8f-c4aa-2cf0-36f9-bdeacf943fd7/AppIcon-0-1x_U007epad-0-11-0-85-220-0.png/512x512bb.jpg"
   },
   {
+    "app": "Ring Widget",
+    "link": "https://apps.apple.com/us/app/ring-widget/id1663323988?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f9/a4/20/f9a420ea-1b6b-83f4-25b5-488aef5a11db/AppIcon-0-0-1x_U007epad-0-1-sRGB-85-220.png/512x512bb.jpg"
+  },
+  {
     "app": "Ripple News - AI Personal News",
     "link": "https://apps.apple.com/us/app/ripple-news-ai-personal-news/id6758356024?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/19/33/17/193317c5-5112-6151-9fd9-5b98ac41b52d/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/512x512bb.jpg"
@@ -1369,6 +1374,11 @@
     "app": "Scooter Tools",
     "link": "https://apps.apple.com/us/app/scooter-tools/id6452079114?uo=4",
     "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/cf/8e/88/cf8e88b7-50bc-e82f-f37b-734549d82fcd/AppIcon-0-1x_U007epad-0-1-85-220-0.png/512x512bb.jpg"
+  },
+  {
+    "app": "Secure Storage: Private Vault",
+    "link": "https://apps.apple.com/us/app/secure-storage-private-vault/id6794763277?uo=4",
+    "icon": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/02/4e/89/024e8960-34e7-b77b-3da3-d293b7da39b5/SecureStorage-0-0-1x_U007ephone-0-1-0-sRGB-85-220.png/512x512bb.jpg"
   },
   {
     "app": "Set - Strength Log",

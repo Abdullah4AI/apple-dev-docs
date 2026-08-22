@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 func TestRetryReadWithFreshTimeoutRetriesChildDeadline(t *testing.T) {
@@ -83,5 +86,33 @@ func TestRetryReadWithFreshTimeoutDoesNotAmplifyRetryableErrors(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("expected one workflow read attempt, got %d", requests)
+	}
+}
+
+func TestRetryReadWithFreshTimeoutDoesNotRetryBoundedRetryAfterError(t *testing.T) {
+	t.Setenv("ASC_TIMEOUT", "30s")
+	t.Setenv("ASC_MAX_RETRIES", "3")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1s")
+
+	requests := 0
+	_, err := RetryReadWithFreshTimeout(context.Background(), func(requestCtx context.Context) (string, error) {
+		requests++
+		_, retryErr := asc.WithRetry(requestCtx, func() (struct{}, error) {
+			return struct{}{}, &asc.RetryableError{
+				Err:        errors.New("rate limited"),
+				RetryAfter: time.Hour,
+			}
+		}, asc.RetryOptions{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Second})
+		return "", retryErr
+	})
+	if err == nil {
+		t.Fatal("expected bounded retry-after error, got nil")
+	}
+	if requests != 1 {
+		t.Fatalf("expected one workflow read attempt, got %d", requests)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected bounded retry-after error not to masquerade as a deadline, got %v", err)
 	}
 }

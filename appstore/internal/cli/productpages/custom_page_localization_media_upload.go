@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/peterbourgon/ff/v3/ffcli"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -155,11 +156,16 @@ func executeCustomPageScreenshotUpload(
 	localizationID, path, deviceType string,
 	sync bool,
 ) (*asc.CustomProductPageScreenshotUploadResult, error) {
+	trimmedLocalizationID := strings.TrimSpace(localizationID)
+	trimmedPath := strings.TrimSpace(path)
+	trimmedDeviceType := strings.TrimSpace(deviceType)
 	return assets.ExecuteScreenshotSetUpload(ctx, assets.ScreenshotSetUploadOptions[*asc.CustomProductPageScreenshotUploadResult]{
 		LocalizationID: localizationID,
 		Path:           path,
 		DeviceType:     deviceType,
 		Replace:        sync,
+		InspectCommand: fmt.Sprintf("asc product-pages custom-pages localizations screenshot-sets list --localization-id %q --include-screenshots --paginate --output json", trimmedLocalizationID),
+		ReplaceCommand: shellquote.Join("asc", "product-pages", "custom-pages", "localizations", "screenshot-sets", "sync", "--localization-id", trimmedLocalizationID, "--path", trimmedPath, "--device-type", trimmedDeviceType, "--confirm"),
 		ClientFactory:  customPageMediaClientFactory,
 		RequestContext: contextWithCustomPageMediaUploadTimeout,
 		UploadContext:  contextWithCustomPageMediaUploadTimeout,

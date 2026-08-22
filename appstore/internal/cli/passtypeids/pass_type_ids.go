@@ -78,14 +78,22 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := shared.ValidateNextURL(*next); err != nil {
+				return fmt.Errorf("pass-type-ids list: %w", err)
+			}
+			if err := shared.RejectNextFlagConflicts(
+				fs,
+				*next,
+				"pass-type-ids list",
+				"id", "identifier", "name", "sort", "fields", "certificate-fields", "include", "limit-certificates", "limit",
+			); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("pass-type-ids list: --limit must be between 1 and 200")
 			}
 			if *certificatesLimit != 0 && (*certificatesLimit < 1 || *certificatesLimit > 50) {
 				return fmt.Errorf("pass-type-ids list: --limit-certificates must be between 1 and 50")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("pass-type-ids list: %w", err)
 			}
 			if err := shared.ValidateSort(*sort, passTypeIDSortList()...); err != nil {
 				return fmt.Errorf("pass-type-ids list: %w", err)

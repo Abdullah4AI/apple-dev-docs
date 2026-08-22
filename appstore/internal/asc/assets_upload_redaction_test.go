@@ -88,6 +88,10 @@ func TestUploadAssetFromFileSanitizesTransportErrorURL(t *testing.T) {
 }
 
 func TestUploadAssetFromFileSanitizesTimeoutErrorURL(t *testing.T) {
+	// A timed-out PUT is retried, so this also covers redaction of the error
+	// that survives retry exhaustion.
+	setFastAssetUploadRetries(t, "1")
+
 	path := writeUploadFixture(t)
 	file, err := os.Open(path)
 	if err != nil {

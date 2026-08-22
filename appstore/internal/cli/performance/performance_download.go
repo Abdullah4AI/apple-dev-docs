@@ -21,7 +21,8 @@ func PerformanceDownloadCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("download", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	buildID := fs.String("build", "", "Build ID to download metrics for")
+	buildID := fs.String("build-id", "", "Build ID to download metrics for")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	diagnosticID := fs.String("diagnostic-id", "", "Diagnostic signature ID to download logs for")
 	platform := fs.String("platform", "", "Platform filter (IOS)")
 	metricType := fs.String("metric-type", "", "Metric types (comma-separated: "+strings.Join(perfPowerMetricTypeList(), ", ")+")")
@@ -39,11 +40,15 @@ func PerformanceDownloadCommand() *ffcli.Command {
 
 Examples:
   asc performance download --app "APP_ID" --output ./metrics.json
-  asc performance download --build "BUILD_ID" --output ./metrics.json
+  asc performance download --build-id "BUILD_ID" --output ./metrics.json
   asc performance download --diagnostic-id "SIGNATURE_ID" --output ./diagnostic.json --decompress`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			appFlag := strings.TrimSpace(*appID)
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			trimmedDiagnosticID := strings.TrimSpace(*diagnosticID)
@@ -61,13 +66,13 @@ Examples:
 			if selectionCount == 0 {
 				appFlag = shared.ResolveAppID(*appID)
 				if appFlag == "" {
-					fmt.Fprintln(os.Stderr, "Error: --app, --build, or --diagnostic-id is required")
+					fmt.Fprintln(os.Stderr, "Error: --app, --build-id, or --diagnostic-id is required")
 					return shared.MissingRequiredUsageError("")
 				}
 				selectionCount = 1
 			}
 			if selectionCount > 1 {
-				return shared.UsageError("--app, --build, and --diagnostic-id are mutually exclusive")
+				return shared.UsageError("--app, --build-id, and --diagnostic-id are mutually exclusive")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("--limit must be between 1 and 200")

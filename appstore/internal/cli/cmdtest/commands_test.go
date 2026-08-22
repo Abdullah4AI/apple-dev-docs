@@ -718,7 +718,7 @@ func TestBuildBundlesValidationErrors(t *testing.T) {
 		{
 			name:    "build-bundles list missing build",
 			args:    []string{"build-bundles", "list"},
-			wantErr: "Error: --build is required",
+			wantErr: "Error: --build-id is required",
 		},
 		{
 			name:    "build-bundles file-sizes list missing id",
@@ -2851,7 +2851,7 @@ func TestEncryptionValidationErrors(t *testing.T) {
 		{
 			name:     "encryption declarations assign-builds missing build",
 			args:     []string{"encryption", "declarations", "assign-builds", "--id", "DECL_ID"},
-			wantErr:  "--build is required",
+			wantErr:  "--build-id is required",
 			wantHelp: true,
 		},
 		{
@@ -3038,13 +3038,13 @@ func TestPerformanceValidationErrors(t *testing.T) {
 		{
 			name:     "performance metrics view missing build",
 			args:     []string{"performance", "metrics", "view"},
-			wantErr:  "--build is required",
+			wantErr:  "--build-id is required",
 			wantHelp: true,
 		},
 		{
 			name:     "performance diagnostics list missing build",
 			args:     []string{"performance", "diagnostics", "list"},
-			wantErr:  "--build is required",
+			wantErr:  "--build-id is required",
 			wantHelp: true,
 		},
 		{
@@ -3056,7 +3056,7 @@ func TestPerformanceValidationErrors(t *testing.T) {
 		{
 			name:     "performance download missing selection",
 			args:     []string{"performance", "download"},
-			wantErr:  "--app, --build, or --diagnostic-id is required",
+			wantErr:  "--app, --build-id, or --diagnostic-id is required",
 			wantHelp: true,
 		},
 		{
@@ -3519,7 +3519,7 @@ func TestScreenshotsAndVideoPreviewsValidationErrors(t *testing.T) {
 		{
 			name:    "screenshots list missing localization",
 			args:    []string{"screenshots", "list"},
-			wantErr: "--version-localization is required",
+			wantErr: "choose a localization selector",
 		},
 		{
 			name:    "screenshots upload missing mode",
@@ -3627,7 +3627,7 @@ func TestBuildLocalizationsValidationErrors(t *testing.T) {
 		{
 			name:    "build-localizations list missing build",
 			args:    []string{"build-localizations", "list"},
-			wantErr: "--build is required",
+			wantErr: "--build-id is required",
 		},
 		{
 			name:    "build-localizations create missing locale",
@@ -3818,7 +3818,7 @@ func TestPublishValidationErrors(t *testing.T) {
 		{
 			name:    "publish testflight missing ipa",
 			args:    []string{"publish", "testflight", "--app", "APP_123", "--group", "GROUP_ID"},
-			wantErr: "--ipa is required unless --build or --build-number is provided",
+			wantErr: "--ipa is required unless --build-id or --build-number is provided",
 		},
 		{
 			name:    "publish testflight missing group",
@@ -3906,12 +3906,12 @@ func TestPublishValidationErrors(t *testing.T) {
 		{
 			name:    "publish testflight ipa and build mutually exclusive",
 			args:    []string{"publish", "testflight", "--app", "APP_123", "--ipa", "app.ipa", "--build", "BUILD_123", "--group", "GROUP_ID"},
-			wantErr: "--ipa and --build are mutually exclusive",
+			wantErr: "--ipa and --build-id are mutually exclusive",
 		},
 		{
 			name:    "publish testflight build and build-number mutually exclusive without ipa",
 			args:    []string{"publish", "testflight", "--app", "APP_123", "--build", "BUILD_123", "--build-number", "42", "--group", "GROUP_ID"},
-			wantErr: "--build and --build-number are mutually exclusive when --ipa is not provided",
+			wantErr: "--build-id and --build-number are mutually exclusive when --ipa is not provided",
 		},
 		{
 			name:    "publish testflight version without ipa",
@@ -3941,7 +3941,7 @@ func TestPublishValidationErrors(t *testing.T) {
 		{
 			name:    "publish testflight local build rejects build",
 			args:    []string{"publish", "testflight", "--app", "APP_123", "--workspace", "App.xcworkspace", "--scheme", "App", "--version", "1.2.3", "--build", "BUILD_123", "--group", "GROUP_ID"},
-			wantErr: "--build cannot be combined with --workspace or --project",
+			wantErr: "--build-id cannot be combined with --workspace or --project",
 		},
 		{
 			name:    "publish testflight local build only flag without selector",

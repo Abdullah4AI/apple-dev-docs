@@ -12,6 +12,8 @@ type appsQuery struct {
 	bundleIDs               []string
 	names                   []string
 	skus                    []string
+	versionStates           []string
+	reviewSubmissionStates  []string
 	appInfoFields           []string
 	inAppPurchaseFields     []string
 	subscriptionGroupFields []string
@@ -104,6 +106,8 @@ func buildAppsQuery(query *appsQuery) string {
 	addCSV(values, "filter[bundleId]", query.bundleIDs)
 	addCSV(values, "filter[name]", query.names)
 	addCSV(values, "filter[sku]", query.skus)
+	addCSV(values, "filter[appStoreVersions.appVersionState]", query.versionStates)
+	addCSV(values, "filter[reviewSubmissions.state]", query.reviewSubmissionStates)
 	if query.sort != "" {
 		values.Set("sort", query.sort)
 	}
@@ -446,6 +450,22 @@ func WithAppsNames(names []string) AppsOption {
 func WithAppsSKUs(skus []string) AppsOption {
 	return func(q *appsQuery) {
 		q.skus = normalizeList(skus)
+	}
+}
+
+// WithAppsVersionStates filters apps by the state of their App Store versions
+// using filter[appStoreVersions.appVersionState].
+func WithAppsVersionStates(states []string) AppsOption {
+	return func(q *appsQuery) {
+		q.versionStates = normalizeUpperList(states)
+	}
+}
+
+// WithAppsReviewSubmissionStates filters apps by the state of their review
+// submissions using filter[reviewSubmissions.state].
+func WithAppsReviewSubmissionStates(states []string) AppsOption {
+	return func(q *appsQuery) {
+		q.reviewSubmissionStates = normalizeUpperList(states)
 	}
 }
 

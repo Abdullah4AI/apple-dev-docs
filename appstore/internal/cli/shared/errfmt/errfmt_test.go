@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/appleads"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/storekit"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
 func TestClassify_MissingAuth(t *testing.T) {
@@ -50,6 +53,34 @@ func TestClassify_TimeoutBuildsUploadsListKeepsRequestHint(t *testing.T) {
 	ce := Classify(err)
 	if ce.Hint != "Increase the request timeout (e.g. set `ASC_TIMEOUT=90s`)." {
 		t.Fatalf("expected request timeout hint, got %q", ce.Hint)
+	}
+}
+
+func TestClassify_ServerErrorSuggestsSystemStatus(t *testing.T) {
+	err := fmt.Errorf("apps list: %w", &asc.APIError{Code: "INTERNAL_ERROR", Title: "Unavailable", StatusCode: 503})
+
+	ce := Classify(err)
+	if ce.Hint != "Check Apple's service health with `asc system-status --service \"App Store Connect\"`." {
+		t.Fatalf("expected system-status hint, got %q", ce.Hint)
+	}
+}
+
+func TestClassify_NonASCServerErrorsDoNotSuggestSystemStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "Apple Ads", err: &appleads.APIError{StatusCode: 503}},
+		{name: "StoreKit", err: &storekit.APIError{StatusCode: 503}},
+		{name: "web session", err: &web.APIError{Status: 503}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if hint := Classify(test.err).Hint; hint != "" {
+				t.Fatalf("unexpected cross-service hint: %q", hint)
+			}
+		})
 	}
 }
 

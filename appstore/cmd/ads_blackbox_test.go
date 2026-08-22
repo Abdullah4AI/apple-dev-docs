@@ -20,7 +20,7 @@ func TestAdsUsageErrorsExitTwoWithBuiltBinary(t *testing.T) {
 		{
 			name:       "invalid endpoint output",
 			args:       []string{"ads", "v5", "campaigns", "--output", "xml"},
-			wantStderr: "unsupported format: xml",
+			wantStderr: `(got "xml")`,
 		},
 		{
 			name:       "unexpected endpoint arg",

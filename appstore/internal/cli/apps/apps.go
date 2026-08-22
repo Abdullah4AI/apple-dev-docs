@@ -13,12 +13,14 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-func appsListFlags(fs *flag.FlagSet) (output shared.OutputFlags, bundleID *string, name *string, sku *string, sort *string, limit *int, next *string, paginate *bool, appInfoFields *string, iapFields *string, subscriptionGroupFields *string) {
+func appsListFlags(fs *flag.FlagSet) (output shared.OutputFlags, bundleID *string, name *string, sku *string, versionState *string, reviewSubmissionState *string, sort *string, limit *int, next *string, paginate *bool, appInfoFields *string, iapFields *string, subscriptionGroupFields *string) {
 	output = shared.BindOutputFlags(fs)
 	bundleID = fs.String("bundle-id", "", "Filter by bundle ID(s), comma-separated")
 	name = fs.String("name", "", "Filter by app name(s), comma-separated")
 	sku = fs.String("sku", "", "Filter by SKU(s), comma-separated")
-	sort = fs.String("sort", "", "Sort by name, -name, bundleId, or -bundleId")
+	versionState = fs.String("version-state", "", "[experimental] Filter by App Store version state(s), comma-separated: "+strings.Join(appVersionStateFilterList(), ", "))
+	reviewSubmissionState = fs.String("review-submission-state", "", "[experimental] Filter by review submission state(s), comma-separated: "+strings.Join(reviewSubmissionStateFilterList(), ", "))
+	sort = fs.String("sort", "", "Sort by name, -name, bundleId, -bundleId, sku, or -sku")
 	limit = fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next = fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate = fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -32,7 +34,27 @@ func appsListFlags(fs *flag.FlagSet) (output shared.OutputFlags, bundleID *strin
 func AppsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps", flag.ExitOnError)
 
-	output, bundleID, name, sku, sort, limit, next, paginate, appInfoFields, iapFields, subscriptionGroupFields := appsListFlags(fs)
+	output, bundleID, name, sku, versionState, reviewSubmissionState, sort, limit, next, paginate, appInfoFields, iapFields, subscriptionGroupFields := appsListFlags(fs)
+	subcommands := []*ffcli.Command{
+		AppsListCommand(),
+		AppsPublishedCommand(),
+		AppsWallCommand(),
+		AppsPublicCommand(),
+		AppsRegistryCommand(),
+		AppsGetCommand(),
+		AppsRenameCommand(),
+		AppsInfoCommand(),
+		AppsCIProductCommand(),
+		AppsUpdateCommand(),
+		AppsRemoveBetaTestersCommand(),
+		AppsSubscriptionGracePeriodCommand(),
+		AppsSearchKeywordsCommand(),
+		AppEncryptionDeclarationsCommand(),
+		AppsContentRightsCommand(),
+	}
+	for _, subcommand := range subcommands {
+		rejectAppsListFlagsBeforeSubcommand(fs, subcommand)
+	}
 
 	return &ffcli.Command{
 		Name:       "apps",
@@ -40,11 +62,13 @@ func AppsCommand() *ffcli.Command {
 		ShortHelp:  "List and manage apps in App Store Connect.",
 		LongHelp: `List and manage apps in App Store Connect.
 
+Creating an app record runs through a web session, not this command group:
+  asc web apps create --name "My App" --bundle-id "com.example.app" --sku "MYAPP123"
+
 Examples:
   asc apps
   asc apps list --bundle-id "com.example.app"
   asc apps published
-  asc web apps create --name "My App" --bundle-id "com.example.app" --sku "MYAPP123"
   asc apps wall
   asc apps wall submit --app "1234567890" --confirm
   asc apps public view --app "1234567890"
@@ -63,29 +87,16 @@ Examples:
   asc apps content-rights edit --app "APP_ID" --uses-third-party-content=false
   asc apps --limit 10
   asc apps --sort name
+  asc apps --sort sku
+  asc apps --version-state IN_REVIEW,WAITING_FOR_REVIEW
+  asc apps --review-submission-state IN_REVIEW
   asc apps --app-info-fields kidsAgeBand --iap-fields versions --subscription-group-fields versions
   asc apps --output table
   asc apps --next "<links.next>"
   asc apps --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.VisibleUsageFunc,
-		Subcommands: []*ffcli.Command{
-			AppsListCommand(),
-			AppsPublishedCommand(),
-			AppsWallCommand(),
-			AppsPublicCommand(),
-			AppsRegistryCommand(),
-			AppsGetCommand(),
-			AppsRenameCommand(),
-			AppsInfoCommand(),
-			AppsCIProductCommand(),
-			AppsUpdateCommand(),
-			AppsRemoveBetaTestersCommand(),
-			AppsSubscriptionGracePeriodCommand(),
-			AppsSearchKeywordsCommand(),
-			AppEncryptionDeclarationsCommand(),
-			AppsContentRightsCommand(),
-		},
+		FlagSet:     fs,
+		UsageFunc:   shared.VisibleUsageFunc,
+		Subcommands: subcommands,
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
 				subcommand := strings.TrimSpace(args[0])
@@ -96,8 +107,36 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
 				return flag.ErrHelp
 			}
-			return appsList(ctx, fs, *output.Output, *output.Pretty, *bundleID, *name, *sku, *sort, *limit, *next, *paginate, *appInfoFields, *iapFields, *subscriptionGroupFields)
+			return appsList(ctx, fs, *output.Output, *output.Pretty, *bundleID, *name, *sku, *versionState, *reviewSubmissionState, *sort, *limit, *next, *paginate, *appInfoFields, *iapFields, *subscriptionGroupFields)
 		},
+	}
+}
+
+var appsListOnlyFlagNames = []string{
+	"bundle-id", "name", "sku", "version-state", "review-submission-state",
+	"sort", "limit", "next", "paginate", "app-info-fields", "iap-fields",
+	"subscription-group-fields",
+}
+
+// rejectAppsListFlagsBeforeSubcommand prevents ffcli from accepting a parent
+// list flag and then silently dropping it when dispatching to a child command.
+// Direct `asc apps [flags]` listing remains supported; subcommand flags belong
+// after `list` so the selected command owns their values and validation.
+func rejectAppsListFlagsBeforeSubcommand(parentFS *flag.FlagSet, command *ffcli.Command) {
+	if command == nil {
+		return
+	}
+	if command.Exec != nil {
+		exec := command.Exec
+		command.Exec = func(ctx context.Context, args []string) error {
+			if flagName, ok := appFlagWasProvided(parentFS, appsListOnlyFlagNames...); ok {
+				return shared.UsageErrorf("%s cannot be placed before an apps subcommand; use asc apps [flags] or place it after asc apps list", flagName)
+			}
+			return exec(ctx, args)
+		}
+	}
+	for _, subcommand := range command.Subcommands {
+		rejectAppsListFlagsBeforeSubcommand(parentFS, subcommand)
 	}
 }
 
@@ -105,7 +144,7 @@ Examples:
 func AppsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps list", flag.ExitOnError)
 
-	output, bundleID, name, sku, sort, limit, next, paginate, appInfoFields, iapFields, subscriptionGroupFields := appsListFlags(fs)
+	output, bundleID, name, sku, versionState, reviewSubmissionState, sort, limit, next, paginate, appInfoFields, iapFields, subscriptionGroupFields := appsListFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "list",
@@ -119,6 +158,9 @@ Examples:
   asc apps list --name "My App"
   asc apps list --limit 10
   asc apps list --sort name
+  asc apps list --sort sku
+  asc apps list --version-state IN_REVIEW,WAITING_FOR_REVIEW
+  asc apps list --review-submission-state IN_REVIEW
   asc apps list --app-info-fields kidsAgeBand --iap-fields versions --subscription-group-fields versions
   asc apps list --output table
   asc apps list --next "<links.next>"
@@ -126,7 +168,7 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			return appsList(ctx, fs, *output.Output, *output.Pretty, *bundleID, *name, *sku, *sort, *limit, *next, *paginate, *appInfoFields, *iapFields, *subscriptionGroupFields)
+			return appsList(ctx, fs, *output.Output, *output.Pretty, *bundleID, *name, *sku, *versionState, *reviewSubmissionState, *sort, *limit, *next, *paginate, *appInfoFields, *iapFields, *subscriptionGroupFields)
 		},
 	}
 }
@@ -280,21 +322,51 @@ Examples:
 	}
 }
 
-func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool, bundleID string, name string, sku string, sort string, limit int, next string, paginate bool, appInfoFields string, iapFields string, subscriptionGroupFields string) error {
+func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool, bundleID string, name string, sku string, versionState string, reviewSubmissionState string, sort string, limit int, next string, paginate bool, appInfoFields string, iapFields string, subscriptionGroupFields string) error {
 	if limit != 0 && (limit < 1 || limit > 200) {
 		return fmt.Errorf("apps: --limit must be between 1 and 200")
 	}
 	if err := shared.ValidateNextURL(next); err != nil {
 		return fmt.Errorf("apps: %w", err)
 	}
-	if err := shared.ValidateSort(sort, "name", "-name", "bundleId", "-bundleId"); err != nil {
+	if err := shared.ValidateSort(sort, "name", "-name", "bundleId", "-bundleId", "sku", "-sku"); err != nil {
 		return fmt.Errorf("apps: %w", err)
 	}
 	if strings.TrimSpace(next) != "" {
-		if flagName, ok := appFlagWasProvided(fs, "app-info-fields", "iap-fields", "subscription-group-fields"); ok {
+		if flagName, ok := appFlagWasProvided(
+			fs,
+			"bundle-id", "name", "sku", "version-state", "review-submission-state", "sort", "limit",
+			"app-info-fields", "iap-fields", "subscription-group-fields",
+		); ok {
 			fmt.Fprintf(os.Stderr, "Error: --next cannot be combined with %s\n", flagName)
 			return flag.ErrHelp
 		}
+	}
+	versionStateValues := shared.SplitCSVUpper(versionState)
+	if _, provided := appFlagWasProvided(fs, "version-state"); provided {
+		if strings.TrimSpace(versionState) == "" {
+			return shared.UsageError("--version-state must not be empty")
+		}
+		if csvContainsEmptyValue(versionState) {
+			return shared.UsageError("--version-state must not contain empty values")
+		}
+	}
+	versionStateValues, err := normalizeAppVersionStateFilters(versionStateValues)
+	if err != nil {
+		return shared.UsageError(err.Error())
+	}
+	reviewSubmissionStateValues := shared.SplitCSVUpper(reviewSubmissionState)
+	if _, provided := appFlagWasProvided(fs, "review-submission-state"); provided {
+		if strings.TrimSpace(reviewSubmissionState) == "" {
+			return shared.UsageError("--review-submission-state must not be empty")
+		}
+		if csvContainsEmptyValue(reviewSubmissionState) {
+			return shared.UsageError("--review-submission-state must not contain empty values")
+		}
+	}
+	reviewSubmissionStateValues, err = normalizeReviewSubmissionStateFilters(reviewSubmissionStateValues)
+	if err != nil {
+		return shared.UsageError(err.Error())
 	}
 	appInfoFieldValues, err := normalizeSparseField(fs, appInfoFields, appInfoSparseFields441, "--app-info-fields")
 	if err != nil {
@@ -321,6 +393,8 @@ func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool,
 		asc.WithAppsBundleIDs(shared.SplitCSV(bundleID)),
 		asc.WithAppsNames(shared.SplitCSV(name)),
 		asc.WithAppsSKUs(shared.SplitCSV(sku)),
+		asc.WithAppsVersionStates(versionStateValues),
+		asc.WithAppsReviewSubmissionStates(reviewSubmissionStateValues),
 		asc.WithAppsLimit(limit),
 		asc.WithAppsNextURL(next),
 		asc.WithAppsAppInfoFields(appInfoFieldValues),
@@ -366,4 +440,13 @@ func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool,
 	}
 
 	return shared.PrintOutput(apps, output, pretty)
+}
+
+func csvContainsEmptyValue(value string) bool {
+	for _, element := range strings.Split(value, ",") {
+		if strings.TrimSpace(element) == "" {
+			return true
+		}
+	}
+	return false
 }

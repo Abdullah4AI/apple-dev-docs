@@ -92,13 +92,13 @@ func TestValidateTestFlightRequiresAppAndBuild(t *testing.T) {
 	}{
 		{
 			name:    "missing app",
-			args:    []string{"validate", "testflight", "--build", "build-1"},
+			args:    []string{"validate", "testflight", "--build-id", "build-1"},
 			wantErr: "--app is required",
 		},
 		{
 			name:    "missing build",
 			args:    []string{"validate", "testflight", "--app", "app-1"},
-			wantErr: "--build is required",
+			wantErr: "--build-id is required",
 		},
 	}
 
@@ -137,7 +137,7 @@ func TestValidateTestFlightOutputsJSONAndTable(t *testing.T) {
 
 	root := RootCommand("1.2.3")
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build", "build-1"}); err != nil {
+		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build-id", "build-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -159,7 +159,7 @@ func TestValidateTestFlightOutputsJSONAndTable(t *testing.T) {
 
 	root = RootCommand("1.2.3")
 	stdout, _ = captureOutput(t, func() {
-		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build", "build-1", "--output", "table"}); err != nil {
+		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build-id", "build-1", "--output", "table"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		if err := root.Run(context.Background()); err != nil {
@@ -186,7 +186,7 @@ func TestValidateTestFlightFailsWhenBetaReviewDetailsMissing(t *testing.T) {
 
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build", "build-1"}); err != nil {
+		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build-id", "build-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())
@@ -229,7 +229,7 @@ func TestValidateTestFlightFailsWhenWhatsNewMissing(t *testing.T) {
 
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build", "build-1"}); err != nil {
+		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build-id", "build-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())
@@ -272,7 +272,7 @@ func TestValidateTestFlightFailsWhenBuildAppMismatch(t *testing.T) {
 
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build", "build-1"}); err != nil {
+		if err := root.Parse([]string{"validate", "testflight", "--app", "app-1", "--build-id", "build-1"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())

@@ -42,6 +42,28 @@ func TestBuildsListCommand_HelpMentionsCombinedFilters(t *testing.T) {
 	}
 }
 
+func TestBuildsListQueryFlagsAreExperimental(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		cmd  *ffcli.Command
+		flag string
+	}{
+		{name: "list beta review state", cmd: BuildsListCommand(), flag: "beta-review-state"},
+		{name: "list include", cmd: BuildsListCommand(), flag: "include"},
+		{name: "count beta review state", cmd: BuildsCountCommand(), flag: "beta-review-state"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			queryFlag := test.cmd.FlagSet.Lookup(test.flag)
+			if queryFlag == nil {
+				t.Fatalf("%s flag is not registered", test.flag)
+			}
+			if !strings.HasPrefix(queryFlag.Usage, "[experimental] ") {
+				t.Fatalf("%s flag usage = %q, want experimental lifecycle label", test.flag, queryFlag.Usage)
+			}
+		})
+	}
+}
+
 func TestBuildsUploadCommand_HelpShowsConcurrencyDefaultOnce(t *testing.T) {
 	cmd := BuildsUploadCommand()
 	usage := cmd.UsageFunc(cmd)

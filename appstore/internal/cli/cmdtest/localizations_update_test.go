@@ -120,6 +120,119 @@ func TestLocalizationsUpdateVersionRequiresVersion(t *testing.T) {
 	}
 }
 
+func TestLocalizationsUpdateVersionByResourceIDSkipsDiscovery(t *testing.T) {
+	setupLocUpdateAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = locUpdateRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method != http.MethodPatch || req.URL.Path != "/v1/appStoreVersionLocalizations/loc-1" {
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		if !strings.Contains(string(body), `"description":"Updated"`) {
+			t.Fatalf("unexpected patch body: %s", body)
+		}
+		return locUpdateJSONResponse(`{"data":{"type":"appStoreVersionLocalizations","id":"loc-1","attributes":{"locale":"en-US","description":"Updated"}}}`)
+	})
+
+	stdout, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{
+			"localizations", "update",
+			"--id", "loc-1",
+			"--description", "Updated",
+		}, "1.2.3")
+		if code != cmd.ExitSuccess {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitSuccess, code)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want one direct PATCH", requestCount)
+	}
+	if !strings.Contains(stdout, `"id":"loc-1"`) {
+		t.Fatalf("expected updated localization output, got %q", stdout)
+	}
+}
+
+func TestLocalizationsUpdateAppInfoByResourceIDSkipsDiscovery(t *testing.T) {
+	setupLocUpdateAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	requestCount := 0
+	http.DefaultTransport = locUpdateRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method != http.MethodPatch || req.URL.Path != "/v1/appInfoLocalizations/loc-1" {
+			return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		return locUpdateJSONResponse(`{"data":{"type":"appInfoLocalizations","id":"loc-1","attributes":{"locale":"en-US","name":"Updated"}}}`)
+	})
+
+	stdout, stderr := captureOutput(t, func() {
+		code := cmd.Run([]string{
+			"localizations", "update",
+			"--type", "app-info",
+			"--id", "loc-1",
+			"--name", "Updated",
+		}, "1.2.3")
+		if code != cmd.ExitSuccess {
+			t.Fatalf("expected exit code %d, got %d", cmd.ExitSuccess, code)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want one direct PATCH", requestCount)
+	}
+	if !strings.Contains(stdout, `"id":"loc-1"`) {
+		t.Fatalf("expected updated localization output, got %q", stdout)
+	}
+}
+
+func TestLocalizationsUpdateResourceIDRejectsDiscoverySelectorsBeforeAuth(t *testing.T) {
+	clientCalls := 0
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		clientCalls++
+		return nil, errors.New("client should not be created")
+	}))
+
+	tests := [][]string{
+		{"--id", "loc-1", "--version", "ver-1", "--description", "Updated"},
+		{"--id", "loc-1", "--locale", "en-US", "--description", "Updated"},
+		{"--type", "app-info", "--id", "loc-1", "--app", "123456789", "--name", "Updated"},
+		{"--type", "app-info", "--id", "loc-1", "--app-info", "info-1", "--name", "Updated"},
+	}
+
+	for _, args := range tests {
+		stdout, stderr := captureOutput(t, func() {
+			code := cmd.Run(append([]string{"localizations", "update"}, args...), "1.2.3")
+			if code != cmd.ExitUsage {
+				t.Fatalf("args %v: expected exit code %d, got %d", args, cmd.ExitUsage, code)
+			}
+		})
+		if stdout != "" {
+			t.Fatalf("args %v: expected empty stdout, got %q", args, stdout)
+		}
+		if !strings.Contains(stderr, "--id cannot be combined") {
+			t.Fatalf("args %v: expected selector conflict, got %q", args, stderr)
+		}
+	}
+
+	if clientCalls != 0 {
+		t.Fatalf("expected no client creation, got %d", clientCalls)
+	}
+}
+
 func TestLocalizationsUpdate_RejectsUnsupportedLocaleWithSuggestion(t *testing.T) {
 	setupLocUpdateAuth(t)
 

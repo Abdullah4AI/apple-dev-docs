@@ -181,7 +181,7 @@ func TestBetaAppLocalizationsListPaginateFromNextWithoutApp(t *testing.T) {
 func TestBuildLocalizationsListRejectsInvalidNextURL(t *testing.T) {
 	runLocalizationsInvalidNextURLCases(
 		t,
-		[]string{"build-localizations", "list", "--build", "build-1"},
+		[]string{"build-localizations", "list", "--build-id", "build-1"},
 		"build-localizations list: --next",
 	)
 }
@@ -239,7 +239,7 @@ func TestBuildLocalizationsListPaginateFromNext(t *testing.T) {
 		}
 	})
 
-	args := []string{"build-localizations", "list", "--build", "build-1", "--paginate", "--next", firstURL}
+	args := []string{"build-localizations", "list", "--build-id", "build-1", "--paginate", "--next", firstURL}
 
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)

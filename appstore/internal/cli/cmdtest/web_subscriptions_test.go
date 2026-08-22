@@ -222,7 +222,7 @@ func TestWebSubscriptionsAvailabilityRemoveFromSaleRunUsageErrors(t *testing.T) 
 				"--confirm",
 				"--output", "yaml",
 			},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 	}
 

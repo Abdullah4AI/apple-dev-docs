@@ -154,7 +154,7 @@ func TestTelemetryStatusRejectsInvalidOutput(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("status stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: yaml") {
+	if !strings.Contains(stderr, `(got "yaml")`) {
 		t.Fatalf("status stderr = %q, want invalid output error", stderr)
 	}
 }

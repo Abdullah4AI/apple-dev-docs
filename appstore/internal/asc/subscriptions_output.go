@@ -23,6 +23,37 @@ type SubscriptionPriceDeleteResult struct {
 	Deleted bool   `json:"deleted"`
 }
 
+// SubscriptionIntroductoryOfferCreateSummary describes a single- or
+// all-territories introductory-offer create operation.
+type SubscriptionIntroductoryOfferCreateSummary struct {
+	SubscriptionID  string                                              `json:"subscriptionId"`
+	AvailabilityID  string                                              `json:"availabilityId,omitempty"`
+	Territory       string                                              `json:"territory,omitempty"`
+	AllTerritories  bool                                                `json:"allTerritories"`
+	DryRun          bool                                                `json:"dryRun"`
+	ContinueOnError bool                                                `json:"continueOnError"`
+	Total           int                                                 `json:"total"`
+	Created         int                                                 `json:"created"`
+	Skipped         int                                                 `json:"skipped"`
+	Failed          int                                                 `json:"failed"`
+	Skips           []SubscriptionIntroductoryOfferCreateSummarySkip    `json:"skips,omitempty"`
+	Failures        []SubscriptionIntroductoryOfferCreateSummaryFailure `json:"failures,omitempty"`
+}
+
+// SubscriptionIntroductoryOfferCreateSummarySkip records an existing offer
+// that was not recreated in an all-territories operation.
+type SubscriptionIntroductoryOfferCreateSummarySkip struct {
+	Territory string `json:"territory"`
+	Reason    string `json:"reason"`
+}
+
+// SubscriptionIntroductoryOfferCreateSummaryFailure records a territory that
+// could not be processed.
+type SubscriptionIntroductoryOfferCreateSummaryFailure struct {
+	Territory string `json:"territory"`
+	Error     string `json:"error"`
+}
+
 func subscriptionGroupsRows(resp *SubscriptionGroupsResponse) ([]string, [][]string) {
 	headers := []string{"ID", "Reference Name"}
 	rows := make([][]string, 0, len(resp.Data))
@@ -179,6 +210,45 @@ func subscriptionPriceDeleteResultRows(result *SubscriptionPriceDeleteResult) ([
 	headers := []string{"ID", "Deleted"}
 	rows := [][]string{{result.ID, fmt.Sprintf("%t", result.Deleted)}}
 	return headers, rows
+}
+
+func subscriptionIntroductoryOfferCreateSummaryRows(summary *SubscriptionIntroductoryOfferCreateSummary) ([]string, [][]string) {
+	headers := []string{"Subscription ID"}
+	row := []string{summary.SubscriptionID}
+	if summary.AvailabilityID != "" {
+		headers = append(headers, "Availability ID")
+		row = append(row, summary.AvailabilityID)
+	}
+	if summary.Territory != "" {
+		headers = append(headers, "Territory")
+		row = append(row, summary.Territory)
+	}
+	headers = append(headers, "Dry Run", "Total", "Created", "Skipped", "Failed")
+	row = append(
+		row,
+		fmt.Sprintf("%t", summary.DryRun),
+		fmt.Sprintf("%d", summary.Total),
+		fmt.Sprintf("%d", summary.Created),
+		fmt.Sprintf("%d", summary.Skipped),
+		fmt.Sprintf("%d", summary.Failed),
+	)
+	return headers, [][]string{row}
+}
+
+func subscriptionIntroductoryOfferCreateSummarySkipRows(summary *SubscriptionIntroductoryOfferCreateSummary) ([]string, [][]string) {
+	rows := make([][]string, 0, len(summary.Skips))
+	for _, skip := range summary.Skips {
+		rows = append(rows, []string{skip.Territory, skip.Reason})
+	}
+	return []string{"Skipped Territory", "Reason"}, rows
+}
+
+func subscriptionIntroductoryOfferCreateSummaryFailureRows(summary *SubscriptionIntroductoryOfferCreateSummary) ([]string, [][]string) {
+	rows := make([][]string, 0, len(summary.Failures))
+	for _, failure := range summary.Failures {
+		rows = append(rows, []string{failure.Territory, failure.Error})
+	}
+	return []string{"Failed Territory", "Error"}, rows
 }
 
 func subscriptionPriceRelationshipIDs(raw json.RawMessage) (string, string, error) {

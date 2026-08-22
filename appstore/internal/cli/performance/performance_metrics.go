@@ -25,7 +25,7 @@ func PerformanceMetricsCommand() *ffcli.Command {
 
 Examples:
   asc performance metrics list --app "APP_ID"
-  asc performance metrics view --build "BUILD_ID"`,
+  asc performance metrics view --build-id "BUILD_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -102,7 +102,8 @@ Examples:
 func PerformanceMetricsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("metrics view", flag.ExitOnError)
 
-	buildID := fs.String("build", "", "Build ID to fetch metrics for")
+	buildID := fs.String("build-id", "", "Build ID to fetch metrics for")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	platform := fs.String("platform", "", "Platform filter (IOS)")
 	metricType := fs.String("metric-type", "", "Metric types (comma-separated: "+strings.Join(perfPowerMetricTypeList(), ", ")+")")
 	deviceType := fs.String("device-type", "", "Device types (comma-separated, e.g., iPhone15,2)")
@@ -110,20 +111,24 @@ func PerformanceMetricsGetCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "view",
-		ShortUsage: "asc performance metrics view --build \"BUILD_ID\"",
+		ShortUsage: "asc performance metrics view --build-id \"BUILD_ID\"",
 		ShortHelp:  "View performance/power metrics for a build.",
 		LongHelp: `View performance/power metrics for a build.
 
 Examples:
-  asc performance metrics view --build "BUILD_ID"
-  asc performance metrics view --build "BUILD_ID" --metric-type "MEMORY" --device-type "iPhone15,2"`,
+  asc performance metrics view --build-id "BUILD_ID"
+  asc performance metrics view --build-id "BUILD_ID" --metric-type "MEMORY" --device-type "iPhone15,2"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			if trimmedBuildID == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			platforms, err := normalizePerfPowerMetricPlatforms(shared.SplitCSVUpper(*platform), "--platform")

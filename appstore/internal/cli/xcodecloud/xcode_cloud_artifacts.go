@@ -48,7 +48,7 @@ func XcodeCloudArtifactsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	actionID := fs.String("action-id", "", "Build action ID to list artifacts for")
-	runID := fs.String("run-id", "", "Build run ID to resolve a single action from")
+	runID := fs.String("run-id", "", "Build run ID to aggregate artifacts across all actions")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -57,8 +57,8 @@ func XcodeCloudArtifactsListCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "list",
 		ShortUsage: "asc xcode-cloud artifacts list [flags]",
-		ShortHelp:  "List artifacts for a build action.",
-		LongHelp: `List artifacts for a build action.
+		ShortHelp:  "List artifacts for a build action or build run.",
+		LongHelp: `List artifacts for a build action or across all actions in a build run.
 
 Examples:
   asc xcode-cloud artifacts list --action-id "ACTION_ID"

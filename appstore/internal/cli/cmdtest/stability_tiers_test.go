@@ -17,6 +17,7 @@ func TestExperimentalCommandsHaveStabilityLabel(t *testing.T) {
 	cases := []struct {
 		path []string // subcommand path from root
 	}{
+		{[]string{"system-status"}},
 		{[]string{"screenshots", "run"}},
 		{[]string{"screenshots", "capture"}},
 		{[]string{"screenshots", "frame"}},

@@ -20,7 +20,12 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/auth"
 )
 
-const tokenLifetime = 20 * time.Minute
+const (
+	tokenLifetime = 20 * time.Minute
+	// jwtIssuedAtSkew backdates the issued-at claim so a client clock running
+	// ahead of Apple's does not produce a token rejected as issued in the future.
+	jwtIssuedAtSkew = 60 * time.Second
+)
 
 type ClientOption func(*Client)
 
@@ -121,7 +126,7 @@ func (c *Client) signedToken() (string, error) {
 	now := c.now().UTC()
 	claims := jwt.MapClaims{
 		"iss": c.credentials.IssuerID,
-		"iat": now.Unix(),
+		"iat": now.Add(-jwtIssuedAtSkew).Unix(),
 		"exp": now.Add(tokenLifetime).Unix(),
 		"aud": "appstoreconnect-v1",
 		"bid": c.credentials.BundleID,

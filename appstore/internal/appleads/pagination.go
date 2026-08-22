@@ -31,7 +31,10 @@ type platformPaginatedEnvelope struct {
 	Pagination platformPageDetail `json:"pagination"`
 }
 
-const maxPlatformPaginationPages = 1000
+// MaxPlatformPaginationPages bounds how many pages any Apple Ads paginator
+// fetches for a single logical query. Servers that keep returning full pages
+// without a total count would otherwise loop forever.
+const MaxPlatformPaginationPages = 1000
 
 // PaginateAll fetches all pages for an offset-paginated endpoint.
 func (c *Client) PaginateAll(ctx context.Context, spec EndpointSpec, pathParams map[string]string, query url.Values, startOffset, pageSize int, body json.RawMessage) (RawResponse, error) {
@@ -113,8 +116,8 @@ func (c *Client) paginatePlatformChangeHistoryDetail(ctx context.Context, spec E
 	var aggregated []json.RawMessage
 	var total *int
 	for pages := 0; ; pages++ {
-		if pages >= maxPlatformPaginationPages {
-			return nil, fmt.Errorf("platform API v1 pagination exceeded the %d-page safety limit; narrow your query or use --offset to continue from a smaller result set", maxPlatformPaginationPages)
+		if pages >= MaxPlatformPaginationPages {
+			return nil, fmt.Errorf("platform API v1 pagination exceeded the %d-page safety limit; narrow your query or use --offset to continue from a smaller result set", MaxPlatformPaginationPages)
 		}
 		pageQuery := cloneValues(query)
 		pageQuery.Set("limit", strconv.Itoa(pageSize))
@@ -318,8 +321,8 @@ func (c *Client) paginatePlatformGET(ctx context.Context, spec EndpointSpec, pat
 	var total *int
 	pages := 0
 	for {
-		if pages >= maxPlatformPaginationPages {
-			return nil, fmt.Errorf("platform API v1 pagination exceeded the %d-page safety limit; narrow your query or use --offset to continue from a smaller result set", maxPlatformPaginationPages)
+		if pages >= MaxPlatformPaginationPages {
+			return nil, fmt.Errorf("platform API v1 pagination exceeded the %d-page safety limit; narrow your query or use --offset to continue from a smaller result set", MaxPlatformPaginationPages)
 		}
 		pages++
 		pageQuery := cloneValues(query)

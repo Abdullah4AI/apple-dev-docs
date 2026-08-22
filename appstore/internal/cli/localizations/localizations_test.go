@@ -100,6 +100,23 @@ func TestLocalizationsUpdateCommand_HelpMentionsCanonicalLocaleForms(t *testing.
 	}
 }
 
+func TestLocalizationsListCommand_IncludeFlagListsSupportedValues(t *testing.T) {
+	cmd := LocalizationsListCommand()
+
+	includeFlag := cmd.FlagSet.Lookup("include")
+	if includeFlag == nil {
+		t.Fatal("expected --include flag on localizations list")
+	}
+	for _, want := range []string{"appStoreVersion", "appScreenshotSets", "appPreviewSets", "searchKeywords"} {
+		if !strings.Contains(includeFlag.Usage, want) {
+			t.Fatalf("expected --include usage to mention %q, got %q", want, includeFlag.Usage)
+		}
+	}
+	if !strings.Contains(cmd.LongHelp, `asc localizations list --version "VERSION_ID" --include "appScreenshotSets,appPreviewSets"`) {
+		t.Fatalf("expected long help to document an --include example, got %q", cmd.LongHelp)
+	}
+}
+
 func TestLocalizationsSupportedLocalesCommand_MissingVersion(t *testing.T) {
 	cmd := LocalizationsSupportedLocalesCommand()
 	if err := cmd.FlagSet.Parse(nil); err != nil {

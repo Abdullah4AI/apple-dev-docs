@@ -14,6 +14,8 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
@@ -28,6 +31,21 @@ type customPageUploadRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn customPageUploadRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+type customPageBaseURLRoundTripper struct {
+	target *url.URL
+	next   http.RoundTripper
+}
+
+func (t customPageBaseURLRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	requestURL := *cloned.URL
+	requestURL.Scheme = t.target.Scheme
+	requestURL.Host = t.target.Host
+	cloned.URL = &requestURL
+	cloned.Host = t.target.Host
+	return t.next.RoundTrip(cloned)
 }
 
 func TestExecuteCustomPageScreenshotUpload_SyncDeletesExistingScreenshotsAndReordersUploads(t *testing.T) {
@@ -68,7 +86,7 @@ func TestExecuteCustomPageScreenshotUpload_SyncDeletesExistingScreenshotsAndReor
 			return customPageJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"%s","attributes":{"uploaded":true}}}`, id))
 		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/v1/appScreenshots/"):
 			id := strings.TrimPrefix(req.URL.Path, "/v1/appScreenshots/")
-			return customPageJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"%s","attributes":{"assetDeliveryState":{"state":"COMPLETE"}}}}`, id))
+			return customPageJSONResponse(http.StatusOK, fmt.Sprintf(`{"data":{"type":"appScreenshots","id":"%s","attributes":{"assetDeliveryState":{"state":"COMPLETE"},"sourceFileChecksum":"settled"}}}`, id))
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
@@ -122,6 +140,69 @@ func TestExecuteCustomPageScreenshotUpload_SyncDeletesExistingScreenshotsAndReor
 	}
 }
 
+func TestExecuteCustomPageScreenshotUploadFullSetQuotesReplacementPath(t *testing.T) {
+	rootDir := t.TempDir()
+	trickyPath := filepath.Join(rootDir, "$HOME", "$(touch pwned)")
+	if err := os.MkdirAll(trickyPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	writeCustomPageTestPNG(t, trickyPath, "01-home.png")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appCustomProductPageLocalizations/loc-1/appScreenshotSets":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}]}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshotSets/set-1/appScreenshots":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"data":[{"type":"appScreenshots","id":"old-1"},{"type":"appScreenshots","id":"old-2"},{"type":"appScreenshots","id":"old-3"},{"type":"appScreenshots","id":"old-4"},{"type":"appScreenshots","id":"old-5"},{"type":"appScreenshots","id":"old-6"},{"type":"appScreenshots","id":"old-7"},{"type":"appScreenshots","id":"old-8"},{"type":"appScreenshots","id":"old-9"},{"type":"appScreenshots","id":"old-10"}]}`)
+		default:
+			t.Fatalf("full-set remediation must not mutate remote assets: %s %s", req.Method, req.URL.String())
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(func() {
+		server.Close()
+	})
+
+	serverURL, parseErr := url.Parse(server.URL)
+	if parseErr != nil {
+		t.Fatalf("parse test server URL: %v", parseErr)
+	}
+	httpClient := server.Client()
+	httpClient.Transport = customPageBaseURLRoundTripper{target: serverURL, next: httpClient.Transport}
+	client := newCustomPageTestClientWithHTTPClient(t, httpClient)
+	origFactory := customPageMediaClientFactory
+	customPageMediaClientFactory = func() (*asc.Client, error) { return client, nil }
+	t.Cleanup(func() {
+		customPageMediaClientFactory = origFactory
+	})
+
+	_, err := executeCustomPageScreenshotUpload(context.Background(), "loc-1", trickyPath, "IPHONE_65", false)
+	if err == nil {
+		t.Fatal("expected full screenshot set error")
+	}
+	const marker = "or rerun with "
+	commandIndex := strings.Index(err.Error(), marker)
+	if commandIndex < 0 {
+		t.Fatalf("expected replacement command in error: %v", err)
+	}
+	command := strings.TrimSpace(err.Error()[commandIndex+len(marker):])
+	args, splitErr := shellquote.Split(command)
+	if splitErr != nil {
+		t.Fatalf("replacement command is not shell-parseable: %v", splitErr)
+	}
+	wantArgs := []string{
+		"asc", "product-pages", "custom-pages", "localizations", "screenshot-sets", "sync",
+		"--localization-id", "loc-1", "--path", trickyPath, "--device-type", "IPHONE_65", "--confirm",
+	}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("replacement command args = %#v, want %#v (error: %v)", args, wantArgs, err)
+	}
+}
+
 func newCustomPageTestClient(t *testing.T) *asc.Client {
 	return newCustomPageTestClientWithTimeout(t, asc.ResolveTimeout())
 }
@@ -143,6 +224,33 @@ func newCustomPageTestClientWithTimeout(t *testing.T, timeout time.Duration) *as
 	}
 
 	client, err := asc.NewClientFromPEMWithTimeout("KEY_ID", "ISSUER_ID", string(pemBytes), timeout)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	return client
+}
+
+func newCustomPageTestClientWithHTTPClient(t *testing.T, httpClient *http.Client) *asc.Client {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	if pemBytes == nil {
+		t.Fatal("encode pem: nil")
+	}
+	keyPath := filepath.Join(t.TempDir(), "test-key.p8")
+	if err := os.WriteFile(keyPath, pemBytes, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	client, err := asc.NewClientWithHTTPClient("KEY_ID", "ISSUER_ID", keyPath, httpClient)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}

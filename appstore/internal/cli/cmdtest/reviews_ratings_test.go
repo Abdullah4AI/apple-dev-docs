@@ -71,7 +71,7 @@ func TestReviewsRatingsOutputErrors(t *testing.T) {
 		{
 			name:    "reviews ratings unsupported output",
 			args:    []string{"reviews", "ratings", "--app", "123", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "reviews ratings pretty with table",
@@ -95,7 +95,7 @@ func TestReviewsRatingsOutputErrors(t *testing.T) {
 					t.Fatalf("parse error: %v", err)
 				}
 				err := root.Run(context.Background())
-				if !errors.Is(err, flag.ErrHelp) {
+				if !isUsageClassError(err) {
 					t.Fatalf("expected ErrHelp, got %v", err)
 				}
 			})

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -43,7 +42,7 @@ func WaitForBuildByNumberOrUploadFailure(ctx context.Context, client *asc.Client
 	}
 	uploadID = strings.TrimSpace(uploadID)
 
-	return asc.PollUntil(ctx, pollInterval, func(ctx context.Context) (*asc.BuildResponse, bool, error) {
+	return asc.PollUntilTolerant(ctx, pollInterval, func(ctx context.Context) (*asc.BuildResponse, bool, error) {
 		if uploadID != "" {
 			upload, err := client.GetBuildUpload(ctx, uploadID)
 			if err != nil {
@@ -80,7 +79,7 @@ func WaitForBuildByNumberOrUploadFailure(ctx context.Context, client *asc.Client
 			return build, true, nil
 		}
 		return nil, false, nil
-	})
+	}, asc.PollOptions{Tolerate: asc.IsTransientWaitError})
 }
 
 // VerifyBuildUploadAfterCommit briefly watches a newly committed upload for
@@ -113,10 +112,20 @@ func VerifyBuildUploadAfterCommit(ctx context.Context, client *asc.Client, appID
 		effectiveInterval = time.Millisecond
 	}
 
+	callerCtx := ctx
 	_, err := asc.PollUntil(verifyCtx, effectiveInterval, func(ctx context.Context) (*asc.BuildUploadResponse, bool, error) {
 		upload, err := client.GetBuildUpload(ctx, uploadID)
 		if err != nil {
-			if shouldIgnoreBuildWaitLookupError(err) || shouldIgnorePostCommitBuildUploadLookupError(ctx, err) {
+			// A retry delay that cannot fit in this bounded verification window
+			// is already a terminal best-effort outcome: stop probing now and
+			// preserve the caller's asynchronous-success behavior.
+			if asc.IsRetryDelayExceeded(err) {
+				return nil, true, nil
+			}
+			// Transient lookup errors stay ignorable for the whole verification
+			// window: expiry of the bounded window itself is reported by the
+			// poll context, not by this predicate.
+			if shouldIgnoreBuildWaitLookupError(err) || asc.IsRetryDelayExceeded(err) || asc.IsTransientWaitError(callerCtx, err) {
 				return nil, false, nil
 			}
 			return nil, false, err
@@ -140,40 +149,6 @@ func VerifyBuildUploadAfterCommit(ctx context.Context, client *asc.Client, appID
 		return nil
 	}
 	return err
-}
-
-func shouldIgnorePostCommitBuildUploadLookupError(ctx context.Context, err error) bool {
-	if err == nil {
-		return false
-	}
-	if asc.IsRetryable(err) {
-		return true
-	}
-
-	var apiErr *asc.APIError
-	if errors.As(err, &apiErr) && apiErr.StatusCode >= 500 {
-		return true
-	}
-
-	if errors.Is(err, context.DeadlineExceeded) && ctx != nil && ctx.Err() == nil {
-		return true
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) && (netErr.Timeout() || isTemporaryNetError(netErr)) {
-		return true
-	}
-
-	return false
-}
-
-type temporaryNetError interface {
-	Temporary() bool
-}
-
-func isTemporaryNetError(err net.Error) bool {
-	tempErr, ok := err.(temporaryNetError)
-	return ok && tempErr.Temporary()
 }
 
 func findBuildByNumber(ctx context.Context, client *asc.Client, appID, version, buildNumber, platform, uploadID string) (*asc.BuildResponse, error) {

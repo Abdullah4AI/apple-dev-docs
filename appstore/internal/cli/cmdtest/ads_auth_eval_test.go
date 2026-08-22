@@ -445,7 +445,7 @@ func TestAdsAuthEvalValidatesUsageErrors(t *testing.T) {
 	}
 
 	_, stderr, err = runAdsEvalCommand(t, "ads", "auth", "status", "--output", "markdown")
-	if !errors.Is(err, flag.ErrHelp) || !strings.Contains(stderr, "unsupported format: markdown") {
+	if !isUsageClassError(err) || !strings.Contains(stderr, `(got "markdown")`) {
 		t.Fatalf("status error = %v stderr = %q, want invalid output usage error", err, stderr)
 	}
 

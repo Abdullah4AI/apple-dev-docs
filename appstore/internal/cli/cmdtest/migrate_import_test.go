@@ -876,7 +876,7 @@ func TestMigrateImportUploadsAndSkipsExistingScreenshots(t *testing.T) {
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/shot-new":
 			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png"}}}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/shot-new":
-			body := `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png","assetDeliveryState":{"state":"COMPLETE"}}}}`
+			body := `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png","sourceFileChecksum":"settled","assetDeliveryState":{"state":"COMPLETE"}}}}`
 			return migrateJSONResponse(http.StatusOK, body), nil
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			body, err := io.ReadAll(req.Body)
@@ -1566,7 +1566,7 @@ func TestMigrateImportUploadPhaseKeepsFullUploadBudget(t *testing.T) {
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/shot-new":
 			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png"}}}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/shot-new":
-			body := `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png","assetDeliveryState":{"state":"COMPLETE"}}}}`
+			body := `{"data":{"type":"appScreenshots","id":"shot-new","attributes":{"fileName":"iphone_65_new.png","sourceFileChecksum":"settled","assetDeliveryState":{"state":"COMPLETE"}}}}`
 			return migrateJSONResponse(http.StatusOK, body), nil
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return migrateJSONResponse(http.StatusNoContent, ""), nil
@@ -1739,7 +1739,7 @@ func TestMigrateImportDoesNotWarnForScreenshotBootstrapCreates(t *testing.T) {
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/shot-1":
 			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png"}}}`), nil
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/shot-1":
-			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png","assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
+			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"iphone_65_screen.png","sourceFileChecksum":"settled","assetDeliveryState":{"state":"COMPLETE"}}}}`), nil
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			return migrateJSONResponse(http.StatusNoContent, ""), nil
 		default:

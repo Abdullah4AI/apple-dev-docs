@@ -302,6 +302,9 @@ func TestBuildBetaGroupsQuery(t *testing.T) {
 	WithBetaGroupsApps([]string{" app-1 ", "app-2"})(query)
 	WithBetaGroupsBuilds([]string{"build-1"})(query)
 	WithBetaGroupsFields([]string{"name", "isInternalGroup", "hasAccessToAllBuilds"})(query)
+	WithBetaGroupsIsInternal(true)(query)
+	WithBetaGroupsName("  QA Testers  ")(query)
+	WithBetaGroupsSort(" -createdDate ")(query)
 
 	values, err := url.ParseQuery(buildBetaGroupsQuery(query))
 	if err != nil {
@@ -318,6 +321,32 @@ func TestBuildBetaGroupsQuery(t *testing.T) {
 	}
 	if got := values.Get("fields[betaGroups]"); got != "name,isInternalGroup,hasAccessToAllBuilds" {
 		t.Fatalf("unexpected beta group fields %q", got)
+	}
+	if got := values.Get("filter[isInternalGroup]"); got != "true" {
+		t.Fatalf("expected filter[isInternalGroup]=true, got %q", got)
+	}
+	if got := values.Get("filter[name]"); got != "QA Testers" {
+		t.Fatalf("expected filter[name]=QA Testers, got %q", got)
+	}
+	if got := values.Get("sort"); got != "-createdDate" {
+		t.Fatalf("expected sort=-createdDate, got %q", got)
+	}
+}
+
+func TestBuildBetaGroupsQueryOmitsUnsetNameAndSort(t *testing.T) {
+	query := &betaGroupsQuery{}
+	WithBetaGroupsName("   ")(query)
+	WithBetaGroupsSort("")(query)
+
+	values, err := url.ParseQuery(buildBetaGroupsQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if _, ok := values["filter[name]"]; ok {
+		t.Fatalf("expected no filter[name], got %q", values.Get("filter[name]"))
+	}
+	if _, ok := values["sort"]; ok {
+		t.Fatalf("expected no sort, got %q", values.Get("sort"))
 	}
 }
 

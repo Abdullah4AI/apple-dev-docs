@@ -21,6 +21,45 @@ func TestScoreCommandDocSkipsSelfReferentialAliases(t *testing.T) {
 	}
 }
 
+func TestCommandPathScorePrefersWholeSegmentsOverHyphenatedComponents(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  commandDoc
+		term string
+		want int
+	}{
+		{
+			name: "whole path segment",
+			doc:  commandDoc{Command: "asc web apps create", PathTokens: []string{"web", "apps", "create"}},
+			term: "app",
+			want: exactPathTokenScore,
+		},
+		{
+			name: "hyphenated component",
+			doc:  commandDoc{Command: "asc app-events create", PathTokens: []string{"app-events", "create"}},
+			term: "app",
+			want: compoundPathTokenScore,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := commandPathScore(test.doc, test.term); got != test.want {
+				t.Fatalf("commandPathScore(%q, %q) = %d, want %d", test.doc.Command, test.term, got, test.want)
+			}
+		})
+	}
+}
+
+func TestExactLeafQueryTokenMatchesWholeLeafOnly(t *testing.T) {
+	if token, ok := exactLeafQueryToken("asc xcode-cloud status", []string{"build", "status"}); !ok || token != "status" {
+		t.Fatalf("exactLeafQueryToken() = %q, %t, want status, true", token, ok)
+	}
+	if token, ok := exactLeafQueryToken("asc app-clips domain-status", []string{"build", "status"}); ok {
+		t.Fatalf("exactLeafQueryToken() = %q, true, want compound leaf not to match", token)
+	}
+}
+
 func TestScoreTermDoesNotStackExactCommandAndPathTokenScores(t *testing.T) {
 	doc := commandDoc{
 		Command:    "asc search",

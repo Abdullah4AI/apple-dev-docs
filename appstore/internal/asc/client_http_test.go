@@ -2508,8 +2508,11 @@ func TestBuildAttributesPreservesExpiredPresence(t *testing.T) {
 		input    string
 		contains string
 		excludes string
+		known    bool
+		value    bool
 	}{
-		{name: "explicit false", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z","expired":false}`, contains: `"expired":false`},
+		{name: "explicit false", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z","expired":false}`, contains: `"expired":false`, known: true},
+		{name: "explicit true", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z","expired":true}`, contains: `"expired":true`, known: true, value: true},
 		{name: "absent", input: `{"version":"1","uploadedDate":"2026-01-20T00:00:00Z"}`, excludes: `"expired"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2526,6 +2529,10 @@ func TestBuildAttributesPreservesExpiredPresence(t *testing.T) {
 			}
 			if tc.excludes != "" && strings.Contains(string(encoded), tc.excludes) {
 				t.Fatalf("did not expect %q in %s", tc.excludes, encoded)
+			}
+			expired, known := attrs.ExpiredValue()
+			if known != tc.known || expired != tc.value {
+				t.Fatalf("ExpiredValue() = (%t, %t), want (%t, %t)", expired, known, tc.value, tc.known)
 			}
 		})
 	}
@@ -5384,6 +5391,46 @@ func TestGetAppPreviews(t *testing.T) {
 	}
 	if len(result.Data) != 1 {
 		t.Fatalf("expected 1 preview, got %d", len(result.Data))
+	}
+}
+
+func TestGetAppPreviewsUsesNextURL(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"appPreviews","id":"PREVIEW_456","attributes":{"fileName":"later.mov"}}]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/appPreviewSets/SET_123/appPreviews" || req.URL.RawQuery != "cursor=next" {
+			t.Fatalf("expected next page path and query, got %s", req.URL.RequestURI())
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	result, err := client.GetAppPreviews(
+		context.Background(),
+		"SET_123",
+		WithAppPreviewsNextURL("https://api.appstoreconnect.apple.com/v1/appPreviewSets/SET_123/appPreviews?cursor=next"),
+	)
+	if err != nil {
+		t.Fatalf("GetAppPreviews() error: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "PREVIEW_456" {
+		t.Fatalf("unexpected previews response: %+v", result.Data)
+	}
+}
+
+func TestGetAppPreviewsRejectsUntrustedNextURL(t *testing.T) {
+	client := newTestClient(t, func(req *http.Request) {
+		t.Fatalf("unexpected request: %s", req.URL.String())
+	}, jsonResponse(http.StatusInternalServerError, `{}`))
+
+	_, err := client.GetAppPreviews(
+		context.Background(),
+		"SET_123",
+		WithAppPreviewsNextURL("https://example.com/v1/appPreviews?cursor=next"),
+	)
+	if err == nil || !strings.Contains(err.Error(), "untrusted host") {
+		t.Fatalf("GetAppPreviews() error = %v, want untrusted next URL rejection", err)
 	}
 }
 
@@ -9994,7 +10041,7 @@ func TestGetBetaAppReviewSubmission(t *testing.T) {
 	}
 }
 
-func TestGetBuildBetaDetails_WithBuildFilter(t *testing.T) {
+func TestGetBuildBetaDetails_WithBuildFilterAndInclude(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[{"type":"buildBetaDetails","id":"detail-1","attributes":{"autoNotifyEnabled":true}}]}`)
 	client := newTestClient(t, func(req *http.Request) {
 		if req.Method != http.MethodGet {
@@ -10003,6 +10050,9 @@ func TestGetBuildBetaDetails_WithBuildFilter(t *testing.T) {
 		if req.URL.Path != "/v1/buildBetaDetails" {
 			t.Fatalf("expected path /v1/buildBetaDetails, got %s", req.URL.Path)
 		}
+		if got := req.URL.Query().Get("include"); got != "build" {
+			t.Fatalf("expected include=build, got %q", got)
+		}
 		values := req.URL.Query()
 		if values.Get("filter[build]") != "build-1" {
 			t.Fatalf("expected filter[build]=build-1, got %q", values.Get("filter[build]"))
@@ -10010,7 +10060,11 @@ func TestGetBuildBetaDetails_WithBuildFilter(t *testing.T) {
 		assertAuthorized(t, req)
 	}, response)
 
-	if _, err := client.GetBuildBetaDetails(context.Background(), WithBuildBetaDetailsBuildIDs([]string{"build-1"})); err != nil {
+	if _, err := client.GetBuildBetaDetails(
+		context.Background(),
+		WithBuildBetaDetailsBuildIDs([]string{"build-1"}),
+		WithBuildBetaDetailsIncludeBuild(),
+	); err != nil {
 		t.Fatalf("GetBuildBetaDetails() error: %v", err)
 	}
 }

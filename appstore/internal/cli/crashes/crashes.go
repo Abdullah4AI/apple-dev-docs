@@ -21,6 +21,7 @@ type listCommandFlags struct {
 	appPlatform     *string
 	devicePlatform  *string
 	buildID         *string
+	legacyBuildID   *shared.DeprecatedStringFlagAlias
 	buildPreRelease *string
 	tester          *string
 	include         *string
@@ -38,7 +39,8 @@ func bindListCommandFlags(fs *flag.FlagSet) listCommandFlags {
 		osVersion:       fs.String("os-version", "", "Filter by OS version(s), comma-separated"),
 		appPlatform:     fs.String("app-platform", "", "Filter by app platform(s), comma-separated (IOS, MAC_OS, TV_OS, VISION_OS)"),
 		devicePlatform:  fs.String("device-platform", "", "Filter by device platform(s), comma-separated (IOS, MAC_OS, TV_OS, VISION_OS)"),
-		buildID:         fs.String("build", "", "Filter by build ID(s), comma-separated"),
+		buildID:         fs.String("build-id", "", "Filter by build ID(s), comma-separated"),
+		legacyBuildID:   shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id"),
 		buildPreRelease: fs.String("build-pre-release-version", "", "Filter by pre-release version ID(s), comma-separated"),
 		tester:          fs.String("tester", "", "Filter by tester ID(s), comma-separated"),
 		include:         fs.String("include", "", "Include related resources, comma-separated (build, tester)"),
@@ -83,6 +85,10 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 	}
 	if strings.TrimSpace(config.DeprecatedWarning) != "" {
 		fmt.Fprintln(os.Stderr, config.DeprecatedWarning)
+	}
+
+	if err := flags.legacyBuildID.Apply(flags.buildID); err != nil {
+		return err
 	}
 
 	if *flags.limit != 0 && (*flags.limit < 1 || *flags.limit > 200) {

@@ -198,6 +198,72 @@ func TestQueryOptimizationListPaginatesRequestBody(t *testing.T) {
 	}
 }
 
+func TestQueryOptimizationListCapsUnboundedPages(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		writeJSON(t, w, `{"result":[{"text":"one","popularity":1}],"pagination":{"offset":0,"pageSize":1}}`)
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"}, appleads.WithPlatformBaseURL(server.URL+"/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := appleads.PlatformEndpointByCommandPath("suggestions", "keywords", "find")
+	if !ok {
+		t.Fatal("missing endpoint spec")
+	}
+
+	items, err := queryOptimizationList[SearchSuggestion](context.Background(), client, spec, map[string]any{}, 1)
+	if err == nil {
+		t.Fatal("queryOptimizationList() unexpectedly succeeded for an unbounded result")
+	}
+	if got, want := requests, appleads.MaxPlatformPaginationPages; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	if got, want := len(items), appleads.MaxPlatformPaginationPages; got != want {
+		t.Fatalf("accumulated items = %d, want the %d fetched pages returned alongside the error", got, want)
+	}
+	for _, want := range []string{"1000-page safety limit", "suggestions keywords find", "narrow"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
+func TestQueryOptimizationRowsCapsUnboundedPages(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		writeJSON(t, w, `{"result":{"rows":[{"searchTerm":"habit tracker"}]},"pagination":{"offset":0,"pageSize":1}}`)
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"}, appleads.WithPlatformBaseURL(server.URL+"/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := appleads.PlatformEndpointByCommandPath("insights", "search-term-popularity", "find")
+	if !ok {
+		t.Fatal("missing endpoint spec")
+	}
+
+	items, err := queryOptimizationRows[popularityResponse](context.Background(), client, spec, map[string]any{}, 1)
+	if err == nil {
+		t.Fatal("queryOptimizationRows() unexpectedly succeeded for an unbounded result")
+	}
+	if got, want := requests, appleads.MaxPlatformPaginationPages; got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
+	}
+	if got, want := len(items), appleads.MaxPlatformPaginationPages; got != want {
+		t.Fatalf("accumulated rows = %d, want the %d fetched pages returned alongside the error", got, want)
+	}
+	for _, want := range []string{"1000-page safety limit", "insights search-term-popularity find", "narrow"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
 func TestFetchOptimizationPhraseSuggestionsReadsPhraseField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

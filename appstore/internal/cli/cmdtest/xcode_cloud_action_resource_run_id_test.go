@@ -90,7 +90,7 @@ func TestXcodeCloudIssuesListAggregatesIssuesFromRunID(t *testing.T) {
 	}
 }
 
-func TestXcodeCloudArtifactsListAggregatesArchiveActionsFromRunID(t *testing.T) {
+func TestXcodeCloudArtifactsListAggregatesAllActionsFromRunID(t *testing.T) {
 	setupAuth(t)
 
 	originalTransport := http.DefaultTransport
@@ -129,8 +129,21 @@ func TestXcodeCloudArtifactsListAggregatesArchiveActionsFromRunID(t *testing.T) 
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			}, nil
 		case 3:
-			if req.Method != http.MethodGet || req.URL.Path != "/v1/ciBuildActions/act-3/artifacts" {
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/ciBuildActions/act-2/artifacts" {
 				t.Fatalf("unexpected third request: %s %s", req.Method, req.URL.String())
+			}
+			if req.URL.Query().Get("limit") != "200" {
+				t.Fatalf("expected limit=200, got %q", req.URL.Query().Get("limit"))
+			}
+			body := `{"data":[{"type":"ciArtifacts","id":"test-log-bundle","attributes":{"fileType":"LOG_BUNDLE"}}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		case 4:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/ciBuildActions/act-3/artifacts" {
+				t.Fatalf("unexpected fourth request: %s %s", req.Method, req.URL.String())
 			}
 			if req.URL.Query().Get("limit") != "200" {
 				t.Fatalf("expected limit=200, got %q", req.URL.Query().Get("limit"))
@@ -168,8 +181,11 @@ func TestXcodeCloudArtifactsListAggregatesArchiveActionsFromRunID(t *testing.T) 
 	if !strings.Contains(stdout, `"id":"artifact-2"`) {
 		t.Fatalf("expected second artifact output, got %q", stdout)
 	}
-	if callCount != 3 {
-		t.Fatalf("expected 3 requests, got %d", callCount)
+	if !strings.Contains(stdout, `"id":"test-log-bundle"`) {
+		t.Fatalf("expected test action log bundle output, got %q", stdout)
+	}
+	if callCount != 4 {
+		t.Fatalf("expected 4 requests, got %d", callCount)
 	}
 }
 

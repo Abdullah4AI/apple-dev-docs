@@ -35,7 +35,8 @@ func ReviewSubmitCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	version := fs.String("version", "", "App Store version string")
 	versionID := fs.String("version-id", "", "App Store version ID")
-	buildID := fs.String("build", "", "Build ID to attach")
+	buildID := fs.String("build-id", "", "Build ID to attach")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	confirm := fs.Bool("confirm", false, "Confirm submission (required unless --dry-run)")
 	dryRun := fs.Bool("dry-run", false, "Preview the review submission flow without mutating")
@@ -54,11 +55,15 @@ This is the easier modern wrapper around:
   - asc review submissions-submit
 
 Examples:
-  asc review submit --app "123456789" --version "1.2.3" --build "BUILD_ID" --confirm
-  asc review submit --app "123456789" --version-id "VERSION_ID" --build "BUILD_ID" --dry-run`,
+  asc review submit --app "123456789" --version "1.2.3" --build-id "BUILD_ID" --confirm
+  asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "BUILD_ID" --dry-run`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
@@ -66,8 +71,8 @@ Examples:
 			}
 
 			if strings.TrimSpace(*buildID) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 			if strings.TrimSpace(*version) == "" && strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version or --version-id is required")

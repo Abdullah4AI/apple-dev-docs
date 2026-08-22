@@ -220,6 +220,107 @@ func TestProductPagesExperimentTreatmentLocalizationMediaSetsValidationErrors(t 
 	}
 }
 
+func TestProductPagesScreenshotSetIncludeScreenshotsIsExperimental(t *testing.T) {
+	root := RootCommand("1.2.3")
+	cases := [][]string{
+		{"product-pages", "custom-pages", "localizations", "screenshot-sets", "list"},
+		{"product-pages", "experiments", "treatments", "localizations", "screenshot-sets", "list"},
+	}
+
+	for _, path := range cases {
+		cmd := findSubcommand(root, path...)
+		if cmd == nil {
+			t.Fatalf("command %v not found", path)
+		}
+		includeScreenshots := cmd.FlagSet.Lookup("include-screenshots")
+		if includeScreenshots == nil {
+			t.Fatalf("command %v missing --include-screenshots", path)
+		}
+		if !strings.HasPrefix(includeScreenshots.Usage, "[experimental] ") {
+			t.Fatalf("command %v --include-screenshots usage = %q, want [experimental] prefix", path, includeScreenshots.Usage)
+		}
+	}
+}
+
+func TestProductPagesScreenshotSetIncludeScreenshotsRequiresFullLocalizationList(t *testing.T) {
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/appCustomProductPageLocalizations/loc-1/appScreenshotSets?cursor=next"
+
+	cases := []struct {
+		name           string
+		path           []string
+		localizationID string
+		next           string
+		wantStderr     string
+	}{
+		{
+			name:       "custom pages requires localization id for expansion",
+			path:       []string{"product-pages", "custom-pages", "localizations", "screenshot-sets", "list"},
+			wantStderr: "Error: --localization-id is required",
+		},
+		{
+			name:           "custom pages requires paginate",
+			path:           []string{"product-pages", "custom-pages", "localizations", "screenshot-sets", "list"},
+			localizationID: "loc-1",
+			wantStderr:     "custom-pages localizations screenshot-sets list: --include-screenshots requires --paginate",
+		},
+		{
+			name:           "custom pages rejects next",
+			path:           []string{"product-pages", "custom-pages", "localizations", "screenshot-sets", "list"},
+			localizationID: "loc-1",
+			next:           nextURL,
+			wantStderr:     "custom-pages localizations screenshot-sets list: --include-screenshots cannot be combined with --next",
+		},
+		{
+			name:       "treatment requires localization id for expansion",
+			path:       []string{"product-pages", "experiments", "treatments", "localizations", "screenshot-sets", "list"},
+			wantStderr: "Error: --localization-id is required",
+		},
+		{
+			name:           "treatment requires paginate",
+			path:           []string{"product-pages", "experiments", "treatments", "localizations", "screenshot-sets", "list"},
+			localizationID: "loc-1",
+			wantStderr:     "experiments treatments localizations screenshot-sets list: --include-screenshots requires --paginate",
+		},
+		{
+			name:           "treatment rejects next",
+			path:           []string{"product-pages", "experiments", "treatments", "localizations", "screenshot-sets", "list"},
+			localizationID: "loc-1",
+			next:           nextURL,
+			wantStderr:     "experiments treatments localizations screenshot-sets list: --include-screenshots cannot be combined with --next",
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			args := append(append([]string{}, test.path...), "--include-screenshots")
+			if test.localizationID != "" {
+				args = append(args, "--localization-id", test.localizationID)
+			}
+			if test.next != "" {
+				args = append(args, "--paginate", "--next", test.next)
+			}
+
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected ErrHelp, got %v", err)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantStderr) {
+				t.Fatalf("expected %q in stderr, got %q", test.wantStderr, stderr)
+			}
+		})
+	}
+}
+
 func TestProductPagesCustomPagesLocalizationsPreviewSetsListRejectsInvalidLimit(t *testing.T) {
 	root := RootCommand("1.2.3")
 

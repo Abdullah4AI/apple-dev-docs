@@ -241,27 +241,27 @@ func TestRunNormalizesSpacedBooleansOnActiveCommandPath(t *testing.T) {
 	}
 
 	for _, args := range tests {
-		_, stderr := captureCommandOutput(t, func() {
+		stdout, _ := captureCommandOutput(t, func() {
 			if code := Run(args, "1.0.0"); code != ExitSuccess {
 				t.Fatalf("Run(%v) exit code = %d, want success", args, code)
 			}
 		})
-		if !strings.Contains(stderr, "USAGE") {
-			t.Fatalf("Run(%v) stderr = %q, want command help", args, stderr)
+		if !strings.Contains(stdout, "USAGE") {
+			t.Fatalf("Run(%v) stdout = %q, want command help", args, stdout)
 		}
 	}
 }
 
 func TestRunNormalizesSpacedRootBooleanBeforeLazyCommandDiscovery(t *testing.T) {
 	resetReportFlags(t)
-	_, stderr := captureCommandOutput(t, func() {
+	stdout, _ := captureCommandOutput(t, func() {
 		args := []string{"--version", "false", "builds", "list", "--help"}
 		if code := Run(args, "1.0.0"); code != ExitSuccess {
 			t.Fatalf("Run(%v) exit code = %d, want success", args, code)
 		}
 	})
-	if !strings.Contains(stderr, "asc builds list") {
-		t.Fatalf("stderr = %q, want builds list help", stderr)
+	if !strings.Contains(stdout, "asc builds list") {
+		t.Fatalf("stdout = %q, want builds list help", stdout)
 	}
 }
 

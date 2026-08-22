@@ -94,6 +94,32 @@ func TestSnitchPreviewRemovesTerminalControls(t *testing.T) {
 	}
 }
 
+func TestSnitchDryRunRedactsSensitiveActual(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	const secret = "eyJhbGciOiJFUzI1NiJ9.fake.signature"
+	_, stderr, err := runSnitchCommand(
+		t, "9.9.9",
+		"--dry-run",
+		"--actual", "Authorization: Bearer "+secret,
+		"redaction probe",
+	)
+	if err != nil {
+		t.Fatalf("run snitch: %v", err)
+	}
+
+	if strings.Contains(stderr, secret) {
+		t.Fatalf("stderr leaked the credential: %q", stderr)
+	}
+	if !strings.Contains(stderr, "Authorization: [REDACTED]") {
+		t.Fatalf("stderr = %q, want a redaction marker that preserves context", stderr)
+	}
+	if !strings.Contains(stderr, "sensitive values were redacted") {
+		t.Fatalf("stderr = %q, want a generic redaction notice", stderr)
+	}
+}
+
 func TestSnitchFlushRemovesTerminalControls(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "snitch.log")

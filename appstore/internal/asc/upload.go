@@ -273,7 +273,7 @@ func executeUploadOperation(ctx context.Context, file *os.File, task uploadTask,
 		if replaySafe && isRetryableHTTPStatus(resp.StatusCode) {
 			retryAfter := parseRetryAfterHeader(resp.Header.Get("Retry-After"))
 			return struct{}{}, &RetryableError{
-				Err:        buildRetryableError(resp.StatusCode, retryAfter, nil),
+				Err:        buildRetryableErrorWithSource(resp.StatusCode, retryAfter, nil, "upload server"),
 				RetryAfter: retryAfter,
 			}
 		}

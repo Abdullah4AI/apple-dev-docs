@@ -27,13 +27,14 @@ func ValidateTestFlightCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("testflight", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
-	buildID := fs.String("build", "", "Build ID (required)")
+	buildID := fs.String("build-id", "", "Build ID (required)")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	strict := fs.Bool("strict", false, "Treat warnings as errors (exit non-zero)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "testflight",
-		ShortUsage: "asc validate testflight --app \"APP_ID\" --build \"BUILD_ID\" [flags]",
+		ShortUsage: "asc validate testflight --app \"APP_ID\" --build-id \"BUILD_ID\" [flags]",
 		ShortHelp:  "Validate TestFlight build readiness before distribution.",
 		LongHelp: `Validate TestFlight readiness for a build.
 
@@ -43,16 +44,20 @@ Checks:
   - "What to Test" notes present for at least one localization
 
 Examples:
-  asc validate testflight --app "APP_ID" --build "BUILD_ID"
-  asc validate testflight --app "APP_ID" --build "BUILD_ID" --output table
-  asc validate testflight --app "APP_ID" --build "BUILD_ID" --strict`,
+  asc validate testflight --app "APP_ID" --build-id "BUILD_ID"
+  asc validate testflight --app "APP_ID" --build-id "BUILD_ID" --output table
+  asc validate testflight --app "APP_ID" --build-id "BUILD_ID" --strict`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			buildValue := strings.TrimSpace(*buildID)
 			if buildValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

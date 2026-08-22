@@ -69,7 +69,8 @@ func AssetsScreenshotsValidateCommand() *ffcli.Command {
 
 This preflight mirrors upload file ordering and reports common local problems
 before any App Store Connect mutation happens, including hidden files,
-unreadable assets, unsupported dimensions, and duplicate decoded pixels.
+unreadable assets, unsupported dimensions, images whose encoded format
+contradicts their file extension, and duplicate decoded pixels.
 
 Examples:
   asc screenshots validate --path "./screenshots" --device-type "IPHONE_65"
@@ -189,7 +190,7 @@ func validateScreenshotAssets(pathValue, displayType string) (*screenshotValidat
 			continue
 		}
 
-		dimensions, err := asc.ReadImageDimensions(filePath)
+		dimensions, format, err := asc.ReadImageDimensionsAndFormat(filePath)
 		if err != nil {
 			hasError = true
 			appendScreenshotValidateIssue(result, screenshotValidateIssue{
@@ -206,6 +207,18 @@ func validateScreenshotAssets(pathValue, displayType string) (*screenshotValidat
 		}
 		fileResult.Width = dimensions.Width
 		fileResult.Height = dimensions.Height
+
+		if err := asc.ValidateImageFormatMatchesExtension(filePath, format); err != nil {
+			hasError = true
+			appendScreenshotValidateIssue(result, screenshotValidateIssue{
+				Code:        "format_mismatch",
+				Severity:    screenshotValidateSeverityError,
+				FilePath:    filePath,
+				FileName:    fileName,
+				Message:     err.Error(),
+				Remediation: screenshotFormatMismatchRemediation(filePath, format),
+			})
+		}
 
 		if err := asc.ValidateScreenshotDimensionsForSize(filePath, dimensions.Width, dimensions.Height, apiDisplayType); err != nil {
 			hasError = true
@@ -239,6 +252,16 @@ func validateScreenshotAssets(pathValue, displayType string) (*screenshotValidat
 	}
 
 	return result, nil
+}
+
+// screenshotFormatMismatchRemediation keeps the structured advice in step with
+// the message: a rename is only useful when screenshot uploads collect the
+// real format's extension, which they do for PNG and JPEG but not for GIF.
+func screenshotFormatMismatchRemediation(filePath, format string) string {
+	if renamed, ok := asc.SuggestedImageFileName(filePath, format); ok {
+		return fmt.Sprintf("Rename this file to %s, or re-export it in the format its extension names.", renamed)
+	}
+	return "Re-export this file in the format its extension names; screenshot uploads do not collect its real format."
 }
 
 func checkDecodedPixelDuplicate(result *screenshotValidateResult, filePath, fileName string, seenPixelDigests map[screenshotPixelDigest][]string) bool {

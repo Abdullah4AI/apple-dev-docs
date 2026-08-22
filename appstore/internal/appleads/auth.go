@@ -21,8 +21,14 @@ const (
 	tokenScope       = "searchadsorg"
 	clientSecretTTL  = 10 * time.Minute
 	tokenRefreshSkew = 30 * time.Second
-	clientSecretAud  = "https://appleid.apple.com"
-	grantClientCreds = "client_credentials"
+	// jwtIssuedAtSkew backdates the issued-at claim so a client clock running
+	// ahead of Apple's does not produce a secret rejected as issued in the future.
+	jwtIssuedAtSkew = 60 * time.Second
+	// maxClientSecretSpan is Apple's cap on how far a client secret may expire
+	// past its issued-at claim.
+	maxClientSecretSpan = 180 * 24 * time.Hour
+	clientSecretAud     = "https://appleid.apple.com"
+	grantClientCreds    = "client_credentials"
 )
 
 // Credentials contains resolved Apple Ads authentication inputs.
@@ -157,12 +163,16 @@ func GenerateClientSecret(keyID, teamID, clientID string, privateKey *ecdsa.Priv
 	if lifetime <= 0 {
 		lifetime = clientSecretTTL
 	}
-	if lifetime > 180*24*time.Hour {
-		return "", fmt.Errorf("client secret lifetime must be <= 180 days")
+	// The secret is signed with a backdated issued-at claim, so Apple's cap
+	// applies to the lifetime plus that skew. Subtract instead of adding: the
+	// sum overflows for a lifetime near the maximum duration and would wrap
+	// past the guard.
+	if lifetime > maxClientSecretSpan-jwtIssuedAtSkew {
+		return "", fmt.Errorf("client secret lifetime must be <= 180 days including the %s issued-at skew", jwtIssuedAtSkew)
 	}
 	claims := jwt.MapClaims{
 		"iss": teamID,
-		"iat": jwt.NewNumericDate(now),
+		"iat": jwt.NewNumericDate(now.Add(-jwtIssuedAtSkew)),
 		"exp": jwt.NewNumericDate(now.Add(lifetime)),
 		"aud": clientSecretAud,
 		"sub": clientID,

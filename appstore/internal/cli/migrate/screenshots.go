@@ -128,6 +128,10 @@ func discoverScreenshotPlanWithOpenFiles(screenshotsDir string, retainOpenFiles 
 				_ = file.Close()
 				return nil, nil, fmt.Errorf("invalid screenshot file %q: %w", candidate.path, err)
 			}
+			if err := validateOpenedImageFormat(candidate.path, file); err != nil {
+				_ = file.Close()
+				return nil, nil, fmt.Errorf("invalid screenshot file %q: %w", candidate.path, err)
+			}
 			displayType, err := inferScreenshotDisplayTypeFromDimensions(candidate.path, dimensions.Width, dimensions.Height)
 			if err != nil {
 				_ = file.Close()
@@ -207,6 +211,28 @@ func readOpenedImageDimensions(path string, file *os.File) (asc.ImageDimensions,
 		return asc.ImageDimensions{}, err
 	}
 	return asc.ImageDimensions{Width: cfg.Width, Height: cfg.Height}, nil
+}
+
+// validateOpenedImageFormat rejects a discovered screenshot whose encoded
+// format contradicts its file name, using the handle discovery already pinned.
+// App Store Connect derives the asset content type from that name, so without
+// this the import creates the localization and the screenshot set, reserves the
+// asset, and uploads every byte before the mismatch is reported back.
+func validateOpenedImageFormat(path string, file *os.File) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	format, err := asc.ReadImageFormatFrom(file)
+	if err != nil {
+		return err
+	}
+	if err := asc.ValidateImageFormatMatchesExtension(path, format); err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	return nil
 }
 
 type screenshotSourceRoot struct {

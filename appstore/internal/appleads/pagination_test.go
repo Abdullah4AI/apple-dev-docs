@@ -133,7 +133,7 @@ func TestPaginateAllPlatformGETCapsUnboundedPages(t *testing.T) {
 	if err == nil {
 		t.Fatal("PaginateAll() unexpectedly succeeded for an unbounded result")
 	}
-	if got, want := requests, maxPlatformPaginationPages; got != want {
+	if got, want := requests, MaxPlatformPaginationPages; got != want {
 		t.Fatalf("request count = %d, want %d", got, want)
 	}
 	for _, want := range []string{"1000-page safety limit", "narrow your query", "--offset"} {

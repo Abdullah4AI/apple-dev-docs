@@ -64,12 +64,50 @@ func TestMatchEndpoint_MethodAndPath(t *testing.T) {
 	if matchEndpoint(e, "DELETE /v1/apps") {
 		t.Error("unexpected match for 'DELETE /v1/apps'")
 	}
+	prefix := Endpoint{Method: "POST", Path: "/v1/apps/{id}/appInfos"}
+	if matchEndpoint(prefix, "POST /v1/apps") {
+		t.Error("unexpected prefix match for exact method and path query")
+	}
 }
 
 func TestMatchEndpoint_DotNotation(t *testing.T) {
 	e := Endpoint{Method: "GET", Path: "/v1/apps/{id}/builds"}
 	if !matchEndpoint(e, "apps.builds") {
 		t.Error("expected match for dot notation 'apps.builds'")
+	}
+	collection := Endpoint{Method: "GET", Path: "/v1/apps"}
+	if !matchEndpoint(collection, "apps.list") {
+		t.Error("expected match for action dot notation 'apps.list'")
+	}
+	member := Endpoint{Method: "GET", Path: "/v1/apps/{id}"}
+	if matchEndpoint(member, "apps.list") {
+		t.Error("unexpected list match for member endpoint")
+	}
+	versioned := Endpoint{Method: "GET", Path: "/v2/gameCenterAchievements/{id}", getAction: "get"}
+	if !matchEndpoint(versioned, "v2.gameCenterAchievements.get") {
+		t.Error("expected exact version-qualified action dot notation match")
+	}
+	if matchEndpoint(versioned, "v1.gameCenterAchievements.get") {
+		t.Error("unexpected match for a different API version")
+	}
+}
+
+func TestMatchEndpoint_FuzzyQueryDoesNotMatchActionSuffix(t *testing.T) {
+	tests := []struct {
+		query    string
+		endpoint Endpoint
+	}{
+		{query: "list", endpoint: Endpoint{Method: "GET", Path: "/v1/apps", getAction: "list"}},
+		{query: "create", endpoint: Endpoint{Method: "POST", Path: "/v1/apps"}},
+		{query: "update", endpoint: Endpoint{Method: "PATCH", Path: "/v1/apps/{id}"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			if matchEndpoint(tt.endpoint, tt.query) {
+				t.Fatalf("bare fuzzy query %q matched synthesized action", tt.query)
+			}
+		})
 	}
 }
 
@@ -98,6 +136,63 @@ func TestPathToDotNotation(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("pathToDotNotation(%q, %q) = %q, want %q", tt.method, tt.path, got, tt.want)
 		}
+	}
+}
+
+func TestPathToActionDotNotation(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{method: "GET", path: "/v1/apps", want: "apps.list"},
+		{method: "GET", path: "/v1/apps/{id}", want: "apps.get"},
+		{method: "GET", path: "/v1/apps/{id}/builds", want: "apps.builds.list"},
+		{method: "POST", path: "/v1/apps", want: "apps.create"},
+		{method: "PATCH", path: "/v1/apps/{id}", want: "apps.update"},
+		{method: "DELETE", path: "/v1/apps/{id}", want: "apps.delete"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			if got := pathToActionDotNotation(Endpoint{Method: tt.method, Path: tt.path}); got != tt.want {
+				t.Fatalf("pathToActionDotNotation(%q, %q) = %q, want %q", tt.method, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPathToActionDotNotationUsesOperationCardinality(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		getAction string
+		want      string
+	}{
+		{name: "to one related", path: "/v1/builds/{id}/appStoreVersion", getAction: "get", want: "builds.appStoreVersion.get"},
+		{name: "to many related", path: "/v1/apps/{id}/builds", getAction: "list", want: "apps.builds.list"},
+		{name: "to one relationship", path: "/v1/builds/{id}/relationships/appStoreVersion", getAction: "get", want: "builds.relationships.appStoreVersion.get"},
+		{name: "to many relationship", path: "/v1/apps/{id}/relationships/builds", getAction: "list", want: "apps.relationships.builds.list"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := Endpoint{Method: "GET", Path: tt.path, getAction: tt.getAction}
+			if got := pathToActionDotNotation(endpoint); got != tt.want {
+				t.Fatalf("pathToActionDotNotation() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPathToVersionedActionDotNotation(t *testing.T) {
+	endpoint := Endpoint{
+		Method:    "GET",
+		Path:      "/v2/gameCenterAchievements/{id}",
+		getAction: "get",
+	}
+	if got, want := pathToVersionedActionDotNotation(endpoint), "v2.gameCenterAchievements.get"; got != want {
+		t.Fatalf("pathToVersionedActionDotNotation() = %q, want %q", got, want)
 	}
 }
 

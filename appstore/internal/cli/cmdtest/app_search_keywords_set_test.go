@@ -363,7 +363,7 @@ func TestAppsSearchKeywordsSetUsageErrors(t *testing.T) {
 		{
 			name:    "invalid output before mutation",
 			args:    []string{"apps", "search-keywords", "set", "--app", "app-1", "--version", "1.2.3", "--locale", "en-US", "--keywords", "one,two", "--confirm", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 	}
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestReviewsListKeepsAlpha2Territory(t *testing.T) {
+func TestReviewsListNormalizesAlpha2Territory(t *testing.T) {
 	setupAuth(t)
 
 	originalTransport := http.DefaultTransport
@@ -23,8 +23,8 @@ func TestReviewsListKeepsAlpha2Territory(t *testing.T) {
 		if req.URL.Path != "/v1/apps/app-1/customerReviews" {
 			t.Fatalf("unexpected path %q", req.URL.Path)
 		}
-		if got := req.URL.Query().Get("filter[territory]"); got != "US" {
-			t.Fatalf("expected alpha-2 review territory filter US, got %q", got)
+		if got := req.URL.Query().Get("filter[territory]"); got != "USA" {
+			t.Fatalf("expected App Store territory filter USA, got %q", got)
 		}
 		return jsonResponse(http.StatusOK, `{
 			"data":[

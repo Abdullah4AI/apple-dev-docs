@@ -1,15 +1,15 @@
 package asc
 
 import (
-	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 type reviewQuery struct {
 	listQuery
-	rating                  int
+	ratings                 []int
 	territory               string
 	sort                    string
 	publishedResponseExists *bool
@@ -57,6 +57,7 @@ type reviewSubmissionItemsQuery struct {
 type appStoreVersionLocalizationsQuery struct {
 	listQuery
 	locales []string
+	include []string
 }
 
 type appInfoLocalizationsQuery struct {
@@ -160,8 +161,12 @@ func buildReviewQuery(opts []ReviewOption) string {
 	if query.territory != "" {
 		values.Set("filter[territory]", query.territory)
 	}
-	if query.rating >= 1 && query.rating <= 5 {
-		values.Set("filter[rating]", fmt.Sprintf("%d", query.rating))
+	if len(query.ratings) > 0 {
+		ratings := make([]string, 0, len(query.ratings))
+		for _, rating := range query.ratings {
+			ratings = append(ratings, strconv.Itoa(rating))
+		}
+		values.Set("filter[rating]", strings.Join(ratings, ","))
 	}
 	if query.sort != "" {
 		values.Set("sort", query.sort)
@@ -239,6 +244,7 @@ func buildReviewSubmissionItemsQuery(query *reviewSubmissionItemsQuery) string {
 func buildAppStoreVersionLocalizationsQuery(query *appStoreVersionLocalizationsQuery) string {
 	values := url.Values{}
 	addCSV(values, "filter[locale]", query.locales)
+	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
 	return values.Encode()
 }
@@ -489,16 +495,29 @@ func WithAppStoreReviewAttachmentsNextURL(next string) AppStoreReviewAttachments
 	}
 }
 
-// WithRating filters reviews by star rating (1-5).
+// WithRating filters reviews by a single star rating (1-5).
 func WithRating(rating int) ReviewOption {
+	return WithRatings([]int{rating})
+}
+
+// WithRatings filters reviews by one or more star ratings (1-5). Apple models
+// filter[rating] as a comma-separated array parameter, so several ratings match
+// with OR semantics. Ratings outside 1-5 and repeats are dropped.
+func WithRatings(ratings []int) ReviewOption {
 	return func(r *reviewQuery) {
-		if rating >= 1 && rating <= 5 {
-			r.rating = rating
+		for _, rating := range ratings {
+			if rating < 1 || rating > 5 {
+				continue
+			}
+			if slices.Contains(r.ratings, rating) {
+				continue
+			}
+			r.ratings = append(r.ratings, rating)
 		}
 	}
 }
 
-// WithTerritory filters reviews by territory code (e.g. US, GBR).
+// WithTerritory filters reviews by App Store territory code (e.g. USA, GBR).
 func WithTerritory(territory string) ReviewOption {
 	return func(r *reviewQuery) {
 		if territory != "" {
@@ -781,6 +800,15 @@ func WithAppStoreVersionLocalizationsNextURL(next string) AppStoreVersionLocaliz
 func WithAppStoreVersionLocalizationLocales(locales []string) AppStoreVersionLocalizationsOption {
 	return func(q *appStoreVersionLocalizationsQuery) {
 		q.locales = normalizeList(locales)
+	}
+}
+
+// WithAppStoreVersionLocalizationsInclude includes related resources for
+// version localizations (appStoreVersion, appScreenshotSets, appPreviewSets,
+// searchKeywords).
+func WithAppStoreVersionLocalizationsInclude(include []string) AppStoreVersionLocalizationsOption {
+	return func(q *appStoreVersionLocalizationsQuery) {
+		q.include = normalizeList(include)
 	}
 }
 

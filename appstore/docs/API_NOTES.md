@@ -45,7 +45,7 @@ Finance reports use Apple fiscal months (`YYYY-MM`), not calendar months.
 - Required fields: email, first/last name, password + confirm, secret question/answer, birth date, territory
 - Password must include uppercase, lowercase, and a number (8+ chars)
 - Sandbox territory inputs accept alpha-2, alpha-3, and exact English country names, but the CLI sends canonical 3-letter App Store territory codes (for example, `US`, `USA`, and `United States` all resolve to `USA`)
-- This normalization is limited to verified ASC alpha-3 territory surfaces; reviews, public storefront, and finance region flags keep their existing namespaces
+- This normalization is limited to verified ASC alpha-3 territory surfaces, including customer-review filters; public storefront and finance region flags keep their existing namespaces
 - List/get use the v2 API; create/delete use v1 endpoints (may be unavailable on some accounts)
 - Update/clear-history use the v2 API
 
@@ -92,8 +92,9 @@ Finance reports use Apple fiscal months (`YYYY-MM`), not calendar months.
 ## Authentication & Rate Limiting
 
 - JWTs issued for App Store Connect are valid for 10 minutes (handled internally).
-- Automatic retries apply only to GET/HEAD requests on 429/503 responses; POST/PATCH/DELETE are not retried.
-- Retry-After headers are honored when present; configure retry settings via `ASC_MAX_RETRIES`, `ASC_BASE_DELAY`, `ASC_MAX_DELAY`, `ASC_RETRY_LOG`.
+- For App Store Connect API requests, GET/HEAD requests automatically retry transient 408/429/5xx responses and transient transport failures. Ordinary POST/PATCH/PUT/DELETE requests are automatically replayed only after App Store Connect rejects them with 429; ambiguous 408/5xx responses and transport failures are surfaced without replay. Explicitly idempotent mutations use the broader transient retry policy because their exact payloads are safe to replay. Mutation bodies are buffered and sent identically on each retry. Set `ASC_MAX_RETRIES=0` to disable retries. Presigned uploads follow the upload-specific rules below.
+- Retry-After headers are honored when they do not exceed `ASC_MAX_DELAY` and fit within the remaining request context. Hints above the cap or beyond the context budget fail fast with the requested delay and the applicable limit. Configure retry settings via `ASC_MAX_RETRIES`, `ASC_BASE_DELAY`, `ASC_MAX_DELAY`, `ASC_RETRY_LOG`.
+- Uploads to the presigned URLs Apple returns in `uploadOperations` retry per part rather than per file: a PUT part is retried on 408/429/500/502/503/504 and on transient transport failures, using the same retry settings and honoring Retry-After only up to `ASC_MAX_DELAY`. Over-cap hints fail fast; parts that use any other method are never replayed, and each attempt is bounded by `ASC_UPLOAD_TIMEOUT`. This applies to build, screenshot, Game Center, App Clip, subscription, in-app purchase, and app event asset uploads.
 - `--api-debug` and `ASC_DEBUG=api` log each response's raw `X-Rate-Limit` value to stderr without changing stdout.
 - Some endpoints return 403 when the API key role lacks permission (e.g., finance reports, reviews).
 

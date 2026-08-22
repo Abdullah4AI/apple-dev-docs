@@ -82,6 +82,46 @@ func TestPrintTable_XcodeCloudRunResult(t *testing.T) {
 	}
 }
 
+func TestPrintTable_XcodeCloudDoctorResultUsesRegisteredRenderer(t *testing.T) {
+	result := &XcodeCloudDoctorResult{
+		Run: &XcodeCloudStatusResult{
+			BuildRunID:        "run-92",
+			BuildNumber:       92,
+			ExecutionProgress: "COMPLETE",
+			CompletionStatus:  "FAILED",
+		},
+		Summary: XcodeCloudDoctorSummary{TotalActions: 1, FailedActions: 1},
+		Actions: []XcodeCloudDoctorAction{{
+			ID:               "action-1",
+			Name:             "Archive - iOS",
+			CompletionStatus: "FAILED",
+		}},
+		LogBundles: []XcodeCloudDoctorLogBundle{{
+			ArtifactID:           "log-1",
+			ActionID:             "action-1",
+			Inspected:            true,
+			DiagnosticsTruncated: true,
+			Diagnostics: []XcodeCloudDoctorLogDiagnostic{{
+				Code:       "ITMS-90478",
+				Message:    "Invalid Version",
+				SourceFile: "IDEDistribution.standard.log",
+			}},
+		}},
+		Conclusion: "The Xcode Cloud build run failed.",
+		NextAction: "Resolve the reported issues.",
+	}
+
+	output := captureXcodeCloudStdout(t, func() error {
+		return PrintTable(result)
+	})
+
+	for _, expected := range []string{"Summary field", "run-92", "Actions ID", "action-1", "Archive - iOS", "Diagnostics truncated", "Log diagnostics action ID", "ITMS-90478", "Invalid Version", "IDEDistribution.standard.log"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("registered doctor renderer output missing %q: %s", expected, output)
+		}
+	}
+}
+
 func TestPrintMarkdown_XcodeCloudRunResult(t *testing.T) {
 	result := &XcodeCloudRunResult{
 		BuildRunID:        "run-123",

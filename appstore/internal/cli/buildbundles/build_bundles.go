@@ -24,7 +24,7 @@ func BuildBundlesCommand() *ffcli.Command {
 		LongHelp: `Manage build bundles and App Clip data.
 
 Examples:
-  asc build-bundles list --build "BUILD_ID"
+  asc build-bundles list --build-id "BUILD_ID"
   asc build-bundles file-sizes list --id "BUILD_BUNDLE_ID"
   asc build-bundles app-clip cache-status view --id "BUILD_BUNDLE_ID"
   asc build-bundles app-clip debug-status view --id "BUILD_BUNDLE_ID"
@@ -46,7 +46,8 @@ Examples:
 func BuildBundlesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
-	buildID := fs.String("build", "", "Build ID")
+	buildID := fs.String("build-id", "", "Build ID")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	limit := fs.Int("limit", 0, "Maximum included build bundles (1-50)")
 	output := shared.BindOutputFlags(fs)
 
@@ -57,19 +58,22 @@ func BuildBundlesListCommand() *ffcli.Command {
 		LongHelp: `List build bundles for a build.
 
 Examples:
-  asc build-bundles list --build "BUILD_ID"
-  asc build-bundles list --build "BUILD_ID" --limit 10`,
+  asc build-bundles list --build-id "BUILD_ID"
+  asc build-bundles list --build-id "BUILD_ID" --limit 10`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
 			if *limit != 0 && (*limit < 1 || *limit > 50) {
 				return fmt.Errorf("build-bundles list: --limit must be between 1 and 50")
 			}
 
 			buildValue := strings.TrimSpace(*buildID)
 			if buildValue == "" {
-				fmt.Fprintln(os.Stderr, "Error: --build is required")
-				return shared.MissingRequiredUsageError("--build")
+				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
+				return shared.MissingRequiredUsageError("--build-id")
 			}
 
 			client, err := shared.GetASCClient()

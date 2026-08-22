@@ -3,8 +3,6 @@ package cmdtest
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -553,7 +551,7 @@ func TestIAPOfferCodesListOutputErrors(t *testing.T) {
 		{
 			name:    "unsupported output",
 			args:    []string{"iap", "offer-codes", "list", "--iap-id", "9000000001", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "pretty with table",
@@ -575,7 +573,7 @@ func TestIAPOfferCodesListOutputErrors(t *testing.T) {
 				runErr = root.Run(context.Background())
 			})
 
-			if !errors.Is(runErr, flag.ErrHelp) {
+			if !isUsageClassError(runErr) {
 				t.Fatalf("expected help error, got %v", runErr)
 			}
 			if stdout != "" {

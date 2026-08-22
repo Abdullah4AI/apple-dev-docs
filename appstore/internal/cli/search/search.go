@@ -17,8 +17,11 @@ import (
 )
 
 const (
-	defaultLimit         = 10
-	canonicalIntentBoost = 300
+	defaultLimit           = 10
+	canonicalIntentBoost   = 300
+	exactPathTokenScore    = 60
+	compoundPathTokenScore = 30
+	exactLeafCommandBoost  = 40
 )
 
 var tokenPattern = regexp.MustCompile(`[a-z0-9][a-z0-9-]*`)
@@ -397,6 +400,12 @@ func scoreCommandDoc(doc commandDoc, queryTokens []string) (int, []string) {
 			}
 		}
 	}
+	if len(queryTokens) > 1 {
+		if leafToken, ok := exactLeafQueryToken(doc.Command, queryTokens); ok && hasSupportingQueryToken(doc, queryTokens, leafToken) {
+			score += exactLeafCommandBoost
+			addReason(&reasons, seenReasons, "command-leaf:"+leafToken)
+		}
+	}
 
 	if boost, reason := canonicalBoostFor(doc.Command, queryTokens); boost > 0 {
 		score += boost
@@ -419,8 +428,8 @@ func scoreTerm(doc commandDoc, term, reason string) (int, []string) {
 	if exactCommandMatch {
 		return 120, []string{reason, "command:" + term}
 	}
-	if !exactCommandMatch && tokenContains(doc.PathTokens, term) {
-		score += 60
+	if pathScore := commandPathScore(doc, term); pathScore > 0 {
+		score += pathScore
 		reasons = append(reasons, reason, "command:"+term)
 	}
 	if tokenContains(doc.SummaryTokens, term) {
@@ -455,6 +464,44 @@ func scoreTerm(doc commandDoc, term, reason string) (int, []string) {
 	}
 
 	return score, uniqueStrings(reasons)
+}
+
+func commandPathScore(doc commandDoc, term string) int {
+	if exactTokenContains(doc.PathTokens, term) {
+		return exactPathTokenScore
+	}
+	if tokenContains(doc.PathTokens, term) {
+		return compoundPathTokenScore
+	}
+	return 0
+}
+
+func exactLeafQueryToken(command string, queryTokens []string) (string, bool) {
+	commandParts := strings.Fields(strings.TrimPrefix(command, "asc "))
+	if len(commandParts) == 0 {
+		return "", false
+	}
+	leafForms := searchTokenForms(commandParts[len(commandParts)-1])
+	for _, token := range queryTokens {
+		if searchTokenFormsOverlap(leafForms, searchTokenForms(token)) {
+			return token, true
+		}
+	}
+	return "", false
+}
+
+func hasSupportingQueryToken(doc commandDoc, queryTokens []string, leafToken string) bool {
+	for _, token := range queryTokens {
+		if sameSearchStem(token, leafToken) {
+			continue
+		}
+		if tokenContains(doc.PathTokens, token) ||
+			tokenContains(doc.SummaryTokens, token) ||
+			tokenContains(doc.UsageTokens, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func canonicalBoostFor(command string, queryTokens []string) (int, string) {
@@ -592,6 +639,16 @@ func uniqueTokens(text string) []string {
 func tokenContains(tokens []string, term string) bool {
 	for _, token := range tokens {
 		if searchTokensMatch(token, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func exactTokenContains(tokens []string, term string) bool {
+	termForms := searchTokenForms(strings.ToLower(strings.TrimSpace(term)))
+	for _, token := range tokens {
+		if searchTokenFormsOverlap(searchTokenForms(strings.ToLower(strings.TrimSpace(token))), termForms) {
 			return true
 		}
 	}

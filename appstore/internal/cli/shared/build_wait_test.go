@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -474,6 +476,116 @@ func TestWaitForBuildByNumberOrUploadFailureReturnsMalformedUploadRelationships(
 	}
 }
 
+func TestWaitForBuildByNumberOrUploadFailureToleratesTransientLookupFailures(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	preReleaseCalls := 0
+	client := newBuildWaitTestClient(t, func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			return nil, fmt.Errorf("expected GET, got %s", req.Method)
+		}
+
+		switch req.URL.Path {
+		case "/v1/preReleaseVersions":
+			preReleaseCalls++
+			if preReleaseCalls <= 2 {
+				return buildWaitJSONStatusResponse(http.StatusServiceUnavailable, `{
+					"errors": [
+						{"status": "503", "code": "SERVICE_UNAVAILABLE", "title": "unavailable"}
+					]
+				}`)
+			}
+			return buildWaitJSONResponse(`{
+				"data": [
+					{
+						"type": "preReleaseVersions",
+						"id": "prv-1",
+						"attributes": {
+							"version": "1.2.3",
+							"platform": "IOS"
+						}
+					}
+				],
+				"links": {}
+			}`)
+		case "/v1/builds":
+			return buildWaitJSONResponse(`{
+				"data": [
+					{
+						"type": "builds",
+						"id": "build-123",
+						"attributes": {
+							"version": "42",
+							"processingState": "PROCESSING"
+						}
+					}
+				],
+				"links": {}
+			}`)
+		default:
+			return nil, fmt.Errorf("unexpected path: %s", req.URL.Path)
+		}
+	})
+
+	var buildResp *asc.BuildResponse
+	var err error
+	stderr := captureStderr(t, func() {
+		buildResp, err = WaitForBuildByNumberOrUploadFailure(context.Background(), client, "app-1", "", "1.2.3", "42", "IOS", time.Millisecond)
+	})
+	if err != nil {
+		t.Fatalf("WaitForBuildByNumberOrUploadFailure() error: %v", err)
+	}
+	if buildResp == nil {
+		t.Fatal("expected build response after tolerating transient failures")
+		return
+	}
+	if buildResp.Data.ID != "build-123" {
+		t.Fatalf("expected build ID build-123, got %q", buildResp.Data.ID)
+	}
+	for _, want := range []string{
+		"transient App Store Connect error while waiting (1/5)",
+		"transient App Store Connect error while waiting (2/5)",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("expected stderr to contain %q, got %q", want, stderr)
+		}
+	}
+}
+
+func TestWaitForBuildByNumberOrUploadFailureFailsAfterConsecutiveTransientLimit(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
+	preReleaseCalls := 0
+	client := newBuildWaitTestClient(t, func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			return nil, fmt.Errorf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/preReleaseVersions" {
+			return nil, fmt.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		preReleaseCalls++
+		return buildWaitJSONStatusResponse(http.StatusServiceUnavailable, `{
+			"errors": [
+				{"status": "503", "code": "SERVICE_UNAVAILABLE", "title": "unavailable"}
+			]
+		}`)
+	})
+
+	var err error
+	captureStderr(t, func() {
+		_, err = WaitForBuildByNumberOrUploadFailure(context.Background(), client, "app-1", "", "1.2.3", "42", "IOS", time.Millisecond)
+	})
+	if err == nil {
+		t.Fatal("expected error once transient failures exceed the ceiling, got nil")
+	}
+	if !strings.Contains(err.Error(), "giving up after 6 consecutive transient App Store Connect errors") {
+		t.Fatalf("expected consecutive transient failure error, got %v", err)
+	}
+	if preReleaseCalls != asc.DefaultMaxConsecutivePollFailures+1 {
+		t.Fatalf("expected %d lookups, got %d", asc.DefaultMaxConsecutivePollFailures+1, preReleaseCalls)
+	}
+}
+
 func TestVerifyBuildUploadAfterCommitIgnoresRetryableLookupErrorsUntilBuildLinks(t *testing.T) {
 	t.Setenv("ASC_MAX_RETRIES", "0")
 	lookupCalls := 0
@@ -516,6 +628,52 @@ func TestVerifyBuildUploadAfterCommitIgnoresRetryableLookupErrorsUntilBuildLinks
 	}
 	if lookupCalls < 2 {
 		t.Fatalf("expected retryable lookup error to be retried, got %d lookup(s)", lookupCalls)
+	}
+}
+
+func TestVerifyBuildUploadAfterCommitIgnoresRetryDelayBeyondVerificationBudget(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "5s")
+	asc.ResetConfigCacheForTest()
+	t.Cleanup(asc.ResetConfigCacheForTest)
+
+	lookupCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/buildUploads/upload-current" {
+			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		lookupCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{
+			"errors": [{"status": "429", "code": "RATE_LIMIT_EXCEEDED", "title": "Too many requests"}]
+		}`)
+	}))
+	t.Cleanup(server.Close)
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	client := newBuildWaitTestClient(t, func(req *http.Request) (*http.Response, error) {
+		redirected := req.Clone(req.Context())
+		redirected.URL.Scheme = serverURL.Scheme
+		redirected.URL.Host = serverURL.Host
+		redirected.Host = serverURL.Host
+		return server.Client().Do(redirected)
+	})
+
+	verifyTimeout := 30 * time.Millisecond
+	err = VerifyBuildUploadAfterCommit(context.Background(), client, "app-1", "upload-current", time.Millisecond, verifyTimeout)
+	if err != nil {
+		t.Fatalf("VerifyBuildUploadAfterCommit() error: %v", err)
+	}
+	if lookupCalls != 1 {
+		t.Fatalf("expected one best-effort upload lookup before honoring Retry-After, got %d", lookupCalls)
 	}
 }
 

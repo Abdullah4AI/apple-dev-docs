@@ -158,13 +158,16 @@ func TestRankAppTVOSUsesStorefrontSearchOrder(t *testing.T) {
 			t.Fatalf("X-Apple-Store-Front = %q, want %q", got, Storefronts["us"]+",33")
 		}
 
+		// The target app carries the middle score so neither ascending nor
+		// descending score order reproduces the response order. Ranking by
+		// score instead of response position lands it at rank 2, not 3.
 		writeBody(t, w, `{
 			"pageData": {
 				"bubbles": [{
 					"results": [
-						{"id":"111","entity":"tvSoftware","score":2.0},
-						{"id":"222","entity":"tvSoftware","score":1.9},
-						{"id":"1234567890","entity":"tvSoftware","score":9.9}
+						{"id":"111","entity":"tvSoftware","score":9.9},
+						{"id":"222","entity":"tvSoftware","score":1.0},
+						{"id":"1234567890","entity":"tvSoftware","score":5.0}
 					]
 				}]
 			},

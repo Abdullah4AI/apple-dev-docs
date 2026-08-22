@@ -237,7 +237,7 @@ func TestAuthDoctorJSONPrefillsVersionFromXcodeProject(t *testing.T) {
 		if !sliceContains(report.Migration.SuggestedCommands, `asc versions create --app "123456789" --version "3.2.1"`) {
 			t.Fatalf("expected version create guidance for upload-only lanes, got %#v", report.Migration.SuggestedCommands)
 		}
-		if !sliceContains(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
+		if !sliceContains(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`) {
 			t.Fatalf("expected review submit guidance for upload-only lanes, got %#v", report.Migration.SuggestedCommands)
 		}
 		if !sliceContains(report.Migration.SuggestedCommands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`) {
@@ -245,7 +245,7 @@ func TestAuthDoctorJSONPrefillsVersionFromXcodeProject(t *testing.T) {
 		}
 		attachIdx := sliceIndex(report.Migration.SuggestedCommands, `asc versions attach-build --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID"`)
 		validateIdx := sliceIndex(report.Migration.SuggestedCommands, `asc validate --app "123456789" --version-id "VERSION_ID"`)
-		reviewSubmitIdx := sliceIndex(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
+		reviewSubmitIdx := sliceIndex(report.Migration.SuggestedCommands, `asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "UPLOADED_BUILD_ID" --platform "PLATFORM" --confirm`)
 		if attachIdx < 0 || validateIdx <= attachIdx || reviewSubmitIdx <= validateIdx {
 			t.Fatalf("expected attach-build -> validate -> review submit ordering, got %#v", report.Migration.SuggestedCommands)
 		}

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	cmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestVersionsCreateCopyMetadataAppliesSelectedFields(t *testing.T) {
@@ -339,5 +341,73 @@ func TestVersionsCreateCopyMetadataRejectsInvalidExcludeField(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "--exclude-fields must be one of:") {
 		t.Fatalf("expected exclude-fields usage error, got %q", stderr)
+	}
+}
+
+func TestVersionsCreateRejectsRepeatedCopyFieldFlags(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request to %s", req.URL.String())
+		return nil, nil
+	})
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name: "copy-fields",
+			args: []string{
+				"versions", "create",
+				"--app", "app-1",
+				"--version", "2.4.0",
+				"--copy-metadata-from", "2.3.2",
+				"--copy-fields", "description",
+				"--copy-fields", "keywords",
+			},
+			wantErr: `--copy-fields specified multiple times; pass one comma-separated list, for example --copy-fields "description,keywords"`,
+		},
+		{
+			name: "exclude-fields",
+			args: []string{
+				"versions", "create",
+				"--app", "app-1",
+				"--version", "2.4.0",
+				"--copy-metadata-from", "2.3.2",
+				"--exclude-fields", "whatsNew",
+				"--exclude-fields", "keywords",
+			},
+			wantErr: `--exclude-fields specified multiple times; pass one comma-separated list, for example --exclude-fields "whatsNew,keywords"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := captureOutput(t, func() {
+				code := cmd.Run(test.args, "1.2.3")
+				if code != cmd.ExitUsage {
+					t.Fatalf("exit code = %d, want %d", code, cmd.ExitUsage)
+				}
+			})
+
+			if strings.TrimSpace(stdout) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if !strings.Contains(stderr, test.wantErr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr, test.wantErr)
+			}
+			if strings.Contains(stderr, "SUBCOMMANDS") {
+				t.Fatalf("expected a usage error instead of a help dump, got %q", stderr)
+			}
+		})
 	}
 }

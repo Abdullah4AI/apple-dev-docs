@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 type screenshotValidateOutput struct {
@@ -205,6 +207,56 @@ func TestAssetsScreenshotsValidateReportsDecodedPixelDuplicates(t *testing.T) {
 	}
 	if duplicateIssue.Match != "pixels" {
 		t.Fatalf("expected pixel match, got %q", duplicateIssue.Match)
+	}
+}
+
+func TestAssetsScreenshotsValidateReportsFormatExtensionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writeScreenshotValidatePNG(t, filepath.Join(dir, "01-home.png"), 1242, 2688, color.RGBA{R: 10, A: 255}, png.DefaultCompression)
+	writeCmdtestScreenshotJPEG(t, dir, "02-details.png")
+
+	stdout, stderr, runErr := runRootCommand(t, []string{
+		"screenshots", "validate",
+		"--path", dir,
+		"--device-type", "IPHONE_65",
+		"--output", "json",
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if runErr == nil {
+		t.Fatal("expected reported validation error, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "screenshots validate: found 1 error(s)") {
+		t.Fatalf("expected one reported error, got %v", runErr)
+	}
+	if code := cmd.ExitCodeFromError(runErr); code == cmd.ExitSuccess {
+		t.Fatalf("expected a non-zero exit code for a reported validation error, got %d", code)
+	}
+
+	var result screenshotValidateOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.ErrorCount != 1 {
+		t.Fatalf("expected 1 error, got %d", result.ErrorCount)
+	}
+	if result.ReadyFiles != 1 {
+		t.Fatalf("expected 1 ready file, got %d", result.ReadyFiles)
+	}
+	if !hasScreenshotValidateIssue(result.Issues, "format_mismatch", "error", "02-details.png") {
+		t.Fatalf("expected format mismatch issue, got %+v", result.Issues)
+	}
+	for _, issue := range result.Issues {
+		if issue.Code != "format_mismatch" {
+			continue
+		}
+		for _, want := range []string{"JPEG", "02-details.jpg", "PNG"} {
+			if !strings.Contains(issue.Message, want) {
+				t.Fatalf("expected format mismatch message to mention %q, got %q", want, issue.Message)
+			}
+		}
 	}
 }
 

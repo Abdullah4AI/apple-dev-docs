@@ -54,8 +54,10 @@ func TestClientSignsStoreKitJWT(t *testing.T) {
 	if got := claims["bid"]; got != "com.example.app" {
 		t.Fatalf("bid = %v, want com.example.app", got)
 	}
-	if got := int64(claims["iat"].(float64)); got != now.Unix() {
-		t.Fatalf("iat = %d, want %d", got, now.Unix())
+	// Issued-at is backdated so a client clock running ahead of Apple's does not
+	// produce a token that is rejected as issued in the future.
+	if got, want := int64(claims["iat"].(float64)), now.Add(-jwtIssuedAtSkew).Unix(); got != want {
+		t.Fatalf("iat = %d, want %d", got, want)
 	}
 	if got := int64(claims["exp"].(float64)); got != now.Add(20*time.Minute).Unix() {
 		t.Fatalf("exp = %d, want %d", got, now.Add(20*time.Minute).Unix())

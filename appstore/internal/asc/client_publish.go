@@ -27,7 +27,7 @@ func (c *Client) WaitForBuildProcessing(ctx context.Context, buildID string, pol
 		pollInterval = 30 * time.Second
 	}
 
-	build, err := PollUntil(ctx, pollInterval, func(ctx context.Context) (*BuildResponse, bool, error) {
+	build, err := PollUntilTolerant(ctx, pollInterval, func(ctx context.Context) (*BuildResponse, bool, error) {
 		build, err := c.GetBuild(ctx, buildID)
 		if err != nil {
 			return nil, false, err
@@ -43,7 +43,7 @@ func (c *Client) WaitForBuildProcessing(ctx context.Context, buildID string, pol
 			return nil, false, &buildProcessingFailure{build: build, state: state}
 		}
 		return nil, false, nil
-	})
+	}, PollOptions{Tolerate: IsTransientWaitError})
 	var processingFailure *buildProcessingFailure
 	if errors.As(err, &processingFailure) {
 		return processingFailure.build, err

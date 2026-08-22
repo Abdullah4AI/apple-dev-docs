@@ -483,7 +483,7 @@ func fetchOptimizationSearchTerms(ctx context.Context, client *appleads.Client, 
 func queryOptimizationList[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize int) ([]T, error) {
 	items := make([]T, 0)
 	offset := 0
-	for {
+	for pages := 0; pages < appleads.MaxPlatformPaginationPages; pages++ {
 		pageBody := cloneOptimizationBody(body)
 		pageBody["pagination"] = optimizationRequestPagination(spec, offset, pageSize)
 		raw, err := executeOptimizationQuery(ctx, client, spec, pageBody)
@@ -503,12 +503,13 @@ func queryOptimizationList[T any](ctx context.Context, client *appleads.Client, 
 		}
 		offset += len(envelope.Result)
 	}
+	return items, optimizationPageLimitError(spec)
 }
 
 func queryOptimizationRows[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize int) ([]T, error) {
 	items := make([]T, 0)
 	offset := 0
-	for {
+	for pages := 0; pages < appleads.MaxPlatformPaginationPages; pages++ {
 		pageBody := cloneOptimizationBody(body)
 		pageBody["pagination"] = optimizationRequestPagination(spec, offset, pageSize)
 		raw, err := executeOptimizationQuery(ctx, client, spec, pageBody)
@@ -530,6 +531,14 @@ func queryOptimizationRows[T any](ctx context.Context, client *appleads.Client, 
 		}
 		offset += len(envelope.Result.Rows)
 	}
+	return items, optimizationPageLimitError(spec)
+}
+
+// optimizationPageLimitError reports that a body-paginated Apple Ads query kept
+// returning full pages past the shared safety bound. The pages already fetched
+// are returned with it so callers can still record partial evidence.
+func optimizationPageLimitError(spec appleads.EndpointSpec) error {
+	return fmt.Errorf("platform API v1 pagination for %s exceeded the %d-page safety limit; narrow the request filters or time range", strings.Join(spec.CommandPath, " "), appleads.MaxPlatformPaginationPages)
 }
 
 func executeOptimizationQuery(ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any) (appleads.RawResponse, error) {

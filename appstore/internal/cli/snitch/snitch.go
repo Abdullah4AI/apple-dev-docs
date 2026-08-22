@@ -132,6 +132,10 @@ Examples:
 				ASCVersion:  version,
 				OS:          fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 			}
+			entry, redacted := redactLogEntry(entry)
+			if redacted {
+				fmt.Fprintln(os.Stderr, redactionNotice)
+			}
 
 			token := resolveGitHubToken()
 
@@ -299,6 +303,10 @@ Examples:
 				fmt.Fprintln(os.Stderr, "No local snitch entries found.")
 				return nil
 			}
+			entries, redacted := redactLogEntries(entries)
+			if redacted {
+				fmt.Fprintln(os.Stderr, redactionNotice)
+			}
 
 			fmt.Fprint(os.Stdout, formatLocalEntries(entries))
 			return nil
@@ -347,6 +355,7 @@ func resolveGitHubToken() string {
 }
 
 func issueTitle(e LogEntry) string {
+	e, _ = redactLogEntry(e)
 	prefix := ""
 	switch e.Severity {
 	case "friction":
@@ -358,6 +367,7 @@ func issueTitle(e LogEntry) string {
 }
 
 func issueBody(e LogEntry) string {
+	e, _ = redactLogEntry(e)
 	var b strings.Builder
 
 	b.WriteString("## Summary\n\n")
@@ -391,6 +401,7 @@ func issueBody(e LogEntry) string {
 }
 
 func issueLabels(e LogEntry) []string {
+	e, _ = redactLogEntry(e)
 	labels := []string{"asc-snitch"}
 	switch e.Severity {
 	case "bug":
@@ -536,6 +547,7 @@ func listRepoLabels(ctx context.Context, token string) ([]string, error) {
 }
 
 func validateRequestedLabels(ctx context.Context, token string, requested []string) ([]string, error) {
+	requested, _ = redactStringSlice(requested)
 	requested = dedupeLabels(requested)
 	if len(requested) == 0 {
 		return nil, nil
@@ -635,6 +647,7 @@ func readLocalLog(path string) ([]LogEntry, error) {
 // repository-controlled text, so every field is stripped of terminal control and
 // bidi sequences before printing; the file on disk keeps its original values.
 func formatLocalEntries(entries []LogEntry) string {
+	entries, _ = redactLogEntries(entries)
 	var b strings.Builder
 
 	for i, entry := range entries {
@@ -669,6 +682,7 @@ func formatLocalEntries(entries []LogEntry) string {
 }
 
 func searchIssues(ctx context.Context, token string, query string) ([]GitHubIssue, error) {
+	query, _ = redactSensitiveText(query)
 	// Search open issue titles first to reduce noisy matches from generic terms.
 	q := fmt.Sprintf("repo:%s/%s is:issue is:open in:title %q", defaultOwner, defaultRepo, strings.TrimSpace(query))
 	searchURL := fmt.Sprintf("%s/search/issues?q=%s&per_page=%d",
@@ -747,6 +761,7 @@ func createIssue(ctx context.Context, token string, entry LogEntry) (*GitHubIssu
 }
 
 func addIssueLabels(ctx context.Context, token string, issueNumber int, labels []string) error {
+	labels, _ = redactStringSlice(labels)
 	if len(labels) == 0 {
 		return nil
 	}
@@ -800,6 +815,7 @@ func readGitHubAPIError(resp *http.Response) error {
 }
 
 func writeLocalLog(entry LogEntry) error {
+	entry, _ = redactLogEntry(entry)
 	dir := ".asc"
 	path := filepath.Join(dir, "snitch.log")
 

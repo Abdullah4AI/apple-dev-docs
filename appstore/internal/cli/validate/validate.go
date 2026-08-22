@@ -76,7 +76,7 @@ Examples:
   asc validate --app "APP_ID" --version-id "VERSION_ID" --strict
 
 TestFlight:
-  asc validate testflight --app "APP_ID" --build "BUILD_ID"
+  asc validate testflight --app "APP_ID" --build-id "BUILD_ID"
 
 In-App Purchases:
   asc validate iap --app "APP_ID"

@@ -145,6 +145,71 @@ func TestSearchPrioritizesCanonicalPublishWorkflowForNaturalLanguage(t *testing.
 	}
 }
 
+func TestSearchPrioritizesPreciseCommandPathsForNaturalLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    []string
+		expected string
+	}{
+		{name: "create app", query: []string{"create", "app"}, expected: "asc web apps create"},
+		{name: "build status", query: []string{"build", "status"}, expected: "asc xcode-cloud status"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var code int
+			stdout, stderr := captureOutput(t, func() {
+				args := []string{"search", "--output", "json", "--limit", "5"}
+				args = append(args, test.query...)
+				code = rootcmd.Run(args, "1.2.3")
+			})
+
+			if code != 0 {
+				t.Fatalf("expected exit code 0, got %d with stderr %q", code, stderr)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+
+			var response searchResponse
+			if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+				t.Fatalf("failed to unmarshal search JSON: %v\nstdout=%s", err, stdout)
+			}
+			if len(response.Results) == 0 {
+				t.Fatalf("expected search results, got %#v", response)
+			}
+			if response.Results[0].Command != test.expected {
+				t.Fatalf("expected precise command %q first, got %#v", test.expected, response.Results)
+			}
+		})
+	}
+}
+
+func TestSearchKeepsBuildDownloadsAheadOfGenericDownloads(t *testing.T) {
+	var code int
+	stdout, stderr := captureOutput(t, func() {
+		code = rootcmd.Run([]string{"search", "--output", "json", "--limit", "5", "download", "build"}, "1.2.3")
+	})
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", code, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var response searchResponse
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("failed to unmarshal search JSON: %v\nstdout=%s", err, stdout)
+	}
+	if len(response.Results) == 0 {
+		t.Fatalf("expected search results, got %#v", response)
+	}
+	if response.Results[0].Command != "asc builds dsyms" {
+		t.Fatalf("expected build dSYM download command first, got %#v", response.Results)
+	}
+}
+
 func TestSearchKeepsExactBuildUploadAheadOfBroaderPublishWorkflows(t *testing.T) {
 	for _, query := range [][]string{
 		{"upload", "build"},
@@ -465,6 +530,28 @@ func TestSearchSupportsMixedFlagOrder(t *testing.T) {
 	}
 }
 
+func TestSearchPreservesRootShapedQueryTerms(t *testing.T) {
+	var code int
+	stdout, stderr := captureOutput(t, func() {
+		code = rootcmd.Run([]string{"search", "--output", "json", "logging", "--debug"}, "1.2.3")
+	})
+
+	if code != rootcmd.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d with stderr %q", code, rootcmd.ExitSuccess, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	var response searchResponse
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("failed to unmarshal search JSON: %v\nstdout=%s", err, stdout)
+	}
+	if response.Query != "logging --debug" {
+		t.Fatalf("query = %q, want %q", response.Query, "logging --debug")
+	}
+}
+
 func TestSearchRequiresQuery(t *testing.T) {
 	root := RootCommand("1.2.3")
 	root.FlagSet.SetOutput(io.Discard)
@@ -517,7 +604,7 @@ func TestSearchInvalidOutputExitsWithUsageCode(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: yaml") {
+	if !strings.Contains(stderr, `(got "yaml")`) {
 		t.Fatalf("expected unsupported format error, got %q", stderr)
 	}
 }
@@ -534,7 +621,7 @@ func TestSearchInvalidMixedOrderOutputExitsWithUsageCode(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: yaml") {
+	if !strings.Contains(stderr, `(got "yaml")`) {
 		t.Fatalf("expected unsupported format error, got %q", stderr)
 	}
 }

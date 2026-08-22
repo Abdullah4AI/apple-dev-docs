@@ -242,8 +242,8 @@ func TestAssignDeveloperAppGroupPreservesBundleGraph(t *testing.T) {
 				t.Fatalf("unexpected bundle read %s %s", request.Method, request.URL.String())
 			}
 			return developerPortalTestResponse(http.StatusOK, `{
-				"data":{"id":"bundle-1","type":"bundleIds","attributes":{"name":"Example","identifier":"com.example.app","platform":"IOS"},"relationships":{"bundleIdCapabilities":{"data":[{"type":"bundleIdCapabilities","id":"push-1"}]}}},
-				"included":[{"type":"bundleIdCapabilities","id":"push-1","attributes":{"enabled":true,"settings":[]},"relationships":{"capability":{"data":{"type":"capabilities","id":"PUSH_NOTIFICATIONS"}}}}]
+				"data":{"id":"bundle-1","type":"bundleIds","attributes":{"name":"Example","identifier":"com.example.app","platform":"IOS","permissions":{"delete":true,"edit":true},"~permissions.delete":true,"~permissions.edit":true},"relationships":{"bundleIdCapabilities":{"data":[{"type":"bundleIdCapabilities","id":"push-1"}]}}},
+				"included":[{"type":"bundleIdCapabilities","id":"push-1","attributes":{"enabled":true,"settings":[],"ownerType":"BUNDLE","editable":true,"inputs":[],"responseId":"response-1"},"relationships":{"capability":{"data":{"type":"capabilities","id":"PUSH_NOTIFICATIONS"}}}}]
 			}`, nil), nil
 		case 3:
 			if request.URL.Path != "/services-account/QH65B2/account/ios/identifiers/listApplicationGroups.action" {
@@ -284,8 +284,17 @@ func TestAssignDeveloperAppGroupPreservesBundleGraph(t *testing.T) {
 	if err := json.Unmarshal(patchBody, &payload); err != nil {
 		t.Fatalf("decode patch: %v; body=%s", err, patchBody)
 	}
-	if payload.Data.Attributes == nil || !strings.Contains(string(payload.Data.Attributes), `"teamId":"TEAM123456"`) {
-		t.Fatalf("team and existing attributes not preserved: %s", payload.Data.Attributes)
+	var bundleAttributes map[string]json.RawMessage
+	if err := json.Unmarshal(payload.Data.Attributes, &bundleAttributes); err != nil {
+		t.Fatalf("decode Bundle ID attributes: %v", err)
+	}
+	if string(bundleAttributes["teamId"]) != `"TEAM123456"` || string(bundleAttributes["identifier"]) != `"com.example.app"` {
+		t.Fatalf("team and writable attributes not preserved: %s", payload.Data.Attributes)
+	}
+	for _, key := range []string{"permissions", "~permissions.delete", "~permissions.edit"} {
+		if _, ok := bundleAttributes[key]; ok {
+			t.Fatalf("read-only Bundle ID attribute %q was sent in PATCH: %s", key, payload.Data.Attributes)
+		}
 	}
 	var capabilities developerResourceRelationship
 	if err := json.Unmarshal(payload.Data.Relationships["bundleIdCapabilities"], &capabilities); err != nil {
@@ -293,6 +302,16 @@ func TestAssignDeveloperAppGroupPreservesBundleGraph(t *testing.T) {
 	}
 	if len(capabilities.Data) != 2 {
 		t.Fatalf("capability count = %d, want existing plus APP_GROUPS", len(capabilities.Data))
+	}
+	var existingAttributes map[string]json.RawMessage
+	if err := json.Unmarshal(capabilities.Data[0].Attributes, &existingAttributes); err != nil {
+		t.Fatalf("decode existing capability attributes: %v", err)
+	}
+	if len(existingAttributes) != 2 || string(existingAttributes["enabled"]) != "true" || string(existingAttributes["settings"]) != "[]" {
+		t.Fatalf("PATCH contained read-only capability attributes: %s", capabilities.Data[0].Attributes)
+	}
+	if _, ok := capabilities.Data[0].Relationships["capability"]; !ok {
+		t.Fatalf("existing capability relationship was not preserved: %+v", capabilities.Data[0].Relationships)
 	}
 	appGroupsCapability := capabilities.Data[1]
 	if capability, err := developerBundleIDCapabilityID(appGroupsCapability); err != nil || capability != "APP_GROUPS" {

@@ -52,7 +52,7 @@ func TestUploadScreenshots_ReordersPlannedFilesBeforeUntouchedRemoteExtras(t *te
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshots/new-settings":
 			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"new-settings","attributes":{"uploaded":true}}}`)
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/appScreenshots/new-settings":
-			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"new-settings","attributes":{"assetDeliveryState":{"state":"COMPLETE"}}}}`)
+			return migrateJSONResponse(http.StatusOK, `{"data":{"type":"appScreenshots","id":"new-settings","attributes":{"assetDeliveryState":{"state":"COMPLETE"},"sourceFileChecksum":"settled"}}}`)
 		case req.Method == http.MethodPatch && req.URL.Path == "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
 			body, err := io.ReadAll(req.Body)
 			if err != nil {

@@ -20,10 +20,10 @@ func PerformanceCommand() *ffcli.Command {
 
 Examples:
   asc performance metrics list --app "APP_ID"
-  asc performance metrics view --build "BUILD_ID"
-  asc performance diagnostics list --build "BUILD_ID"
+  asc performance metrics view --build-id "BUILD_ID"
+  asc performance diagnostics list --build-id "BUILD_ID"
   asc performance diagnostics view --id "SIGNATURE_ID"
-  asc performance download --build "BUILD_ID" --output ./metrics.json`,
+  asc performance download --build-id "BUILD_ID" --output ./metrics.json`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{

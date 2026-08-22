@@ -371,30 +371,45 @@ func TestCommitBuildUploadFileDoesNotReconcilePastParentDeadline(t *testing.T) {
 }
 
 func TestCommitBuildUploadFileDoesNotReconcileDefinitiveClientErrors(t *testing.T) {
-	for _, status := range []int{http.StatusUnprocessableEntity, http.StatusTooManyRequests} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			requestCount := 0
+	tests := []struct {
+		status      int
+		wantCommits int
+	}{
+		{status: http.StatusUnprocessableEntity, wantCommits: 1},
+		// App Store Connect rejects a rate-limited commit before applying it, so
+		// the client replays it. The outcome stays unambiguous either way, so no
+		// reconciliation lookup is warranted.
+		{status: http.StatusTooManyRequests, wantCommits: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.status), func(t *testing.T) {
+			t.Setenv("ASC_MAX_RETRIES", "1")
+			t.Setenv("ASC_BASE_DELAY", "1ms")
+			t.Setenv("ASC_MAX_DELAY", "1ms")
+
+			commitCount := 0
 			client := newBuildUploadsTestClient(t, func(req *http.Request) (*http.Response, error) {
-				requestCount++
 				if req.Method != http.MethodPatch {
-					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+					t.Fatalf("unexpected reconciliation request: %s %s", req.Method, req.URL.String())
 				}
-				return buildUploadsJSONStatusResponse(status, fmt.Sprintf(`{"errors":[{"status":"%d","code":"CLIENT_ERROR","title":"Client error"}]}`, status))
+				commitCount++
+				return buildUploadsJSONStatusResponse(tt.status, fmt.Sprintf(`{"errors":[{"status":"%d","code":"CLIENT_ERROR","title":"Client error"}]}`, tt.status))
 			})
 
 			_, err := CommitBuildUploadFile(context.Background(), client, "upload-123", "file-456", nil)
 			if err == nil {
 				t.Fatal("expected commit error, got nil")
 			}
-			if requestCount != 1 {
-				t.Fatalf("expected no reconciliation lookup, got %d requests", requestCount)
+			if commitCount != tt.wantCommits {
+				t.Fatalf("expected %d commit attempts and no reconciliation lookup, got %d requests", tt.wantCommits, commitCount)
 			}
 			if !strings.Contains(err.Error(), `build upload "upload-123"`) || !strings.Contains(err.Error(), `asc builds uploads view --id "upload-123"`) {
 				t.Fatalf("expected upload ID and remediation, got %v", err)
 			}
 			var apiErr *asc.APIError
-			if !errors.As(err, &apiErr) || apiErr.StatusCode != status {
-				t.Fatalf("expected original status %d to remain inspectable, got %v", status, err)
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tt.status {
+				t.Fatalf("expected original status %d to remain inspectable, got %v", tt.status, err)
 			}
 		})
 	}

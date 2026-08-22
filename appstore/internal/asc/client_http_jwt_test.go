@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -81,6 +82,44 @@ func TestGenerateJWT_WhitespaceIssuerUsesUserSubjectClaim(t *testing.T) {
 	}
 	if claims.Subject != "user" {
 		t.Fatalf("subject claim = %q, want user", claims.Subject)
+	}
+}
+
+func TestGenerateJWT_BackdatesIssuedAtForClockSkew(t *testing.T) {
+	privateKey := testJWTPrivateKey(t)
+
+	before := time.Now()
+	tokenString, err := GenerateJWT("KEY123", "ISS456", privateKey)
+	if err != nil {
+		t.Fatalf("GenerateJWT() error: %v", err)
+	}
+	after := time.Now()
+
+	claims := parseJWTClaims(t, tokenString, privateKey)
+	assertJWTIssuedAtSkew(t, claims.IssuedAt, claims.ExpiresAt, before, after, tokenLifetime)
+}
+
+// assertJWTIssuedAtSkew checks that issued-at is backdated by jwtIssuedAtSkew
+// while expiry stays anchored to the signing time. Numeric dates are truncated
+// to whole seconds, so each bound allows a second of slack.
+func assertJWTIssuedAtSkew(t *testing.T, issuedAt, expiresAt *jwt.NumericDate, before, after time.Time, lifetime time.Duration) {
+	t.Helper()
+
+	if issuedAt == nil {
+		t.Fatal("issued-at claim is missing")
+	}
+	if expiresAt == nil {
+		t.Fatal("expires-at claim is missing")
+	}
+
+	if issuedAt.Before(before.Add(-jwtIssuedAtSkew-time.Second)) || issuedAt.After(after.Add(-jwtIssuedAtSkew)) {
+		t.Fatalf("issued-at = %s, want signing time minus %s (~%s)", issuedAt.Time, jwtIssuedAtSkew, before.Add(-jwtIssuedAtSkew))
+	}
+	if expiresAt.Before(before.Add(lifetime-time.Second)) || expiresAt.After(after.Add(lifetime)) {
+		t.Fatalf("expires-at = %s, want signing time plus %s (~%s)", expiresAt.Time, lifetime, before.Add(lifetime))
+	}
+	if got, want := expiresAt.Sub(issuedAt.Time), lifetime+jwtIssuedAtSkew; got != want {
+		t.Fatalf("expires-at minus issued-at = %s, want %s", got, want)
 	}
 }
 

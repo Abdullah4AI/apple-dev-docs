@@ -372,7 +372,7 @@ func TestPrintMigrateOutput_RejectsPrettyForTable(t *testing.T) {
 
 func TestPrintMigrateOutput_UnsupportedFormat(t *testing.T) {
 	err := printMigrateOutput(&MigrateImportResult{}, "yaml", false)
-	if err == nil || !strings.Contains(err.Error(), "unsupported format: yaml") {
+	if err == nil || !strings.Contains(err.Error(), `(got "yaml")`) {
 		t.Fatalf("expected unsupported format error, got %v", err)
 	}
 }

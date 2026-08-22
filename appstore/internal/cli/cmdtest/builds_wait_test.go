@@ -779,6 +779,81 @@ func TestBuildsWaitByAppDiscoveryTimeoutReturnsError(t *testing.T) {
 	}
 }
 
+func TestBuildsWaitRequestTimeoutBudgetIsNotReportedAsOverallTimeout(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		requestPath string
+		wrongText   string
+	}{
+		{
+			name:        "processing",
+			args:        []string{"builds", "wait", "--build-id", "build-1", "--poll-interval", "1ms", "--timeout", "5s"},
+			requestPath: "/v1/builds/build-1",
+			wrongText:   "timed out waiting for build",
+		},
+		{
+			name:        "discovery",
+			args:        []string{"builds", "wait", "--app", "123456789", "--latest", "--poll-interval", "1ms", "--timeout", "5s"},
+			requestPath: "/v1/builds",
+			wrongText:   "timed out resolving build selector",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupAuth(t)
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+			t.Setenv("ASC_APP_ID", "")
+			t.Setenv("ASC_MAX_RETRIES", "0")
+
+			originalTransport := http.DefaultTransport
+			t.Cleanup(func() {
+				http.DefaultTransport = originalTransport
+			})
+
+			requestCount := 0
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requestCount++
+				if req.URL.Path != test.requestPath {
+					t.Fatalf("request path = %q, want %q", req.URL.Path, test.requestPath)
+				}
+				return nil, context.DeadlineExceeded
+			})
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+
+			var runErr error
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(test.args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				runErr = root.Run(context.Background())
+			})
+
+			if runErr == nil {
+				t.Fatal("expected request-timeout budget error")
+			}
+			if !strings.Contains(runErr.Error(), "giving up after 6 consecutive transient App Store Connect errors") {
+				t.Fatalf("expected consecutive-failure explanation, got %v", runErr)
+			}
+			if strings.Contains(runErr.Error(), test.wrongText) {
+				t.Fatalf("request failures were reported as the overall timeout: %v", runErr)
+			}
+			if requestCount != 6 {
+				t.Fatalf("request count = %d, want 6", requestCount)
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "transient App Store Connect error while waiting (5/5)") {
+				t.Fatalf("expected tolerated-failure diagnostics, got %q", stderr)
+			}
+		})
+	}
+}
+
 func TestBuildsWaitFailOnInvalidReturnsError(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

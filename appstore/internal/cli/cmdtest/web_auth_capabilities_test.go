@@ -159,7 +159,7 @@ func TestWebAuthCapabilitiesRunRejectsInvalidOutput(t *testing.T) {
 			t.Fatalf("exit code = %d, want %d", code, cmd.ExitUsage)
 		}
 	})
-	if !strings.Contains(stderr, "unsupported format: yaml") {
+	if !strings.Contains(stderr, `(got "yaml")`) {
 		t.Fatalf("expected unsupported format error, got %q", stderr)
 	}
 }

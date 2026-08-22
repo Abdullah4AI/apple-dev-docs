@@ -279,7 +279,7 @@ func TestAppTagsListOutputErrors(t *testing.T) {
 		{
 			name:    "unsupported output",
 			args:    []string{"app-tags", "list", "--app", "app-1", "--output", "yaml"},
-			wantErr: "unsupported format: yaml",
+			wantErr: `(got "yaml")`,
 		},
 		{
 			name:    "pretty with markdown",
@@ -301,7 +301,7 @@ func TestAppTagsListOutputErrors(t *testing.T) {
 				runErr = root.Run(context.Background())
 			})
 
-			if !errors.Is(runErr, flag.ErrHelp) {
+			if !isUsageClassError(runErr) {
 				t.Fatalf("expected help error, got %v", runErr)
 			}
 			if stdout != "" {

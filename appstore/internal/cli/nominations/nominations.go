@@ -295,22 +295,22 @@ Examples:
 func NominationsCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("nominations create", flag.ExitOnError)
 
-	appID := fs.String("app", "", "Related app ID(s), comma-separated (or ASC_APP_ID)")
+	appID := shared.BindOnceCSVFlag(fs, "app", "Related app ID(s), comma-separated (or ASC_APP_ID)")
 	name := fs.String("name", "", "Nomination name (required)")
 	nomType := fs.String("type", "", "Nomination type (required): "+strings.Join(nominationTypeList(), ", "))
 	description := fs.String("description", "", "Nomination description (required)")
 	submitted := fs.Bool("submitted", false, "Submit nomination now (true/false)")
 	publishStartDate := fs.String("publish-start-date", "", "Publish start date (RFC3339, required)")
 	publishEndDate := fs.String("publish-end-date", "", "Publish end date (RFC3339)")
-	deviceFamilies := fs.String("device-families", "", "Device families, comma-separated: "+strings.Join(nominationDeviceFamilyList(), ", "))
-	locales := fs.String("locales", "", "Locales, comma-separated")
-	supplementalMaterialsURIs := fs.String("supplemental-materials-uris", "", "Supplemental material URIs, comma-separated")
+	deviceFamilies := shared.BindOnceCSVFlag(fs, "device-families", "Device families, comma-separated: "+strings.Join(nominationDeviceFamilyList(), ", "))
+	locales := shared.BindOnceCSVFlag(fs, "locales", "Locales, comma-separated")
+	supplementalMaterialsURIs := shared.BindOnceCSVFlag(fs, "supplemental-materials-uris", "Supplemental material URIs, comma-separated")
 	hasInAppEvents := fs.Bool("has-in-app-events", false, "Indicate in-app events are included")
 	launchInSelectMarketsFirst := fs.Bool("launch-in-select-markets-first", false, "Launch in select markets first")
 	notes := fs.String("notes", "", "Internal notes")
 	preOrderEnabled := fs.Bool("pre-order-enabled", false, "Enable pre-order")
-	inAppEvents := fs.String("in-app-events", "", "In-app event IDs, comma-separated")
-	supportedTerritories := fs.String("supported-territories", "", "Supported territory IDs, comma-separated")
+	inAppEvents := shared.BindOnceCSVFlag(fs, "in-app-events", "In-app event IDs, comma-separated")
+	supportedTerritories := shared.BindOnceCSVFlag(fs, "supported-territories", "Supported territory IDs, comma-separated")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -330,7 +330,7 @@ Examples:
 				visited[f.Name] = true
 			})
 
-			relatedApps := shared.SplitCSV(shared.ResolveAppID(*appID))
+			relatedApps := shared.SplitCSV(shared.ResolveAppID(appID.String()))
 			if len(relatedApps) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")
 				return shared.MissingRequiredUsageError("--app")
@@ -370,7 +370,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			deviceFamilyValues, err := normalizeNominationDeviceFamilies(shared.SplitCSVUpper(*deviceFamilies))
+			deviceFamilyValues, err := normalizeNominationDeviceFamilies(shared.SplitCSVUpper(deviceFamilies.String()))
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)
 				return flag.ErrHelp
@@ -403,10 +403,10 @@ Examples:
 			if len(deviceFamilyValues) > 0 {
 				attrs.DeviceFamilies = normalizeNominationDeviceFamilyAttributes(deviceFamilyValues)
 			}
-			if localesValue := shared.SplitCSV(*locales); len(localesValue) > 0 {
+			if localesValue := shared.SplitCSV(locales.String()); len(localesValue) > 0 {
 				attrs.Locales = localesValue
 			}
-			if supplementalValue := shared.SplitCSV(*supplementalMaterialsURIs); len(supplementalValue) > 0 {
+			if supplementalValue := shared.SplitCSV(supplementalMaterialsURIs.String()); len(supplementalValue) > 0 {
 				attrs.SupplementalMaterialsURIs = supplementalValue
 			}
 			if visited["has-in-app-events"] {
@@ -429,10 +429,10 @@ Examples:
 			relationships := asc.NominationRelationships{
 				RelatedApps: buildNominationRelationshipList(asc.ResourceTypeApps, relatedApps),
 			}
-			if inAppEventIDs := shared.SplitCSV(*inAppEvents); len(inAppEventIDs) > 0 {
+			if inAppEventIDs := shared.SplitCSV(inAppEvents.String()); len(inAppEventIDs) > 0 {
 				relationships.InAppEvents = buildNominationRelationshipList(asc.ResourceTypeAppEvents, inAppEventIDs)
 			}
-			if territoryIDs := shared.SplitCSV(*supportedTerritories); len(territoryIDs) > 0 {
+			if territoryIDs := shared.SplitCSV(supportedTerritories.String()); len(territoryIDs) > 0 {
 				relationships.SupportedTerritories = buildNominationRelationshipList(asc.ResourceTypeTerritories, territoryIDs)
 			}
 
@@ -458,16 +458,16 @@ func NominationsUpdateCommand() *ffcli.Command {
 	archived := fs.Bool("archived", false, "Archive nomination (true/false)")
 	publishStartDate := fs.String("publish-start-date", "", "Publish start date (RFC3339)")
 	publishEndDate := fs.String("publish-end-date", "", "Publish end date (RFC3339)")
-	deviceFamilies := fs.String("device-families", "", "Device families, comma-separated: "+strings.Join(nominationDeviceFamilyList(), ", "))
-	locales := fs.String("locales", "", "Locales, comma-separated")
-	supplementalMaterialsURIs := fs.String("supplemental-materials-uris", "", "Supplemental material URIs, comma-separated")
+	deviceFamilies := shared.BindOnceCSVFlag(fs, "device-families", "Device families, comma-separated: "+strings.Join(nominationDeviceFamilyList(), ", "))
+	locales := shared.BindOnceCSVFlag(fs, "locales", "Locales, comma-separated")
+	supplementalMaterialsURIs := shared.BindOnceCSVFlag(fs, "supplemental-materials-uris", "Supplemental material URIs, comma-separated")
 	hasInAppEvents := fs.Bool("has-in-app-events", false, "Indicate in-app events are included")
 	launchInSelectMarketsFirst := fs.Bool("launch-in-select-markets-first", false, "Launch in select markets first")
 	notes := fs.String("notes", "", "Internal notes")
 	preOrderEnabled := fs.Bool("pre-order-enabled", false, "Enable pre-order")
-	appIDs := fs.String("app", "", "Replace related app ID(s), comma-separated")
-	inAppEvents := fs.String("in-app-events", "", "Replace in-app event IDs, comma-separated")
-	supportedTerritories := fs.String("supported-territories", "", "Replace supported territory IDs, comma-separated")
+	appIDs := shared.BindOnceCSVFlag(fs, "app", "Replace related app ID(s), comma-separated")
+	inAppEvents := shared.BindOnceCSVFlag(fs, "in-app-events", "Replace in-app event IDs, comma-separated")
+	supportedTerritories := shared.BindOnceCSVFlag(fs, "supported-territories", "Replace supported territory IDs, comma-separated")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -570,7 +570,7 @@ Examples:
 					attrsValue.PublishEndDate = &normalized
 				}
 				if visited["device-families"] {
-					deviceFamilyValues, err := normalizeNominationDeviceFamilies(shared.SplitCSVUpper(*deviceFamilies))
+					deviceFamilyValues, err := normalizeNominationDeviceFamilies(shared.SplitCSVUpper(deviceFamilies.String()))
 					if err != nil {
 						fmt.Fprintln(os.Stderr, "Error:", err)
 						return flag.ErrHelp
@@ -581,14 +581,14 @@ Examples:
 					attrsValue.DeviceFamilies = normalizeNominationDeviceFamilyAttributes(deviceFamilyValues)
 				}
 				if visited["locales"] {
-					localesValue := shared.SplitCSV(*locales)
+					localesValue := shared.SplitCSV(locales.String())
 					if len(localesValue) == 0 {
 						return fmt.Errorf("nominations update: --locales is required")
 					}
 					attrsValue.Locales = localesValue
 				}
 				if visited["supplemental-materials-uris"] {
-					supplementalValue := shared.SplitCSV(*supplementalMaterialsURIs)
+					supplementalValue := shared.SplitCSV(supplementalMaterialsURIs.String())
 					if len(supplementalValue) == 0 {
 						return fmt.Errorf("nominations update: --supplemental-materials-uris is required")
 					}
@@ -617,21 +617,21 @@ Examples:
 			if hasRelationshipUpdates {
 				relationshipValue := asc.NominationRelationships{}
 				if visited["app"] {
-					appValues := shared.SplitCSV(*appIDs)
+					appValues := shared.SplitCSV(appIDs.String())
 					if len(appValues) == 0 {
 						return fmt.Errorf("nominations update: --app is required")
 					}
 					relationshipValue.RelatedApps = buildNominationRelationshipList(asc.ResourceTypeApps, appValues)
 				}
 				if visited["in-app-events"] {
-					eventValues := shared.SplitCSV(*inAppEvents)
+					eventValues := shared.SplitCSV(inAppEvents.String())
 					if len(eventValues) == 0 {
 						return fmt.Errorf("nominations update: --in-app-events is required")
 					}
 					relationshipValue.InAppEvents = buildNominationRelationshipList(asc.ResourceTypeAppEvents, eventValues)
 				}
 				if visited["supported-territories"] {
-					territoryValues := shared.SplitCSV(*supportedTerritories)
+					territoryValues := shared.SplitCSV(supportedTerritories.String())
 					if len(territoryValues) == 0 {
 						return fmt.Errorf("nominations update: --supported-territories is required")
 					}

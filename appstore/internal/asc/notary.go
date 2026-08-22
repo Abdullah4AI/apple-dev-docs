@@ -136,7 +136,7 @@ func GenerateNotaryJWT(keyID, issuerID string, privateKey any) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"aud":   "appstoreconnect-v1",
-		"iat":   jwt.NewNumericDate(now),
+		"iat":   jwt.NewNumericDate(now.Add(-jwtIssuedAtSkew)),
 		"exp":   jwt.NewNumericDate(now.Add(tokenLifetime)),
 		"scope": []string{"/notary/v2"},
 	}

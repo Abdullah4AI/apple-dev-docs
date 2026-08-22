@@ -45,6 +45,7 @@ Examples:
   asc devices view --id "DEVICE_ID"
   asc devices local-udid
   asc devices register --name "iPhone 15" --udid "UDID" --platform IOS
+  asc devices register-batch --file "./devices.txt" --confirm
   asc devices update --id "DEVICE_ID" --status DISABLED`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -53,6 +54,7 @@ Examples:
 			DevicesGetCommand(),
 			DevicesLocalUDIDCommand(),
 			DevicesRegisterCommand(),
+			DevicesRegisterBatchCommand(),
 			DevicesUpdateCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {

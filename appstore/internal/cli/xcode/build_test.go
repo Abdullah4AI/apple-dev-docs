@@ -268,7 +268,7 @@ func TestXcodeBuildRejectsInvalidOutputBeforeStartingBuild(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "unsupported format: yaml") {
+	if !strings.Contains(stderr, `(got "yaml")`) {
 		t.Fatalf("stderr = %q, want unsupported format error", stderr)
 	}
 }

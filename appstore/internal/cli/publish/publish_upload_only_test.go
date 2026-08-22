@@ -191,7 +191,7 @@ func TestPublishTestFlightUploadOnlyRejectsContradictoryFlagsDeterministically(t
 		{name: "confirm", args: []string{"--confirm"}, wantErr: "--confirm cannot be used with --upload-only"},
 		{name: "test notes", args: []string{"--test-notes", "Try it", "--locale", "en-US"}, wantErr: "--test-notes cannot be used with --upload-only"},
 		{name: "locale", args: []string{"--locale", "en-US"}, wantErr: "--locale cannot be used with --upload-only"},
-		{name: "existing build", args: []string{"--build", "build-1"}, wantErr: "--build cannot be used with --upload-only"},
+		{name: "existing build", args: []string{"--build-id", "build-1"}, wantErr: "--build-id cannot be used with --upload-only"},
 	}
 
 	for _, test := range tests {

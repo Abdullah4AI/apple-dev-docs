@@ -473,9 +473,36 @@ func (c *Client) DeleteAppPreviewSet(ctx context.Context, setID string) error {
 	return err
 }
 
+type appPreviewsQuery struct {
+	nextURL string
+}
+
+// AppPreviewsOption configures app preview queries.
+type AppPreviewsOption func(*appPreviewsQuery)
+
+// WithAppPreviewsNextURL uses a next page URL directly.
+func WithAppPreviewsNextURL(next string) AppPreviewsOption {
+	return func(q *appPreviewsQuery) {
+		if strings.TrimSpace(next) != "" {
+			q.nextURL = strings.TrimSpace(next)
+		}
+	}
+}
+
 // GetAppPreviews retrieves previews for a set.
-func (c *Client) GetAppPreviews(ctx context.Context, setID string) (*AppPreviewsResponse, error) {
+func (c *Client) GetAppPreviews(ctx context.Context, setID string, opts ...AppPreviewsOption) (*AppPreviewsResponse, error) {
+	query := &appPreviewsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+
 	path := fmt.Sprintf("/v1/appPreviewSets/%s/appPreviews", setID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("appPreviews: %w", err)
+		}
+		path = query.nextURL
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err

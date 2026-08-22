@@ -18,6 +18,13 @@ type AppScreenshotListResult struct {
 	Sets                  []AppScreenshotSetWithScreenshots `json:"sets"`
 }
 
+// AppScreenshotSetListResult represents screenshot sets and their screenshots
+// for a non-version localization, such as a custom product page or treatment.
+type AppScreenshotSetListResult struct {
+	LocalizationID string                            `json:"localizationId"`
+	Sets           []AppScreenshotSetWithScreenshots `json:"sets"`
+}
+
 // AppPreviewSetWithPreviews groups a set with its previews.
 type AppPreviewSetWithPreviews struct {
 	Set      Resource[AppPreviewSetAttributes] `json:"set"`
@@ -184,9 +191,17 @@ func appPreviewsRows(resp *AppPreviewsResponse) ([]string, [][]string) {
 }
 
 func appScreenshotListResultRows(result *AppScreenshotListResult) ([]string, [][]string) {
+	return appScreenshotSetsWithScreenshotsRows(result.Sets)
+}
+
+func appScreenshotSetListResultRows(result *AppScreenshotSetListResult) ([]string, [][]string) {
+	return appScreenshotSetsWithScreenshotsRows(result.Sets)
+}
+
+func appScreenshotSetsWithScreenshotsRows(sets []AppScreenshotSetWithScreenshots) ([]string, [][]string) {
 	headers := []string{"Set ID", "Display Type", "Screenshot ID", "File Name", "File Size", "State"}
 	var rows [][]string
-	for _, set := range result.Sets {
+	for _, set := range sets {
 		setID := SanitizeTerminalText(set.Set.ID)
 		displayType := SanitizeTerminalText(set.Set.Attributes.ScreenshotDisplayType)
 		if len(set.Screenshots) == 0 {

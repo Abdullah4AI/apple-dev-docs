@@ -215,6 +215,9 @@ func TestUploadAssetFromFileUsesUploadTimeoutEnv(t *testing.T) {
 }
 
 func TestUploadAssetFromFileUsesUploadTimeoutWhenShorter(t *testing.T) {
+	// Retries are covered separately; a single attempt keeps this focused on
+	// the per-attempt upload timeout.
+	setFastAssetUploadRetries(t, "0")
 	t.Setenv("ASC_TIMEOUT", "250ms")
 	t.Setenv("ASC_TIMEOUT_SECONDS", "")
 	t.Setenv("ASC_UPLOAD_TIMEOUT", "10ms")

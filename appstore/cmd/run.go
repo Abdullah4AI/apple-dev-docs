@@ -52,8 +52,16 @@ func Run(args []string, versionInfo string) int {
 	restoreFlagOutputs()
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
+			// Explicitly requested help is the command's result, not a
+			// diagnostic: agents pipe and redirect it, so it belongs on stdout
+			// with a success exit code. Help raised by any other parse path is
+			// a usage failure and stays on stderr.
+			if requestedHelp(root, args) {
+				fmt.Fprint(os.Stdout, parseOutput.String())
+				return ExitSuccess
+			}
 			fmt.Fprint(os.Stderr, parseOutput.String())
-			return ExitSuccess
+			return ExitUsage
 		}
 		recoverCIReportFlags(root, args)
 		if err := shared.ValidateReportFlags(); err != nil {
@@ -66,7 +74,7 @@ func Run(args []string, versionInfo string) int {
 			badFlagSyntax = firstLine
 		}
 		if analysis.unknownFlag && isUnknownFlagParseFailure(parseErr, parseOutput.String()) {
-			printConciseUnknownFlag(analysis, getCommandName(root, args))
+			printConciseUnknownFlag(root, analysis, getCommandName(root, args))
 		} else if strings.HasPrefix(badFlagSyntax, "bad flag syntax:") {
 			fmt.Fprintf(os.Stderr, "Error: %s\nFor help:\n  asc --help\n", shared.SanitizeTerminal(badFlagSyntax))
 		} else {
@@ -359,6 +367,41 @@ func commandAcceptsPositionalPayload(commandPath []string) bool {
 	default:
 		return false
 	}
+}
+
+// requestedHelp reports whether the invocation explicitly asked for help with
+// any -h or -help spelling accepted by the standard flag package. That package
+// raises flag.ErrHelp for an undefined help token, so the token itself is the
+// only reliable signal that the operator asked for the help page instead of
+// tripping over a usage failure.
+func requestedHelp(root *ffcli.Command, args []string) bool {
+	command := root
+	for i := 0; i < len(args); {
+		token := args[i]
+		if token == "" {
+			i++
+			continue
+		}
+		// Everything after the terminator is positional and never parsed as a
+		// help request.
+		if token == "--" {
+			return false
+		}
+		if subcommand := findDirectSubcommand(command, token); subcommand != nil {
+			command = subcommand
+			i++
+			continue
+		}
+		if isHelpToken(token) {
+			return true
+		}
+		next, consumed := consumeFlagToken(command.FlagSet, token, args, i)
+		if !consumed {
+			return false
+		}
+		i = next
+	}
+	return false
 }
 
 func printParseFailure(parseErr error, parseOutput string, analysis invocationAnalysis) {

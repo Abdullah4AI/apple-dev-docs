@@ -63,17 +63,32 @@ type latestBuild struct {
 	Version         string `json:"version,omitempty"`
 	BuildNumber     string `json:"buildNumber"`
 	ProcessingState string `json:"processingState,omitempty"`
-	UploadedDate    string `json:"uploadedDate,omitempty"`
-	Platform        string `json:"platform,omitempty"`
+	// Expired reports Apple's build expiry flag, which stays independent of
+	// processingState: an expired build is still VALID but no longer installable.
+	Expired      *bool  `json:"expired,omitempty"`
+	UploadedDate string `json:"uploadedDate,omitempty"`
+	Platform     string `json:"platform,omitempty"`
 }
 
 type testFlightSection struct {
-	LatestDistributedBuildID string                      `json:"latestDistributedBuildId,omitempty"`
-	BetaReviewState          string                      `json:"betaReviewState,omitempty"`
-	ExternalBuildState       string                      `json:"externalBuildState,omitempty"`
-	SubmittedDate            string                      `json:"submittedDate,omitempty"`
-	BetaReviewSubmission     *betaReviewSubmissionStatus `json:"betaReviewSubmission,omitempty"`
-	latestBuild              *betaReviewBuildStatus
+	LatestDistributedBuildID string `json:"latestDistributedBuildId,omitempty"`
+	BetaReviewState          string `json:"betaReviewState,omitempty"`
+	// InternalBuildState is the TestFlight internal state of the latest uploaded
+	// build, which is the build reported in builds.latest. ExternalBuildState
+	// describes LatestDistributedBuildID instead, so the two can disagree while a
+	// newer build is still processing for internal testers.
+	InternalBuildState   string                      `json:"internalBuildState,omitempty"`
+	ExternalBuildState   string                      `json:"externalBuildState,omitempty"`
+	SubmittedDate        string                      `json:"submittedDate,omitempty"`
+	BetaReviewSubmission *betaReviewSubmissionStatus `json:"betaReviewSubmission,omitempty"`
+	latestBuild          *betaReviewBuildStatus
+}
+
+// betaBuildStates pairs the TestFlight-side states App Store Connect reports for
+// a single build.
+type betaBuildStates struct {
+	internal string
+	external string
 }
 
 type betaReviewSubmissionStatus struct {
@@ -566,6 +581,7 @@ func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID stri
 				Version:         latestContext.Version,
 				BuildNumber:     latest.Attributes.Version,
 				ProcessingState: latest.Attributes.ProcessingState,
+				Expired:         optionalBuildExpired(latest.Attributes),
 				UploadedDate:    latest.Attributes.UploadedDate,
 				Platform:        latestContext.Platform,
 			}
@@ -592,15 +608,22 @@ func fillBuildsAndTestFlight(ctx context.Context, client *asc.Client, appID stri
 	betaDetails, err := client.GetBuildBetaDetails(
 		ctx,
 		asc.WithBuildBetaDetailsBuildIDs(buildIDs),
+		asc.WithBuildBetaDetailsIncludeBuild(),
 		asc.WithBuildBetaDetailsLimit(200),
 	)
 	if err != nil {
 		return err
 	}
-	externalStateByBuild := buildExternalStatesByBuildID(buildIDs, betaDetails)
+	betaStatesByBuild := buildBetaStatesByBuildID(buildIDs, betaDetails)
+
+	// The latest build carries the internal state operators need: it can still be
+	// PROCESSING for internal testers while processingState already reads VALID.
+	if latest != nil {
+		section.InternalBuildState = strings.ToUpper(strings.TrimSpace(betaStatesByBuild[latest.ID].internal))
+	}
 
 	for _, build := range buildsResp.Data {
-		state := strings.ToUpper(strings.TrimSpace(externalStateByBuild[build.ID]))
+		state := strings.ToUpper(strings.TrimSpace(betaStatesByBuild[build.ID].external))
 		if isDistributedState(state) {
 			section.LatestDistributedBuildID = build.ID
 			section.ExternalBuildState = state
@@ -773,10 +796,10 @@ func fetchBetaReviewSubmissionsForStatus(
 	return result, nil
 }
 
-func buildExternalStatesByBuildID(buildIDs []string, betaDetails *asc.BuildBetaDetailsResponse) map[string]string {
+func buildBetaStatesByBuildID(buildIDs []string, betaDetails *asc.BuildBetaDetailsResponse) map[string]betaBuildStates {
 	// BuildBetaDetails can omit relationships.build in some real API responses.
 	// Use relationship mapping when available, otherwise fall back to positional mapping.
-	externalStateByBuild := make(map[string]string, len(buildIDs))
+	statesByBuild := make(map[string]betaBuildStates, len(buildIDs))
 	if betaDetails != nil {
 		usedRelationshipMapping := false
 		for _, detail := range betaDetails.Data {
@@ -785,18 +808,33 @@ func buildExternalStatesByBuildID(buildIDs []string, betaDetails *asc.BuildBetaD
 				continue
 			}
 			usedRelationshipMapping = true
-			externalStateByBuild[buildID] = strings.TrimSpace(detail.Attributes.ExternalBuildState)
+			statesByBuild[buildID] = betaBuildStatesFromAttributes(detail.Attributes)
 		}
 
 		// Without relationships, mapping by position is ambiguous for multiple
 		// builds because the API does not guarantee response order for filters.
 		// Keep a single-item fallback where positional mapping is unambiguous.
 		if !usedRelationshipMapping && len(buildIDs) == 1 && len(betaDetails.Data) == 1 {
-			externalStateByBuild[buildIDs[0]] = strings.TrimSpace(betaDetails.Data[0].Attributes.ExternalBuildState)
+			statesByBuild[buildIDs[0]] = betaBuildStatesFromAttributes(betaDetails.Data[0].Attributes)
 		}
 	}
 
-	return externalStateByBuild
+	return statesByBuild
+}
+
+func optionalBuildExpired(attributes asc.BuildAttributes) *bool {
+	expired, known := attributes.ExpiredValue()
+	if !known {
+		return nil
+	}
+	return &expired
+}
+
+func betaBuildStatesFromAttributes(attributes asc.BuildBetaDetailAttributes) betaBuildStates {
+	return betaBuildStates{
+		internal: strings.TrimSpace(attributes.InternalBuildState),
+		external: strings.TrimSpace(attributes.ExternalBuildState),
+	}
 }
 
 func optionalRelationshipResourceID(relationships json.RawMessage, key string) (string, bool) {
@@ -1457,12 +1495,20 @@ func renderDashboard(resp *dashboardResponse, markdown bool) {
 		if resp.Builds.Latest == nil {
 			rows = append(rows, []string{"latest", "[-] none"})
 		} else {
+			expired := "[-] unknown"
+			if resp.Builds.Latest.Expired != nil && !*resp.Builds.Latest.Expired {
+				expired = "[+] false"
+			}
+			if resp.Builds.Latest.Expired != nil && *resp.Builds.Latest.Expired {
+				expired = "[x] true"
+			}
 			rows = append(
 				rows,
 				[]string{"latest.id", resp.Builds.Latest.ID},
 				[]string{"latest.version", shared.OrNA(resp.Builds.Latest.Version)},
 				[]string{"latest.buildNumber", shared.OrNA(resp.Builds.Latest.BuildNumber)},
 				[]string{"latest.processingState", prefixedState(resp.Builds.Latest.ProcessingState)},
+				[]string{"latest.expired", expired},
 				[]string{"latest.uploadedDate", formatDateWithRelative(resp.Builds.Latest.UploadedDate)},
 				[]string{"latest.platform", shared.OrNA(resp.Builds.Latest.Platform)},
 			)
@@ -1472,6 +1518,7 @@ func renderDashboard(resp *dashboardResponse, markdown bool) {
 
 	if resp.TestFlight != nil {
 		rows := [][]string{
+			{"internalBuildState", prefixedInternalBuildState(resp.TestFlight.InternalBuildState)},
 			{"latestDistributedBuildId", shared.OrNA(resp.TestFlight.LatestDistributedBuildID)},
 			{"externalBuildState", prefixedState(resp.TestFlight.ExternalBuildState)},
 		}
@@ -1579,6 +1626,27 @@ func prefixedState(value string) string {
 		return "[-] n/a"
 	}
 	return fmt.Sprintf("%s %s", stateSymbol(trimmed), trimmed)
+}
+
+func prefixedInternalBuildState(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "[-] n/a"
+	}
+	return fmt.Sprintf("%s %s", internalBuildStateSymbol(trimmed), trimmed)
+}
+
+func internalBuildStateSymbol(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "PROCESSING", "IN_EXPORT_COMPLIANCE_REVIEW":
+		return "[~]"
+	case "PROCESSING_EXCEPTION", "MISSING_EXPORT_COMPLIANCE", "EXPIRED":
+		return "[x]"
+	case "READY_FOR_BETA_TESTING", "IN_BETA_TESTING":
+		return "[+]"
+	default:
+		return stateSymbol(value)
+	}
 }
 
 func stateSymbol(value string) string {

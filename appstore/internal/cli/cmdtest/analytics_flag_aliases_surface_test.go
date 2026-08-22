@@ -56,11 +56,14 @@ func TestAnalyticsRankedAmbiguousFlagsRemainRejected(t *testing.T) {
 		flag string
 	}{
 		{path: []string{"screenshots", "upload"}, flag: "locale"},
-		{path: []string{"screenshots", "list"}, flag: "app"},
 		{path: []string{"screenshots", "list"}, flag: "paginate"},
 		{path: []string{"localizations", "update"}, flag: "localization-id"},
 		{path: []string{"profiles", "list"}, flag: "bundle-id"},
-		{path: []string{"subscriptions", "localizations", "update"}, flag: "subscription-id"},
+		// `subscriptions localizations update --subscription-id` stays a
+		// non-alias too, but it is now recognized purely so the command can
+		// explain that --id addresses the localization. Its surface and
+		// runtime contracts live in
+		// subscriptions_localizations_selector_flags_test.go.
 	}
 
 	root := RootCommand("1.2.3")

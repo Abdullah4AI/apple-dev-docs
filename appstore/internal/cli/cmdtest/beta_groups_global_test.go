@@ -330,18 +330,20 @@ func TestBetaGroupsListScopedWithExternalFilter(t *testing.T) {
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
 		}
-		if req.URL.Path != "/v1/apps/app-1/betaGroups" {
-			t.Fatalf("expected path /v1/apps/app-1/betaGroups, got %s", req.URL.Path)
+		if req.URL.Path != "/v1/betaGroups" {
+			t.Fatalf("expected path /v1/betaGroups, got %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("filter[app]") != "app-1" {
+			t.Fatalf("expected filter[app]=app-1, got %q", req.URL.Query().Get("filter[app]"))
+		}
+		if req.URL.Query().Get("filter[isInternalGroup]") != "false" {
+			t.Fatalf("expected filter[isInternalGroup]=false, got %q", req.URL.Query().Get("filter[isInternalGroup]"))
 		}
 		if req.URL.Query().Get("limit") != "200" {
-			t.Fatalf("expected limit=200, got %q", req.URL.Query().Get("limit"))
-		}
-		if req.URL.Query().Get("filter[isInternalGroup]") != "" {
-			t.Fatalf("expected no filter[isInternalGroup] in request, got %q", req.URL.Query().Get("filter[isInternalGroup]"))
+			t.Fatalf("expected maximum page size for the filtered aggregate, got %q", req.URL.Query().Get("limit"))
 		}
 
 		body := `{"data":[` +
-			`{"type":"betaGroups","id":"bg-int","attributes":{"name":"Internal","isInternalGroup":true}},` +
 			`{"type":"betaGroups","id":"bg-ext","attributes":{"name":"External","isInternalGroup":false}}` +
 			`]}`
 		return &http.Response{

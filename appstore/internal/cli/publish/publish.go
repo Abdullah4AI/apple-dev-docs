@@ -75,8 +75,9 @@ func PublishTestFlightCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("publish testflight", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (required, or ASC_APP_ID env)")
-	ipaPath := fs.String("ipa", "", "Path to .ipa file (required unless --build/--build-number is provided)")
-	buildID := fs.String("build", "", "Existing build ID to distribute (skip upload)")
+	ipaPath := fs.String("ipa", "", "Path to .ipa file (required unless --build-id/--build-number is provided)")
+	buildID := fs.String("build-id", "", "Existing build ID to distribute (skip upload)")
+	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	version := fs.String("version", "", "CFBundleShortVersionString (auto-extracted from IPA if not provided)")
 	buildNumber := fs.String("build-number", "", "CFBundleVersion (used for upload metadata with --ipa, or build lookup when --ipa is omitted)")
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
@@ -102,7 +103,7 @@ func PublishTestFlightCommand() *ffcli.Command {
 The --upload-only flag is experimental.
 
 Steps:
-1. Build locally with Xcode or upload an IPA (unless --build/--build-number is provided)
+1. Build locally with Xcode or upload an IPA (unless --build-id/--build-number is provided)
 2. Wait for processing when needed (--wait, --test-notes, or --submit)
 3. Stop and return the build metadata with --upload-only, or add the build to specified beta groups
 4. Optionally notify testers
@@ -118,11 +119,15 @@ Examples:
   asc publish testflight --app "123" --ipa app.ipa --group "G1,G2" --wait --notify
   asc publish testflight --app "123" --ipa app.ipa --group "External Testers" --submit --confirm
   asc publish testflight --app "123" --ipa app.ipa --group "GROUP_ID" --test-notes "Test instructions" --locale "en-US" --wait
-  asc publish testflight --app "123" --build "BUILD_ID" --group "GROUP_ID" --wait
+  asc publish testflight --app "123" --build-id "BUILD_ID" --group "GROUP_ID" --wait
   asc publish testflight --app "123" --build-number "42" --group "GROUP_ID" --wait`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := legacyBuildID.Apply(buildID); err != nil {
+				return err
+			}
+
 			resolvedAppInput := shared.ResolveAppID(*appID)
 			if resolvedAppInput == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
@@ -143,8 +148,8 @@ Examples:
 						return shared.UsageErrorf("--%s cannot be used with --upload-only", flagName)
 					}
 				}
-				if setFlags["build"] {
-					return shared.UsageError("--build cannot be used with --upload-only")
+				if setFlags["build-id"] || setFlags["build"] {
+					return shared.UsageError("--build-id cannot be used with --upload-only")
 				}
 			}
 			if err := validateLocalBuildFlagUsage(localBuildMode, setFlags); err != nil {
@@ -169,24 +174,24 @@ Examples:
 					return shared.UsageError("--ipa cannot be combined with --workspace or --project")
 				}
 				if buildIDValue != "" {
-					return shared.UsageError("--build cannot be combined with --workspace or --project")
+					return shared.UsageError("--build-id cannot be combined with --workspace or --project")
 				}
 				if versionValue == "" {
 					return shared.UsageError("--version is required")
 				}
 			case uploadMode:
 				if buildIDValue != "" {
-					return shared.UsageError("--ipa and --build are mutually exclusive")
+					return shared.UsageError("--ipa and --build-id are mutually exclusive")
 				}
 			default:
 				if *uploadOnly {
 					return shared.UsageError("--upload-only requires --ipa, --workspace, or --project")
 				}
 				if buildIDValue == "" && buildNumberValue == "" {
-					return shared.UsageError("--ipa is required unless --build or --build-number is provided")
+					return shared.UsageError("--ipa is required unless --build-id or --build-number is provided")
 				}
 				if buildIDValue != "" && buildNumberValue != "" {
-					return shared.UsageError("--build and --build-number are mutually exclusive when --ipa is not provided")
+					return shared.UsageError("--build-id and --build-number are mutually exclusive when --ipa is not provided")
 				}
 				if versionValue != "" {
 					return shared.UsageError("--version is only supported when --ipa is provided")

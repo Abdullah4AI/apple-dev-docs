@@ -177,7 +177,7 @@ func isolateIntroductoryOfferCreateAuth(t *testing.T) {
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	for _, key := range []string{
-		"ASC_PROFILE", "ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PATH",
+		"ASC_APP_ID", "ASC_PROFILE", "ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PATH",
 		"ASC_PRIVATE_KEY", "ASC_PRIVATE_KEY_B64", "ASC_STRICT_AUTH",
 	} {
 		t.Setenv(key, "")
@@ -413,6 +413,220 @@ func TestSubscriptionsIntroductoryOffersCreateAllTerritoriesDryRunSummarizesAvai
 		if strings.HasPrefix(request, http.MethodPost+" ") {
 			t.Fatalf("dry-run should not POST, saw requests: %v", seen)
 		}
+	}
+}
+
+func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunSummarizesResolvedTerritory(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	seen := make([]string, 0, 1)
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = append(seen, req.Method+" "+req.URL.Path)
+		t.Fatalf("dry-run should not POST or otherwise reach the API, saw requests: %v", seen)
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var summary struct {
+		SubscriptionID string `json:"subscriptionId"`
+		Territory      string `json:"territory"`
+		AllTerritories bool   `json:"allTerritories"`
+		DryRun         bool   `json:"dryRun"`
+		Total          int    `json:"total"`
+		Created        int    `json:"created"`
+		Skipped        int    `json:"skipped"`
+		Failed         int    `json:"failed"`
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"subscriptions", "offers", "introductory", "create",
+			"--subscription-id", "8000000001",
+			"--offer-duration", "ONE_MONTH",
+			"--offer-mode", "FREE_TRIAL",
+			"--number-of-periods", "1",
+			"--territory", "US",
+			"--dry-run",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &summary); err != nil {
+		t.Fatalf("parse JSON summary: %v", err)
+	}
+	if summary.SubscriptionID != "8000000001" || summary.AllTerritories || !summary.DryRun {
+		t.Fatalf("unexpected summary identity: %+v", summary)
+	}
+	if summary.Territory != "USA" {
+		t.Fatalf("expected normalized territory USA, got %+v", summary)
+	}
+	if summary.Total != 1 || summary.Created != 1 || summary.Skipped != 0 || summary.Failed != 0 {
+		t.Fatalf("unexpected summary counts: %+v", summary)
+	}
+}
+
+func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunSkipsSubscriptionLookup(t *testing.T) {
+	isolateIntroductoryOfferCreateAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("single-territory dry-run should not resolve subscription selectors: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	stdout, stderr, runErr := runRootCommand(t, []string{
+		"subscriptions", "offers", "introductory", "create",
+		"--subscription-id", "com.example.monthly",
+		"--app", "app-1",
+		"--offer-duration", "ONE_MONTH",
+		"--offer-mode", "FREE_TRIAL",
+		"--number-of-periods", "1",
+		"--territory", "US",
+		"--dry-run",
+		"--output", "json",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+
+	var summary struct {
+		SubscriptionID string `json:"subscriptionId"`
+		Territory      string `json:"territory"`
+		DryRun         bool   `json:"dryRun"`
+		Total          int    `json:"total"`
+		Created        int    `json:"created"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &summary); err != nil {
+		t.Fatalf("parse JSON summary: %v", err)
+	}
+	if summary.SubscriptionID != "com.example.monthly" || summary.Territory != "USA" || !summary.DryRun {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+	if summary.Total != 1 || summary.Created != 1 {
+		t.Fatalf("unexpected summary counts: %+v", summary)
+	}
+}
+
+func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunRequiresAppForLookupSelectors(t *testing.T) {
+	isolateIntroductoryOfferCreateAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("missing app validation must happen before HTTP: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	for _, selector := range []string{"com.example.monthly", "Monthly Plan"} {
+		t.Run(selector, func(t *testing.T) {
+			stdout, stderr, runErr := runRootCommand(t, []string{
+				"subscriptions", "offers", "introductory", "create",
+				"--subscription-id", selector,
+				"--offer-duration", "ONE_MONTH",
+				"--offer-mode", "FREE_TRIAL",
+				"--number-of-periods", "1",
+				"--territory", "US",
+				"--dry-run",
+				"--output", "json",
+			})
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("expected usage error, got %v", runErr)
+			}
+			if rootcmd.ExitCodeFromError(runErr) != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", rootcmd.ExitCodeFromError(runErr), rootcmd.ExitUsage)
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "Error: --app is required (or set ASC_APP_ID) when --subscription-id is a product ID or name") {
+				t.Fatalf("unexpected stderr: %q", stderr)
+			}
+		})
+	}
+}
+
+func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunHonorsCanceledContext(t *testing.T) {
+	isolateIntroductoryOfferCreateAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("canceled dry-run should not reach the API: %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	if err := root.Parse([]string{
+		"subscriptions", "offers", "introductory", "create",
+		"--subscription-id", "8000000001",
+		"--offer-duration", "ONE_MONTH",
+		"--offer-mode", "FREE_TRIAL",
+		"--number-of-periods", "1",
+		"--territory", "US",
+		"--dry-run",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("run error = %v, want context canceled", err)
+		}
+	})
+	if stdout != "" {
+		t.Fatalf("expected no output after cancellation, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunRendersRegisteredFormats(t *testing.T) {
+	isolateIntroductoryOfferCreateAuth(t)
+
+	for _, format := range []string{"table", "markdown"} {
+		t.Run(format, func(t *testing.T) {
+			stdout, stderr, runErr := runRootCommand(t, []string{
+				"subscriptions", "offers", "introductory", "create",
+				"--subscription-id", "8000000001",
+				"--offer-duration", "ONE_MONTH",
+				"--offer-mode", "FREE_TRIAL",
+				"--number-of-periods", "1",
+				"--territory", "US",
+				"--dry-run",
+				"--output", format,
+			})
+			if runErr != nil {
+				t.Fatalf("run error: %v", runErr)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+			if !strings.Contains(stdout, "Subscription ID") || !strings.Contains(stdout, "USA") {
+				t.Fatalf("expected registered %s output, got %q", format, stdout)
+			}
+		})
 	}
 }
 

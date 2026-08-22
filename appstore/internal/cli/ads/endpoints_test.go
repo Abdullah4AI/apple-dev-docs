@@ -109,7 +109,7 @@ func TestAdsRawResponseCommandsExposeJSONOnlyOutput(t *testing.T) {
 			if err := cmd.Parse(args); err != nil {
 				t.Fatalf("asc ads %s parse error: %v", strings.Join(path, " "), err)
 			}
-			if err := cmd.Exec(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "unsupported format: table") {
+			if err := cmd.Exec(context.Background(), nil); err == nil || !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), `(got "table")`) {
 				t.Fatalf("asc ads %s accepted --output table for a raw response: %v", strings.Join(path, " "), err)
 			}
 		})
@@ -118,7 +118,7 @@ func TestAdsRawResponseCommandsExposeJSONOnlyOutput(t *testing.T) {
 	for _, format := range []string{"table", "markdown"} {
 		output := format
 		pretty := false
-		if _, err := validateAdsRawOutput(shared.OutputFlags{Output: &output, Pretty: &pretty}); err == nil || !strings.Contains(err.Error(), "unsupported format: "+format) {
+		if _, err := validateAdsRawOutput(shared.OutputFlags{Output: &output, Pretty: &pretty}); err == nil || !strings.Contains(err.Error(), `(got "`+format+`")`) {
 			t.Fatalf("validateAdsRawOutput(%q) error = %v", format, err)
 		}
 	}

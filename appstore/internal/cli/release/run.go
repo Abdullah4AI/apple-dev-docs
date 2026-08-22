@@ -304,7 +304,7 @@ func executePipeline(ctx context.Context, opts runOptions) (runResult, error) {
 	// which mutate. Resolve the requested build before any of them so a build
 	// that does not exist, or belongs to another app, fails the run (and the
 	// dry-run preview) instead of the version being left half-updated.
-	if err := runStep(stepValidateBuild, "Pass a --build that exists and belongs to --app (try `asc builds list --app <id>`).", func() (stepOutcome, error) {
+	if err := runStep(stepValidateBuild, "Pass a --build-id that exists and belongs to --app (try `asc builds list --app <id>`).", func() (stepOutcome, error) {
 		buildAppID, buildErr := resolveBuildOwningApp(requestCtx, client, opts.BuildID)
 		if buildErr != nil {
 			return stepOutcome{}, fmt.Errorf("validate build: %w", buildErr)
@@ -514,7 +514,7 @@ func executePipeline(ctx context.Context, opts runOptions) (runResult, error) {
 		}
 	}
 
-	if err := runStep(stepAttachBuild, "Ensure --build points to a valid processed build for this app.", func() (stepOutcome, error) {
+	if err := runStep(stepAttachBuild, "Ensure --build-id points to a valid processed build for this app.", func() (stepOutcome, error) {
 		if strings.TrimSpace(versionID) == "" {
 			if opts.DryRun {
 				return stepOutcome{

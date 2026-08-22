@@ -67,6 +67,13 @@ func (a BuildAttributes) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// ExpiredValue reports the build expiry value and whether the API supplied it.
+// The presence result prevents callers from treating an omitted attribute as
+// an explicit false value.
+func (a BuildAttributes) ExpiredValue() (bool, bool) {
+	return a.Expired, a.expiredSet || a.Expired
+}
+
 // BuildAudienceType represents who can receive a build.
 type BuildAudienceType string
 
