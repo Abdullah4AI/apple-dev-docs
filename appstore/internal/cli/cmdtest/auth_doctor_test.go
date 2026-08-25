@@ -18,6 +18,15 @@ type doctorMigrationJSON struct {
 
 type doctorReportJSON struct {
 	Migration doctorMigrationJSON `json:"migration"`
+	Sections  []struct {
+		Title  string `json:"title"`
+		Checks []struct {
+			Message string `json:"message"`
+		} `json:"checks"`
+	} `json:"sections"`
+	Summary struct {
+		Errors int `json:"errors"`
+	} `json:"summary"`
 }
 
 func TestAuthDoctorJSONIncludesMigrationHints(t *testing.T) {
@@ -103,11 +112,13 @@ func TestAuthDoctorTextIncludesMigrationHints(t *testing.T) {
 
 func TestAuthDoctorTextRedactsCredentialIdentifiers(t *testing.T) {
 	withTempRepo(t, func(repo string) {
+		keyPath := filepath.Join(repo, "AuthKey.p8")
+		writeECDSAPEM(t, keyPath)
 		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 		t.Setenv("ASC_CONFIG_PATH", filepath.Join(repo, "config.json"))
 		t.Setenv("ASC_KEY_ID", "ABC123SECRET")
 		t.Setenv("ASC_ISSUER_ID", "issuer-uuid")
-		t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", keyPath)
 
 		root := RootCommand("1.2.3")
 		root.FlagSet.SetOutput(io.Discard)
@@ -132,6 +143,56 @@ func TestAuthDoctorTextRedactsCredentialIdentifiers(t *testing.T) {
 		}
 		if strings.Contains(stdout, "issuer-uuid") {
 			t.Fatalf("expected ASC_ISSUER_ID to be redacted, got %q", stdout)
+		}
+	})
+}
+
+func TestAuthDoctorJSONFailsForMissingEnvironmentPrivateKey(t *testing.T) {
+	withTempRepo(t, func(repo string) {
+		missingKeyPath := filepath.Join(repo, "missing.p8")
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(repo, "config.json"))
+		t.Setenv("ASC_KEY_ID", "ENVKEY")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", missingKeyPath)
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+
+		root := RootCommand("1.2.3")
+		root.FlagSet.SetOutput(io.Discard)
+
+		var runErr error
+		stdout, _ := captureOutput(t, func() {
+			if err := root.Parse([]string{"auth", "doctor", "--output", "json"}); err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			runErr = root.Run(context.Background())
+		})
+		if runErr == nil {
+			t.Fatal("expected doctor to fail for a missing environment private key")
+		}
+
+		var report doctorReportJSON
+		if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if report.Summary.Errors == 0 {
+			t.Fatalf("expected a failed check in summary, got %#v", report.Summary)
+		}
+
+		found := false
+		for _, section := range report.Sections {
+			if section.Title != "Environment" {
+				continue
+			}
+			for _, check := range section.Checks {
+				if strings.Contains(check.Message, "ASC_PRIVATE_KEY_PATH - file not found") {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("expected environment key failure in JSON output, got %q", stdout)
 		}
 	})
 }

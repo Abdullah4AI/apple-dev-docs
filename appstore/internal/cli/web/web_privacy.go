@@ -1271,7 +1271,11 @@ Examples:
 			}
 			resolvedAppID := strings.TrimSpace(shared.ResolveAppID(*appID))
 			if resolvedAppID == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
+				return shared.WithDiagnostic(
+					shared.UsageError("--app is required (or set ASC_APP_ID)"),
+					shared.DiagnosticRequiredInputMissing,
+					"--app",
+				)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)

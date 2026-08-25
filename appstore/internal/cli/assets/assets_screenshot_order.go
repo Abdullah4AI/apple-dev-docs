@@ -66,7 +66,7 @@ func uploadScreenshotsWithOrderStateWithOpenedFiles(ctx context.Context, client 
 			return progress, err
 		}
 		progress.Results = append(progress.Results, item)
-		progress.OrderedIDs = appendUniqueScreenshotID(progress.OrderedIDs, item.AssetID)
+		progress.OrderedIDs = appendUniqueAssetID(progress.OrderedIDs, item.AssetID)
 	}
 
 	if len(progress.OrderedIDs) == 0 {
@@ -119,7 +119,7 @@ func resumeScreenshotsWithOrderState(ctx context.Context, client *asc.Client, se
 		}
 		if !retryUpload {
 			progress.Results = append(progress.Results, result)
-			progress.OrderedIDs = appendUniqueScreenshotID(progress.OrderedIDs, result.AssetID)
+			progress.OrderedIDs = appendUniqueAssetID(progress.OrderedIDs, result.AssetID)
 			remainingFiles = remainingFiles[1:]
 		}
 	}
@@ -231,24 +231,9 @@ func GetOrderedAppScreenshotIDs(ctx context.Context, client *asc.Client, setID s
 		return nil, err
 	}
 
-	orderedIDs := make([]string, 0, len(firstPage.Data))
-	err = asc.PaginateEach(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
+	return collectOrderedLinkageIDs(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
 		return client.GetAppScreenshotSetAppScreenshotsRelationships(ctx, "", asc.WithLinkagesNextURL(nextURL))
-	}, func(page asc.PaginatedResponse) error {
-		linkages, ok := page.(*asc.LinkagesResponse)
-		if !ok {
-			return fmt.Errorf("unexpected screenshot relationship response type %T", page)
-		}
-		for _, item := range linkages.Data {
-			orderedIDs = appendUniqueScreenshotID(orderedIDs, item.ID)
-		}
-		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return orderedIDs, nil
 }
 
 // SetOrderedAppScreenshots replaces the screenshot relationships for a set in the provided order.
@@ -256,39 +241,5 @@ func SetOrderedAppScreenshots(ctx context.Context, client *asc.Client, setID str
 	if client == nil {
 		return fmt.Errorf("client is required")
 	}
-	return client.UpdateAppScreenshotSetAppScreenshotsRelationship(ctx, setID, normalizeScreenshotIDs(orderedIDs))
-}
-
-func normalizeScreenshotIDs(ids []string) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(ids))
-	normalized := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		normalized = append(normalized, id)
-	}
-	return normalized
-}
-
-func appendUniqueScreenshotID(ids []string, id string) []string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ids
-	}
-	for _, existing := range ids {
-		if existing == id {
-			return ids
-		}
-	}
-	return append(ids, id)
+	return client.UpdateAppScreenshotSetAppScreenshotsRelationship(ctx, setID, normalizeAssetIDs(orderedIDs))
 }

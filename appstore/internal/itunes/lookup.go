@@ -137,19 +137,14 @@ func (c *Client) LookupApps(ctx context.Context, ids []string, opts LookupOption
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("lookup request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, &httpStatusError{operation: "lookup", statusCode: resp.StatusCode}
-	}
-
 	var lookup lookupResponse
-	if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
-		return nil, fmt.Errorf("failed to parse lookup response: %w", err)
+	if err := c.do(ctx, "lookup", req, func(resp *http.Response) error {
+		if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
+			return fmt.Errorf("failed to parse lookup response: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	appsByCanonicalID := make(map[string]App, len(lookup.Results))
@@ -222,19 +217,14 @@ func (c *Client) LookupAppByBundleID(ctx context.Context, bundleID string, opts 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("lookup request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, &httpStatusError{operation: "lookup", statusCode: resp.StatusCode}
-	}
-
 	var lookup lookupResponse
-	if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
-		return nil, fmt.Errorf("failed to parse lookup response: %w", err)
+	if err := c.do(ctx, "lookup", req, func(resp *http.Response) error {
+		if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
+			return fmt.Errorf("failed to parse lookup response: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	for _, result := range lookup.Results {
 		if result.TrackID == 0 || !strings.EqualFold(strings.TrimSpace(result.BundleID), bundleID) {

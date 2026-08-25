@@ -244,6 +244,122 @@ func TestWithRetry_FailsFastWhenRetryAfterExceedsContextBudget(t *testing.T) {
 	}
 }
 
+func TestWithRetry_FailsFastWhenOptedInFallbackExceedsContextBudget(t *testing.T) {
+	var attempts atomic.Int32
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := WithRetry(ctx, func() (struct{}, error) {
+		attempts.Add(1)
+		return struct{}{}, &RetryableError{
+			Err:                     buildRetryableError(http.StatusTooManyRequests, 0, nil),
+			PreserveErrorOnDeadline: true,
+		}
+	}, RetryOptions{MaxRetries: 3, BaseDelay: time.Second, MaxDelay: time.Second})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 attempt, got %d", got)
+	}
+	if elapsed >= 250*time.Millisecond {
+		t.Fatalf("elapsed = %s, want an immediate fallback deadline failure", elapsed)
+	}
+	if !IsRetryDelayExceeded(err) {
+		t.Fatalf("expected retry-delay-exceeded marker, got %v", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("did not expect context deadline classification before the parent context expires, got %v", err)
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError in chain, got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, apiErr.StatusCode)
+	}
+}
+
+func TestWithRetry_ExplicitCancellationWinsWhenOptedInFallbackExceedsContextBudget(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	cancel()
+
+	_, err := WithRetry(ctx, func() (struct{}, error) {
+		return struct{}{}, &RetryableError{
+			Err:                     errors.New("retryable failure"),
+			PreserveErrorOnDeadline: true,
+		}
+	}, RetryOptions{MaxRetries: 1, BaseDelay: time.Second, MaxDelay: time.Second})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want explicit context cancellation", err)
+	}
+	if IsRetryDelayExceeded(err) {
+		t.Fatalf("did not expect fallback deadline classification to hide cancellation, got %v", err)
+	}
+}
+
+func TestWithRetry_FinalFallbackAttemptPreservesExplicitCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var attempts atomic.Int32
+	_, err := WithRetry(ctx, func() (struct{}, error) {
+		if attempts.Add(1) == 2 {
+			cancel()
+		}
+		return struct{}{}, &RetryableError{
+			Err:                     buildRetryableError(http.StatusTooManyRequests, 0, nil),
+			PreserveErrorOnDeadline: true,
+		}
+	}, RetryOptions{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Second})
+
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("expected the final allowed attempt, got %d attempts", got)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want explicit context cancellation", err)
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError in chain, got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, apiErr.StatusCode)
+	}
+}
+
+func TestWithRetry_FinalFallbackAttemptRetainsBudgetWithoutCancellation(t *testing.T) {
+	var attempts atomic.Int32
+	_, err := WithRetry(context.Background(), func() (struct{}, error) {
+		attempts.Add(1)
+		return struct{}{}, &RetryableError{
+			Err:                     buildRetryableError(http.StatusTooManyRequests, 0, nil),
+			PreserveErrorOnDeadline: true,
+		}
+	}, RetryOptions{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Second})
+
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("expected the final allowed attempt, got %d attempts", got)
+	}
+	if !IsRetryBudgetExhausted(err) {
+		t.Fatalf("expected retry budget exhaustion, got %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("did not expect cancellation without a canceled context, got %v", err)
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("expected *APIError in chain, got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, apiErr.StatusCode)
+	}
+}
+
 func TestWithRetry_ClassifiesOverCapHintBeforeFinalRetryBudget(t *testing.T) {
 	var attempts atomic.Int32
 

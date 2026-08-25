@@ -11,7 +11,7 @@ func TestReviewDetailsChecks_DemoCredentialRemediationExplainsOptIn(t *testing.T
 		ContactFirstName:    "A",
 		ContactLastName:     "B",
 		ContactEmail:        "a@example.com",
-		ContactPhone:        "123",
+		ContactPhone:        "+1 555 010 1234",
 		DemoAccountRequired: true,
 	})
 

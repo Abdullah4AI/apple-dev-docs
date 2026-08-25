@@ -36,13 +36,24 @@ func (f *DeprecatedStringFlagAlias) Set(value string) error {
 // BindDeprecatedStringFlagAlias accepts a compatibility spelling without
 // advertising it as part of the command's canonical interface.
 func BindDeprecatedStringFlagAlias(fs *flag.FlagSet, aliasName, canonicalName string) *DeprecatedStringFlagAlias {
+	alias := bindDeprecatedStringFlagAlias(fs, aliasName, canonicalName)
+	HideFlagFromHelp(fs.Lookup(alias.aliasName))
+	return alias
+}
+
+// BindVisibleDeprecatedStringFlagAlias accepts a compatibility spelling and
+// keeps its deprecation notice visible during the stable migration window.
+func BindVisibleDeprecatedStringFlagAlias(fs *flag.FlagSet, aliasName, canonicalName string) *DeprecatedStringFlagAlias {
+	return bindDeprecatedStringFlagAlias(fs, aliasName, canonicalName)
+}
+
+func bindDeprecatedStringFlagAlias(fs *flag.FlagSet, aliasName, canonicalName string) *DeprecatedStringFlagAlias {
 	alias := &DeprecatedStringFlagAlias{
 		flagSet:       fs,
 		aliasName:     strings.TrimSpace(aliasName),
 		canonicalName: strings.TrimSpace(canonicalName),
 	}
 	fs.Var(alias, alias.aliasName, fmt.Sprintf("DEPRECATED: use --%s", alias.canonicalName))
-	HideFlagFromHelp(fs.Lookup(alias.aliasName))
 	return alias
 }
 
@@ -67,6 +78,25 @@ func (f *DeprecatedStringFlagAlias) Apply(canonical *string) error {
 		*canonical = aliasValue
 	}
 
+	return nil
+}
+
+// ApplyExclusive copies a supplied alias into the canonical value and rejects
+// any invocation that explicitly supplies both spellings.
+func (f *DeprecatedStringFlagAlias) ApplyExclusive(canonical *string) error {
+	if f == nil || !f.set {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "Warning: `--%s` is deprecated. Use `--%s`.\n", f.aliasName, f.canonicalName)
+	if f.canonicalWasSet() {
+		message := fmt.Sprintf("--%s conflicts with --%s; use only --%s", f.aliasName, f.canonicalName, f.canonicalName)
+		fmt.Fprintln(os.Stderr, "Error: "+message)
+		return NewReportedUsageError(UsageErrorInvalidValue, message)
+	}
+	if canonical != nil {
+		*canonical = strings.TrimSpace(f.value)
+	}
 	return nil
 }
 

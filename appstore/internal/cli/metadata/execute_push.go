@@ -40,17 +40,17 @@ func ExecutePushWithWarnings(ctx context.Context, opts PushExecutionOptions) (Pu
 	errorPrefix := metadataMutationErrorPrefix(opts.CommandName)
 	resolvedAppID := shared.ResolveAppID(opts.AppID)
 	if resolvedAppID == "" {
-		return PushPlanResult{}, nil, shared.UsageError("--app is required (or set ASC_APP_ID)")
+		return PushPlanResult{}, nil, metadataRequiredInputError("--app", "--app is required (or set ASC_APP_ID)")
 	}
 
 	versionValue := strings.TrimSpace(opts.Version)
 	if versionValue == "" {
-		return PushPlanResult{}, nil, shared.UsageError("--version is required")
+		return PushPlanResult{}, nil, metadataRequiredInputError("--version", "--version is required")
 	}
 
 	dirValue := strings.TrimSpace(opts.Dir)
 	if dirValue == "" {
-		return PushPlanResult{}, nil, shared.UsageError("--dir is required")
+		return PushPlanResult{}, nil, metadataRequiredInputError("--dir", "--dir is required")
 	}
 	if strings.TrimSpace(opts.ReviewDir) != "" && !opts.DryRun && !opts.Confirm {
 		return PushPlanResult{}, nil, shared.UsageError("--confirm is required when applying an approved metadata plan")

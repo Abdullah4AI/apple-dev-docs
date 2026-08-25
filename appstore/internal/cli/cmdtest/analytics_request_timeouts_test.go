@@ -105,6 +105,50 @@ func TestAnalyticsViewRefreshesTimeoutForEachRequest(t *testing.T) {
 	assertAnalyticsDeadlinesRefresh(t, deadlines)
 }
 
+func TestAnalyticsViewWarnsWhenReportsHaveAnotherPage(t *testing.T) {
+	setupAnalyticsTimeoutTest(t)
+
+	const reportsNextURL = "https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/" + analyticsViewRequestID + "/reports?cursor=reports-next"
+	requestCount := 0
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			assertAnalyticsTimeoutRequest(t, req, "/v1/analyticsReportRequests/"+analyticsViewRequestID+"/reports", "limit=200")
+			return analyticsViewJSONResponse(`{
+				"data":[{"type":"analyticsReports","id":"report-1","attributes":{"name":"App Sessions"}}],
+				"links":{"next":"` + reportsNextURL + `"}
+			}`), nil
+		case 2:
+			assertAnalyticsTimeoutRequest(t, req, "/v1/analyticsReports/report-1/instances", "limit=200")
+			return analyticsViewJSONResponse(`{"data":[],"links":{}}`), nil
+		default:
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+	setAnalyticsTimeoutTestClient(t, transport)
+
+	stdout, stderr, runErr := runCommand(t, []string{
+		"analytics", "view",
+		"--request-id", analyticsViewRequestID,
+		"--output", "json",
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if requestCount != 2 {
+		t.Fatalf("request count = %d, want 2", requestCount)
+	}
+	if !strings.Contains(stdout, `"id":"report-1"`) || !strings.Contains(stdout, `"next":"`+reportsNextURL+`"`) {
+		t.Fatalf("analytics view output lost the first page response: %s", stdout)
+	}
+	wantWarning := "Warning: showing 1 results; more pages exist (use --paginate or --next where supported)\n"
+	if stderr != wantWarning {
+		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	}
+}
+
 func TestAnalyticsDownloadRefreshesTimeoutThroughBodyTransfer(t *testing.T) {
 	setupAnalyticsTimeoutTest(t)
 

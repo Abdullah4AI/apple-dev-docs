@@ -68,6 +68,102 @@ func TestMetadataLengthChecks_ValidUnicode(t *testing.T) {
 	}
 }
 
+func TestVersionLocalizationMinimumLengthIssues(t *testing.T) {
+	issues := VersionLocalizationMinimumLengthIssues(VersionLocalization{
+		Locale:      "en-US",
+		Description: "TBD",
+	})
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %+v", issues)
+	}
+	if issues[0].Field != "description" || issues[0].Length != 3 || issues[0].Minimum != MinLengthDescription {
+		t.Fatalf("unexpected description issue: %+v", issues[0])
+	}
+
+	for _, description := range []string{"", strings.Repeat("d", MinLengthDescription), strings.Repeat("説", MinLengthDescription)} {
+		if issues := VersionLocalizationMinimumLengthIssues(VersionLocalization{Description: description}); len(issues) != 0 {
+			t.Fatalf("expected no issues for %q, got %+v", description, issues)
+		}
+	}
+}
+
+func TestAppInfoLocalizationMinimumLengthIssues(t *testing.T) {
+	issues := AppInfoLocalizationMinimumLengthIssues(AppInfoLocalization{
+		Locale: "en-US",
+		Name:   "X",
+	})
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %+v", issues)
+	}
+	if issues[0].Field != "name" || issues[0].Length != 1 || issues[0].Minimum != MinLengthName {
+		t.Fatalf("unexpected name issue: %+v", issues[0])
+	}
+
+	for _, name := range []string{"", "Ab", "名前"} {
+		if issues := AppInfoLocalizationMinimumLengthIssues(AppInfoLocalization{Name: name}); len(issues) != 0 {
+			t.Fatalf("expected no issues for %q, got %+v", name, issues)
+		}
+	}
+}
+
+func longHTTPSURL(length int) string {
+	const prefix = "https://example.com/"
+	if length <= len(prefix) {
+		return prefix[:length]
+	}
+	return prefix + strings.Repeat("a", length-len(prefix))
+}
+
+func TestMetadataLengthChecks_URLsOverLimit(t *testing.T) {
+	loc := VersionLocalization{
+		Locale:       "en-US",
+		SupportURL:   longHTTPSURL(LimitSupportURL + 1),
+		MarketingURL: longHTTPSURL(LimitMarketingURL + 1),
+	}
+	appInfo := AppInfoLocalization{
+		Locale:            "en-US",
+		PrivacyPolicyURL:  longHTTPSURL(LimitPrivacyPolicyURL + 1),
+		PrivacyChoicesURL: longHTTPSURL(LimitPrivacyChoicesURL + 1),
+	}
+
+	checks := metadataLengthChecks([]VersionLocalization{loc}, []AppInfoLocalization{appInfo})
+
+	wantIDs := []string{
+		"metadata.length.support_url",
+		"metadata.length.marketing_url",
+		"metadata.length.privacy_policy_url",
+		"metadata.length.privacy_choices_url",
+	}
+	for _, id := range wantIDs {
+		if !hasCheckID(checks, id) {
+			t.Fatalf("expected %s check, got %+v", id, checks)
+		}
+	}
+	for _, check := range checks {
+		if check.Severity != SeverityWarning {
+			t.Fatalf("expected URL length checks to be warnings, got %+v", check)
+		}
+	}
+}
+
+func TestMetadataLengthChecks_URLsAtLimit(t *testing.T) {
+	loc := VersionLocalization{
+		Locale:       "en-US",
+		SupportURL:   longHTTPSURL(LimitSupportURL),
+		MarketingURL: longHTTPSURL(LimitMarketingURL),
+	}
+	appInfo := AppInfoLocalization{
+		Locale:            "en-US",
+		PrivacyPolicyURL:  longHTTPSURL(LimitPrivacyPolicyURL),
+		PrivacyChoicesURL: longHTTPSURL(LimitPrivacyChoicesURL),
+	}
+
+	checks := metadataLengthChecks([]VersionLocalization{loc}, []AppInfoLocalization{appInfo})
+	if len(checks) != 0 {
+		t.Fatalf("expected no checks at URL limits, got %+v", checks)
+	}
+}
+
 func TestVersionLocalizationLengthIssues_KeywordsUseCharacterLimit(t *testing.T) {
 	keywords := strings.Repeat("語", 101)
 

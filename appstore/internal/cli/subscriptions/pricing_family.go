@@ -26,7 +26,8 @@ Examples:
   asc subscriptions pricing price-points list --subscription-id "SUB_ID" --territory "United States"
   asc subscriptions pricing availability view --subscription-id "SUB_ID"
   asc subscriptions pricing monthly-commitment list --subscription-id "SUB_ID"
-  asc subscriptions pricing equalize --subscription-id "SUB_ID" --base-price "3.49"`,
+  asc subscriptions pricing equalize --subscription-id "SUB_ID" --base-price "3.49"
+  asc subscriptions pricing derive --source-subscription-id "MONTHLY_ID" --target-subscription-id "YEARLY_ID" --multiplier "10" --dry-run`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -36,6 +37,7 @@ Examples:
 			SubscriptionsPricingAvailabilityCommand(),
 			SubscriptionsPricingMonthlyCommitmentCommand(),
 			SubscriptionsPricingEqualizeCommand(),
+			SubscriptionsPricingDeriveCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp

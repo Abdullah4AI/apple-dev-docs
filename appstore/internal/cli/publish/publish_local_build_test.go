@@ -774,6 +774,149 @@ func TestPublishTestFlightUploadReportsStructuredRecoveryResultAfterBetaReviewFa
 	}
 }
 
+func TestPublishTestFlightUploadTestNotesFailurePreservesStructuredRecoveryContext(t *testing.T) {
+	restore := overridePublishCommandTestHooks(t)
+	defer restore()
+	testNotes := "Line one\nLine two\x1b[31m"
+
+	getPublishASCClientFn = func(time.Duration) (*asc.Client, error) { return newPublishCommandTestClient(t), nil }
+	resolvePublishAppIDWithLookupFn = func(_ context.Context, _ *asc.Client, _ string) (string, error) {
+		return "app-123", nil
+	}
+	validatePublishIPAPathFn = func(string) (os.FileInfo, error) {
+		return newPublishTestFileInfo(t)
+	}
+	uploadCalls := 0
+	uploadBuildAndWaitForIDFn = func(_ context.Context, _ *asc.Client, _ string, _ string, _ os.FileInfo, version, buildNumber string, _ asc.Platform, _ time.Duration, _ time.Duration, _ bool) (*publishUploadResult, error) {
+		uploadCalls++
+		return &publishUploadResult{
+			Build: &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+				ID: "build-123",
+				Attributes: asc.BuildAttributes{
+					Version:         buildNumber,
+					ProcessingState: asc.BuildProcessingStateProcessing,
+				},
+			}},
+			Version:     version,
+			BuildNumber: buildNumber,
+		}, nil
+	}
+	waitForPublishBuildProcessingFn = func(context.Context, *asc.Client, string, time.Duration) (*asc.BuildResponse, error) {
+		return &asc.BuildResponse{Data: asc.Resource[asc.BuildAttributes]{
+			ID: "build-123",
+			Attributes: asc.BuildAttributes{
+				Version:         "42",
+				ProcessingState: asc.BuildProcessingStateValid,
+			},
+		}}, nil
+	}
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	requestCount := 0
+	http.DefaultTransport = publishCommandRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/apps/app-123/betaGroups" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[{"type":"betaGroups","id":"group-1","attributes":{"name":"External","isInternalGroup":false}}]}`)
+		case 2:
+			if req.Method != http.MethodGet || req.URL.Path != "/v1/builds/build-123/betaBuildLocalizations" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusOK, `{"data":[]}`)
+		case 3:
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/betaBuildLocalizations" {
+				t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			}
+			return publishCommandJSONResponse(http.StatusUnprocessableEntity, `{"errors":[{"status":"422","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"The provided entity has an invalid attribute","detail":"What to Test was rejected by the server"}]}`)
+		default:
+			t.Fatalf("unexpected request %d: %s %s", requestCount, req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	cmd := PublishTestFlightCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--app", "app-123",
+		"--ipa", "Demo.ipa",
+		"--version", "1.2.3",
+		"--build-number", "42",
+		"--group", "External",
+		"--test-notes", testNotes,
+		"--locale", "en-US",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	var runErr error
+	stdout, _ := capturePublishCommandOutput(t, func() error {
+		runErr = cmd.Exec(context.Background(), nil)
+		return runErr
+	})
+	if runErr == nil {
+		t.Fatal("expected post-upload test notes rejection")
+	}
+	if uploadCalls != 1 {
+		t.Fatalf("upload calls = %d, want 1", uploadCalls)
+	}
+	wantParts := []string{
+		`build "build-123" is available`,
+		`locale "en-US"`,
+		"The provided entity has an invalid attribute: What to Test was rejected by the server",
+		"retry without uploading the build again",
+		"reuse the original notes",
+		"asc builds test-notes create --build-id BUILD_ID --locale LOCALE --whats-new NOTES",
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(runErr.Error(), want) {
+			t.Fatalf("expected recovery error to contain %q, got %v", want, runErr)
+		}
+	}
+	if asc.HasInterpretedTerminalSequence(runErr.Error()) || strings.Contains(runErr.Error(), "Line one") {
+		t.Fatalf("expected sanitized human recovery without embedded notes, got %q", runErr)
+	}
+
+	var result asc.TestFlightPublishResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode partial publish result: %v\nstdout=%s", err, stdout)
+	}
+	if result.Status != publishPartialStatus || result.FailureStage != publishFailureStageTestNotes {
+		t.Fatalf("unexpected partial status: status=%q stage=%q", result.Status, result.FailureStage)
+	}
+	if result.BuildID != "build-123" || !result.Uploaded {
+		t.Fatalf("expected recoverable uploaded build, got buildId=%q uploaded=%t", result.BuildID, result.Uploaded)
+	}
+	wantCompleted := []string{publishCompletedStageUpload, publishCompletedStageBuildProcessing}
+	if !slices.Equal(result.CompletedStages, wantCompleted) {
+		t.Fatalf("completed stages = %v, want %v", result.CompletedStages, wantCompleted)
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(result.Failure, want) {
+			t.Fatalf("expected structured failure to contain %q, got %q", want, result.Failure)
+		}
+	}
+	if result.Recovery == nil {
+		t.Fatalf("expected typed test-notes recovery, got %#v", result)
+	}
+	if result.Recovery.BuildID != "build-123" || result.Recovery.Locale != "en-US" || result.Recovery.SubmittedNotes != testNotes {
+		t.Fatalf("structured recovery lost exact values: %#v", result.Recovery)
+	}
+	wantArguments := []string{
+		"builds", "test-notes", "create",
+		"--build-id", "build-123",
+		"--locale", "en-US",
+		"--whats-new", testNotes,
+	}
+	if result.Recovery.Command != "asc" || !slices.Equal(result.Recovery.Arguments, wantArguments) {
+		t.Fatalf("structured recovery command = %q %#v, want asc %#v", result.Recovery.Command, result.Recovery.Arguments, wantArguments)
+	}
+}
+
 func TestPublishTestFlightUploadReportsTerminalProcessingStateAfterWaitFailure(t *testing.T) {
 	restore := overridePublishCommandTestHooks(t)
 	defer restore()

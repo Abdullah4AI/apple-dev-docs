@@ -45,3 +45,18 @@ func TestBetaTestersRemoveCommand_ConfirmPassesValidation(t *testing.T) {
 		t.Fatalf("remove with --confirm should pass validation, got %v", err)
 	}
 }
+
+func TestBetaTestersRemoveWaitFlagsAreExperimental(t *testing.T) {
+	cmd := BetaTestersRemoveCommand()
+	for _, name := range []string{"wait", "poll-interval", "timeout"} {
+		t.Run(name, func(t *testing.T) {
+			flagValue := cmd.FlagSet.Lookup(name)
+			if flagValue == nil {
+				t.Fatalf("--%s is not registered", name)
+			}
+			if !strings.HasPrefix(flagValue.Usage, "[experimental] ") {
+				t.Fatalf("--%s usage = %q, want [experimental] prefix", name, flagValue.Usage)
+			}
+		})
+	}
+}

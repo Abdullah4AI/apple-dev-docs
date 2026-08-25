@@ -423,7 +423,7 @@ func TestBuildsInfoByLatestVersionWithoutPlatformSelectsNewestAcrossPlatforms(t 
 	}
 }
 
-func TestBuildsInfoByLatestVersionIgnoresNearMatchPreReleaseVersions(t *testing.T) {
+func TestBuildsInfoByLatestVersionCollectsEquivalentPlatformVersions(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("ASC_APP_ID", "")
@@ -433,6 +433,7 @@ func TestBuildsInfoByLatestVersionIgnoresNearMatchPreReleaseVersions(t *testing.
 		http.DefaultTransport = originalTransport
 	})
 
+	var buildFilters []string
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case "/v1/preReleaseVersions":
@@ -440,8 +441,8 @@ func TestBuildsInfoByLatestVersionIgnoresNearMatchPreReleaseVersions(t *testing.
 			if query.Get("filter[app]") != "123456789" {
 				t.Fatalf("expected filter[app]=123456789, got %q", query.Get("filter[app]"))
 			}
-			if query.Get("filter[version]") != "1.1" {
-				t.Fatalf("expected filter[version]=1.1, got %q", query.Get("filter[version]"))
+			if query.Get("filter[version]") != "1.1,1.1.0" {
+				t.Fatalf("expected filter[version]=1.1,1.1.0, got %q", query.Get("filter[version]"))
 			}
 			if query.Get("limit") != "200" {
 				t.Fatalf("expected limit=200 for version-only latest lookup, got %q", query.Get("limit"))
@@ -454,8 +455,17 @@ func TestBuildsInfoByLatestVersionIgnoresNearMatchPreReleaseVersions(t *testing.
 			}, nil
 		case "/v1/builds":
 			query := req.URL.Query()
-			if query.Get("filter[preReleaseVersion]") != "prv-exact" {
-				t.Fatalf("expected exact pre-release version match only, got %q", query.Get("filter[preReleaseVersion]"))
+			filter := query.Get("filter[preReleaseVersion]")
+			buildFilters = append(buildFilters, filter)
+			if filter == "prv-near" {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+				}, nil
+			}
+			if filter != "prv-exact" {
+				t.Fatalf("unexpected pre-release version filter %q", filter)
 			}
 			body := `{"data":[{"type":"builds","id":"build-exact","attributes":{"version":"101","uploadedDate":"2026-03-03T10:00:00Z"}}]}`
 			return &http.Response{
@@ -494,6 +504,9 @@ func TestBuildsInfoByLatestVersionIgnoresNearMatchPreReleaseVersions(t *testing.
 	if !strings.Contains(stdout, `"id":"build-exact"`) {
 		t.Fatalf("expected exact-version latest build output, got %q", stdout)
 	}
+	if len(buildFilters) != 2 || buildFilters[0] != "prv-exact" || buildFilters[1] != "prv-near" {
+		t.Fatalf("expected both equivalent platform trains to be inspected, got %v", buildFilters)
+	}
 }
 
 func TestBuildsInfoByLatestVersionKeepsServerMatchedPreReleaseVersionsWithoutAttributes(t *testing.T) {
@@ -513,8 +526,8 @@ func TestBuildsInfoByLatestVersionKeepsServerMatchedPreReleaseVersionsWithoutAtt
 			if query.Get("filter[app]") != "123456789" {
 				t.Fatalf("expected filter[app]=123456789, got %q", query.Get("filter[app]"))
 			}
-			if query.Get("filter[version]") != "1.1" {
-				t.Fatalf("expected filter[version]=1.1, got %q", query.Get("filter[version]"))
+			if query.Get("filter[version]") != "1.1,1.1.0" {
+				t.Fatalf("expected filter[version]=1.1,1.1.0, got %q", query.Get("filter[version]"))
 			}
 			if query.Get("limit") != "200" {
 				t.Fatalf("expected limit=200 for version-only latest lookup, got %q", query.Get("limit"))

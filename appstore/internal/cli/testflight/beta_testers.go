@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -306,11 +307,14 @@ func BetaTestersRemoveCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	email := fs.String("email", "", "Tester email address")
 	confirm := fs.Bool("confirm", false, "Confirm removal")
+	wait := fs.Bool("wait", false, "[experimental] Wait until the removal is visible (tester is gone or reports REVOKED)")
+	pollInterval := fs.Duration("poll-interval", betaTesterRemoveDefaultPollInterval, "[experimental] Polling interval while waiting for removal visibility")
+	timeout := fs.Duration("timeout", betaTesterRemoveDefaultWaitTimeout, "[experimental] Maximum time to wait for removal visibility")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "remove",
-		ShortUsage: "asc testflight beta-testers remove --app APP_ID --email EMAIL --confirm",
+		ShortUsage: "asc testflight beta-testers remove --app APP_ID --email EMAIL --confirm [--wait]",
 		ShortHelp:  "Remove a TestFlight beta tester.",
 		LongHelp: `Remove a TestFlight beta tester.
 
@@ -318,8 +322,13 @@ Removal deletes the beta tester record itself: every group membership and
 build assignment is removed across all apps the tester belongs to, not only
 the app used for the lookup. This cannot be undone, so --confirm is required.
 
+Removed testers can continue to appear in list output with state REVOKED;
+verify a removal with view --id, which reports the record as gone. Pass
+--wait to block until that signal is observed.
+
 Examples:
-  asc testflight beta-testers remove --app "APP_ID" --email "tester@example.com" --confirm`,
+  asc testflight beta-testers remove --app "APP_ID" --email "tester@example.com" --confirm
+  asc testflight beta-testers remove --app "APP_ID" --email "tester@example.com" --confirm --wait`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -335,6 +344,27 @@ Examples:
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
 				return shared.MissingRequiredUsageError("--confirm")
+			}
+			waitFlagsProvided := make([]string, 0, 2)
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "poll-interval" || f.Name == "timeout" {
+					waitFlagsProvided = append(waitFlagsProvided, "--"+f.Name)
+				}
+			})
+			if !*wait && len(waitFlagsProvided) > 0 {
+				verb := "requires"
+				if len(waitFlagsProvided) > 1 {
+					verb = "require"
+				}
+				return shared.UsageError(strings.Join(waitFlagsProvided, " and ") + " " + verb + " --wait")
+			}
+			if *wait {
+				if *pollInterval <= 0 {
+					return shared.UsageError("--poll-interval must be greater than 0")
+				}
+				if *timeout <= 0 {
+					return shared.UsageError("--timeout must be greater than 0")
+				}
 			}
 
 			client, err := shared.GetASCClient()
@@ -363,9 +393,43 @@ Examples:
 				Deleted: true,
 			}
 
+			if *wait {
+				if waitErr := waitForBetaTesterRemoval(ctx, client, testerID, *pollInterval, *timeout); waitErr != nil {
+					if printErr := shared.PrintOutput(result, *output.Output, *output.Pretty); printErr != nil {
+						return printErr
+					}
+					return fmt.Errorf("beta-testers remove: removal committed but not yet visible: %w", waitErr)
+				}
+			}
+
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+const (
+	betaTesterRemoveDefaultPollInterval = 5 * time.Second
+	betaTesterRemoveDefaultWaitTimeout  = 2 * time.Minute
+)
+
+func waitForBetaTesterRemoval(ctx context.Context, client *asc.Client, testerID string, pollInterval, timeout time.Duration) error {
+	waitCtx, cancel := shared.ContextWithTimeoutDuration(ctx, timeout)
+	defer cancel()
+
+	_, err := asc.PollUntil(waitCtx, pollInterval, func(pollCtx context.Context) (struct{}, bool, error) {
+		tester, err := client.GetBetaTester(pollCtx, testerID)
+		if err != nil {
+			if asc.IsNotFound(err) {
+				return struct{}{}, true, nil
+			}
+			return struct{}{}, false, err
+		}
+		if tester.Data.Attributes.State == asc.BetaTesterStateRevoked {
+			return struct{}{}, true, nil
+		}
+		return struct{}{}, false, nil
+	})
+	return err
 }
 
 // BetaTestersAddGroupsCommand returns the beta testers add-groups subcommand.

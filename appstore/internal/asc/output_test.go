@@ -477,6 +477,21 @@ func TestPrintTable_SkippedAssetUploadResultShowsSkippedState(t *testing.T) {
 	}
 }
 
+func TestPrintTable_AppPreviewUploadResultRendersPartialFailures(t *testing.T) {
+	assertRenderedNonJSONContains(t, PrintTable, &AppPreviewUploadResult{
+		VersionLocalizationID: "LOC_123",
+		SetID:                 "SET_123",
+		PreviewType:           "IPHONE_65",
+		Results: []AssetUploadResultItem{
+			{FileName: "01-first.mov", AssetID: "PREVIEW_1", State: "COMPLETE"},
+			{FileName: "02-second.mov", FilePath: "/tmp/02-second.mov", State: "failed"},
+		},
+		Failures: []AssetUploadFailureItem{
+			{FileName: "02-second.mov", FilePath: "/tmp/02-second.mov", Error: "preview reservation failed"},
+		},
+	}, "SET_123", "IPHONE_65", "01-first.mov", "PREVIEW_1", "failed", "preview reservation failed")
+}
+
 func TestPrintTableAndMarkdown_AppScreenshotFanoutUploadResultIncludesFlattenedFileRows(t *testing.T) {
 	resp := &AppScreenshotFanoutUploadResult{
 		AppID:       "123456789",

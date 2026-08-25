@@ -65,17 +65,17 @@ Examples:
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
-				return shared.UsageError("--app is required (or set ASC_APP_ID)")
+				return metadataRequiredInputError("--app", "--app is required (or set ASC_APP_ID)")
 			}
 
 			versionValue := strings.TrimSpace(*version)
 			if versionValue == "" {
-				return shared.UsageError("--version is required")
+				return missingMetadataPullVersionError()
 			}
 
 			dirValue := strings.TrimSpace(*dir)
 			if dirValue == "" {
-				return shared.UsageError("--dir is required")
+				return metadataRequiredInputError("--dir", "--dir is required")
 			}
 
 			platformValue := strings.TrimSpace(*platform)
@@ -216,6 +216,18 @@ Examples:
 			)
 		},
 	}
+}
+
+func missingMetadataPullVersionError() error {
+	const message = "--version is required"
+	fmt.Fprintln(os.Stderr, "Error: "+message)
+	fmt.Fprintln(os.Stderr, "Find versions:")
+	fmt.Fprintln(os.Stderr, `  asc versions list --app "APP_ID" --paginate`)
+	return shared.WithDiagnostic(
+		shared.NewReportedUsageError(shared.UsageErrorMissingRequired, message),
+		shared.DiagnosticRequiredInputMissing,
+		"--version",
+	)
 }
 
 func ensureNoExistingPullTargets(plans []WritePlan) error {

@@ -2,11 +2,10 @@ package cmdtest
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"io"
-	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestMigrateMetadataPullAliasDelegatesToMetadataCommand(t *testing.T) {
@@ -23,14 +22,14 @@ func TestMigrateMetadataPullAliasDelegatesToMetadataCommand(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
-	if !errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("expected ErrHelp, got %v", runErr)
+	if !shared.IsReportedUsageError(runErr) {
+		t.Fatalf("expected reported usage error, got %v", runErr)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "Error: --app is required (or set ASC_APP_ID)") {
-		t.Fatalf("expected metadata pull validation error, got %q", stderr)
+	if stderr != "Error: --app is required (or set ASC_APP_ID)\n" {
+		t.Fatalf("expected concise metadata pull validation error, got %q", stderr)
 	}
 }
 
@@ -48,14 +47,14 @@ func TestMigrateMetadataPushAliasDelegatesToMetadataCommand(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
-	if !errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("expected ErrHelp, got %v", runErr)
+	if !shared.IsReportedUsageError(runErr) {
+		t.Fatalf("expected reported usage error, got %v", runErr)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "Error: --app is required (or set ASC_APP_ID)") {
-		t.Fatalf("expected metadata push validation error, got %q", stderr)
+	if stderr != "Error: --app is required (or set ASC_APP_ID)\n" {
+		t.Fatalf("expected concise metadata push validation error, got %q", stderr)
 	}
 }
 
@@ -71,13 +70,13 @@ func TestMigrateMetadataValidateAliasDelegatesToMetadataCommand(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
-	if !errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("expected ErrHelp, got %v", runErr)
+	if !shared.IsReportedUsageError(runErr) {
+		t.Fatalf("expected reported usage error, got %v", runErr)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "Error: --dir is required") {
-		t.Fatalf("expected metadata validate validation error, got %q", stderr)
+	if stderr != "Error: --dir is required\n" {
+		t.Fatalf("expected concise metadata validate validation error, got %q", stderr)
 	}
 }

@@ -36,6 +36,8 @@ func BetaTestersExportCommand() *ffcli.Command {
 	group := fs.String("group", "", "Beta group name or ID to filter (optional)")
 	buildID, legacyBuildID := bindBuildIDFlag(fs, "Build ID to filter (optional)")
 	email := fs.String("email", "", "Filter by tester email (optional)")
+	firstName := fs.String("first-name", "", "Filter by tester first name (exact match, optional)")
+	lastName := fs.String("last-name", "", "Filter by tester last name (exact match, optional)")
 	includeGroups := fs.Bool("include-groups", false, "Include a groups column (requires additional API calls)")
 	format := shared.BindOutputFlagsWith(fs, "format", "json", "Summary output format: json (default), table, markdown")
 
@@ -58,6 +60,7 @@ Examples:
   asc testflight beta-testers export --app "APP_ID" --group "Beta" --output "./testers.csv"
   asc testflight beta-testers export --app "APP_ID" --build-id "BUILD_ID" --output "./testers.csv"
   asc testflight beta-testers export --app "APP_ID" --email "tester@example.com" --output "./testers.csv"
+  asc testflight beta-testers export --app "APP_ID" --last-name "Lovelace" --output "./testers.csv"
   asc testflight beta-testers export --app "APP_ID" --output "./testers.csv" --include-groups`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -110,6 +113,12 @@ Examples:
 			}
 			if trimmed := strings.TrimSpace(*email); trimmed != "" {
 				opts = append(opts, asc.WithBetaTestersEmail(trimmed))
+			}
+			if trimmed := strings.TrimSpace(*firstName); trimmed != "" {
+				opts = append(opts, asc.WithBetaTestersFirstName(trimmed))
+			}
+			if trimmed := strings.TrimSpace(*lastName); trimmed != "" {
+				opts = append(opts, asc.WithBetaTestersLastName(trimmed))
 			}
 			if trimmed := strings.TrimSpace(*group); trimmed != "" {
 				id, err := groupResolver.Resolve(trimmed)

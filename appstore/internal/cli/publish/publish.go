@@ -408,7 +408,9 @@ Examples:
 
 			if testNotesValue != "" {
 				if _, err := shared.UpsertBetaBuildLocalization(requestCtx, client, buildResp.Data.ID, localeValue, testNotesValue); err != nil {
-					return reportPartialFailure(publishFailureStageTestNotes, fmt.Errorf("publish testflight: %w", err))
+					recoveryErr := shared.NewTestNotesRecoveryError(buildResp.Data.ID, localeValue, testNotesValue, err)
+					result.Recovery = recoveryErr.Recovery()
+					return reportPartialFailure(publishFailureStageTestNotes, fmt.Errorf("publish testflight: %w", recoveryErr))
 				}
 				completedStages = append(completedStages, publishCompletedStageTestNotes)
 			}

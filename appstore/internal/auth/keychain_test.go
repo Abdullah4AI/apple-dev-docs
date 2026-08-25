@@ -1492,6 +1492,45 @@ func TestRemoveAllCredentials(t *testing.T) {
 	}
 }
 
+func TestRemoveAllCredentialsPreservesConfigSettings(t *testing.T) {
+	withArrayKeyring(t)
+
+	configPath, err := config.Path()
+	if err != nil {
+		t.Fatalf("config.Path() error: %v", err)
+	}
+	timeout, err := config.ParseDurationValue("60s")
+	if err != nil {
+		t.Fatalf("ParseDurationValue() error: %v", err)
+	}
+	if err := config.SaveAt(configPath, &config.Config{
+		KeyID:          "KEY123",
+		IssuerID:       "ISS456",
+		PrivateKeyPath: "/tmp/AuthKey.p8",
+		DefaultKeyName: "demo",
+		AppID:          "12345",
+		VendorNumber:   "67890",
+		Timeout:        timeout,
+	}); err != nil {
+		t.Fatalf("config.SaveAt() error: %v", err)
+	}
+
+	if err := RemoveAllCredentials(); err != nil {
+		t.Fatalf("RemoveAllCredentials() error: %v", err)
+	}
+
+	cfg, err := config.LoadAt(configPath)
+	if err != nil {
+		t.Fatalf("config.LoadAt() error: %v", err)
+	}
+	if cfg.KeyID != "" || cfg.IssuerID != "" || cfg.PrivateKeyPath != "" || cfg.DefaultKeyName != "" {
+		t.Fatalf("expected credentials cleared, got %+v", cfg)
+	}
+	if cfg.AppID != "12345" || cfg.VendorNumber != "67890" || cfg.Timeout.String() != "60s" {
+		t.Fatalf("expected settings preserved, got %+v", cfg)
+	}
+}
+
 func TestRemoveAllCredentials_ClearsStoredKeychainMetadata(t *testing.T) {
 	withArrayKeyring(t)
 

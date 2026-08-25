@@ -125,8 +125,8 @@ func TestBuildsListVersionLookupPaginatesAndUsesAllPreReleaseVersions(t *testing
 			if query.Get("filter[app]") != "123456789" {
 				t.Fatalf("expected filter[app]=123456789, got %q", query.Get("filter[app]"))
 			}
-			if query.Get("filter[version]") != "2.0.0" {
-				t.Fatalf("expected filter[version]=2.0.0, got %q", query.Get("filter[version]"))
+			if query.Get("filter[version]") != "2.0.0,2.0" {
+				t.Fatalf("expected filter[version]=2.0.0,2.0, got %q", query.Get("filter[version]"))
 			}
 			if query.Get("limit") != "200" {
 				t.Fatalf("expected limit=200, got %q", query.Get("limit"))

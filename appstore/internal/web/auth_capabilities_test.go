@@ -53,15 +53,17 @@ func TestClientDoIrisV1RequestUsesIntegrationsHeaders(t *testing.T) {
 	}
 }
 
-func TestClientDoOlympusRequestUsesOlympusHeaders(t *testing.T) {
+func TestClientDoOlympusGetUsesOlympusHeaders(t *testing.T) {
 	var (
 		gotPath      string
+		gotMethod    string
 		gotRequested string
 		gotAccept    string
 	)
 	client := &Client{
 		httpClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			gotPath = r.URL.Path
+			gotMethod = r.Method
 			gotRequested = r.Header.Get("X-Requested-With")
 			gotAccept = r.Header.Get("Accept")
 			return &http.Response{
@@ -72,12 +74,15 @@ func TestClientDoOlympusRequestUsesOlympusHeaders(t *testing.T) {
 		})},
 	}
 
-	if _, err := client.doOlympusRequest(context.Background(), http.MethodGet, "/actors/actor-1", nil); err != nil {
-		t.Fatalf("doOlympusRequest() error: %v", err)
+	if _, err := client.doOlympusGet(context.Background(), "/actors/actor-1"); err != nil {
+		t.Fatalf("doOlympusGet() error: %v", err)
 	}
 
 	if gotPath != "/olympus/v1/actors/actor-1" {
 		t.Fatalf("expected path %q, got %q", "/olympus/v1/actors/actor-1", gotPath)
+	}
+	if gotMethod != http.MethodGet {
+		t.Fatalf("expected GET, got %q", gotMethod)
 	}
 	if gotRequested != "xsdr2$" {
 		t.Fatalf("unexpected X-Requested-With %q", gotRequested)

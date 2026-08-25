@@ -224,6 +224,7 @@ Examples:
 							subID,
 							[]equalizeAttemptFailure{{Target: baseTarget}},
 							effectiveAt,
+							priceAttrs.PlanType,
 						)
 						return reconciled == 1, readErr
 					},
@@ -333,7 +334,7 @@ func applyEqualizedPrices(ctx context.Context, client *asc.Client, subID string,
 	retryable, finalFailures := partitionEqualizeFailures(ctx, failures)
 
 	for pass := 1; len(retryable) > 0 && pass <= maxEqualizeRecoveryPasses; pass++ {
-		reconciled, unresolved, verifyErr := reconcileEqualizeFailures(ctx, client, subID, retryable, effectiveAt)
+		reconciled, unresolved, verifyErr := reconcileEqualizeFailures(ctx, client, subID, retryable, effectiveAt, attrs.PlanType)
 		if verifyErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not verify %d retryable territory update(s) before replay: %v\n", len(retryable), verifyErr)
 			finalFailures = append(finalFailures, retryable...)
@@ -365,7 +366,7 @@ func applyEqualizedPrices(ctx context.Context, client *asc.Client, subID string,
 		finalFailures = append(finalFailures, retryable...)
 	}
 
-	reconciled, remaining, err := reconcileEqualizeFailures(ctx, client, subID, finalFailures, effectiveAt)
+	reconciled, remaining, err := reconcileEqualizeFailures(ctx, client, subID, finalFailures, effectiveAt, attrs.PlanType)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not verify %d failed territory update(s): %v\n", len(finalFailures), err)
 		return succeeded, finalFailures
@@ -532,14 +533,14 @@ func isApprovedOrLiveSubscriptionState(state string) bool {
 	}
 }
 
-func reconcileEqualizeFailures(ctx context.Context, client *asc.Client, subID string, failures []equalizeAttemptFailure, effectiveAt time.Time) (int, []equalizeAttemptFailure, error) {
+func reconcileEqualizeFailures(ctx context.Context, client *asc.Client, subID string, failures []equalizeAttemptFailure, effectiveAt time.Time, planType asc.SubscriptionPlanType) (int, []equalizeAttemptFailure, error) {
 	if len(failures) == 0 {
 		return 0, nil, nil
 	}
 
 	fmt.Fprintf(os.Stderr, "Verifying %d territory update(s) against current prices...\n", len(failures))
 
-	resolved, err := fetchResolvedSubscriptionPrices(ctx, client, subID, 200, "", effectiveAt, "", "")
+	resolved, err := fetchResolvedSubscriptionPrices(ctx, client, subID, 200, "", effectiveAt, planType, "")
 	if err != nil {
 		return 0, failures, err
 	}

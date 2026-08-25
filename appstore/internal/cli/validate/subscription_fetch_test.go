@@ -7,10 +7,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/handlertest"
 )
 
 func TestFetchSubscriptions_BoundsGroupAndMetadataFanOutAndSortsDeterministically(t *testing.T) {
 	const delay = 50 * time.Millisecond
+	fixture := handlertest.New(t)
 	tracker := &requestConcurrencyTracker{}
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path == "/v1/apps/app-1/subscriptionGroups" {
@@ -41,7 +44,7 @@ func TestFetchSubscriptions_BoundsGroupAndMetadataFanOutAndSortsDeterministicall
 			strings.HasSuffix(req.URL.Path, "/winBackOffers"):
 			return buildsJSONResponse(http.StatusOK, `{"data":[]}`)
 		default:
-			return buildsJSONResponse(http.StatusInternalServerError, `{"errors":[{"status":"500","code":"UNEXPECTED_REQUEST"}]}`)
+			return fixture.Response("unexpected request: %s", req.URL.Path), nil
 		}
 	}))
 
@@ -69,27 +72,27 @@ func TestFetchSubscriptions_BoundsGroupAndMetadataFanOutAndSortsDeterministicall
 }
 
 func TestFetchSubscriptionPlanAvailabilitiesPaginatesPlansAndTerritories(t *testing.T) {
+	fixture := handlertest.New(t)
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.URL.Path == "/v1/subscriptions/sub-1/planAvailabilities" && req.URL.Query().Get("cursor") == "next":
 			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"subscriptionPlanAvailabilities","id":"plan-monthly","attributes":{"planType":"MONTHLY","availableInNewTerritories":false}}]}`)
 		case req.URL.Path == "/v1/subscriptions/sub-1/planAvailabilities":
 			if got := req.URL.Query().Get("limit"); got != "200" {
-				t.Fatalf("expected plan limit=200, got %q", got)
+				return nil, fixture.Errorf("expected plan limit=200, got %q", got)
 			}
 			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"subscriptionPlanAvailabilities","id":"plan-upfront","attributes":{"planType":"UPFRONT","availableInNewTerritories":true}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/planAvailabilities?cursor=next"}}`)
 		case req.URL.Path == "/v1/subscriptionPlanAvailabilities/plan-upfront/relationships/availableTerritories" && req.URL.Query().Get("cursor") == "next":
 			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"territories","id":"CAN"}]}`)
 		case req.URL.Path == "/v1/subscriptionPlanAvailabilities/plan-upfront/relationships/availableTerritories":
 			if got := req.URL.Query().Get("limit"); got != "200" {
-				t.Fatalf("expected territory limit=200, got %q", got)
+				return nil, fixture.Errorf("expected territory limit=200, got %q", got)
 			}
 			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"territories","id":"USA"}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/subscriptionPlanAvailabilities/plan-upfront/relationships/availableTerritories?cursor=next"}}`)
 		case req.URL.Path == "/v1/subscriptionPlanAvailabilities/plan-monthly/relationships/availableTerritories":
 			return buildsJSONResponse(http.StatusOK, `{"data":[]}`)
 		default:
-			t.Fatalf("unexpected request: %s", req.URL.String())
-			return nil, nil
+			return nil, fixture.Errorf("unexpected request: %s", req.URL.String())
 		}
 	}))
 
@@ -126,6 +129,7 @@ func TestFetchSubscriptionPlanAvailabilitiesPreservesUnverifiedFallback(t *testi
 }
 
 func TestFetchSubscriptionAvailabilityTerritoriesNormalizesTerritoryIDs(t *testing.T) {
+	fixture := handlertest.New(t)
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case "/v1/subscriptions/sub-1/subscriptionAvailability":
@@ -133,8 +137,7 @@ func TestFetchSubscriptionAvailabilityTerritoriesNormalizesTerritoryIDs(t *testi
 		case "/v1/subscriptionAvailabilities/availability-1/availableTerritories":
 			return buildsJSONResponse(http.StatusOK, `{"data":[{"type":"territories","id":" can "},{"type":"territories","id":"fra"}]}`)
 		default:
-			t.Fatalf("unexpected request: %s", req.URL.String())
-			return nil, nil
+			return nil, fixture.Errorf("unexpected request: %s", req.URL.String())
 		}
 	}))
 
@@ -151,21 +154,22 @@ func TestFetchSubscriptionAvailabilityTerritoriesNormalizesTerritoryIDs(t *testi
 }
 
 func TestFetchSubscriptionPriceTerritories_DeduplicatesAndSortsTerritories(t *testing.T) {
+	fixture := handlertest.New(t)
 	client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			return buildsJSONResponse(http.StatusMethodNotAllowed, `{"errors":[{"status":"405"}]}`)
 		}
 		if req.URL.Path != "/v1/subscriptions/sub-1/prices" {
-			t.Fatalf("expected subscription prices path, got %q", req.URL.Path)
+			return nil, fixture.Errorf("expected subscription prices path, got %q", req.URL.Path)
 		}
 		if got := req.URL.Query().Get("include"); got != "territory" {
-			t.Fatalf("expected include=territory query, got %q", got)
+			return nil, fixture.Errorf("expected include=territory query, got %q", got)
 		}
 		if got := req.URL.Query().Get("limit"); got != "200" {
-			t.Fatalf("expected limit=200 query, got %q", got)
+			return nil, fixture.Errorf("expected limit=200 query, got %q", got)
 		}
 		if got := req.URL.Query().Get("filter[planType]"); got != "UPFRONT" {
-			t.Fatalf("expected filter[planType]=UPFRONT query, got %q", got)
+			return nil, fixture.Errorf("expected filter[planType]=UPFRONT query, got %q", got)
 		}
 		return buildsJSONResponse(http.StatusOK, `{
 			"data": [
@@ -289,9 +293,10 @@ func TestFetchSubscriptionReviewScreenshot_ReportsAssetDeliveryState(t *testing.
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			fixture := handlertest.New(t)
 			client := newBuildsTestClient(t, buildsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if got := req.URL.Query().Get("fields[subscriptionAppStoreReviewScreenshots]"); got != "assetDeliveryState" {
-					t.Fatalf("expected assetDeliveryState field request, got %q", got)
+					return nil, fixture.Errorf("expected assetDeliveryState field request, got %q", got)
 				}
 				attributes := `{}`
 				if test.state != "" {

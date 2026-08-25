@@ -22,6 +22,10 @@ type SearchOptimizationRequest struct {
 	End             string
 	PopularityStart string
 	PopularityEnd   string
+	// Limit bounds the suggestions-only collection used by keyword discovery.
+	// The broader optimization plan leaves it unset and retains its existing
+	// pagination behavior.
+	Limit int
 }
 
 // SearchOptimizationSourceStatus describes the availability of one official
@@ -124,6 +128,7 @@ type SearchEligibility struct {
 type SearchOptimizationData struct {
 	Sources                        []SearchOptimizationSourceStatus `json:"sources"`
 	Suggestions                    []SearchSuggestion               `json:"suggestions,omitempty"`
+	SuggestionsTruncated           bool                             `json:"-"`
 	Popularities                   []SearchPopularity               `json:"popularities,omitempty"`
 	ImpressionShares               []SearchImpressionShare          `json:"impressionShares,omitempty"`
 	SearchTerms                    []SearchTermPerformance          `json:"searchTerms,omitempty"`
@@ -151,6 +156,41 @@ func CollectSearchOptimizationData(ctx context.Context, adsProfile, adAccount st
 		return SearchOptimizationData{}, err
 	}
 	return fetchSearchOptimizationData(ctx, client, request)
+}
+
+// CollectSearchSuggestions resolves official Apple Ads authentication and
+// gathers only the keyword and phrase suggestions needed by
+// `asc optimize keywords discover`. The request limit is applied to each
+// documented suggestion endpoint before pagination, so discovery never walks
+// the broader optimization data set or downloads a full 1000-item page just
+// to truncate it locally.
+func CollectSearchSuggestions(ctx context.Context, adsProfile, adAccount string, request SearchOptimizationRequest) (SearchOptimizationData, error) {
+	profile := strings.TrimSpace(adsProfile)
+	account := strings.TrimSpace(adAccount)
+	client, _, err := resolvePlatformClientAndAdAccountID(ctx, commonFlags{
+		AdsProfile: &profile,
+		AdAccount:  &account,
+	}, appleads.ContextAdAccount)
+	if err != nil {
+		return SearchOptimizationData{}, err
+	}
+	return fetchSearchSuggestions(ctx, client, request)
+}
+
+// CollectSearchPopularity resolves official Apple Ads authentication and reads
+// only country-and-genre search demand. Unlike the broader optimization plan,
+// this source is not scoped to a promoted app.
+func CollectSearchPopularity(ctx context.Context, adsProfile, adAccount string, request SearchOptimizationRequest) ([]SearchPopularity, error) {
+	profile := strings.TrimSpace(adsProfile)
+	account := strings.TrimSpace(adAccount)
+	client, _, err := resolvePlatformClientAndAdAccountID(ctx, commonFlags{
+		AdsProfile: &profile,
+		AdAccount:  &account,
+	}, appleads.ContextAdAccount)
+	if err != nil {
+		return nil, err
+	}
+	return fetchOptimizationPopularity(ctx, client, request)
 }
 
 func fetchSearchOptimizationData(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest) (SearchOptimizationData, error) {
@@ -249,6 +289,50 @@ func fetchSearchOptimizationData(ctx context.Context, client *appleads.Client, r
 	return data, nil
 }
 
+func fetchSearchSuggestions(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest) (SearchOptimizationData, error) {
+	data := SearchOptimizationData{}
+	appID := strings.TrimSpace(request.AppID)
+	appIDNumber, err := strconv.ParseInt(appID, 10, 64)
+	if err != nil || appIDNumber <= 0 {
+		return data, fmt.Errorf("app ID must be a positive integer Adam ID")
+	}
+	if request.Limit < 1 {
+		return data, fmt.Errorf("suggestion limit must be at least 1")
+	}
+
+	suggestionRequest := SearchOptimizationRequest{AppID: appID, Country: request.Country, Limit: request.Limit}
+	record := func(name string, suggestions []SearchSuggestion, err error) {
+		status := SearchOptimizationSourceStatus{Name: name, Count: len(suggestions)}
+		switch {
+		case err != nil:
+			status.Status = "unavailable"
+			status.Error = err.Error()
+		case len(suggestions) == 0:
+			status.Status = "empty"
+		default:
+			status.Status = "available"
+		}
+		data.Sources = append(data.Sources, status)
+	}
+
+	var keywordSuggestions []SearchSuggestion
+	var keywordMore bool
+	keywordSuggestions, keywordMore, err = fetchOptimizationSuggestionsLimitedWithMore(ctx, client, suggestionRequest, false, request.Limit)
+	keywordErr := err
+	data.Suggestions = append(data.Suggestions, keywordSuggestions...)
+	record("keyword_suggestions", keywordSuggestions, keywordErr)
+
+	var phraseMore bool
+	var phraseSuggestions []SearchSuggestion
+	phraseSuggestions, phraseMore, err = fetchOptimizationSuggestionsLimitedWithMore(ctx, client, suggestionRequest, true, request.Limit)
+	phraseErr := err
+	data.Suggestions = append(data.Suggestions, phraseSuggestions...)
+	record("phrase_suggestions", phraseSuggestions, phraseErr)
+	data.SuggestionsTruncated = keywordMore || phraseMore
+
+	return data, nil
+}
+
 func fetchOptimizationCampaigns(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest) ([]SearchCampaign, error) {
 	spec := mustOptimizationEndpoint("campaigns", "find")
 	body := map[string]any{"filters": []any{
@@ -279,6 +363,15 @@ func fetchOptimizationCampaigns(ctx context.Context, client *appleads.Client, re
 }
 
 func fetchOptimizationSuggestions(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest, phrases bool) ([]SearchSuggestion, error) {
+	return fetchOptimizationSuggestionsLimited(ctx, client, request, phrases, 0)
+}
+
+func fetchOptimizationSuggestionsLimited(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest, phrases bool, limit int) ([]SearchSuggestion, error) {
+	items, _, err := fetchOptimizationSuggestionsLimitedWithMore(ctx, client, request, phrases, limit)
+	return items, err
+}
+
+func fetchOptimizationSuggestionsLimitedWithMore(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest, phrases bool, limit int) ([]SearchSuggestion, bool, error) {
 	path := []string{"suggestions", "keywords", "find"}
 	kind := "keyword"
 	if phrases {
@@ -295,10 +388,11 @@ func fetchOptimizationSuggestions(ctx context.Context, client *appleads.Client, 
 	} else {
 		filters = append(filters, optimizationFilter("countriesOrRegions", "IN", []string{strings.ToUpper(strings.TrimSpace(request.Country))}))
 	}
-	items, err := queryOptimizationList[suggestionResponse](ctx, client, spec, map[string]any{"filters": filters}, 1000)
-	if err != nil {
-		return nil, err
+	body := map[string]any{
+		"filters": filters,
+		"sorting": []any{map[string]any{"field": "popularity", "order": "DESC"}},
 	}
+	items, more, err := queryOptimizationListBoundedWithMore[suggestionResponse](ctx, client, spec, body, 1000, limit)
 	result := make([]SearchSuggestion, 0, len(items))
 	for _, item := range items {
 		text := strings.TrimSpace(item.Text)
@@ -309,7 +403,7 @@ func fetchOptimizationSuggestions(ctx context.Context, client *appleads.Client, 
 			result = append(result, SearchSuggestion{Text: text, Popularity: item.Popularity, Kind: kind})
 		}
 	}
-	return result, nil
+	return result, more, err
 }
 
 func fetchOptimizationPopularity(ctx context.Context, client *appleads.Client, request SearchOptimizationRequest) ([]SearchPopularity, error) {
@@ -481,6 +575,25 @@ func fetchOptimizationSearchTerms(ctx context.Context, client *appleads.Client, 
 }
 
 func queryOptimizationList[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize int) ([]T, error) {
+	return queryOptimizationListBounded[T](ctx, client, spec, body, pageSize, 0)
+}
+
+// queryOptimizationListBounded keeps the normal pagination behavior while
+// allowing callers that only need a bounded prefix to stop as soon as that
+// prefix has been collected. A non-positive maxItems retains the unbounded
+// behavior used by the broader optimization plan.
+func queryOptimizationListBounded[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize, maxItems int) ([]T, error) {
+	items, _, err := queryOptimizationListBoundedWithMore[T](ctx, client, spec, body, pageSize, maxItems)
+	return items, err
+}
+
+func queryOptimizationListBoundedWithMore[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize, maxItems int) ([]T, bool, error) {
+	if pageSize <= 0 {
+		pageSize = 1000
+	}
+	if maxItems > 0 && pageSize > maxItems {
+		pageSize = maxItems
+	}
 	items := make([]T, 0)
 	offset := 0
 	for pages := 0; pages < appleads.MaxPlatformPaginationPages; pages++ {
@@ -488,22 +601,72 @@ func queryOptimizationList[T any](ctx context.Context, client *appleads.Client, 
 		pageBody["pagination"] = optimizationRequestPagination(spec, offset, pageSize)
 		raw, err := executeOptimizationQuery(ctx, client, spec, pageBody)
 		if err != nil {
-			return items, err
+			if maxItems > 0 && len(items) > 0 {
+				if len(items) > maxItems {
+					items = items[:maxItems]
+				}
+				return items, true, err
+			}
+			return items, false, err
 		}
 		var envelope struct {
 			Result     []T                    `json:"result"`
 			Pagination optimizationPagination `json:"pagination"`
 		}
 		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return items, fmt.Errorf("decode %s response: %w", strings.Join(spec.CommandPath, " "), err)
+			if maxItems > 0 && len(items) > 0 {
+				if len(items) > maxItems {
+					items = items[:maxItems]
+				}
+				return items, true, fmt.Errorf("decode %s response: %w", strings.Join(spec.CommandPath, " "), err)
+			}
+			return items, false, fmt.Errorf("decode %s response: %w", strings.Join(spec.CommandPath, " "), err)
 		}
 		items = append(items, envelope.Result...)
+		if maxItems > 0 && len(items) >= maxItems {
+			more := len(items) > maxItems
+			if !more && envelope.Pagination.TotalCountPresent {
+				more = envelope.Pagination.TotalCount > offset+len(envelope.Result)
+			}
+			if !more && !envelope.Pagination.TotalCountPresent && len(envelope.Result) >= pageSize {
+				more, err = probeOptimizationListHasMore(ctx, client, spec, body, offset+len(envelope.Result))
+				if err != nil {
+					return items[:maxItems], true, fmt.Errorf("pagination truncation probe for %s failed: %w", strings.Join(spec.CommandPath, " "), err)
+				}
+			}
+			return items[:maxItems], more, nil
+		}
 		if optimizationPageComplete(offset, pageSize, len(envelope.Result), envelope.Pagination.TotalCount) {
-			return items, nil
+			return items, false, nil
 		}
 		offset += len(envelope.Result)
 	}
-	return items, optimizationPageLimitError(spec)
+	if maxItems > 0 && len(items) > 0 {
+		if len(items) > maxItems {
+			items = items[:maxItems]
+		}
+		return items, true, optimizationPageLimitError(spec)
+	}
+	return items, false, optimizationPageLimitError(spec)
+}
+
+// probeOptimizationListHasMore checks one record beyond a bounded prefix when
+// Apple omits pagination.totalCount. The probe is deliberately one item wide
+// so bounded callers do not silently turn into an unbounded collection.
+func probeOptimizationListHasMore(ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, offset int) (bool, error) {
+	pageBody := cloneOptimizationBody(body)
+	pageBody["pagination"] = optimizationRequestPagination(spec, offset, 1)
+	raw, err := executeOptimizationQuery(ctx, client, spec, pageBody)
+	if err != nil {
+		return false, err
+	}
+	var envelope struct {
+		Result []json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return false, fmt.Errorf("decode %s probe response: %w", strings.Join(spec.CommandPath, " "), err)
+	}
+	return len(envelope.Result) > 0, nil
 }
 
 func queryOptimizationRows[T any](ctx context.Context, client *appleads.Client, spec appleads.EndpointSpec, body map[string]any, pageSize int) ([]T, error) {
@@ -632,7 +795,23 @@ func (value *flexibleInt64) UnmarshalJSON(data []byte) error {
 func (value flexibleInt64) Int64() int64 { return int64(value) }
 
 type optimizationPagination struct {
-	TotalCount int `json:"totalCount"`
+	TotalCount        int  `json:"totalCount"`
+	TotalCountPresent bool `json:"-"`
+}
+
+func (pagination *optimizationPagination) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		TotalCount *int `json:"totalCount"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	pagination.TotalCount = 0
+	pagination.TotalCountPresent = raw.TotalCount != nil
+	if raw.TotalCount != nil {
+		pagination.TotalCount = *raw.TotalCount
+	}
+	return nil
 }
 
 type suggestionResponse struct {

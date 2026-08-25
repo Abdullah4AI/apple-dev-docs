@@ -34,7 +34,7 @@ func TestWebCommandUsesProductionHelpContract(t *testing.T) {
 		t.Fatalf("expected web-session help heading, got %q", usage)
 	}
 	lowerUsage := strings.ToLower(usage)
-	for _, token := range []string{"experimental", "unofficial", "discouraged", "private", "risk"} {
+	for _, token := range []string{"unofficial", "discouraged", "private", "risk"} {
 		if !strings.Contains(lowerUsage, token) {
 			continue
 		}

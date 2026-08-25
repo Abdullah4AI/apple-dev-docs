@@ -5,6 +5,16 @@ import (
 	"strings"
 )
 
+// TestNotesRecovery describes a shell-neutral retry after a build exists but
+// setting its What to Test notes fails.
+type TestNotesRecovery struct {
+	BuildID        string   `json:"buildId"`
+	Locale         string   `json:"locale"`
+	SubmittedNotes string   `json:"submittedNotes"`
+	Command        string   `json:"command"`
+	Arguments      []string `json:"arguments"`
+}
+
 func testFlightPublishResultRows(result *TestFlightPublishResult) ([]string, [][]string) {
 	headers := []string{"Build ID", "Version", "Build Number", "Processing", "Groups", "Uploaded", "Notified", "Notification Action", "Beta Review Submitted", "Beta Review Submission ID"}
 	notified := ""

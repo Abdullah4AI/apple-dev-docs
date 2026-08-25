@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,6 +9,36 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestOptimizeKeywordsDiscoverMissingAdsCredentialsWritesGuidanceToStderr(t *testing.T) {
+	binaryPath := buildASCBlackboxBinary(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	command := exec.Command(
+		binaryPath,
+		"optimize", "keywords", "discover",
+		"--app", "1234567890",
+		"--country", "US",
+		"--output", "json",
+	)
+	command.Env = isolatedAdsBlackboxEnv(configPath)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %v, want nonzero built-binary exit", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	for _, want := range []string{"optimize keywords discover", "--ad-account", "--ads-profile", "asc ads auth login"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr.String(), want)
+		}
+	}
+}
 
 func TestAdsUsageErrorsExitTwoWithBuiltBinary(t *testing.T) {
 	binaryPath := buildASCBlackboxBinary(t)
@@ -88,6 +119,7 @@ func isolatedAdsBlackboxEnv(configPath string) []string {
 		"ASC_ADS_PRIVATE_KEY",
 		"ASC_ADS_PRIVATE_KEY_B64",
 		"ASC_ADS_ORG_ID",
+		"ASC_ADS_AD_ACCOUNT_ID",
 		"ASC_ADS_PROFILE",
 		"ASC_ADS_BYPASS_KEYCHAIN",
 		"ASC_ADS_STRICT_AUTH",

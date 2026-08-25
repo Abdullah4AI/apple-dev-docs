@@ -366,7 +366,7 @@ Examples:
 					if testNotesValue != "" {
 						fmt.Fprintf(os.Stderr, "Build %s discovered; setting What to Test notes...\n", buildResp.Data.ID)
 						if _, err := shared.UpsertBetaBuildLocalization(requestCtx, client, buildResp.Data.ID, localeValue, testNotesValue); err != nil {
-							return fmt.Errorf("builds upload: %w", err)
+							return fmt.Errorf("builds upload: %w", shared.NewTestNotesRecoveryError(buildResp.Data.ID, localeValue, testNotesValue, err))
 						}
 					}
 
@@ -662,7 +662,7 @@ Examples:
 
 			preReleaseVersionIDs := []string{}
 			if versionValue != "" && nextValue == "" {
-				preReleaseVersionIDs, err = findPreReleaseVersionIDsForBuildsList(requestCtx, client, resolvedAppID, versionValue)
+				preReleaseVersionIDs, err = shared.FindPreReleaseVersionIDs(requestCtx, client, resolvedAppID, versionValue, platformValue)
 				if err != nil {
 					return fmt.Errorf("builds: %w", err)
 				}
@@ -734,65 +734,6 @@ func normalizeBuildProcessingStateFilter(raw string) ([]string, error) {
 		FlagName:          "--processing-state",
 		AllowedValuesHelp: "VALID, PROCESSING, FAILED, INVALID, or all",
 	})
-}
-
-func findPreReleaseVersionIDsForBuildsList(
-	ctx context.Context,
-	client *asc.Client,
-	appID string,
-	version string,
-) ([]string, error) {
-	version = strings.TrimSpace(version)
-
-	firstPage, err := client.GetPreReleaseVersions(
-		ctx,
-		appID,
-		asc.WithPreReleaseVersionsVersion(version),
-		asc.WithPreReleaseVersionsLimit(200),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup pre-release versions for marketing version %q: %w", version, err)
-	}
-
-	ids := make([]string, 0, len(firstPage.Data))
-	seen := make(map[string]struct{}, len(firstPage.Data))
-	appendIDs := func(page *asc.PreReleaseVersionsResponse) {
-		for _, preReleaseVersion := range page.Data {
-			// ASC's version filter can return dotted-version near-matches like
-			// 1.1 and 1.1.0 together, so enforce exact matching client-side
-			// when the response includes attributes.version. If ASC omits the
-			// attribute entirely, trust the server-side filter instead.
-			versionAttr := strings.TrimSpace(preReleaseVersion.Attributes.Version)
-			if versionAttr != "" && versionAttr != version {
-				continue
-			}
-			id := strings.TrimSpace(preReleaseVersion.ID)
-			if id == "" {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			ids = append(ids, id)
-		}
-	}
-
-	err = asc.PaginateEach(ctx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-		return client.GetPreReleaseVersions(ctx, appID, asc.WithPreReleaseVersionsNextURL(nextURL))
-	}, func(page asc.PaginatedResponse) error {
-		resp, ok := page.(*asc.PreReleaseVersionsResponse)
-		if !ok {
-			return fmt.Errorf("unexpected pre-release versions page type %T", page)
-		}
-		appendIDs(resp)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to paginate pre-release versions for marketing version %q: %w", version, err)
-	}
-
-	return ids, nil
 }
 
 func attachBuildInfoPreReleaseVersion(

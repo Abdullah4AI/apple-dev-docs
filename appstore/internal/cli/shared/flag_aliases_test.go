@@ -90,6 +90,40 @@ func TestBindDeprecatedStringFlagAliasHidesCompatibilityFlag(t *testing.T) {
 	}
 }
 
+func TestVisibleDeprecatedStringFlagAliasRejectsDualUse(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	canonical := fs.String("canonical", "", "Canonical value")
+	alias := BindVisibleDeprecatedStringFlagAlias(fs, "legacy", "canonical")
+	if err := fs.Parse([]string{"--canonical", "same", "--legacy", "same"}); err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	visible := false
+	for _, item := range VisibleHelpFlags(fs) {
+		if item.Name == "legacy" && item.Usage == "DEPRECATED: use --canonical" {
+			visible = true
+		}
+	}
+	if !visible {
+		t.Fatal("deprecated compatibility flag was not marked in help")
+	}
+
+	_, stderr := captureOutput(t, func() {
+		err := alias.ApplyExclusive(canonical)
+		if err == nil || !strings.Contains(err.Error(), "--legacy conflicts with --canonical") {
+			t.Fatalf("ApplyExclusive() error = %v, want dual-use conflict", err)
+		}
+		if !IsReportedUsageError(err) {
+			t.Fatalf("ApplyExclusive() error = %v, want concise usage error", err)
+		}
+	})
+	wantStderr := "Warning: `--legacy` is deprecated. Use `--canonical`.\n" +
+		"Error: --legacy conflicts with --canonical; use only --canonical\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
 func TestDeprecatedIntFlagAliasApply(t *testing.T) {
 	tests := []struct {
 		name         string

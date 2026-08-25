@@ -402,7 +402,11 @@ func chooseSubmissionForShow(submissions []webcore.ReviewSubmission, preferredID
 				return &chosen, "explicit", nil
 			}
 		}
-		return nil, "", fmt.Errorf("submission %q was not found for this app", preferredID)
+		return nil, "", shared.WithDiagnostic(
+			fmt.Errorf("submission %q was not found for this app", preferredID),
+			shared.DiagnosticResourceNotFound,
+			"--submission",
+		)
 	}
 
 	var unresolved *webcore.ReviewSubmission
@@ -844,12 +848,20 @@ Selection:
 		Exec: func(ctx context.Context, args []string) error {
 			trimmedAppID := strings.TrimSpace(*appID)
 			if trimmedAppID == "" {
-				return shared.UsageError("--app is required")
+				return shared.WithDiagnostic(
+					shared.UsageError("--app is required"),
+					shared.DiagnosticRequiredInputMissing,
+					"--app",
+				)
 			}
 			trimmedPattern := strings.TrimSpace(*pattern)
 			if trimmedPattern != "" {
 				if _, err := filepath.Match(trimmedPattern, "sample.png"); err != nil {
-					return shared.UsageErrorf("--pattern is invalid: %v", err)
+					return shared.WithDiagnostic(
+						shared.UsageErrorf("--pattern is invalid: %v", err),
+						shared.DiagnosticInvalidInput,
+						"--pattern",
+					)
 				}
 			}
 

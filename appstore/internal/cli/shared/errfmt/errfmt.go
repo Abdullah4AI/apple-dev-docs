@@ -59,6 +59,14 @@ func Classify(err error) ClassifiedError {
 		}
 	}
 
+	// API-level remediation is already part of the rendered error. Do not add
+	// the generic permission hint as well: agreement-blocked 403s are account
+	// state, not an API-key role problem, and the two messages conflict.
+	var remediationErr *asc.APIError
+	if errors.As(err, &remediationErr) && strings.TrimSpace(remediationErr.Remediation) != "" {
+		return ClassifiedError{Message: err.Error()}
+	}
+
 	if errors.Is(err, asc.ErrForbidden) {
 		return ClassifiedError{
 			Message: err.Error(),

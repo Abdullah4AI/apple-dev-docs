@@ -59,6 +59,16 @@ type AnalyticsReportGetResult struct {
 	Links     Links                      `json:"links"`
 }
 
+// GetLinks returns pagination links for shared truncation warnings.
+func (r *AnalyticsReportGetResult) GetLinks() *Links {
+	return &r.Links
+}
+
+// GetData returns report data for shared pagination helpers.
+func (r *AnalyticsReportGetResult) GetData() any {
+	return r.Data
+}
+
 // AnalyticsReportGetReport represents an analytics report with instances.
 type AnalyticsReportGetReport struct {
 	ID          string                       `json:"id"`

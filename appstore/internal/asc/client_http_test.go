@@ -134,6 +134,14 @@ func TestListEndpoints_UseNextURL(t *testing.T) {
 			},
 		},
 		{
+			name: "GetAppInfos",
+			next: "https://api.appstoreconnect.apple.com/v1/apps/app-1/appInfos?cursor=abc",
+			call: func(c *Client, next string) error {
+				_, err := c.GetAppInfos(ctx, "app-1", WithAppInfosNextURL(next))
+				return err
+			},
+		},
+		{
 			name: "GetAppTags",
 			next: "https://api.appstoreconnect.apple.com/v1/apps/123/appTags?cursor=abc",
 			call: func(c *Client, next string) error {

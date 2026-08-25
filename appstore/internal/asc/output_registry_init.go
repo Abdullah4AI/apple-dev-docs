@@ -13,6 +13,17 @@ func registerAllOutputRenderers() {
 		render(sh, sr)
 		return nil
 	})
+	registerDirect(webAgreementsStatusTables)
+	registerRows(webAgreementsAcceptRows)
+	registerDirect(func(v *KeywordRankReport, render func([]string, [][]string)) error {
+		h, r := keywordRankSummaryRows(v)
+		render(h, r)
+		kh, kr := keywordRankRows(v)
+		render(kh, kr)
+		return nil
+	})
+	registerDirect(keywordDiscoverTables)
+	registerDirect(keywordScoreTables)
 	registerRows(feedbackRows)
 	registerRows(crashesRows)
 	registerRowsWithSingleResourceAdapter(reviewsRows)
@@ -119,6 +130,15 @@ func registerAllOutputRenderers() {
 	registerRowsWithSingleResourceAdapter(promotedPurchasesRows)
 	registerRowsErr(subscriptionPricesRows)
 	registerRows(subscriptionPriceRows)
+	registerDirect(func(v *SubscriptionPricingDeriveResult, render func([]string, [][]string)) error {
+		h, r := subscriptionPricingDeriveSummaryRows(v)
+		render(h, r)
+		if len(v.Rows) > 0 {
+			rh, rr := subscriptionPricingDeriveRowRows(v)
+			render(rh, rr)
+		}
+		return nil
+	})
 	registerRows(subscriptionAvailabilityRows)
 	registerRowsWithSingleResourceAdapter(subscriptionPlanAvailabilitiesRows)
 	registerRows(subscriptionGracePeriodRows)
@@ -175,6 +195,8 @@ func registerAllOutputRenderers() {
 	registerRows(appAvailabilityRows)
 	registerRows(territoryAvailabilitiesRows)
 	registerRows(endAppAvailabilityPreOrderRows)
+	registerRows(availabilityPlatformsResultRows)
+	registerRows(availabilityRemoveFromSaleResultRows)
 	registerRowsWithSingleResourceAdapter(appStoreVersionLocalizationsRows)
 	registerRowsWithSingleResourceAdapter(betaAppLocalizationsRows)
 	registerRowsWithSingleResourceAdapter(betaBuildLocalizationsRows)
@@ -209,6 +231,7 @@ func registerAllOutputRenderers() {
 	registerRowsWithSingleToListAdapter[BetaLicenseAgreementResponse, BetaLicenseAgreementsResponse](betaLicenseAgreementsRows)
 	registerRows(buildBetaNotificationRows)
 	registerRows(ageRatingDeclarationRows)
+	registerRows(ageRatingAuditResultRows)
 	registerRows(accessibilityDeclarationsRows)
 	registerRows(accessibilityDeclarationRows)
 	registerRows(appStoreReviewDetailRows)
@@ -275,6 +298,10 @@ func registerAllOutputRenderers() {
 		if len(v.Results) > 0 {
 			ih, ir := assetUploadResultItemRows(v.Results)
 			render(ih, ir)
+		}
+		if len(v.Failures) > 0 {
+			fh, fr := assetUploadFailureItemRows(v.Failures)
+			render(fh, fr)
 		}
 		return nil
 	})

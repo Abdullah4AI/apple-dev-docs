@@ -68,6 +68,7 @@ type appInfoLocalizationsQuery struct {
 }
 
 type appInfoQuery struct {
+	listQuery
 	fields                     []string
 	ageRatingDeclarationFields []string
 	include                    []string
@@ -270,6 +271,7 @@ func buildAppInfoQuery(query *appInfoQuery) string {
 	addCSV(values, "fields[appInfos]", fields)
 	addCSV(values, "fields[ageRatingDeclarations]", query.ageRatingDeclarationFields)
 	addCSV(values, "include", include)
+	addLimit(values, query.limit)
 	if query.localizationsLimit > 0 {
 		values.Set("limit[appInfoLocalizations]", strconv.Itoa(query.localizationsLimit))
 	}
@@ -855,6 +857,24 @@ func WithAppInfoLocalizationsInclude(include []string) AppInfoLocalizationsOptio
 func WithAppInfoFields(fields []string) AppInfoOption {
 	return func(q *appInfoQuery) {
 		q.fields = normalizeList(fields)
+	}
+}
+
+// WithAppInfosLimit sets the maximum number of app info records to return.
+func WithAppInfosLimit(limit int) AppInfoOption {
+	return func(q *appInfoQuery) {
+		if limit > 0 {
+			q.limit = limit
+		}
+	}
+}
+
+// WithAppInfosNextURL uses an app info continuation URL directly.
+func WithAppInfosNextURL(next string) AppInfoOption {
+	return func(q *appInfoQuery) {
+		if strings.TrimSpace(next) != "" {
+			q.nextURL = strings.TrimSpace(next)
+		}
 	}
 }
 

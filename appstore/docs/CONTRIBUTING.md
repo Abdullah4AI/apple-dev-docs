@@ -9,20 +9,26 @@ This file covers patterns for AI agents working on the codebase.
 - Branch from `main` and keep one logical change per branch
 - Do not commit directly to `main` unless explicitly instructed; prefer PRs
 - Prefer `git worktree add` for parallel tasks; remove with `git worktree remove` when done
-- Rebase on `main` before merging; avoid merge commits
+- Compare the branch with current `main` before merging. Do not rebase or merge `main` into a clean branch merely because `main` advanced; update only when an actual merge conflict prevents the merge
+- Preserve additive PR commits. Do not force-push, rebase, squash, or otherwise rewrite shared history unless the user explicitly requests it. When merging, use a regular merge commit by default
 - Commit small, coherent changes; no WIP commits on shared branches
 - Use concise, present-tense commit messages that match repo style
 - Never commit secrets or local config files (keys, `.env`, `.asc/config.json`)
 
 ## Before Committing
 
+For substantive behavior changes, run:
+
 ```bash
+make build      # Build the CLI
 make format     # Format code
 make lint       # Check for issues
 make check-docs  # Verify repo docs, website docs, and command docs stay in sync
 ASC_BYPASS_KEYCHAIN=1 make test  # Run all tests without keychain prompts
 git diff        # Review changes before staging
 ```
+
+For a narrowly scoped documentation or skill change, run `make check-docs`; it includes the repository and skill validators. Use broader checks when the changed surface or repository policy requires them.
 
 If `docs/wall-of-apps.json` is the only staged change, the local hook skips the full Go pipeline and only runs:
 

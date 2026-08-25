@@ -252,7 +252,7 @@ func TestBuildsListPaginateKeepsPreReleaseVersionOutput(t *testing.T) {
 	}
 }
 
-func TestBuildsListVersionLookupRequiresExactMatch(t *testing.T) {
+func TestBuildsListVersionLookupCollectsEquivalentPlatforms(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("ASC_APP_ID", "")
@@ -296,8 +296,8 @@ func TestBuildsListVersionLookupRequiresExactMatch(t *testing.T) {
 			}
 
 			query := req.URL.Query()
-			if query.Get("filter[preReleaseVersion]") != "prv-exact" {
-				t.Fatalf("expected exact pre-release version match only, got %q", query.Get("filter[preReleaseVersion]"))
+			if query.Get("filter[preReleaseVersion]") != "prv-exact,prv-near" {
+				t.Fatalf("expected both equivalent platform trains, got %q", query.Get("filter[preReleaseVersion]"))
 			}
 
 			body := `{

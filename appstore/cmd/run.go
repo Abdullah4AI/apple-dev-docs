@@ -74,7 +74,7 @@ func Run(args []string, versionInfo string) int {
 			badFlagSyntax = firstLine
 		}
 		if analysis.unknownFlag && isUnknownFlagParseFailure(parseErr, parseOutput.String()) {
-			printConciseUnknownFlag(root, analysis, getCommandName(root, args))
+			printConciseUnknownFlag(root, analysis, getCommandName(root, args), args)
 		} else if strings.HasPrefix(badFlagSyntax, "bad flag syntax:") {
 			fmt.Fprintf(os.Stderr, "Error: %s\nFor help:\n  asc --help\n", shared.SanitizeTerminal(badFlagSyntax))
 		} else {

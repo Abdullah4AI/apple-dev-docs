@@ -401,6 +401,29 @@ func TestLegalChecks_AllValid_NoChecks(t *testing.T) {
 	}
 }
 
+func TestIsValidHTTPURL(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "https://example.com", want: true},
+		{value: "http://example.com/support", want: true},
+		{value: "  https://example.com/support  ", want: true},
+		{value: "example.com", want: false},
+		{value: "www.example.com/support", want: false},
+		{value: "ftp://example.com", want: false},
+		{value: "https://", want: false},
+		{value: "https://exa mple.com", want: false},
+		{value: "", want: false},
+	}
+
+	for _, test := range tests {
+		if got := IsValidHTTPURL(test.value); got != test.want {
+			t.Fatalf("IsValidHTTPURL(%q) = %v, want %v", test.value, got, test.want)
+		}
+	}
+}
+
 func TestValidate_IncludesLegalChecks(t *testing.T) {
 	report := Validate(Input{
 		AppID:         "app-1",

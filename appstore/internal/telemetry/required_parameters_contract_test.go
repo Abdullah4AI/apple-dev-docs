@@ -38,10 +38,14 @@ func TestRequiredUsageLiteralParametersAreAllowlisted(t *testing.T) {
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
-			if !ok || len(call.Args) != 1 || !isRequiredUsageCall(call.Fun) {
+			if !ok {
 				return true
 			}
-			literal, ok := call.Args[0].(*ast.BasicLit)
+			parameterArgument, ok := requiredUsageParameterArgument(call)
+			if !ok {
+				return true
+			}
+			literal, ok := parameterArgument.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
 				return true
 			}
@@ -70,13 +74,26 @@ func TestRequiredUsageLiteralParametersAreAllowlisted(t *testing.T) {
 	}
 }
 
-func isRequiredUsageCall(function ast.Expr) bool {
-	switch expression := function.(type) {
+func requiredUsageParameterArgument(call *ast.CallExpr) (ast.Expr, bool) {
+	var name string
+	switch expression := call.Fun.(type) {
 	case *ast.Ident:
-		return expression.Name == "MissingRequiredUsageError"
+		name = expression.Name
 	case *ast.SelectorExpr:
-		return expression.Sel.Name == "MissingRequiredUsageError"
-	default:
-		return false
+		name = expression.Sel.Name
 	}
+
+	switch name {
+	case "MissingRequiredUsageError":
+		if len(call.Args) == 1 {
+			return call.Args[0], true
+		}
+	case "metadataRequiredInputError":
+		if len(call.Args) == 2 {
+			return call.Args[0], true
+		}
+	default:
+		return nil, false
+	}
+	return nil, false
 }

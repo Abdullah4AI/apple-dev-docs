@@ -98,34 +98,26 @@ func (c *Client) fetchHistogram(ctx context.Context, appID, country string, rati
 	req.Header.Set("X-Apple-Store-Front", storefront+",12")
 	req.Header.Set("Accept", "text/html")
 
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("histogram request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &httpStatusError{operation: "histogram", statusCode: resp.StatusCode}
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read histogram response: %w", err)
-	}
-
-	re := regexp.MustCompile(`<span class="total">([0-9,]+)</span>`)
-	matches := re.FindAllStringSubmatch(string(body), 5)
-	stars := []int{5, 4, 3, 2, 1}
-	for i, match := range matches {
-		if i >= len(stars) || len(match) < 2 {
-			continue
+	return c.do(ctx, "histogram", req, func(resp *http.Response) error {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read histogram response: %w", err)
 		}
-		raw := strings.ReplaceAll(match[1], ",", "")
-		count, _ := strconv.ParseInt(raw, 10, 64)
-		ratings.Histogram[stars[i]] = count
-	}
 
-	return nil
+		re := regexp.MustCompile(`<span class="total">([0-9,]+)</span>`)
+		matches := re.FindAllStringSubmatch(string(body), 5)
+		stars := []int{5, 4, 3, 2, 1}
+		for i, match := range matches {
+			if i >= len(stars) || len(match) < 2 {
+				continue
+			}
+			raw := strings.ReplaceAll(match[1], ",", "")
+			count, _ := strconv.ParseInt(raw, 10, 64)
+			ratings.Histogram[stars[i]] = count
+		}
+
+		return nil
+	})
 }
 
 // GetAllRatings fetches rating statistics for an app across all supported countries.

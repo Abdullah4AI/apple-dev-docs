@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/config"
@@ -47,7 +49,9 @@ type DoctorReport struct {
 }
 
 type DoctorOptions struct {
-	Fix bool
+	Fix        bool
+	Profile    string
+	StrictAuth bool
 }
 
 func Doctor(options DoctorOptions) DoctorReport {
@@ -64,7 +68,7 @@ func doctor(options DoctorOptions, resolver MigrationSuggestionResolver) DoctorR
 		inspectStorage(options),
 		inspectProfiles(),
 		inspectPrivateKeys(options),
-		inspectEnvironment(),
+		inspectEnvironment(options),
 		inspectTempKeys(options),
 		migrationSection,
 	}
@@ -325,6 +329,12 @@ func inspectPrivateKeyPath(path string, options DoctorOptions) DoctorCheck {
 			Message: fmt.Sprintf("%s - path is a directory", path),
 		}
 	}
+	if !info.Mode().IsRegular() {
+		return DoctorCheck{
+			Status:  DoctorFail,
+			Message: fmt.Sprintf("%s - not a regular file", path),
+		}
+	}
 
 	check := DoctorCheck{
 		Status:  DoctorOK,
@@ -359,7 +369,7 @@ func inspectPrivateKeyPath(path string, options DoctorOptions) DoctorCheck {
 	return check
 }
 
-func inspectEnvironment() DoctorSection {
+func inspectEnvironment(options DoctorOptions) DoctorSection {
 	checks := []DoctorCheck{}
 
 	envVars := []string{
@@ -385,6 +395,12 @@ func inspectEnvironment() DoctorSection {
 			})
 		}
 	}
+	if selectedProfileCheck := inspectSelectedProfile(options); selectedProfileCheck != nil {
+		checks = append(checks, *selectedProfileCheck)
+	}
+	if defaultCredentialCheck := inspectDefaultCredentialFallback(options); defaultCredentialCheck != nil {
+		checks = append(checks, *defaultCredentialCheck)
+	}
 
 	keyID := strings.TrimSpace(os.Getenv("ASC_KEY_ID"))
 	issuerID := strings.TrimSpace(os.Getenv("ASC_ISSUER_ID"))
@@ -392,9 +408,7 @@ func inspectEnvironment() DoctorSection {
 	keyType := config.NormalizeCredentialKeyType(keyTypeRaw)
 	keyTypeValid := keyTypeRaw == "" || config.IsValidCredentialKeyType(keyType)
 	individualKey := keyTypeValid && config.IsIndividualCredentialKeyType(keyType)
-	hasKeyPath := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "" ||
-		strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY")) != "" ||
-		strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_B64")) != ""
+	hasKeyPath := hasEnvironmentPrivateKey()
 	envProvided := keyID != "" || issuerID != "" || hasKeyPath || keyTypeRaw != ""
 	envComplete := keyID != "" && hasKeyPath &&
 		keyTypeValid &&
@@ -412,6 +426,14 @@ func inspectEnvironment() DoctorSection {
 			Message:        "Environment credentials are incomplete (set ASC_KEY_ID, ASC_ISSUER_ID unless ASC_KEY_TYPE=individual, and a private key)",
 			Recommendation: "Set missing ASC_* variables or clear partial values",
 		})
+	}
+	if ignoredReason := ignoredEnvironmentPrivateKeyReason(options); hasKeyPath && ignoredReason != "" {
+		checks = append(checks, DoctorCheck{
+			Status:  DoctorInfo,
+			Message: fmt.Sprintf("Environment private key is set but ignored because %s; key material was not validated", ignoredReason),
+		})
+	} else if privateKeyCheck := inspectEnvironmentPrivateKey(options); privateKeyCheck != nil {
+		checks = append(checks, *privateKeyCheck)
 	}
 
 	shapeLabels := CredentialShapeLabels{KeyID: "ASC_KEY_ID", IssuerID: "ASC_ISSUER_ID"}
@@ -446,6 +468,305 @@ func inspectEnvironment() DoctorSection {
 	}
 
 	return DoctorSection{Title: "Environment", Checks: checks}
+}
+
+func ignoredEnvironmentPrivateKeyReason(options DoctorOptions) string {
+	profile := selectedDoctorProfile(options)
+	if profile != "" {
+		credentials, err := GetCredentials(profile)
+		if err != nil || credentials == nil {
+			return fmt.Sprintf("profile %q is selected", profile)
+		}
+		if strings.TrimSpace(credentials.PrivateKeyPath) != "" || strings.TrimSpace(credentials.PrivateKeyPEM) != "" {
+			return fmt.Sprintf("profile %q provides stored private key material", profile)
+		}
+		return ""
+	}
+	if !shouldBypassKeychain() && completeEnvironmentCredentialsPreemptStored() {
+		return ""
+	}
+
+	credentials, err := GetDefaultCredentials()
+	if err != nil || credentials == nil {
+		return ""
+	}
+	hasKeyID := strings.TrimSpace(credentials.KeyID) != ""
+	hasIssuer := strings.TrimSpace(credentials.IssuerID) != "" || config.IsIndividualCredentialKeyType(credentials.KeyType)
+	hasPrivateKey := strings.TrimSpace(credentials.PrivateKeyPath) != "" || strings.TrimSpace(credentials.PrivateKeyPEM) != ""
+	if !hasPrivateKey {
+		return ""
+	}
+	complete := hasKeyID && hasIssuer
+	if shouldBypassKeychain() {
+		return "complete stored config credentials are selected in keychain bypass mode"
+	}
+	if !complete {
+		return "default stored private key is selected"
+	}
+	return "complete default stored credentials are selected"
+}
+
+func selectedDoctorProfile(options DoctorOptions) string {
+	if profile := strings.TrimSpace(options.Profile); profile != "" {
+		return profile
+	}
+	return strings.TrimSpace(os.Getenv("ASC_PROFILE"))
+}
+
+func inspectSelectedProfile(options DoctorOptions) *DoctorCheck {
+	profile := selectedDoctorProfile(options)
+	if profile == "" {
+		return nil
+	}
+	credentials, err := GetCredentials(profile)
+	if err != nil {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Selected profile %q could not be resolved: %v", profile, err),
+			Recommendation: "Choose an existing complete profile or update the selected profile credentials",
+		}
+	}
+	if credentials == nil {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Selected profile %q could not be resolved", profile),
+			Recommendation: "Choose an existing complete profile or update the selected profile credentials",
+		}
+	}
+	shape := effectiveCredentialShape(credentials)
+	if shape.invalidEnvironmentKeyType {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Selected profile %q cannot use environment fallback: ASC_KEY_TYPE must be team or individual", profile),
+			Recommendation: "Set ASC_KEY_TYPE to team or individual, or update the selected profile so fallback is unnecessary",
+		}
+	}
+	if len(shape.missing) > 0 {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Selected profile %q is incomplete after environment fallback (missing %s)", profile, strings.Join(shape.missing, ", ")),
+			Recommendation: "Update the selected profile or set the missing ASC_* environment fields",
+		}
+	}
+	if options.StrictAuth && shape.mixedSources {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Selected profile %q requires mixed stored and environment credential sources while strict authentication is enabled", profile),
+			Recommendation: "Store a complete credential profile or clear ASC_STRICT_AUTH",
+		}
+	}
+	return nil
+}
+
+func inspectDefaultCredentialFallback(options DoctorOptions) *DoctorCheck {
+	if selectedDoctorProfile(options) != "" {
+		return nil
+	}
+	if !shouldBypassKeychain() && completeEnvironmentCredentialsPreemptStored() {
+		return nil
+	}
+	credentials, err := GetDefaultCredentials()
+	if err != nil || credentials == nil {
+		return nil
+	}
+	shape := effectiveCredentialShape(credentials)
+	if shape.invalidEnvironmentKeyType {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        "Default stored credentials cannot use environment fallback: ASC_KEY_TYPE must be team or individual",
+			Recommendation: "Set ASC_KEY_TYPE to team or individual, or complete the default stored credentials",
+		}
+	}
+	if len(shape.missing) > 0 {
+		return &DoctorCheck{
+			Status:         DoctorFail,
+			Message:        fmt.Sprintf("Default stored credentials are incomplete after environment fallback (missing %s)", strings.Join(shape.missing, ", ")),
+			Recommendation: "Complete the default stored credentials or set the missing ASC_* environment fields",
+		}
+	}
+	if !options.StrictAuth || !shape.mixedSources {
+		return nil
+	}
+	return &DoctorCheck{
+		Status:         DoctorFail,
+		Message:        "Default stored credentials require mixed stored and environment credential sources while strict authentication is enabled",
+		Recommendation: "Store complete default credentials or clear ASC_STRICT_AUTH",
+	}
+}
+
+type credentialShape struct {
+	missing                   []string
+	invalidEnvironmentKeyType bool
+	mixedSources              bool
+}
+
+func effectiveCredentialShape(credentials *config.Config) credentialShape {
+	storedKeyID := strings.TrimSpace(credentials.KeyID) != ""
+	storedIssuer := strings.TrimSpace(credentials.IssuerID) != ""
+	storedPrivateKey := strings.TrimSpace(credentials.PrivateKeyPath) != "" || strings.TrimSpace(credentials.PrivateKeyPEM) != ""
+	storedKeyType := config.NormalizeCredentialKeyType(credentials.KeyType)
+	storedIndividual := config.IsIndividualCredentialKeyType(credentials.KeyType)
+	needsFallback := !storedKeyID || (!storedIssuer && !storedIndividual) || !storedPrivateKey
+
+	shape := credentialShape{}
+	effectiveIndividual := storedIndividual
+	if needsFallback {
+		environmentKeyType := strings.TrimSpace(os.Getenv("ASC_KEY_TYPE"))
+		if environmentKeyType != "" && !config.IsValidCredentialKeyType(environmentKeyType) {
+			shape.invalidEnvironmentKeyType = true
+			return shape
+		}
+		if storedKeyType == config.CredentialKeyTypeTeam && config.IsIndividualCredentialKeyType(environmentKeyType) {
+			effectiveIndividual = true
+		}
+	}
+
+	sources := map[string]struct{}{}
+	if storedKeyID {
+		sources["stored"] = struct{}{}
+	} else if strings.TrimSpace(os.Getenv("ASC_KEY_ID")) != "" {
+		sources["environment"] = struct{}{}
+	} else {
+		shape.missing = append(shape.missing, "key ID")
+	}
+	if !effectiveIndividual {
+		if storedIssuer {
+			sources["stored"] = struct{}{}
+		} else if strings.TrimSpace(os.Getenv("ASC_ISSUER_ID")) != "" {
+			sources["environment"] = struct{}{}
+		} else {
+			shape.missing = append(shape.missing, "issuer ID")
+		}
+	}
+	if storedPrivateKey {
+		sources["stored"] = struct{}{}
+	} else if hasEnvironmentPrivateKey() {
+		sources["environment"] = struct{}{}
+	} else {
+		shape.missing = append(shape.missing, "private key")
+	}
+	shape.mixedSources = len(sources) > 1
+	return shape
+}
+
+func hasEnvironmentPrivateKey() bool {
+	return strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "" ||
+		strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY")) != "" ||
+		strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_B64")) != ""
+}
+
+func completeEnvironmentCredentialsPreemptStored() bool {
+	keyID := strings.TrimSpace(os.Getenv("ASC_KEY_ID"))
+	issuerID := strings.TrimSpace(os.Getenv("ASC_ISSUER_ID"))
+	keyType := config.NormalizeCredentialKeyType(os.Getenv("ASC_KEY_TYPE"))
+	if keyID == "" || !config.IsValidCredentialKeyType(keyType) ||
+		(issuerID == "" && !config.IsIndividualCredentialKeyType(keyType)) {
+		return false
+	}
+
+	switch {
+	case strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "":
+		return true
+	case strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_B64")) != "":
+		compact := strings.Join(strings.Fields(os.Getenv("ASC_PRIVATE_KEY_B64")), "")
+		decoded, err := base64.StdEncoding.DecodeString(compact)
+		return err == nil && len(decoded) > 0 && environmentPrivateKeyCanMaterialize(len(decoded))
+	case strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY")) != "":
+		normalized := strings.ReplaceAll(strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY")), `\n`, "\n")
+		return environmentPrivateKeyCanMaterialize(len(normalized))
+	default:
+		return false
+	}
+}
+
+func environmentPrivateKeyCanMaterialize(size int) bool {
+	file, err := os.CreateTemp("", "asc-doctor-key-check-*.p8")
+	if err != nil {
+		return false
+	}
+	path := file.Name()
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(path)
+	}()
+	if err := file.Chmod(0o600); err != nil {
+		return false
+	}
+	if _, err := file.Write(make([]byte, size)); err != nil {
+		return false
+	}
+	return file.Close() == nil
+}
+
+func inspectEnvironmentPrivateKey(options DoctorOptions) *DoctorCheck {
+	if path := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")); path != "" {
+		check := inspectPrivateKeyPath(path, options)
+		redactEnvironmentPrivateKeyPath(&check, path)
+		return &check
+	}
+
+	if value := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_B64")); value != "" {
+		compact := strings.Join(strings.Fields(value), "")
+		decoded, err := base64.StdEncoding.DecodeString(compact)
+		if err != nil || len(decoded) == 0 {
+			return &DoctorCheck{
+				Status:         DoctorFail,
+				Message:        "ASC_PRIVATE_KEY_B64 is not valid base64",
+				Recommendation: "Set ASC_PRIVATE_KEY_B64 to a base64-encoded ECDSA P-256 private key",
+			}
+		}
+		if _, err := LoadPrivateKeyFromPEM(decoded); err != nil {
+			return &DoctorCheck{
+				Status:         DoctorFail,
+				Message:        "ASC_PRIVATE_KEY_B64 does not contain a valid private key",
+				Recommendation: "Set ASC_PRIVATE_KEY_B64 to a base64-encoded ECDSA P-256 private key",
+			}
+		}
+		if !environmentPrivateKeyCanMaterialize(len(decoded)) {
+			return &DoctorCheck{
+				Status:         DoctorFail,
+				Message:        "ASC_PRIVATE_KEY_B64 cannot be materialized as a temporary private key",
+				Recommendation: "Set TMPDIR to a writable directory or use ASC_PRIVATE_KEY_PATH",
+			}
+		}
+		return &DoctorCheck{
+			Status:  DoctorOK,
+			Message: "ASC_PRIVATE_KEY_B64 contains a valid ECDSA private key",
+		}
+	}
+
+	if value := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY")); value != "" {
+		value = strings.ReplaceAll(value, `\n`, "\n")
+		if _, err := LoadPrivateKeyFromPEM([]byte(value)); err != nil {
+			return &DoctorCheck{
+				Status:         DoctorFail,
+				Message:        "ASC_PRIVATE_KEY is not a valid private key",
+				Recommendation: "Set ASC_PRIVATE_KEY to an ECDSA P-256 private key in PEM format",
+			}
+		}
+		if !environmentPrivateKeyCanMaterialize(len(value)) {
+			return &DoctorCheck{
+				Status:         DoctorFail,
+				Message:        "ASC_PRIVATE_KEY cannot be materialized as a temporary private key",
+				Recommendation: "Set TMPDIR to a writable directory or use ASC_PRIVATE_KEY_PATH",
+			}
+		}
+		return &DoctorCheck{
+			Status:  DoctorOK,
+			Message: "ASC_PRIVATE_KEY contains a valid ECDSA private key",
+		}
+	}
+
+	return nil
+}
+
+func redactEnvironmentPrivateKeyPath(check *DoctorCheck, path string) {
+	if check == nil || path == "" {
+		return
+	}
+	check.Message = strings.ReplaceAll(check.Message, path, "ASC_PRIVATE_KEY_PATH")
+	check.Recommendation = strings.ReplaceAll(check.Recommendation, strconv.Quote(path), `"$ASC_PRIVATE_KEY_PATH"`)
+	check.Recommendation = strings.ReplaceAll(check.Recommendation, path, "$ASC_PRIVATE_KEY_PATH")
 }
 
 func inspectTempKeys(options DoctorOptions) DoctorSection {

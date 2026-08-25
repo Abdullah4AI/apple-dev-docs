@@ -100,11 +100,12 @@ type AppScreenshotFanoutUploadResult struct {
 
 // AppPreviewUploadResult represents preview upload output.
 type AppPreviewUploadResult struct {
-	VersionLocalizationID string                  `json:"versionLocalizationId"`
-	SetID                 string                  `json:"setId"`
-	PreviewType           string                  `json:"previewType"`
-	DryRun                bool                    `json:"dryRun,omitempty"`
-	Results               []AssetUploadResultItem `json:"results"`
+	VersionLocalizationID string                   `json:"versionLocalizationId"`
+	SetID                 string                   `json:"setId"`
+	PreviewType           string                   `json:"previewType"`
+	DryRun                bool                     `json:"dryRun,omitempty"`
+	Results               []AssetUploadResultItem  `json:"results"`
+	Failures              []AssetUploadFailureItem `json:"failures,omitempty"`
 }
 
 // CustomProductPageScreenshotUploadResult represents custom product page screenshot upload output.

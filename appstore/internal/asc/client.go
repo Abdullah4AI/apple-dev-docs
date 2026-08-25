@@ -1728,7 +1728,12 @@ func (c *Client) GetAppInfos(ctx context.Context, appID string, opts ...AppInfoO
 	}
 
 	path := fmt.Sprintf("/v1/apps/%s/appInfos", appID)
-	if queryString := buildAppInfoQuery(query); queryString != "" {
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("appInfos: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildAppInfoQuery(query); queryString != "" {
 		path += "?" + queryString
 	}
 	data, err := c.do(ctx, "GET", path, nil)

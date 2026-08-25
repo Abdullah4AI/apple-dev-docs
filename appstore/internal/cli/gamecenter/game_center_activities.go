@@ -480,7 +480,7 @@ Use --remove to remove relationships instead of adding.
 
 Examples:
   asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1,ACH_2"
-  asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1" --remove`,
+  asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1" --remove --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -499,6 +499,7 @@ func GameCenterActivityAchievementsSetCommand() *ffcli.Command {
 	activityID := fs.String("activity-id", "", "Game Center activity ID")
 	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated achievement IDs")
 	remove := fs.Bool("remove", false, "Remove relationships instead of adding")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm removal (required with --remove)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -509,7 +510,7 @@ func GameCenterActivityAchievementsSetCommand() *ffcli.Command {
 
 Examples:
   asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1,ACH_2"
-  asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1" --remove`,
+  asc game-center activities achievements set --activity-id "ACTIVITY_ID" --ids "ACH_1" --remove --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -522,6 +523,13 @@ Examples:
 			if len(idsValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
 				return shared.MissingRequiredUsageError("--ids")
+			}
+			if *confirm && !*remove {
+				return shared.UsageError("--confirm requires --remove")
+			}
+			if *remove && !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required with --remove")
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()
@@ -562,7 +570,7 @@ Use --remove to remove relationships instead of adding.
 
 Examples:
   asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1,LB_2"
-  asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1" --remove`,
+  asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1" --remove --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -581,6 +589,7 @@ func GameCenterActivityLeaderboardsSetCommand() *ffcli.Command {
 	activityID := fs.String("activity-id", "", "Game Center activity ID")
 	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated leaderboard IDs")
 	remove := fs.Bool("remove", false, "Remove relationships instead of adding")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm removal (required with --remove)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -591,7 +600,7 @@ func GameCenterActivityLeaderboardsSetCommand() *ffcli.Command {
 
 Examples:
   asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1,LB_2"
-  asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1" --remove`,
+  asc game-center activities leaderboards set --activity-id "ACTIVITY_ID" --ids "LB_1" --remove --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -604,6 +613,13 @@ Examples:
 			if len(idsValue) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --ids is required")
 				return shared.MissingRequiredUsageError("--ids")
+			}
+			if *confirm && !*remove {
+				return shared.UsageError("--confirm requires --remove")
+			}
+			if *remove && !*confirm {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required with --remove")
+				return shared.MissingRequiredUsageError("--confirm")
 			}
 
 			client, err := shared.GetASCClient()

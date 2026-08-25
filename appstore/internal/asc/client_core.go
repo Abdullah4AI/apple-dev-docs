@@ -236,6 +236,10 @@ func envValue(name string) (string, bool) {
 type RetryableError struct {
 	Err        error
 	RetryAfter time.Duration
+	// PreserveErrorOnDeadline requests terminal classification when a computed
+	// fallback wait cannot finish before the context deadline. Explicit context
+	// cancellation still takes precedence.
+	PreserveErrorOnDeadline bool
 }
 
 func (e *RetryableError) Error() string {
@@ -305,10 +309,11 @@ func (e *retryCancelledError) Unwrap() []error {
 	return []error{e.contextErr, e.err}
 }
 
-// retryDelayExceededError marks a retryable failure whose server-provided
-// delay could not be honored by this request. It preserves the original
-// retryable cause for status and Retry-After inspection, while allowing outer
-// recovery loops to treat the already-diagnosed wait as terminal.
+// retryDelayExceededError marks a retryable failure whose requested or
+// computed delay could not be honored by this request. It preserves the
+// original retryable cause for status and Retry-After inspection, while
+// allowing outer recovery loops to treat the already-diagnosed wait as
+// terminal.
 type retryDelayExceededError struct {
 	err error
 }
@@ -490,11 +495,26 @@ func withRetry[T any](ctx context.Context, fn func() (T, error), opts RetryOptio
 			)}
 		}
 
+		if retryPreservesErrorOnDeadline(err) {
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+				if ctx.Err() == nil {
+					remaining := time.Until(deadline)
+					return zero, &retryDelayExceededError{err: fmt.Errorf(
+						"%s: computed fallback backoff %s cannot be honored before the context deadline (%s remaining): %w",
+						retryDelayCategory(err), delay, remaining.Round(time.Millisecond), err,
+					)}
+				}
+			}
+		}
+
 		// Check if we've exceeded max retries after classifying any explicit
 		// Retry-After hint. A final attempt carrying an unhonored hint must
 		// remain terminal to outer recovery loops instead of being hidden by
 		// the retry-budget marker.
 		if retryCount >= opts.MaxRetries {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return zero, &retryCancelledError{contextErr: contextErr, err: err}
+			}
 			return zero, &retryBudgetExceededError{retries: retryCount + 1, err: err}
 		}
 
@@ -529,6 +549,11 @@ func withRetry[T any](ctx context.Context, fn func() (T, error), opts RetryOptio
 			// Continue to next retry
 		}
 	}
+}
+
+func retryPreservesErrorOnDeadline(err error) bool {
+	retryErr, ok := errors.AsType[*RetryableError](err)
+	return ok && retryErr.PreserveErrorOnDeadline
 }
 
 func retryDelayCategory(err error) string {

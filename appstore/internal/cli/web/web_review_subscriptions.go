@@ -450,20 +450,24 @@ Subcommands:
 func WebReviewSubscriptionsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web review subscriptions list", flag.ExitOnError)
 
-	appID := fs.String("app", "", "App ID")
+	appID := fs.String("app", "", "App ID (or ASC_APP_ID env)")
 	authFlags := bindWebSessionFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc web review subscriptions list --app APP_ID [flags]",
+		ShortUsage: "asc web review subscriptions list [--app APP_ID] [flags]",
 		ShortHelp:  "List subscriptions and next-version attach state.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			trimmedAppID := strings.TrimSpace(*appID)
+			trimmedAppID := strings.TrimSpace(shared.ResolveAppID(*appID))
 			if trimmedAppID == "" {
-				return shared.UsageError("--app is required")
+				return shared.WithDiagnostic(
+					shared.UsageError("--app is required (or set ASC_APP_ID)"),
+					shared.DiagnosticRequiredInputMissing,
+					"--app",
+				)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)

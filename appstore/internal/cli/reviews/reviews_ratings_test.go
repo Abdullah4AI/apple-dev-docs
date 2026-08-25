@@ -265,6 +265,10 @@ func TestResolveRatingsAppIDLooksUpTrimmedBundleWithHttptest(t *testing.T) {
 }
 
 func TestResolveRatingsAppIDHidesBundleLookupFailureDetails(t *testing.T) {
+	// The public client retries 5xx replies; this test asserts the terminal
+	// failure, so keep it on the single-attempt path.
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/lookup" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -295,6 +299,10 @@ func TestResolveRatingsAppIDHidesBundleLookupFailureDetails(t *testing.T) {
 }
 
 func TestExecuteRatingsRetainsPublicHTTPStatusWithoutChangingErrors(t *testing.T) {
+	// The public client retries 503 replies; this test asserts the terminal
+	// failure, so keep it on the single-attempt path.
+	t.Setenv("ASC_MAX_RETRIES", "0")
+
 	tests := []struct {
 		name      string
 		app       string

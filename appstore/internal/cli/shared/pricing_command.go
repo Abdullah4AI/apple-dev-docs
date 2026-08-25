@@ -62,11 +62,11 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 
 			if err := ValidatePriceSelectionFlags(pricePointValue, tierValue, priceValue, freeValue); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)
-				return flag.ErrHelp
+				return reportedUsageErrHelp(err)
 			}
 			if err := ValidateFinitePriceFlag("--price", priceValue); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)
-				return flag.ErrHelp
+				return WithDiagnostic(flag.ErrHelp, DiagnosticInvalidInput, "--price")
 			}
 
 			baseTerritoryInput := strings.TrimSpace(*baseTerritory)
@@ -78,7 +78,7 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 			if baseTerritoryInput != "" {
 				normalizedBaseTerritory, normalizeErr := ascterritory.Normalize(baseTerritoryInput)
 				if normalizeErr != nil {
-					return UsageError(normalizeErr.Error())
+					return WithDiagnostic(UsageError(normalizeErr.Error()), DiagnosticInvalidInput, "--base-territory")
 				}
 				baseTerritoryValue = normalizedBaseTerritory
 			}
@@ -95,7 +95,11 @@ func NewPricingSetCommand(config PricingSetCommandConfig) *ffcli.Command {
 
 			normalizedStartDate, err := normalizePricingStartDate(startDateValue)
 			if err != nil {
-				return fmt.Errorf("%s: %w", config.ErrorPrefix, err)
+				return WithDiagnostic(
+					fmt.Errorf("%s: %w", config.ErrorPrefix, err),
+					DiagnosticInvalidInput,
+					"--start-date",
+				)
 			}
 
 			client, err := getASCClient()

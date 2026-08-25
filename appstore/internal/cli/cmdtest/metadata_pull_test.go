@@ -12,30 +12,41 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestMetadataPullValidationErrors(t *testing.T) {
 	t.Setenv("ASC_APP_ID", "")
 
 	tests := []struct {
-		name    string
-		args    []string
-		wantErr string
+		name          string
+		args          []string
+		wantErr       string
+		wantStderr    string
+		wantParameter string
+		wantConcise   bool
 	}{
 		{
-			name:    "missing app",
-			args:    []string{"metadata", "pull", "--version", "1.2.3", "--dir", "./metadata"},
-			wantErr: "Error: --app is required (or set ASC_APP_ID)",
+			name:          "missing app",
+			args:          []string{"metadata", "pull", "--version", "1.2.3", "--dir", "./metadata"},
+			wantStderr:    "Error: --app is required (or set ASC_APP_ID)\n",
+			wantParameter: "--app",
+			wantConcise:   true,
 		},
 		{
-			name:    "missing version",
-			args:    []string{"metadata", "pull", "--app", "app-1", "--dir", "./metadata"},
-			wantErr: "Error: --version is required",
+			name:          "missing version",
+			args:          []string{"metadata", "pull", "--app", "app-1", "--dir", "./metadata"},
+			wantStderr:    "Error: --version is required\nFind versions:\n  asc versions list --app \"APP_ID\" --paginate\n",
+			wantParameter: "--version",
+			wantConcise:   true,
 		},
 		{
-			name:    "missing dir",
-			args:    []string{"metadata", "pull", "--app", "app-1", "--version", "1.2.3"},
-			wantErr: "Error: --dir is required",
+			name:          "missing dir",
+			args:          []string{"metadata", "pull", "--app", "app-1", "--version", "1.2.3"},
+			wantStderr:    "Error: --dir is required\n",
+			wantParameter: "--dir",
+			wantConcise:   true,
 		},
 		{
 			name:    "invalid include",
@@ -57,13 +68,24 @@ func TestMetadataPullValidationErrors(t *testing.T) {
 				runErr = root.Run(context.Background())
 			})
 
-			if !errors.Is(runErr, flag.ErrHelp) {
+			if test.wantConcise {
+				if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+					t.Fatalf("expected reported usage error without ErrHelp, got %v", runErr)
+				}
+				diagnostic, ok := shared.DiagnosticFromError(runErr)
+				if !ok || diagnostic.Code != shared.DiagnosticRequiredInputMissing || diagnostic.Parameter != test.wantParameter {
+					t.Fatalf("diagnostic = %+v, found=%t", diagnostic, ok)
+				}
+			} else if !errors.Is(runErr, flag.ErrHelp) {
 				t.Fatalf("expected ErrHelp, got %v", runErr)
 			}
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if !strings.Contains(stderr, test.wantErr) {
+			if test.wantConcise && stderr != test.wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr, test.wantStderr)
+			}
+			if !test.wantConcise && !strings.Contains(stderr, test.wantErr) {
 				t.Fatalf("expected %q in stderr, got %q", test.wantErr, stderr)
 			}
 		})

@@ -23,6 +23,7 @@ const appStoreVersionIncludeValues = "ageRatingDeclaration, app, appStoreVersion
 
 func clearASCAuth(t *testing.T) {
 	t.Helper()
+	t.Setenv("ASC_APP_ID", "")
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("ASC_PROFILE", "")
@@ -78,6 +79,152 @@ func TestVersionsViewSendsExactSupportedIncludeQuery(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestVersionsViewResolvesVersionFromAppAndVersionString(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	requests := make([]string, 0, 2)
+	stubTransport(t, func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		switch req.URL.Path {
+		case "/v1/apps/app-1/appStoreVersions":
+			query := req.URL.Query()
+			if got := query.Get("filter[versionString]"); got != "1.2.3" {
+				t.Fatalf("version filter = %q, want 1.2.3", got)
+			}
+			if got := query.Get("filter[platform]"); got != "IOS" {
+				t.Fatalf("platform filter = %q, want IOS", got)
+			}
+			if got := query.Get("limit"); got != "10" {
+				t.Fatalf("limit = %q, want 10", got)
+			}
+			return jsonResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS"}}]}`)
+		case "/v1/appStoreVersions/version-1":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS","appVersionState":"PREPARE_FOR_SUBMISSION"}}}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("test")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"versions", "view",
+			"--app", "app-1",
+			"--version", "1.2.3",
+			"--output", "json",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	var result asc.AppStoreVersionDetailResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal stdout: %v; stdout=%q", err, stdout)
+	}
+	if result.ID != "version-1" || result.VersionString != "1.2.3" || result.Platform != "IOS" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	wantRequests := []string{
+		"GET /v1/apps/app-1/appStoreVersions",
+		"GET /v1/appStoreVersions/version-1",
+	}
+	if fmt.Sprint(requests) != fmt.Sprint(wantRequests) {
+		t.Fatalf("requests = %v, want %v", requests, wantRequests)
+	}
+}
+
+func TestVersionsViewSelectorValidationBeforeClient(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "direct ID with lookup selectors",
+			args:       []string{"versions", "view", "--version-id", "version-1", "--app", "app-1", "--version", "1.2.3"},
+			wantStderr: "--version-id cannot be combined with --app, --version, or --platform",
+		},
+		{
+			name:       "explicit empty direct ID with lookup selectors",
+			args:       []string{"versions", "view", "--version-id", " ", "--app", "app-1", "--version", "1.2.3"},
+			wantStderr: "--version-id cannot be combined with --app, --version, or --platform",
+		},
+		{
+			name:       "app without version",
+			args:       []string{"versions", "view", "--app", "app-1"},
+			wantStderr: "--version is required when resolving by app",
+		},
+		{
+			name:       "version without app",
+			args:       []string{"versions", "view", "--version", "1.2.3"},
+			wantStderr: "--app is required (or set ASC_APP_ID)",
+		},
+		{
+			name:       "version with whitespace app",
+			args:       []string{"versions", "view", "--app", " ", "--version", "1.2.3"},
+			wantStderr: "--app is required (or set ASC_APP_ID)",
+		},
+		{
+			name:       "invalid platform",
+			args:       []string{"versions", "view", "--app", "app-1", "--version", "1.2.3", "--platform", "ANDROID"},
+			wantStderr: "versions view: --platform must be one of: IOS, MAC_OS, TV_OS, VISION_OS",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearASCAuth(t)
+			clientFactoryCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientFactoryCalls++
+				return nil, fmt.Errorf("client should not be created")
+			}))
+
+			stdout, stderr := captureOutput(t, func() {
+				if code := rootcmd.Run(test.args, "test"); code != rootcmd.ExitUsage {
+					t.Errorf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Errorf("stdout = %q, want empty", stdout)
+			}
+			errorLine, _, _ := strings.Cut(stderr, "\n")
+			if got := errorLine + "\n"; got != "Error: "+test.wantStderr+"\n" {
+				t.Errorf("stderr error line = %q, want %q; full stderr = %q", got, "Error: "+test.wantStderr+"\n", stderr)
+			}
+			if clientFactoryCalls != 0 {
+				t.Errorf("client factory calls = %d, want 0", clientFactoryCalls)
+			}
+		})
+	}
+}
+
+func TestVersionsViewSelectorFlagsAreExperimental(t *testing.T) {
+	cmd := findSubcommand(RootCommand("test"), "versions", "view")
+	if cmd == nil {
+		t.Fatal("versions view command not found")
+	}
+	for _, name := range []string{"app", "version", "platform"} {
+		flag := cmd.FlagSet.Lookup(name)
+		if flag == nil {
+			t.Fatalf("--%s flag not found", name)
+		}
+		if !strings.HasPrefix(flag.Usage, "[experimental] ") {
+			t.Fatalf("--%s usage = %q, want [experimental] prefix", name, flag.Usage)
+		}
 	}
 }
 

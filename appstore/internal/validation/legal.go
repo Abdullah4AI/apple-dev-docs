@@ -48,7 +48,7 @@ func legalChecks(copyright string, hasActiveMonetization bool, hasReviewRelevant
 	// URL format checks on version localizations.
 	for _, loc := range versionLocs {
 		if u := strings.TrimSpace(loc.SupportURL); u != "" {
-			if !isValidHTTPURL(u) {
+			if !IsValidHTTPURL(u) {
 				checks = append(checks, CheckResult{
 					ID:           "legal.format.support_url",
 					Severity:     SeverityWarning,
@@ -62,7 +62,7 @@ func legalChecks(copyright string, hasActiveMonetization bool, hasReviewRelevant
 			}
 		}
 		if u := strings.TrimSpace(loc.MarketingURL); u != "" {
-			if !isValidHTTPURL(u) {
+			if !IsValidHTTPURL(u) {
 				checks = append(checks, CheckResult{
 					ID:           "legal.format.marketing_url",
 					Severity:     SeverityWarning,
@@ -108,7 +108,7 @@ func legalChecks(copyright string, hasActiveMonetization bool, hasReviewRelevant
 			})
 		}
 
-		if privacyURL != "" && !isValidHTTPURL(privacyURL) {
+		if privacyURL != "" && !IsValidHTTPURL(privacyURL) {
 			checks = append(checks, CheckResult{
 				ID:           "legal.format.privacy_policy_url",
 				Severity:     SeverityWarning,
@@ -122,7 +122,7 @@ func legalChecks(copyright string, hasActiveMonetization bool, hasReviewRelevant
 		}
 
 		if u := strings.TrimSpace(loc.PrivacyChoicesURL); u != "" {
-			if !isValidHTTPURL(u) {
+			if !IsValidHTTPURL(u) {
 				checks = append(checks, CheckResult{
 					ID:           "legal.format.privacy_choices_url",
 					Severity:     SeverityWarning,
@@ -164,7 +164,7 @@ func HasTermsOfUseLink(description string) bool {
 	for _, match := range descriptionURLPattern.FindAllStringIndex(description, -1) {
 		rawURL := description[match[0]:match[1]]
 		normalizedURL := normalizeDescriptionURL(rawURL)
-		if !isValidHTTPURL(normalizedURL) {
+		if !IsValidHTTPURL(normalizedURL) {
 			continue
 		}
 		if isAppleStandardEULAURL(normalizedURL) || urlLooksLikeTermsLink(normalizedURL) {
@@ -197,8 +197,11 @@ func urlLooksLikeTermsLink(raw string) bool {
 	return termsURLPattern.MatchString(lower)
 }
 
-// isValidHTTPURL returns true for absolute HTTP/HTTPS URLs with a hostname and no raw whitespace.
-func isValidHTTPURL(s string) bool {
+// IsValidHTTPURL reports whether a value is an absolute HTTP/HTTPS URL with a
+// hostname and no raw whitespace, matching the URL syntax App Store Connect
+// accepts for metadata URL fields. It is exported so offline metadata checks
+// apply the same rule as the online validation report.
+func IsValidHTTPURL(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" || strings.ContainsAny(s, " \t\r\n") {
 		return false

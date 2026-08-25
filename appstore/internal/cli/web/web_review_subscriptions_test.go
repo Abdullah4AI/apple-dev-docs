@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"strings"
@@ -1555,6 +1556,151 @@ func TestBuildReviewSubscriptionMutationRowsFallbacks(t *testing.T) {
 	}
 	if rows[9][2] != "false" || rows[10][2] != "false" {
 		t.Fatalf("expected boolean fields to render false values, got %#v %#v", rows[9], rows[10])
+	}
+}
+
+func TestWebReviewSubscriptionsListCommandResolvesAppFromEnv(t *testing.T) {
+	_ = stubWebProgressLabels(t)
+	t.Setenv("ASC_APP_ID", "123")
+
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	var requestedPaths []string
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestedPaths = append(requestedPaths, req.URL.Path)
+					body := `{"data": [], "included": []}`
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(body)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := WebReviewSubscriptionsListCommand()
+	if err := cmd.FlagSet.Parse([]string{"--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("exec error: %v", err)
+		}
+	})
+
+	if len(requestedPaths) != 1 || requestedPaths[0] != "/iris/v1/apps/123/subscriptionGroups" {
+		t.Fatalf("expected request scoped to ASC_APP_ID app 123, got %#v", requestedPaths)
+	}
+
+	var payload reviewSubscriptionsListOutput
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("failed to parse stdout JSON: %v\nstdout=%s", err, stdout)
+	}
+	if payload.AppID != "123" {
+		t.Fatalf("expected payload app id 123, got %#v", payload)
+	}
+}
+
+func TestWebReviewSubscriptionsListCommandExplicitFlagWinsOverEnv(t *testing.T) {
+	_ = stubWebProgressLabels(t)
+	t.Setenv("ASC_APP_ID", "999")
+
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	var requestedPaths []string
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestedPaths = append(requestedPaths, req.URL.Path)
+					body := `{"data": [], "included": []}`
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(body)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := WebReviewSubscriptionsListCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("exec error: %v", err)
+		}
+	})
+
+	if len(requestedPaths) != 1 || requestedPaths[0] != "/iris/v1/apps/app-1/subscriptionGroups" {
+		t.Fatalf("expected explicit --app to win over ASC_APP_ID, got %#v", requestedPaths)
+	}
+
+	var payload reviewSubscriptionsListOutput
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("failed to parse stdout JSON: %v\nstdout=%s", err, stdout)
+	}
+	if payload.AppID != "app-1" {
+		t.Fatalf("expected payload app id app-1, got %#v", payload)
+	}
+}
+
+func TestWebReviewSubscriptionsListCommandMissingAppReportsFallbackAndDiagnostic(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+	sessionCalls := 0
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		sessionCalls++
+		return nil, "", errors.New("session resolution must not run")
+	}
+
+	cmd := WebReviewSubscriptionsListCommand()
+	if cmd.ShortUsage != "asc web review subscriptions list [--app APP_ID] [flags]" {
+		t.Fatalf("ShortUsage = %q, want optional --app", cmd.ShortUsage)
+	}
+	if err := cmd.FlagSet.Parse(nil); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), nil)
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("error = %v, want flag.ErrHelp", runErr)
+	}
+	if runErr.Error() != "--app is required (or set ASC_APP_ID)" {
+		t.Fatalf("error = %q, want exact missing-app message", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr != "Error: --app is required (or set ASC_APP_ID)\n" {
+		t.Fatalf("stderr = %q, want exact missing-app diagnostic", stderr)
+	}
+	if sessionCalls != 0 {
+		t.Fatalf("session resolver called %d time(s), want 0", sessionCalls)
+	}
+
+	diagnostic, ok := shared.DiagnosticFromError(runErr)
+	if !ok {
+		t.Fatalf("expected structured diagnostic, got %v", runErr)
+	}
+	if diagnostic.Code != shared.DiagnosticRequiredInputMissing || diagnostic.Parameter != "--app" {
+		t.Fatalf("diagnostic = %+v, want required_input_missing for --app", diagnostic)
 	}
 }
 

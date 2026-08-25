@@ -16,6 +16,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/signing"
 	core "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/distribution"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/handlertest"
 	localxcode "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/xcode"
 )
 
@@ -1390,6 +1391,10 @@ func TestExecuteDistributionApplySamePlanReturnsSameRunWithoutRepeatingStages(t 
 }
 
 func TestConcurrentApplyInitializesOnlyAfterReadingStateUnderRunLock(t *testing.T) {
+	// executeDistributionApply runs on a worker goroutine below, so these
+	// dependency stubs must report and return instead of calling t.Fatal:
+	// terminating the worker would leave the test blocked on done forever.
+	fixture := handlertest.New(t)
 	plan := validPersistedDistributionPlan(t)
 	deps := validApplyDistributionOrchestrationDependencies(t, plan)
 	runID := deterministicDistributionRunID(plan)
@@ -1409,12 +1414,10 @@ func TestConcurrentApplyInitializesOnlyAfterReadingStateUnderRunLock(t *testing.
 	}
 	deps.readRun = func(string, string) (persistedDistributionRunState, error) { return completed, nil }
 	deps.writeRun = func(string, persistedDistributionRunState) error {
-		t.Fatal("stale creator overwrote completed state")
-		return nil
+		return fixture.Errorf("stale creator overwrote completed state")
 	}
 	deps.reconcileApply = func(context.Context, signing.ReconcileApplyOptions) (signing.ReconcileReceiptView, error) {
-		t.Fatal("stale creator repeated reconciliation")
-		return signing.ReconcileReceiptView{}, nil
+		return signing.ReconcileReceiptView{}, fixture.Errorf("stale creator repeated reconciliation")
 	}
 	deps.readReceipt = func(string, string) (persistedDistributionReceipt, error) {
 		return validPersistedDistributionReceipt(completed), nil

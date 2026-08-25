@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
@@ -25,7 +26,7 @@ type LatestBuildSelectionOptions struct {
 
 type latestBuildSelectionResult struct {
 	ResolvedAppID        string
-	NormalizedVersion    string
+	BuildUploadVersions  []string
 	NormalizedPlatform   string
 	HasPreReleaseFilters bool
 	PreReleaseVersionIDs []string
@@ -146,7 +147,7 @@ func ResolveNextBuildNumber(ctx context.Context, client *asc.Client, opts NextBu
 		scanCtx,
 		client,
 		selection.ResolvedAppID,
-		selection.NormalizedVersion,
+		selection.BuildUploadVersions,
 		selection.NormalizedPlatform,
 	)
 	if err != nil {
@@ -205,6 +206,7 @@ func resolveLatestBuildSelection(ctx context.Context, client *asc.Client, opts L
 	}
 
 	hasPreReleaseFilters := opts.Version != "" || opts.Platform != ""
+	buildUploadVersions := versionQueryVariants(opts.Version)
 
 	var preReleaseVersionIDs []string
 	if hasPreReleaseFilters {
@@ -314,7 +316,7 @@ func resolveLatestBuildSelection(ctx context.Context, client *asc.Client, opts L
 
 	return &latestBuildSelectionResult{
 		ResolvedAppID:        resolvedAppID,
-		NormalizedVersion:    opts.Version,
+		BuildUploadVersions:  append([]string(nil), buildUploadVersions...),
 		NormalizedPlatform:   opts.Platform,
 		HasPreReleaseFilters: hasPreReleaseFilters,
 		PreReleaseVersionIDs: append([]string(nil), preReleaseVersionIDs...),
@@ -396,13 +398,70 @@ func findHighestProcessedBuildNumber(
 }
 
 // FindPreReleaseVersionIDs returns the exact-matching pre-release version IDs
-// for the provided app/version/platform filters.
+// for the provided app/version/platform filters. App Store Connect treats
+// "1.2" and "1.2.0" as the same version, so when the requested format matches
+// nothing the equivalent format is tried before reporting no match.
 func FindPreReleaseVersionIDs(ctx context.Context, client *asc.Client, appID, version, platform string) ([]string, error) {
-	opts := []asc.PreReleaseVersionsOption{}
-	exactVersion := strings.TrimSpace(version)
+	requestedVersion := strings.TrimSpace(version)
 
-	if version != "" {
-		opts = append(opts, asc.WithPreReleaseVersionsVersion(version))
+	variants := versionQueryVariants(requestedVersion)
+	if len(variants) == 0 {
+		ids, _, err := findPreReleaseVersionIDsForVersions(ctx, client, appID, nil, platform)
+		return ids, err
+	}
+
+	// A platform-scoped lookup can stop at the caller's exact spelling. Without
+	// a platform filter, equivalent spellings can legitimately belong to
+	// different platform trains, so every variant is requested together.
+	if strings.TrimSpace(platform) == "" {
+		ids, matchedVersions, err := findPreReleaseVersionIDsForVersions(ctx, client, appID, variants, "")
+		if err != nil {
+			return nil, err
+		}
+		if _, exactMatched := matchedVersions[requestedVersion]; !exactMatched {
+			for _, variant := range variants {
+				if variant == requestedVersion {
+					continue
+				}
+				if _, ok := matchedVersions[variant]; ok {
+					noteEquivalentVersionMatch(requestedVersion, variant)
+					break
+				}
+			}
+		}
+		return ids, nil
+	}
+
+	// The requested format is queried first and wins outright, so an app that
+	// really does have a train under the caller's exact version string keeps
+	// resolving exactly as before.
+	for _, variant := range variants {
+		ids, _, err := findPreReleaseVersionIDsForVersions(ctx, client, appID, []string{variant}, platform)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		noteEquivalentVersionMatch(requestedVersion, variant)
+		return ids, nil
+	}
+
+	return nil, nil
+}
+
+func findPreReleaseVersionIDsForVersions(ctx context.Context, client *asc.Client, appID string, versions []string, platform string) ([]string, map[string]struct{}, error) {
+	opts := []asc.PreReleaseVersionsOption{}
+	acceptedVersions := make(map[string]struct{}, len(versions))
+	for _, version := range versions {
+		if normalized := strings.TrimSpace(version); normalized != "" {
+			acceptedVersions[normalized] = struct{}{}
+		}
+	}
+	versionFilter := strings.Join(versions, ",")
+
+	if versionFilter != "" {
+		opts = append(opts, asc.WithPreReleaseVersionsVersion(versionFilter))
 		opts = append(opts, asc.WithPreReleaseVersionsLimit(200))
 	} else {
 		opts = append(opts, asc.WithPreReleaseVersionsLimit(200))
@@ -416,26 +475,41 @@ func FindPreReleaseVersionIDs(ctx context.Context, client *asc.Client, appID, ve
 	firstPage, err := client.GetPreReleaseVersions(firstPageCtx, appID, opts...)
 	firstPageCancel()
 	if err != nil {
-		return nil, fmt.Errorf("failed to lookup pre-release versions: %w", err)
+		return nil, nil, fmt.Errorf("failed to lookup pre-release versions: %w", err)
 	}
 
+	matchedVersions := make(map[string]struct{}, len(acceptedVersions))
 	matchesRequestedVersion := func(preReleaseVersion asc.PreReleaseVersion) bool {
-		if exactVersion == "" {
+		if len(acceptedVersions) == 0 {
 			return true
 		}
 		versionAttr := strings.TrimSpace(preReleaseVersion.Attributes.Version)
 		if versionAttr == "" {
 			return true
 		}
-		return versionAttr == exactVersion
+		if _, ok := acceptedVersions[versionAttr]; ok {
+			matchedVersions[versionAttr] = struct{}{}
+			return true
+		}
+		return false
 	}
 
 	ids := make([]string, 0, len(firstPage.Data))
+	seen := make(map[string]struct{}, len(firstPage.Data))
 	appendIDs := func(page *asc.PreReleaseVersionsResponse) {
 		for _, preReleaseVersion := range page.Data {
-			if matchesRequestedVersion(preReleaseVersion) {
-				ids = append(ids, preReleaseVersion.ID)
+			if !matchesRequestedVersion(preReleaseVersion) {
+				continue
 			}
+			id := strings.TrimSpace(preReleaseVersion.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
 	}
 
@@ -452,10 +526,87 @@ func FindPreReleaseVersionIDs(ctx context.Context, client *asc.Client, appID, ve
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to paginate pre-release versions: %w", err)
+		return nil, nil, fmt.Errorf("failed to paginate pre-release versions: %w", err)
 	}
 
-	return ids, nil
+	return ids, matchedVersions, nil
+}
+
+// versionQueryVariants returns the marketing version strings worth querying for
+// a caller-supplied version, most specific first. App Store Connect treats
+// "1.2" and "1.2.0" as the same version but only exposes the format that was
+// uploaded first through filter[version], so a lookup that finds nothing under
+// the requested format has to retry the equivalent one before concluding the
+// version does not exist. Only the trailing ".0" equivalence is inferred;
+// other spellings, including leading-zero variants, are preserved. Versions
+// that are not purely numeric are returned unchanged.
+func versionQueryVariants(version string) []string {
+	trimmed := strings.TrimSpace(version)
+	if trimmed == "" {
+		return nil
+	}
+
+	variants := []string{trimmed}
+	appendVariant := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		for _, existing := range variants {
+			if existing == candidate {
+				return
+			}
+		}
+		variants = append(variants, candidate)
+	}
+
+	segments := strings.Split(trimmed, ".")
+	for _, segment := range segments {
+		if segment == "" {
+			return variants
+		}
+		for _, ch := range segment {
+			if ch < '0' || ch > '9' {
+				return variants
+			}
+		}
+	}
+
+	switch {
+	case len(segments) == 2:
+		appendVariant(trimmed + ".0")
+	case len(segments) == 3 && segments[2] == "0":
+		appendVariant(strings.Join(segments[:2], "."))
+	}
+
+	return variants
+}
+
+var (
+	equivalentVersionNoteMu sync.Mutex
+	equivalentVersionNotes  = map[string]struct{}{}
+)
+
+// noteEquivalentVersionMatch reports that a lookup succeeded through an
+// equivalent version format instead of the exact string the caller asked for.
+// Build waits repeat these lookups on every poll, so each requested/matched
+// pair is reported only once.
+func noteEquivalentVersionMatch(requested, matched string) {
+	if requested == "" || matched == "" || requested == matched {
+		return
+	}
+
+	key := requested + "\x00" + matched
+	equivalentVersionNoteMu.Lock()
+	_, seen := equivalentVersionNotes[key]
+	if !seen {
+		equivalentVersionNotes[key] = struct{}{}
+	}
+	equivalentVersionNoteMu.Unlock()
+	if seen {
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "note: matched version %q for requested %q\n", matched, requested)
 }
 
 func findMostRecentlyUploadedBuild(ctx context.Context, client *asc.Client, appID string, opts ...asc.BuildsOption) (*asc.BuildResponse, error) {
@@ -608,13 +759,13 @@ func ParseBuildTimestamp(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time %q", trimmed)
 }
 
-func findLatestBuildUploadNumber(ctx context.Context, client *asc.Client, appID, version, platform string) (buildNumber, *string, bool, error) {
+func findLatestBuildUploadNumber(ctx context.Context, client *asc.Client, appID string, versions []string, platform string) (buildNumber, *string, bool, error) {
 	opts := []asc.BuildUploadsOption{
 		asc.WithBuildUploadsStates([]string{"AWAITING_UPLOAD", "PROCESSING", "COMPLETE"}),
 		asc.WithBuildUploadsLimit(200),
 	}
-	if strings.TrimSpace(version) != "" {
-		opts = append(opts, asc.WithBuildUploadsCFBundleShortVersionStrings([]string{version}))
+	if len(versions) > 0 {
+		opts = append(opts, asc.WithBuildUploadsCFBundleShortVersionStrings(versions))
 	}
 	if strings.TrimSpace(platform) != "" {
 		opts = append(opts, asc.WithBuildUploadsPlatforms([]string{platform}))

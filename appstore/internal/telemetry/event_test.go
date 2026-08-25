@@ -301,7 +301,7 @@ func TestBuildEventWithContextAllowsKnownFailureParameters(t *testing.T) {
 	clearContextEnv(t)
 	setTelemetryTestHome(t)
 
-	for _, parameter := range []string{"--id", "--app", "--app-id", "--key-type", "--export-xcodebuild-flag", "--active", "--availability-id", "--base-price", "--batch-id", "--bg-color", "--config", "--copy-metadata-from", "--copyright", "--country", "--custom-app-name", "--demo-account-password", "--detail-fields", "--end-date", "--external-testing", "--fields", "--group", "--iap-version-fields", "--include", "--input", "--item-fields", "--keywords", "--local", "--name", "--number-of-periods", "--offer-code", "--offer-code-id", "--older-than", "--path", "--pkg", "--price-id", "--price-point-id", "--prices", "--private-key", "--product-id", "--provider", "--reference-name", "--removed", "--resolved", "--response-fields", "--response-state", "--screenshot-id", "--skip-validation", "--stars", "--state", "--subtitle", "--subtitle-color", "--subscription-group-version-fields", "--subscription-version-fields", "--term", "--territories", "--territory", "--tester", "--test-notes", "--title-color", "--treatment-id", "--type", "--upload", "--uses-non-exempt-encryption", "--uses-third-party-content", "--visible-in-app-store", "--watch", "--watch-debounce", "--watch-raw-dir", "--watch-review-dir", "--whats-new", "--workers"} {
+	for _, parameter := range []string{"--id", "--app", "--app-id", "--apple-id", "--key-type", "--export-xcodebuild-flag", "--active", "--availability-id", "--base-price", "--batch-id", "--bg-color", "--config", "--copy-metadata-from", "--copyright", "--country", "--custom-app-name", "--demo-account-password", "--detail-fields", "--end-date", "--external-testing", "--fields", "--group", "--iap-version-fields", "--include", "--input", "--item-fields", "--keywords", "--local", "--multiplier", "--name", "--number-of-periods", "--offer-code", "--offer-code-id", "--older-than", "--path", "--pattern", "--pkg", "--price-id", "--price-point-id", "--prices", "--private-key", "--product-id", "--provider", "--reference-name", "--removed", "--resolved", "--response-fields", "--response-state", "--screenshot-id", "--skip-validation", "--sku", "--source-subscription-id", "--stars", "--state", "--subtitle", "--subtitle-color", "--subscription-group-version-fields", "--subscription-version-fields", "--target-subscription-id", "--term", "--territories", "--territory", "--tester", "--test-notes", "--tier", "--title-color", "--treatment-id", "--type", "--upload", "--uses-non-exempt-encryption", "--uses-third-party-content", "--visible-in-app-store", "--watch", "--watch-debounce", "--watch-raw-dir", "--watch-review-dir", "--whats-new", "--workers"} {
 		t.Run(parameter, func(t *testing.T) {
 			ev, ok := BuildEventWithContext(
 				"asc apps view",
@@ -353,6 +353,63 @@ func TestBuildEventWithContextStripsKnownFailureParameterValue(t *testing.T) {
 	}
 	if strings.Contains(string(data), "individual") {
 		t.Fatalf("payload leaked failure parameter value: %s", data)
+	}
+}
+
+func TestBuildEventWithContextAllowsDirWithoutItsValue(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	ev, ok := BuildEventWithContext(
+		"asc metadata validate",
+		"1.2.3",
+		0,
+		2,
+		EventContext{
+			InvocationShape:  InvocationShapeLeaf,
+			ErrorKind:        ErrorKindMissingRequired,
+			FailureStage:     FailureStageValidation,
+			FailureParameter: "--dir=/Users/example/private-metadata",
+		},
+	)
+	if !ok {
+		t.Fatal("expected event")
+	}
+	if ev.FailureParameter == nil || *ev.FailureParameter != "--dir" {
+		t.Fatalf("FailureParameter = %v, want --dir", ev.FailureParameter)
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if strings.Contains(string(data), "private-metadata") {
+		t.Fatalf("payload leaked --dir value: %s", data)
+	}
+
+	for _, parameter := range []string{
+		"/Users/example/private-metadata",
+		"--dir /Users/example/private-metadata",
+	} {
+		t.Run(parameter, func(t *testing.T) {
+			pathEvent, pathOK := BuildEventWithContext(
+				"asc metadata validate",
+				"1.2.3",
+				0,
+				2,
+				EventContext{
+					InvocationShape:  InvocationShapeLeaf,
+					ErrorKind:        ErrorKindMissingRequired,
+					FailureStage:     FailureStageValidation,
+					FailureParameter: parameter,
+				},
+			)
+			if !pathOK {
+				t.Fatal("expected event")
+			}
+			if pathEvent.FailureParameter != nil {
+				t.Fatalf("FailureParameter = %q, want nil", *pathEvent.FailureParameter)
+			}
+		})
 	}
 }
 

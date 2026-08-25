@@ -41,19 +41,6 @@ type AvailabilityRemoveFromSaleCommandConfig struct {
 	ClientFactory func() (*asc.Client, error)
 }
 
-// AvailabilityRemoveFromSaleResult summarizes a verified remove-from-sale operation.
-type AvailabilityRemoveFromSaleResult struct {
-	AppID                          string   `json:"appId"`
-	AvailabilityID                 string   `json:"availabilityId"`
-	Status                         string   `json:"status"`
-	AvailableInNewTerritories      bool     `json:"availableInNewTerritories"`
-	TotalTerritories               int      `json:"totalTerritories"`
-	UpdatedTerritories             int      `json:"updatedTerritories"`
-	AlreadyUnavailableTerritories  int      `json:"alreadyUnavailableTerritories"`
-	VerifiedUnavailableTerritories int      `json:"verifiedUnavailableTerritories"`
-	FailedTerritories              []string `json:"failedTerritories"`
-}
-
 // NewAvailabilitySetCommand builds a shared availability set command.
 func NewAvailabilitySetCommand(config AvailabilitySetCommandConfig) *ffcli.Command {
 	fs := flag.NewFlagSet(config.FlagSetName, flag.ExitOnError)
@@ -140,6 +127,7 @@ func NewAvailabilityRemoveFromSaleCommand(config AvailabilityRemoveFromSaleComma
 	fs := flag.NewFlagSet("pricing availability remove-from-sale", flag.ExitOnError)
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	confirm := fs.Bool("confirm", false, "Confirm removal from sale in all current territories")
+	allPlatforms := fs.Bool("all-platforms", false, "[experimental] Acknowledge removal of every live platform listing (required when more than one platform is live)")
 	output := BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -152,6 +140,17 @@ This command uses the public App Store Connect API. It makes every existing
 territory unavailable and verifies the final state. It does not delete the app
 record, and it preserves the existing availableInNewTerritories policy because
 Apple does not expose an update operation for that setting.
+
+Removal is always app-wide: every platform listing (iOS, macOS, tvOS,
+visionOS) shares one availability record, and Apple does not support removing
+a single platform from sale through the public API, the internal web API, or
+the App Store Connect UI. When more than one platform has a live listing this
+command lists them and requires --all-platforms as an extra acknowledgement.
+If platform listings cannot be verified, the command fails closed unless
+--all-platforms explicitly acknowledges the unknown app-wide blast radius.
+To remove only one platform's listing, file an App Store Connect support
+request instead. Preview the blast radius first with
+"asc pricing availability platforms".
 
 Examples:
   asc pricing availability remove-from-sale --app "123456789" --confirm`,
@@ -180,6 +179,27 @@ Examples:
 
 			requestCtx, cancel := contextWithAvailabilityTimeout(ctx, true)
 			defer cancel()
+
+			liveListings, listingsErr := fetchLiveAvailabilityPlatformListings(requestCtx, client, resolvedAppID)
+			platformListingsVerified := listingsErr == nil
+			platformListingsVerificationError := ""
+			if listingsErr != nil {
+				platformListingsVerificationError = strings.TrimSpace(listingsErr.Error())
+				if !*allPlatforms {
+					return fmt.Errorf("pricing availability remove-from-sale: could not verify live platform listings; retry or pass --all-platforms to acknowledge the unknown app-wide blast radius: %w", listingsErr)
+				}
+				fmt.Fprintf(os.Stderr, "Warning: could not verify live platform listings; proceeding because --all-platforms acknowledges the unknown app-wide blast radius: %v\n", listingsErr)
+			} else if len(liveListings) > 0 {
+				fmt.Fprintf(os.Stderr, "Removal is app-wide; %d live platform listing(s) leave sale together:\n", len(liveListings))
+				for _, listing := range liveListings {
+					fmt.Fprintf(os.Stderr, "  %s %s (%s)\n", listing.Platform, listing.VersionString, listing.State)
+				}
+				if len(liveListings) > 1 && !*allPlatforms {
+					fmt.Fprintln(os.Stderr, "Error: --all-platforms is required because more than one platform is live. Apple does not support removing a single platform from sale; to remove one platform listing, file an App Store Connect support request.")
+					return MissingRequiredUsageError("--all-platforms")
+				}
+			}
+
 			_, summary, updateErr := executeTerritoryAvailabilityUpdate(requestCtx, client, availabilityUpdateRequest{
 				AppID:          resolvedAppID,
 				AllTerritories: true,
@@ -194,16 +214,23 @@ Examples:
 			if updateErr != nil {
 				status = "partialFailure"
 			}
-			result := AvailabilityRemoveFromSaleResult{
-				AppID:                          resolvedAppID,
-				AvailabilityID:                 summary.AvailabilityID,
-				Status:                         status,
-				AvailableInNewTerritories:      summary.AvailableInNewTerritories,
-				TotalTerritories:               summary.TotalTerritories,
-				UpdatedTerritories:             summary.UpdatedTerritories,
-				AlreadyUnavailableTerritories:  summary.SkippedTerritories,
-				VerifiedUnavailableTerritories: summary.VerifiedTerritories,
-				FailedTerritories:              append([]string{}, summary.FailedTerritories...),
+			removedPlatformListings := liveListings
+			if updateErr != nil {
+				removedPlatformListings = nil
+			}
+			result := &asc.AvailabilityRemoveFromSaleResult{
+				AppID:                             resolvedAppID,
+				AvailabilityID:                    summary.AvailabilityID,
+				Status:                            status,
+				AvailableInNewTerritories:         summary.AvailableInNewTerritories,
+				TotalTerritories:                  summary.TotalTerritories,
+				UpdatedTerritories:                summary.UpdatedTerritories,
+				AlreadyUnavailableTerritories:     summary.SkippedTerritories,
+				VerifiedUnavailableTerritories:    summary.VerifiedTerritories,
+				FailedTerritories:                 append([]string{}, summary.FailedTerritories...),
+				PlatformListingsVerified:          platformListingsVerified,
+				PlatformListingsVerificationError: platformListingsVerificationError,
+				RemovedPlatformListings:           removedPlatformListings,
 			}
 			if updateErr != nil {
 				fmt.Fprintf(
@@ -226,19 +253,7 @@ Examples:
 			if result.AvailableInNewTerritories {
 				fmt.Fprintln(os.Stderr, "Warning: Apple may automatically enable future App Store territories under the preserved policy.")
 			}
-			renderErr := PrintOutputWithRenderers(
-				result,
-				*output.Output,
-				*output.Pretty,
-				func() error {
-					renderAvailabilityRemoveFromSaleResult(result, false)
-					return nil
-				},
-				func() error {
-					renderAvailabilityRemoveFromSaleResult(result, true)
-					return nil
-				},
-			)
+			renderErr := PrintOutput(result, *output.Output, *output.Pretty)
 			return errors.Join(updateErr, renderErr)
 		},
 	}
@@ -405,24 +420,150 @@ func executeTerritoryAvailabilityUpdate(ctx context.Context, client *asc.Client,
 	return resp, summary, nil
 }
 
-func renderAvailabilityRemoveFromSaleResult(result AvailabilityRemoveFromSaleResult, markdown bool) {
-	headers := []string{"Field", "Value"}
-	rows := [][]string{
-		{"App ID", result.AppID},
-		{"Availability ID", result.AvailabilityID},
-		{"Status", result.Status},
-		{"Available in new territories", fmt.Sprintf("%t", result.AvailableInNewTerritories)},
-		{"Total territories", fmt.Sprintf("%d", result.TotalTerritories)},
-		{"Updated territories", fmt.Sprintf("%d", result.UpdatedTerritories)},
-		{"Already unavailable", fmt.Sprintf("%d", result.AlreadyUnavailableTerritories)},
-		{"Verified unavailable", fmt.Sprintf("%d", result.VerifiedUnavailableTerritories)},
-		{"Failed territories", strings.Join(result.FailedTerritories, ", ")},
+// FetchAvailabilityPlatformListings returns one listing per platform: the
+// newest live version when one exists, otherwise the newest version overall.
+func FetchAvailabilityPlatformListings(ctx context.Context, client *asc.Client, appID string) ([]asc.AvailabilityPlatformListing, error) {
+	newestLive := map[string]asc.AvailabilityPlatformListing{}
+	newestAny := map[string]asc.AvailabilityPlatformListing{}
+	platformStateKnown := map[string]bool{}
+	order := []string{}
+	next := ""
+	for {
+		opts := []asc.AppStoreVersionsOption{asc.WithAppStoreVersionsLimit(200)}
+		if next != "" {
+			opts = append(opts, asc.WithAppStoreVersionsNextURL(next))
+		}
+		resp, err := client.GetAppStoreVersions(ctx, appID, opts...)
+		if err != nil {
+			return nil, err
+		}
+		for _, version := range resp.Data {
+			platform := string(version.Attributes.Platform)
+			if platform == "" {
+				continue
+			}
+			state, live, stateKnown := availabilityListingStatus(version.Attributes)
+			listing := asc.AvailabilityPlatformListing{
+				Platform:      platform,
+				VersionString: version.Attributes.VersionString,
+				State:         state,
+				Live:          live,
+				StateKnown:    stateKnown,
+				CreatedDate:   version.Attributes.CreatedDate,
+			}
+			if _, seen := newestAny[platform]; !seen {
+				order = append(order, platform)
+				platformStateKnown[platform] = true
+			}
+			if !listing.StateKnown {
+				platformStateKnown[platform] = false
+			}
+			if current, seen := newestAny[platform]; !seen || availabilityListingIsNewer(listing, current) {
+				newestAny[platform] = listing
+			}
+			if listing.Live {
+				if current, seen := newestLive[platform]; !seen || availabilityListingIsNewer(listing, current) {
+					newestLive[platform] = listing
+				}
+			}
+		}
+		next = strings.TrimSpace(resp.Links.Next)
+		if next == "" {
+			break
+		}
 	}
-	if markdown {
-		asc.RenderMarkdown(headers, rows)
-		return
+	listings := make([]asc.AvailabilityPlatformListing, 0, len(order))
+	for _, platform := range order {
+		if live, ok := newestLive[platform]; ok {
+			live.StateKnown = live.StateKnown && platformStateKnown[platform]
+			listings = append(listings, live)
+			continue
+		}
+		listing := newestAny[platform]
+		listing.StateKnown = listing.StateKnown && platformStateKnown[platform]
+		listings = append(listings, listing)
 	}
-	asc.RenderTable(headers, rows)
+	return listings, nil
+}
+
+func availabilityListingIsNewer(candidate, current asc.AvailabilityPlatformListing) bool {
+	candidateTime, candidateValid := parseAvailabilityCreatedDate(candidate.CreatedDate)
+	currentTime, currentValid := parseAvailabilityCreatedDate(current.CreatedDate)
+	switch {
+	case candidateValid && !currentValid:
+		return true
+	case !candidateValid:
+		return false
+	default:
+		return candidateTime.After(currentTime)
+	}
+}
+
+func parseAvailabilityCreatedDate(value string) (time.Time, bool) {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	return parsed, err == nil
+}
+
+// fetchLiveAvailabilityPlatformListings returns only platforms with a live listing.
+func fetchLiveAvailabilityPlatformListings(ctx context.Context, client *asc.Client, appID string) ([]asc.AvailabilityPlatformListing, error) {
+	listings, err := FetchAvailabilityPlatformListings(ctx, client, appID)
+	if err != nil {
+		return nil, err
+	}
+	live := make([]asc.AvailabilityPlatformListing, 0, len(listings))
+	unverifiable := make([]string, 0)
+	for _, listing := range listings {
+		if !listing.StateKnown {
+			state := strings.TrimSpace(listing.State)
+			if state == "" {
+				state = "<missing>"
+			}
+			unverifiable = append(unverifiable, fmt.Sprintf("%s %s (%s)", listing.Platform, listing.VersionString, state))
+			continue
+		}
+		if listing.Live {
+			live = append(live, listing)
+		}
+	}
+	if len(unverifiable) > 0 {
+		sort.Strings(unverifiable)
+		return nil, fmt.Errorf("platform listing states are unverifiable: %s", strings.Join(unverifiable, "; "))
+	}
+	return live, nil
+}
+
+func availabilityListingState(attributes asc.AppStoreVersionAttributes) string {
+	if attributes.AppVersionState != "" {
+		return strings.TrimSpace(attributes.AppVersionState)
+	}
+	return strings.TrimSpace(attributes.AppStoreState)
+}
+
+func availabilityListingStatus(attributes asc.AppStoreVersionAttributes) (string, bool, bool) {
+	appStoreState := strings.TrimSpace(attributes.AppStoreState)
+	appVersionState := strings.TrimSpace(attributes.AppVersionState)
+	state := availabilityListingState(attributes)
+	if appStoreState == "" && appVersionState == "" {
+		return state, false, false
+	}
+
+	stateKnown := true
+	for _, candidate := range []string{appStoreState, appVersionState} {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := appStoreVersionStates[strings.ToUpper(candidate)]; !ok {
+			stateKnown = false
+		}
+	}
+
+	appStoreStateUpper := strings.ToUpper(appStoreState)
+	appVersionStateUpper := strings.ToUpper(appVersionState)
+	live := appStoreStateUpper == "READY_FOR_SALE" ||
+		appStoreStateUpper == "PREORDER_READY_FOR_SALE" ||
+		appVersionStateUpper == "READY_FOR_DISTRIBUTION" ||
+		appVersionStateUpper == "PREORDER_READY_FOR_SALE"
+	return state, live, stateKnown
 }
 
 func contextWithAvailabilityTimeout(ctx context.Context, allTerritories bool) (context.Context, context.CancelFunc) {

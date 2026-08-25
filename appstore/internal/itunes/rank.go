@@ -99,18 +99,14 @@ func (c *Client) rankTVApp(ctx context.Context, appID, term, country string) (Pu
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Apple-Store-Front", storefrontID+","+appleTVStorefrontSoftwareKind)
 
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return PublicRankResult{}, fmt.Errorf("storefront search request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return PublicRankResult{}, &httpStatusError{operation: "storefront search", statusCode: resp.StatusCode}
-	}
-
 	var payload storefrontSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return PublicRankResult{}, fmt.Errorf("failed to parse storefront search response: %w", err)
+	if err := c.do(ctx, "storefront search", req, func(resp *http.Response) error {
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			return fmt.Errorf("failed to parse storefront search response: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return PublicRankResult{}, err
 	}
 	if payload.PageData.Bubbles == nil {
 		return PublicRankResult{}, fmt.Errorf("invalid storefront search response: missing pageData.bubbles")

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/handlertest"
 )
 
 type requestConcurrencyTracker struct {
@@ -118,6 +119,7 @@ func TestBuildReadinessReport_OverlapsSixIndependentReadGroups(t *testing.T) {
 	}
 	serialDelay := slowDelay + 5*shortDelay
 
+	fixture := handlertest.New(t)
 	tracker := &requestConcurrencyTracker{}
 	var mu sync.Mutex
 	requestCounts := make(map[string]int)
@@ -164,8 +166,7 @@ func TestBuildReadinessReport_OverlapsSixIndependentReadGroups(t *testing.T) {
 			"/v1/apps/app-1/inAppPurchasesV2":
 			fmt.Fprint(w, `{"data":[]}`)
 		default:
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, `{"errors":[{"status":"500","code":"UNEXPECTED_REQUEST","detail":%q}]}`, req.URL.Path)
+			fixture.Respond(w, "unexpected request: %s", req.URL.Path)
 		}
 	}))
 	t.Cleanup(server.Close)

@@ -64,6 +64,8 @@ Checks:
   - strict JSON schema decode (unknown keys rejected)
   - required fields
   - metadata character limits
+  - URL syntax and length for marketing, support, privacy policy, and privacy choices URLs
+  - implausibly short app name and description values
   - optional subscription-app Terms of Use / EULA description link heuristic
 
 Examples:
@@ -79,7 +81,7 @@ Examples:
 
 			dirValue := strings.TrimSpace(*dir)
 			if dirValue == "" {
-				return shared.UsageError("--dir is required")
+				return metadataRequiredInputError("--dir", "--dir is required")
 			}
 
 			result, err := validateDir(dirValue, *subscriptionApp)
@@ -159,6 +161,8 @@ func validateDir(dir string, subscriptionApp bool) (ValidateResult, error) {
 				})
 			}
 			result.Issues = append(result.Issues, appInfoLengthIssues(filePath, resolvedLocale, loc)...)
+			result.Issues = append(result.Issues, appInfoURLIssues(filePath, resolvedLocale, loc)...)
+			result.Issues = append(result.Issues, appInfoMinimumLengthIssues(filePath, resolvedLocale, loc)...)
 		}
 	}
 
@@ -223,6 +227,8 @@ func validateDir(dir string, subscriptionApp bool) (ValidateResult, error) {
 					})
 				}
 				result.Issues = append(result.Issues, versionLengthIssues(filePath, version, resolvedLocale, loc)...)
+				result.Issues = append(result.Issues, versionURLIssues(filePath, version, resolvedLocale, loc)...)
+				result.Issues = append(result.Issues, versionMinimumLengthIssues(filePath, version, resolvedLocale, loc)...)
 				if subscriptionApp {
 					result.Issues = append(result.Issues, versionTermsIssues(filePath, version, resolvedLocale, loc)...)
 				}
@@ -326,47 +332,137 @@ func metadataIntentValidateIssues(scope, filePath, locale, version string, issue
 }
 
 func versionLengthIssues(filePath, version, locale string, loc VersionLocalization) []ValidateIssue {
-	issues := make([]ValidateIssue, 0, 4)
+	issues := make([]ValidateIssue, 0, 6)
 	for _, issue := range validation.VersionLocalizationLengthIssues(validation.VersionLocalization{
 		Description:     loc.Description,
 		Keywords:        loc.Keywords,
 		WhatsNew:        loc.WhatsNew,
 		PromotionalText: loc.PromotionalText,
+		MarketingURL:    loc.MarketingURL,
+		SupportURL:      loc.SupportURL,
 	}) {
-		message := fmt.Sprintf("%s exceeds %d %s", issue.Field, issue.Limit, issue.Unit)
-		if issue.Field == "keywords" {
-			message = fmt.Sprintf("keywords exceed %d %s", issue.Limit, issue.Unit)
-		}
-		issues = append(issues, ValidateIssue{
-			Scope:    versionDirName,
-			File:     filePath,
-			Locale:   locale,
-			Version:  version,
-			Field:    issue.Field,
-			Severity: issueSeverityError,
-			Message:  message,
-			Length:   issue.Length,
-			Limit:    issue.Limit,
-		})
+		issues = append(issues, metadataLengthValidateIssue(versionDirName, filePath, locale, version, issue))
 	}
 	return issues
 }
 
 func appInfoLengthIssues(filePath, locale string, loc AppInfoLocalization) []ValidateIssue {
-	issues := make([]ValidateIssue, 0, 2)
+	issues := make([]ValidateIssue, 0, 4)
 	for _, issue := range validation.AppInfoLocalizationLengthIssues(validation.AppInfoLocalization{
-		Name:     loc.Name,
-		Subtitle: loc.Subtitle,
+		Name:              loc.Name,
+		Subtitle:          loc.Subtitle,
+		PrivacyPolicyURL:  loc.PrivacyPolicyURL,
+		PrivacyChoicesURL: loc.PrivacyChoicesURL,
 	}) {
+		issues = append(issues, metadataLengthValidateIssue(appInfoDirName, filePath, locale, "", issue))
+	}
+	return issues
+}
+
+// versionMinimumLengthIssues reports version localization values that are too
+// short to be real content, such as a placeholder description.
+func versionMinimumLengthIssues(filePath, version, locale string, loc VersionLocalization) []ValidateIssue {
+	issues := make([]ValidateIssue, 0, 1)
+	for _, issue := range validation.VersionLocalizationMinimumLengthIssues(validation.VersionLocalization{
+		Description: loc.Description,
+	}) {
+		issues = append(issues, metadataMinimumLengthValidateIssue(versionDirName, filePath, locale, version, issue))
+	}
+	return issues
+}
+
+// appInfoMinimumLengthIssues reports app-info localization values that are too
+// short to be real content, such as a single-character app name.
+func appInfoMinimumLengthIssues(filePath, locale string, loc AppInfoLocalization) []ValidateIssue {
+	issues := make([]ValidateIssue, 0, 1)
+	for _, issue := range validation.AppInfoLocalizationMinimumLengthIssues(validation.AppInfoLocalization{
+		Name: loc.Name,
+	}) {
+		issues = append(issues, metadataMinimumLengthValidateIssue(appInfoDirName, filePath, locale, "", issue))
+	}
+	return issues
+}
+
+func metadataMinimumLengthValidateIssue(scope, filePath, locale, version string, issue validation.MetadataMinimumLengthIssue) ValidateIssue {
+	return ValidateIssue{
+		Scope:   scope,
+		File:    filePath,
+		Locale:  locale,
+		Version: version,
+		Field:   issue.Field,
+		// Apple publishes no exact minimum, so short values are advisory.
+		Severity: issueSeverityWarning,
+		Message: fmt.Sprintf(
+			"%s is shorter than %d characters",
+			validation.MetadataFieldLabel(issue.Field),
+			issue.Minimum,
+		),
+		Length: issue.Length,
+	}
+}
+
+func metadataLengthValidateIssue(scope, filePath, locale, version string, issue validation.MetadataLengthIssue) ValidateIssue {
+	verb := "exceeds"
+	if issue.Field == "keywords" {
+		verb = "exceed"
+	}
+	severity := issueSeverityError
+	if validation.MetadataLengthSeverity(issue.Field) == validation.SeverityWarning {
+		severity = issueSeverityWarning
+	}
+
+	return ValidateIssue{
+		Scope:    scope,
+		File:     filePath,
+		Locale:   locale,
+		Version:  version,
+		Field:    issue.Field,
+		Severity: severity,
+		Message:  fmt.Sprintf("%s %s %d %s", validation.MetadataFieldLabel(issue.Field), verb, issue.Limit, issue.Unit),
+		Length:   issue.Length,
+		Limit:    issue.Limit,
+	}
+}
+
+type metadataURLField struct {
+	field string
+	label string
+	value string
+}
+
+// versionURLIssues reports version localization URL fields App Store Connect
+// rejects at push time because they are not absolute HTTP/HTTPS URLs.
+func versionURLIssues(filePath, version, locale string, loc VersionLocalization) []ValidateIssue {
+	return metadataURLIssues(versionDirName, filePath, locale, version, []metadataURLField{
+		{field: "marketingUrl", label: "marketing URL", value: loc.MarketingURL},
+		{field: "supportUrl", label: "support URL", value: loc.SupportURL},
+	})
+}
+
+// appInfoURLIssues reports app-info localization URL fields App Store Connect
+// rejects at push time because they are not absolute HTTP/HTTPS URLs.
+func appInfoURLIssues(filePath, locale string, loc AppInfoLocalization) []ValidateIssue {
+	return metadataURLIssues(appInfoDirName, filePath, locale, "", []metadataURLField{
+		{field: "privacyChoicesUrl", label: "privacy choices URL", value: loc.PrivacyChoicesURL},
+		{field: "privacyPolicyUrl", label: "privacy policy URL", value: loc.PrivacyPolicyURL},
+	})
+}
+
+func metadataURLIssues(scope, filePath, locale, version string, fields []metadataURLField) []ValidateIssue {
+	issues := make([]ValidateIssue, 0, len(fields))
+	for _, field := range fields {
+		value := strings.TrimSpace(field.value)
+		if value == "" || validation.IsValidHTTPURL(value) {
+			continue
+		}
 		issues = append(issues, ValidateIssue{
-			Scope:    appInfoDirName,
+			Scope:    scope,
 			File:     filePath,
 			Locale:   locale,
-			Field:    issue.Field,
-			Severity: issueSeverityError,
-			Message:  fmt.Sprintf("%s exceeds %d characters", issue.Field, issue.Limit),
-			Length:   issue.Length,
-			Limit:    issue.Limit,
+			Version:  version,
+			Field:    field.field,
+			Severity: issueSeverityWarning,
+			Message:  fmt.Sprintf("%s is not a valid HTTP/HTTPS URL", field.label),
 		})
 	}
 	return issues

@@ -126,7 +126,10 @@ func collectAccountStatus(ctx context.Context, appID string) (*accountStatusResp
 }
 
 func authHealthCheck() accountCheck {
-	report := authsvc.Doctor(authsvc.DoctorOptions{})
+	report := authsvc.Doctor(authsvc.DoctorOptions{
+		Profile:    shared.ResolveProfileName(),
+		StrictAuth: shared.StrictAuthEnabled(),
+	})
 	switch {
 	case report.Summary.Errors > 0:
 		return accountCheck{

@@ -49,8 +49,8 @@ func (c *Client) doIrisV2Request(ctx context.Context, method, path string, body 
 	return c.doRequestBase(ctx, irisV2BaseURL, method, path, body, integrationsHeaders(integrationsIndividualKeysRefererURL))
 }
 
-func (c *Client) doOlympusRequest(ctx context.Context, method, path string, body any) ([]byte, error) {
-	return c.doRequestBase(ctx, olympusBaseURL, method, path, body, olympusHeaders(integrationsIndividualKeysRefererURL))
+func (c *Client) doOlympusGet(ctx context.Context, path string) ([]byte, error) {
+	return c.doRequestBase(ctx, olympusBaseURL, http.MethodGet, path, nil, olympusHeaders(integrationsIndividualKeysRefererURL))
 }
 
 type KeyActor struct {
@@ -317,7 +317,7 @@ func (c *Client) getActor(ctx context.Context, actorID string) (*olympusActor, e
 		return nil, fmt.Errorf("actor id is required")
 	}
 
-	body, err := c.doOlympusRequest(ctx, http.MethodGet, "/actors/"+actorID+"?include=provider,person", nil)
+	body, err := c.doOlympusGet(ctx, "/actors/"+actorID+"?include=provider,person")
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (c *Client) listActors(ctx context.Context) ([]olympusActor, error) {
 		}
 		visited[nextPath] = struct{}{}
 
-		body, err := c.doOlympusRequest(ctx, http.MethodGet, nextPath, nil)
+		body, err := c.doOlympusGet(ctx, nextPath)
 		if err != nil {
 			return nil, err
 		}

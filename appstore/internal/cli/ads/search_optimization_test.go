@@ -3,6 +3,7 @@ package ads
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,6 +159,49 @@ func TestFetchSearchOptimizationDataUsesOfficialEndpointsAndPreservesPartialFail
 	}
 }
 
+func TestFetchOptimizationPopularityDoesNotRequireAppScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/insights/apps/search-term-popularity/query" {
+			t.Errorf("path = %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode popularity request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		if hasOptimizationFilter(body, "promotedObjectId") {
+			t.Errorf("popularity request unexpectedly contains app scope: %#v", body)
+		}
+		assertFilter(t, body, "countryOrRegion", "US")
+		assertFilter(t, body, "genre", "PRODUCTIVITY_UTILITIES")
+		writeJSON(t, w, `{"result":{"rows":[{"week":"2026-08-09","countryOrRegion":"US","genre":"PRODUCTIVITY_UTILITIES","searchTerm":"habit tracker","searchPopularity1to5":5}]},"pagination":{"offset":0,"pageSize":5000,"totalCount":1}}`)
+	}))
+	defer server.Close()
+
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := fetchOptimizationPopularity(context.Background(), client, SearchOptimizationRequest{
+		Country:         "US",
+		Genre:           "PRODUCTIVITY_UTILITIES",
+		PopularityStart: "2026-08-09",
+		PopularityEnd:   "2026-08-15",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Term != "habit tracker" {
+		t.Fatalf("popularity rows = %+v", rows)
+	}
+}
+
 func TestQueryOptimizationListPaginatesRequestBody(t *testing.T) {
 	var offsets []int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +338,323 @@ func TestFetchOptimizationPhraseSuggestionsReadsPhraseField(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Text != "best habit tracker" || items[0].Kind != "phrase" || items[0].Popularity == nil || *items[0].Popularity != 82 {
 		t.Fatalf("phrase suggestions = %+v", items)
+	}
+}
+
+func TestFetchSearchSuggestionsSortsByPopularityAndHonorsLimit(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode suggestion request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		assertSorting(t, body, "popularity", "order", "DESC")
+		pagination, ok := body["pagination"].(map[string]any)
+		if !ok || pagination["offset"] != float64(0) || pagination["pageSize"] != float64(2) {
+			t.Errorf("pagination = %#v, want offset 0/pageSize 2", body["pagination"])
+		}
+		if r.URL.Path == "/v1/suggestions/keywords/query" {
+			writeJSON(t, w, `{"result":[{"text":"keyword one","popularity":90},{"text":"keyword two","popularity":80}],"pagination":{"offset":0,"pageSize":2,"totalCount":10}}`)
+			return
+		}
+		if r.URL.Path == "/v1/suggestions/phrases/query" {
+			writeJSON(t, w, `{"result":[{"phrase":"phrase one","popularity":70},{"phrase":"phrase two","popularity":60}],"pagination":{"offset":0,"pageSize":2,"totalCount":10}}`)
+			return
+		}
+		t.Errorf("unexpected path %s", r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := fetchSearchSuggestions(context.Background(), client, SearchOptimizationRequest{
+		AppID: "123456789", Country: "US", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("fetchSearchSuggestions() error = %v", err)
+	}
+	if len(requests) != 2 || requests[0] != "/v1/suggestions/keywords/query" || requests[1] != "/v1/suggestions/phrases/query" {
+		t.Fatalf("suggestion requests = %v, want one keyword and one phrase request", requests)
+	}
+	if len(data.Suggestions) != 4 {
+		t.Fatalf("suggestions = %+v, want two results from each endpoint", data.Suggestions)
+	}
+	if !data.SuggestionsTruncated {
+		t.Fatal("suggestions should report that both endpoints have more results beyond the bounded prefix")
+	}
+}
+
+func TestFetchSearchSuggestionsDetectsMoreWhenTotalCountIsOmitted(t *testing.T) {
+	requests := make(map[string][][2]int)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode suggestion request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		pagination, ok := body["pagination"].(map[string]any)
+		if !ok {
+			t.Errorf("pagination = %#v, want an object", body["pagination"])
+			http.Error(w, "missing pagination", http.StatusBadRequest)
+			return
+		}
+		offset := int(pagination["offset"].(float64))
+		pageSize := int(pagination["pageSize"].(float64))
+		requests[r.URL.Path] = append(requests[r.URL.Path], [2]int{offset, pageSize})
+		if offset == 0 {
+			if r.URL.Path == "/v1/suggestions/keywords/query" {
+				writeJSON(t, w, `{"result":[{"text":"keyword one","popularity":90},{"text":"keyword two","popularity":80}],"pagination":{"offset":0,"pageSize":2}}`)
+				return
+			}
+			writeJSON(t, w, `{"result":[{"phrase":"phrase one","popularity":70},{"phrase":"phrase two","popularity":60}],"pagination":{"offset":0,"pageSize":2}}`)
+			return
+		}
+		if offset == 2 && pageSize == 1 {
+			if r.URL.Path == "/v1/suggestions/keywords/query" {
+				writeJSON(t, w, `{"result":[{"text":"keyword three","popularity":50}],"pagination":{"offset":2,"pageSize":1}}`)
+				return
+			}
+			writeJSON(t, w, `{"result":[{"phrase":"phrase three","popularity":40}],"pagination":{"offset":2,"pageSize":1}}`)
+			return
+		}
+		t.Errorf("unexpected %s pagination offset=%d pageSize=%d", r.URL.Path, offset, pageSize)
+		http.Error(w, "unexpected pagination", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := fetchSearchSuggestions(context.Background(), client, SearchOptimizationRequest{
+		AppID: "123456789", Country: "US", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("fetchSearchSuggestions() error = %v", err)
+	}
+	if !data.SuggestionsTruncated {
+		t.Fatal("suggestions should report more results when the probe finds another record")
+	}
+	if len(data.Suggestions) != 4 {
+		t.Fatalf("suggestions = %+v, want bounded first pages only", data.Suggestions)
+	}
+	for _, path := range []string{"/v1/suggestions/keywords/query", "/v1/suggestions/phrases/query"} {
+		if got := requests[path]; len(got) != 2 || got[0] != [2]int{0, 2} || got[1] != [2]int{2, 1} {
+			t.Fatalf("%s requests = %v, want initial page and one-record probe", path, got)
+		}
+	}
+}
+
+func TestFetchSearchSuggestionsPreservesPrefixWhenTruncationProbeFails(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Pagination struct {
+				Offset   int `json:"offset"`
+				PageSize int `json:"pageSize"`
+			} `json:"pagination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode suggestion request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		requests = append(requests, fmt.Sprintf("%s offset=%d pageSize=%d", r.URL.Path, body.Pagination.Offset, body.Pagination.PageSize))
+
+		switch {
+		case r.URL.Path == "/v1/suggestions/keywords/query" && body.Pagination.Offset == 0:
+			writeJSON(t, w, `{"result":[{"text":"keyword one","popularity":90},{"text":"keyword two","popularity":80}],"pagination":{"offset":0,"pageSize":2}}`)
+		case r.URL.Path == "/v1/suggestions/keywords/query" && body.Pagination.Offset == 2:
+			http.Error(w, "probe unavailable", http.StatusBadGateway)
+		case r.URL.Path == "/v1/suggestions/phrases/query":
+			writeJSON(t, w, `{"result":[{"phrase":"phrase one","popularity":70}],"pagination":{"offset":0,"pageSize":2,"totalCount":1}}`)
+		default:
+			t.Errorf("unexpected suggestion request: %s", requests[len(requests)-1])
+			http.Error(w, "unexpected pagination", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := fetchSearchSuggestions(context.Background(), client, SearchOptimizationRequest{
+		AppID: "123456789", Country: "US", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("fetchSearchSuggestions() error = %v", err)
+	}
+	if len(data.Suggestions) != 3 {
+		t.Fatalf("suggestions = %+v, want the bounded prefix plus the phrase result", data.Suggestions)
+	}
+	if !data.SuggestionsTruncated {
+		t.Fatal("suggestions should be conservatively marked truncated when the probe fails")
+	}
+	keywordSource := findOptimizationSource(t, data.Sources, "keyword_suggestions")
+	if keywordSource.Status != "unavailable" || keywordSource.Count != 2 {
+		t.Fatalf("keyword source = %+v, want unavailable with preserved prefix count", keywordSource)
+	}
+	if !strings.Contains(keywordSource.Error, "pagination truncation probe") || !strings.Contains(keywordSource.Error, "probe unavailable") {
+		t.Fatalf("keyword source diagnostic = %q, want the probe failure", keywordSource.Error)
+	}
+}
+
+func TestFetchSearchSuggestionsMarksPrefixTruncatedWhenPaginationFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Pagination struct {
+				Offset   int `json:"offset"`
+				PageSize int `json:"pageSize"`
+			} `json:"pagination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode suggestion request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path == "/v1/suggestions/phrases/query" {
+			writeJSON(t, w, `{"result":[],"pagination":{"offset":0,"pageSize":1000,"totalCount":0}}`)
+			return
+		}
+		if body.Pagination.Offset == 1000 {
+			http.Error(w, "page unavailable", http.StatusBadGateway)
+			return
+		}
+		result := make([]map[string]any, 1000)
+		for index := range result {
+			result[index] = map[string]any{"text": fmt.Sprintf("keyword-%d", index), "popularity": 1000 - index}
+		}
+		payload := map[string]any{
+			"result": result,
+			"pagination": map[string]any{
+				"offset":     body.Pagination.Offset,
+				"pageSize":   body.Pagination.PageSize,
+				"totalCount": 1800,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			t.Errorf("encode suggestion response: %v", err)
+		}
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := fetchSearchSuggestions(context.Background(), client, SearchOptimizationRequest{
+		AppID: "123456789", Country: "US", Limit: 1500,
+	})
+	if err != nil {
+		t.Fatalf("fetchSearchSuggestions() error = %v", err)
+	}
+	if len(data.Suggestions) != 1000 {
+		t.Fatalf("suggestions = %d, want the successfully fetched prefix", len(data.Suggestions))
+	}
+	if !data.SuggestionsTruncated {
+		t.Fatal("suggestions should be conservatively marked truncated after a later page fails")
+	}
+	keywordSource := findOptimizationSource(t, data.Sources, "keyword_suggestions")
+	if keywordSource.Status != "unavailable" || keywordSource.Count != 1000 {
+		t.Fatalf("keyword source = %+v, want unavailable with the preserved prefix", keywordSource)
+	}
+}
+
+func TestFetchSearchSuggestionsMarksOvershotBoundedPageAsTruncated(t *testing.T) {
+	requests := make(map[string][][2]int)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Pagination struct {
+				Offset   int `json:"offset"`
+				PageSize int `json:"pageSize"`
+			} `json:"pagination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode suggestion request: %v", err)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
+			return
+		}
+		requests[r.URL.Path] = append(requests[r.URL.Path], [2]int{body.Pagination.Offset, body.Pagination.PageSize})
+
+		count := 0
+		switch {
+		case r.URL.Path == "/v1/suggestions/keywords/query" && body.Pagination.Offset == 0:
+			count = 1000
+		case r.URL.Path == "/v1/suggestions/keywords/query" && body.Pagination.Offset == 1000:
+			count = 800
+		case r.URL.Path == "/v1/suggestions/phrases/query":
+			writeJSON(t, w, `{"result":[],"pagination":{"offset":0,"pageSize":1000,"totalCount":0}}`)
+			return
+		default:
+			t.Errorf("unexpected %s pagination %+v", r.URL.Path, body.Pagination)
+			http.Error(w, "unexpected pagination", http.StatusBadRequest)
+			return
+		}
+
+		result := make([]map[string]any, count)
+		for index := range result {
+			result[index] = map[string]any{
+				"text":       fmt.Sprintf("keyword-%d", body.Pagination.Offset+index),
+				"popularity": count - index,
+			}
+		}
+		payload := map[string]any{
+			"result": result,
+			"pagination": map[string]any{
+				"offset":     body.Pagination.Offset,
+				"pageSize":   body.Pagination.PageSize,
+				"totalCount": 1800,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			t.Errorf("encode suggestion response: %v", err)
+		}
+	}))
+	defer server.Close()
+	client, err := appleads.NewClient(
+		appleads.Credentials{AccessToken: "token", AdAccountID: "account-1"},
+		appleads.WithPlatformBaseURL(server.URL+"/v1/"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := fetchSearchSuggestions(context.Background(), client, SearchOptimizationRequest{
+		AppID: "123456789", Country: "US", Limit: 1500,
+	})
+	if err != nil {
+		t.Fatalf("fetchSearchSuggestions() error = %v", err)
+	}
+	if !data.SuggestionsTruncated {
+		t.Fatal("suggestions should report truncation when an overshot page contains results beyond the limit")
+	}
+	if len(data.Suggestions) != 1500 {
+		t.Fatalf("suggestions = %d, want the requested limit", len(data.Suggestions))
+	}
+	if got := requests["/v1/suggestions/keywords/query"]; len(got) != 2 || got[0] != [2]int{0, 1000} || got[1] != [2]int{1000, 1000} {
+		t.Fatalf("keyword requests = %v, want two bounded pages", got)
 	}
 }
 

@@ -73,7 +73,7 @@ func TestValidateDirAcceptsArabicKeywordsWithinCharacterLimit(t *testing.T) {
 		t.Fatalf("mkdir version dir: %v", err)
 	}
 
-	body := `{"description":"وصف عربي","keywords":"تغريدات,ردود,اعجابات,فلترة,بحث,ارشفة,ازالة,سجل,ريتويت,لايكات,منشن,خصوصية,منشورات,قديمة,حساب"}`
+	body := `{"description":"وصف تطبيق عربي كامل","keywords":"تغريدات,ردود,اعجابات,فلترة,بحث,ارشفة,ازالة,سجل,ريتويت,لايكات,منشن,خصوصية,منشورات,قديمة,حساب"}`
 	if err := os.WriteFile(filepath.Join(dir, versionDirName, version, "ar-SA.json"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write Arabic localization: %v", err)
 	}
@@ -87,6 +87,189 @@ func TestValidateDirAcceptsArabicKeywordsWithinCharacterLimit(t *testing.T) {
 	}
 	if !result.Valid {
 		t.Fatalf("expected valid metadata result, got %+v", result)
+	}
+}
+
+func longHTTPSURL(length int) string {
+	const prefix = "https://example.com/"
+	return prefix + strings.Repeat("a", length-len(prefix))
+}
+
+func TestURLLengthIssuesBoundaries(t *testing.T) {
+	noVersionIssues := versionLengthIssues("file", "1.2.3", "en-US", VersionLocalization{
+		MarketingURL: longHTTPSURL(validation.LimitMarketingURL),
+		SupportURL:   longHTTPSURL(validation.LimitSupportURL),
+	})
+	if len(noVersionIssues) != 0 {
+		t.Fatalf("expected no issues at URL limits, got %+v", noVersionIssues)
+	}
+
+	versionIssues := versionLengthIssues("file", "1.2.3", "en-US", VersionLocalization{
+		MarketingURL: longHTTPSURL(validation.LimitMarketingURL + 1),
+		SupportURL:   longHTTPSURL(validation.LimitSupportURL + 1),
+	})
+	if len(versionIssues) != 2 {
+		t.Fatalf("expected 2 version URL issues, got %+v", versionIssues)
+	}
+	for _, issue := range versionIssues {
+		if issue.Severity != issueSeverityWarning {
+			t.Fatalf("expected warning severity for URL length, got %+v", issue)
+		}
+		if issue.Limit != 255 {
+			t.Fatalf("expected limit 255, got %+v", issue)
+		}
+	}
+
+	noAppInfoIssues := appInfoLengthIssues("file", "en-US", AppInfoLocalization{
+		PrivacyPolicyURL:  longHTTPSURL(validation.LimitPrivacyPolicyURL),
+		PrivacyChoicesURL: longHTTPSURL(validation.LimitPrivacyChoicesURL),
+	})
+	if len(noAppInfoIssues) != 0 {
+		t.Fatalf("expected no issues at app-info URL limits, got %+v", noAppInfoIssues)
+	}
+
+	appInfoIssues := appInfoLengthIssues("file", "en-US", AppInfoLocalization{
+		PrivacyPolicyURL:  longHTTPSURL(validation.LimitPrivacyPolicyURL + 1),
+		PrivacyChoicesURL: longHTTPSURL(validation.LimitPrivacyChoicesURL + 1),
+	})
+	if len(appInfoIssues) != 2 {
+		t.Fatalf("expected 2 app-info URL issues, got %+v", appInfoIssues)
+	}
+	for _, issue := range appInfoIssues {
+		if issue.Severity != issueSeverityWarning {
+			t.Fatalf("expected warning severity for URL length, got %+v", issue)
+		}
+	}
+}
+
+func TestValidateDirWarnsForInvalidURLSyntax(t *testing.T) {
+	dir := t.TempDir()
+	version := "1.2.3"
+
+	if err := os.MkdirAll(filepath.Join(dir, appInfoDirName), 0o755); err != nil {
+		t.Fatalf("mkdir app-info: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, versionDirName, version), 0o755); err != nil {
+		t.Fatalf("mkdir version dir: %v", err)
+	}
+	appInfoBody := `{"name":"App Name","privacyPolicyUrl":"example.com/privacy","privacyChoicesUrl":"example.com/choices"}`
+	if err := os.WriteFile(filepath.Join(dir, appInfoDirName, "en-US.json"), []byte(appInfoBody), 0o644); err != nil {
+		t.Fatalf("write app-info file: %v", err)
+	}
+	versionBody := `{"description":"English description","supportUrl":"example.com","marketingUrl":"www.example.com/app"}`
+	if err := os.WriteFile(filepath.Join(dir, versionDirName, version, "en-US.json"), []byte(versionBody), 0o644); err != nil {
+		t.Fatalf("write version file: %v", err)
+	}
+
+	result, err := validateDir(dir, false)
+	if err != nil {
+		t.Fatalf("validateDir() error: %v", err)
+	}
+	if result.ErrorCount != 0 {
+		t.Fatalf("expected URL syntax issues to stay warnings, got %+v", result.Issues)
+	}
+	if !result.Valid {
+		t.Fatalf("expected valid=true for warning-only report, got %+v", result)
+	}
+
+	wantFields := map[string]bool{
+		"supportUrl":        false,
+		"marketingUrl":      false,
+		"privacyPolicyUrl":  false,
+		"privacyChoicesUrl": false,
+	}
+	for _, issue := range result.Issues {
+		if _, ok := wantFields[issue.Field]; !ok {
+			continue
+		}
+		if issue.Severity != issueSeverityWarning {
+			t.Fatalf("expected warning severity for %s, got %+v", issue.Field, issue)
+		}
+		if !strings.Contains(issue.Message, "not a valid HTTP/HTTPS URL") {
+			t.Fatalf("expected URL syntax message for %s, got %+v", issue.Field, issue)
+		}
+		wantFields[issue.Field] = true
+	}
+	for field, found := range wantFields {
+		if !found {
+			t.Fatalf("expected URL syntax warning for %s, got %+v", field, result.Issues)
+		}
+	}
+}
+
+func TestValidateDirWarnsForImplausiblyShortMetadata(t *testing.T) {
+	dir := t.TempDir()
+	version := "1.2.3"
+
+	if err := os.MkdirAll(filepath.Join(dir, appInfoDirName), 0o755); err != nil {
+		t.Fatalf("mkdir app-info: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, versionDirName, version), 0o755); err != nil {
+		t.Fatalf("mkdir version dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, appInfoDirName, "en-US.json"), []byte(`{"name":"X"}`), 0o644); err != nil {
+		t.Fatalf("write app-info file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, versionDirName, version, "en-US.json"), []byte(`{"description":"TBD"}`), 0o644); err != nil {
+		t.Fatalf("write version file: %v", err)
+	}
+
+	result, err := validateDir(dir, false)
+	if err != nil {
+		t.Fatalf("validateDir() error: %v", err)
+	}
+	if result.ErrorCount != 0 || !result.Valid {
+		t.Fatalf("expected short values to stay warnings, got %+v", result)
+	}
+	if len(result.Issues) != 2 {
+		t.Fatalf("expected 2 issues, got %+v", result.Issues)
+	}
+
+	wantFields := map[string]bool{"name": false, "description": false}
+	for _, issue := range result.Issues {
+		if _, ok := wantFields[issue.Field]; !ok {
+			t.Fatalf("unexpected issue: %+v", issue)
+		}
+		if issue.Severity != issueSeverityWarning {
+			t.Fatalf("expected warning severity, got %+v", issue)
+		}
+		if !strings.Contains(issue.Message, "shorter than") {
+			t.Fatalf("expected minimum-length message, got %+v", issue)
+		}
+		wantFields[issue.Field] = true
+	}
+	for field, found := range wantFields {
+		if !found {
+			t.Fatalf("expected minimum-length warning for %s, got %+v", field, result.Issues)
+		}
+	}
+}
+
+func TestValidateDirAcceptsValidURLSyntax(t *testing.T) {
+	dir := t.TempDir()
+	version := "1.2.3"
+
+	if err := os.MkdirAll(filepath.Join(dir, appInfoDirName), 0o755); err != nil {
+		t.Fatalf("mkdir app-info: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, versionDirName, version), 0o755); err != nil {
+		t.Fatalf("mkdir version dir: %v", err)
+	}
+	appInfoBody := `{"name":"App Name","privacyPolicyUrl":"https://example.com/privacy","privacyChoicesUrl":"http://example.com/choices"}`
+	if err := os.WriteFile(filepath.Join(dir, appInfoDirName, "en-US.json"), []byte(appInfoBody), 0o644); err != nil {
+		t.Fatalf("write app-info file: %v", err)
+	}
+	versionBody := `{"description":"English description","supportUrl":"https://example.com","marketingUrl":"https://example.com/app"}`
+	if err := os.WriteFile(filepath.Join(dir, versionDirName, version, "en-US.json"), []byte(versionBody), 0o644); err != nil {
+		t.Fatalf("write version file: %v", err)
+	}
+
+	result, err := validateDir(dir, false)
+	if err != nil {
+		t.Fatalf("validateDir() error: %v", err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("expected no issues for valid URLs, got %+v", result.Issues)
 	}
 }
 

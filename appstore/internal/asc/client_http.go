@@ -728,6 +728,7 @@ func ParseErrorWithStatus(body []byte, statusCode int) error {
 			Detail:           errResp.Errors[0].Detail,
 			StatusCode:       statusCode,
 			AssociatedErrors: associatedErrors,
+			Remediation:      remediationForAPIError(errResp.Errors[0].Code),
 		}
 	}
 

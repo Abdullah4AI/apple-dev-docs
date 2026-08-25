@@ -60,6 +60,37 @@ func TestSomething(t *testing.T) {
 - For JSON assertions, unmarshal and assert fields (not `strings.Contains`)
 - For renderer/output assertions, avoid token-only checks when structure matters; include header or formatting assertions for representative cases
 
+### Assertions Outside the Test Goroutine
+
+`t.Fatal`, `t.Fatalf`, and `t.FailNow` may only be called from the goroutine running the test. Inside an `httptest` handler they skip the response write and leave the client under test waiting; inside a worker goroutine or an injected dependency stub they terminate that goroutine before it can send its result, so the test deadlocks instead of failing and the real failure is buried in a timeout dump.
+
+Use `internal/handlertest` instead. It records the failure with `Errorf`, which is safe from any goroutine, and returns a value the fixture hands back so the code under test unwinds normally:
+
+```go
+fixture := handlertest.New(t)
+
+// RoundTrippers, dependency stubs, and worker goroutines return the error.
+transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+    return nil, fixture.Errorf("unexpected request: %s %s", req.Method, req.URL)
+})
+
+// httptest handlers cannot return, so answer with a 500 and stop.
+server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+    fixture.Respond(w, "unexpected request: %s %s", req.Method, req.URL.Path)
+}))
+
+// Fixture builders that must return a response answer with a 500 body.
+func territoryResponse(fixture *handlertest.Asserter, payload any) *http.Response {
+    body, err := json.Marshal(payload)
+    if err != nil {
+        return fixture.Response("marshal territory response: %v", err)
+    }
+    return jsonHTTPResponse(http.StatusOK, string(body))
+}
+```
+
+`Errorf` renders with `fmt.Errorf`, so `%w` keeps wrapping the operand and still prints readably in the test log. Keep using `t.Fatal` for setup that runs on the test goroutine.
+
 ### CLI Tests
 
 - Add CLI-level tests for command output/parsing

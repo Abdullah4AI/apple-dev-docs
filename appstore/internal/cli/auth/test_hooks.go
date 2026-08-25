@@ -50,6 +50,20 @@ func SetListCredentialSummaries(fn func() ([]authsvc.Credential, error)) func() 
 	}
 }
 
+// SetKeychainAvailable replaces the keychain availability hook for tests.
+// It returns a restore function to reset the previous handler.
+func SetKeychainAvailable(fn func() (bool, error)) func() {
+	previous := keychainAvailable
+	if fn == nil {
+		keychainAvailable = authsvc.KeychainAvailable
+	} else {
+		keychainAvailable = fn
+	}
+	return func() {
+		keychainAvailable = previous
+	}
+}
+
 // SetMigrateKeychainToConfig replaces the keychain-to-config migration hook for tests.
 // It returns a restore function to reset the previous handler.
 func SetMigrateKeychainToConfig(fn func(authsvc.MigrateKeychainToConfigOptions) (authsvc.MigrateKeychainToConfigResult, error)) func() {
@@ -61,6 +75,23 @@ func SetMigrateKeychainToConfig(fn func(authsvc.MigrateKeychainToConfigOptions) 
 	}
 	return func() {
 		migrateKeychainToConfig = previous
+	}
+}
+
+// SetLogoutCredentialRemovers replaces the credential removal hooks for tests.
+// It returns a restore function to reset the previous handlers.
+func SetLogoutCredentialRemovers(remove func(string) error, removeAll func() error) func() {
+	previousRemove := removeStoredCredential
+	previousRemoveAll := removeStoredCredentials
+	if remove != nil {
+		removeStoredCredential = remove
+	}
+	if removeAll != nil {
+		removeStoredCredentials = removeAll
+	}
+	return func() {
+		removeStoredCredential = previousRemove
+		removeStoredCredentials = previousRemoveAll
 	}
 }
 

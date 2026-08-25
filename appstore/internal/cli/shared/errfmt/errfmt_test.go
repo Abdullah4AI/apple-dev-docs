@@ -31,6 +31,22 @@ func TestClassify_Forbidden(t *testing.T) {
 	}
 }
 
+func TestClassify_AgreementForbiddenDoesNotAddPermissionHint(t *testing.T) {
+	apiErr := &asc.APIError{
+		Code:        "FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED",
+		StatusCode:  403,
+		Remediation: "An Account Holder must accept the agreement.",
+	}
+
+	classified := Classify(apiErr)
+	if classified.Hint != "" {
+		t.Fatalf("expected account remediation to suppress generic permission hint, got %q", classified.Hint)
+	}
+	if !strings.Contains(classified.Message, apiErr.Remediation) {
+		t.Fatalf("expected remediation in classified message, got %q", classified.Message)
+	}
+}
+
 func TestClassify_Timeout(t *testing.T) {
 	ce := Classify(context.DeadlineExceeded)
 	if ce.Hint != "Increase the request timeout (e.g. set `ASC_TIMEOUT=90s`)." {

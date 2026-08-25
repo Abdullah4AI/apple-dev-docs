@@ -1344,6 +1344,7 @@ func TestRun_UnknownCommandsReturnConciseRecovery(t *testing.T) {
 			name: "no close match",
 			args: []string{"builds", "qqqqq"},
 			wantStderr: "Error: unknown command `asc builds qqqqq`\n" +
+				buildsTaskHintBlock +
 				"For help:\n" +
 				"  asc builds --help\n",
 		},
@@ -1476,6 +1477,155 @@ func TestRun_UnknownFlagReturnsConciseRecovery(t *testing.T) {
 	}
 	if strings.Contains(stderr, "SECRET_VALUE") {
 		t.Fatalf("stderr leaked a following argument: %q", stderr)
+	}
+}
+
+func TestRun_MetadataValidateUnsupportedFlagsExplainDirectoryWorkflow(t *testing.T) {
+	resetReportFlags(t)
+
+	tests := []struct {
+		name            string
+		args            []string
+		unsupportedFlag string
+	}{
+		{name: "app", args: []string{"metadata", "validate", "--app", "PRIVATE_VALUE"}, unsupportedFlag: "--app"},
+		{name: "spaced version", args: []string{"metadata", "validate", "--version", "PRIVATE_VALUE"}, unsupportedFlag: "--version"},
+		{name: "equals version", args: []string{"metadata", "validate", "--version=PRIVATE_VALUE"}, unsupportedFlag: "--version"},
+		{name: "spaced numeric version", args: []string{"metadata", "validate", "--version", "1"}, unsupportedFlag: "--version"},
+		{name: "equals numeric version", args: []string{"metadata", "validate", "--version=1"}, unsupportedFlag: "--version"},
+		{name: "spaced zero version", args: []string{"metadata", "validate", "--version", "0"}, unsupportedFlag: "--version"},
+		{name: "equals zero version", args: []string{"metadata", "validate", "--version=0"}, unsupportedFlag: "--version"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := captureCommandOutput(t, func() {
+				if code := Run(test.args, "1.0.0"); code != ExitUsage {
+					t.Fatalf("exit code = %d, want %d", code, ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			want := "Error: unknown flag `" + test.unsupportedFlag + "` for `asc metadata validate`\n" +
+				"`asc metadata validate` reads from `--dir`; omit `--app` and `--version`. Run `asc metadata pull` first if needed.\n" +
+				"Try:\n" +
+				"  asc metadata validate --dir \"./metadata\"\n" +
+				"  asc metadata pull --app \"APP_ID\" --version \"1.2.3\" --dir \"./metadata\"\n" +
+				"For help:\n" +
+				"  asc metadata validate --help\n"
+			if stderr != want {
+				t.Fatalf("stderr = %q, want %q", stderr, want)
+			}
+			if strings.Contains(stderr, "PRIVATE_VALUE") {
+				t.Fatalf("stderr leaked unsupported flag value: %q", stderr)
+			}
+		})
+	}
+}
+
+func TestRun_MetadataValidateBareVersionPreservesGlobalFlagRecovery(t *testing.T) {
+	resetReportFlags(t)
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "bare", args: []string{"metadata", "validate", "--version"}},
+		{name: "equals boolean", args: []string{"metadata", "validate", "--version=false"}},
+		{name: "spaced boolean", args: []string{"metadata", "validate", "--version", "true"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := captureCommandOutput(t, func() {
+				if code := Run(test.args, "1.0.0"); code != ExitUsage {
+					t.Fatalf("exit code = %d, want %d", code, ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			want := "Error: unknown flag `--version` for `asc metadata validate`\n" +
+				"`--version` is a global flag; the flag and any required valid value must appear before the command name.\n" +
+				"For help:\n" +
+				"  asc --help\n"
+			if stderr != want {
+				t.Fatalf("stderr = %q, want %q", stderr, want)
+			}
+		})
+	}
+}
+
+func TestRun_MetadataPullMissingVersionPointsToDiscovery(t *testing.T) {
+	resetReportFlags(t)
+	originalEmitTelemetry := emitTelemetry
+	t.Cleanup(func() { emitTelemetry = originalEmitTelemetry })
+
+	var gotContext telemetry.EventContext
+	emitTelemetry = func(_ string, _ string, _ time.Duration, _ int, eventContext telemetry.EventContext) {
+		gotContext = eventContext
+	}
+	stdout, stderr := captureCommandOutput(t, func() {
+		if code := Run([]string{"metadata", "pull", "--app", "app-1", "--dir", "./metadata"}, "1.0.0"); code != ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	want := "Error: --version is required\n" +
+		"Find versions:\n" +
+		"  asc versions list --app \"APP_ID\" --paginate\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+	if gotContext.FailureParameter != "--version" ||
+		gotContext.DiagnosticCode != string(shared.DiagnosticRequiredInputMissing) ||
+		gotContext.ErrorKind != telemetry.ErrorKindMissingRequired ||
+		gotContext.FailureStage != telemetry.FailureStageValidation ||
+		gotContext.OutcomeKind != telemetry.OutcomeUsageError {
+		t.Fatalf("telemetry context = %+v, want missing --version validation", gotContext)
+	}
+}
+
+func TestRun_XcodeCloudStatusIDAliasHelpAndConflictTelemetry(t *testing.T) {
+	resetReportFlags(t)
+	originalEmitTelemetry := emitTelemetry
+	t.Cleanup(func() { emitTelemetry = originalEmitTelemetry })
+
+	stdout, stderr := captureCommandOutput(t, func() {
+		if code := Run([]string{"xcode-cloud", "status", "--help"}, "1.0.0"); code != ExitSuccess {
+			t.Fatalf("help exit code = %d, want %d", code, ExitSuccess)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("help stderr = %q, want empty", stderr)
+	}
+	if !strings.Contains(stdout, "--id") || !strings.Contains(stdout, "DEPRECATED: use --run-id") {
+		t.Fatalf("help does not mark --id deprecated: %q", stdout)
+	}
+
+	var gotContext telemetry.EventContext
+	emitTelemetry = func(_ string, _ string, _ time.Duration, _ int, eventContext telemetry.EventContext) {
+		gotContext = eventContext
+	}
+	stdout, stderr = captureCommandOutput(t, func() {
+		if code := Run([]string{"xcode-cloud", "status", "--run-id", "run-1", "--id", "run-1"}, "1.0.0"); code != ExitUsage {
+			t.Fatalf("conflict exit code = %d, want %d", code, ExitUsage)
+		}
+	})
+	if stdout != "" {
+		t.Fatalf("conflict stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "--id conflicts with --run-id; use only --run-id") {
+		t.Fatalf("conflict stderr = %q", stderr)
+	}
+	if gotContext.FailureParameter != "--run-id" ||
+		gotContext.DiagnosticCode != string(shared.DiagnosticConflictingInput) ||
+		gotContext.FailureStage != telemetry.FailureStageValidation ||
+		gotContext.OutcomeKind != telemetry.OutcomeUsageError {
+		t.Fatalf("telemetry context = %+v, want canonical --run-id conflict", gotContext)
 	}
 }
 
@@ -1702,6 +1852,7 @@ func TestRun_CommonWrongCommandPathDoesNotCopyUnsupportedSuffix(t *testing.T) {
 		{"versions", "info", "--version-id", "VERSION_ID", "--include-build=maybe"},
 	}
 	want := "Error: unknown command `asc versions info`\n" +
+		versionsTaskHintBlock +
 		"For help:\n" +
 		"  asc versions --help\n"
 

@@ -61,6 +61,20 @@ func TestAuthHelpHighlightsStatusDiscoverability(t *testing.T) {
 	}
 }
 
+func TestAuthHelpExplainsCredentialResolutionBranches(t *testing.T) {
+	longHelp := AuthCommand().LongHelp
+	for _, expected := range []string{
+		"--profile or ASC_PROFILE selects a stored profile and disables the env-only fast path.",
+		"With no profile and keychain bypass disabled, a complete environment set skips stored lookup.",
+		"ASC_BYPASS_KEYCHAIN skips keychain; env fallback follows only missing/default-selection config errors.",
+		"Config selection: ASC_CONFIG_PATH; otherwise nearest ancestor .asc/config.json; otherwise ~/.asc/config.json.",
+	} {
+		if !strings.Contains(longHelp, expected) {
+			t.Fatalf("expected AuthCommand().LongHelp to contain %q, got %q", expected, longHelp)
+		}
+	}
+}
+
 func TestAuthCommandUnknownSubcommand(t *testing.T) {
 	cmd := AuthCommand()
 	_, stderr := captureAuthOutput(t, func() {
@@ -773,7 +787,45 @@ func TestAuthSwitchCommand(t *testing.T) {
 	})
 }
 
+type authLogoutTestCalls struct {
+	names []string
+	all   int
+}
+
+func stubLogoutRemovers(t *testing.T) *authLogoutTestCalls {
+	t.Helper()
+	calls := &authLogoutTestCalls{}
+	restore := SetLogoutCredentialRemovers(
+		func(name string) error {
+			calls.names = append(calls.names, name)
+			return nil
+		},
+		func() error {
+			calls.all++
+			return nil
+		},
+	)
+	t.Cleanup(restore)
+	return calls
+}
+
 func TestAuthLogoutCommand(t *testing.T) {
+	t.Run("help recommends confirmation", func(t *testing.T) {
+		cmd := AuthLogoutCommand()
+		if cmd.FlagSet.Lookup("confirm") == nil {
+			t.Fatal("expected --confirm flag")
+		}
+		for _, expected := range []string{
+			`asc auth logout --all --confirm`,
+			`asc auth logout --name "MyKey" --confirm`,
+			"will be required in 5.0.0",
+		} {
+			if !strings.Contains(cmd.LongHelp, expected) {
+				t.Fatalf("expected logout help to contain %q, got %q", expected, cmd.LongHelp)
+			}
+		}
+	})
+
 	t.Run("blank name rejected", func(t *testing.T) {
 		cmd := AuthLogoutCommand()
 		if err := cmd.FlagSet.Parse([]string{"--name", "   "}); err != nil {
@@ -807,61 +859,77 @@ func TestAuthLogoutCommand(t *testing.T) {
 	})
 
 	t.Run("remove named credential", func(t *testing.T) {
-		cfgPath := filepath.Join(t.TempDir(), "config.json")
-		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
-		t.Setenv("ASC_CONFIG_PATH", cfgPath)
-		if err := authsvc.StoreCredentialsConfigAt("demo", "KEY", "ISS", "/tmp/AuthKey.p8", cfgPath); err != nil {
-			t.Fatalf("StoreCredentialsConfigAt() error: %v", err)
-		}
+		calls := stubLogoutRemovers(t)
 
 		cmd := AuthLogoutCommand()
-		if err := cmd.FlagSet.Parse([]string{"--name", "demo"}); err != nil {
+		if err := cmd.FlagSet.Parse([]string{"--name", "demo", "--confirm"}); err != nil {
 			t.Fatalf("Parse() error: %v", err)
 		}
 		if err := cmd.Exec(context.Background(), []string{}); err != nil {
 			t.Fatalf("Exec() error: %v", err)
 		}
 
-		cfg, err := config.LoadAt(cfgPath)
-		if err != nil {
-			t.Fatalf("LoadAt() error: %v", err)
-		}
-		if cfg.DefaultKeyName != "" {
-			t.Fatalf("expected cleared default key, got %q", cfg.DefaultKeyName)
+		if len(calls.names) != 1 || calls.names[0] != "demo" || calls.all != 0 {
+			t.Fatalf("unexpected removal calls: %+v", calls)
 		}
 	})
 
 	t.Run("remove all credentials", func(t *testing.T) {
-		cfgPath := filepath.Join(t.TempDir(), "config.json")
-		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
-		t.Setenv("ASC_CONFIG_PATH", cfgPath)
-		if err := authsvc.StoreCredentialsConfigAt("one", "KEY1", "ISS1", "/tmp/AuthKey1.p8", cfgPath); err != nil {
-			t.Fatalf("StoreCredentialsConfigAt() error: %v", err)
-		}
-		if err := authsvc.StoreCredentialsConfigAt("two", "KEY2", "ISS2", "/tmp/AuthKey2.p8", cfgPath); err != nil {
-			t.Fatalf("StoreCredentialsConfigAt() error: %v", err)
-		}
+		calls := stubLogoutRemovers(t)
 
 		cmd := AuthLogoutCommand()
-		if err := cmd.FlagSet.Parse([]string{"--all"}); err != nil {
+		if err := cmd.FlagSet.Parse([]string{"--all", "--confirm"}); err != nil {
 			t.Fatalf("Parse() error: %v", err)
 		}
-		execErr := cmd.Exec(context.Background(), []string{})
+		if err := cmd.Exec(context.Background(), []string{}); err != nil {
+			t.Fatalf("Exec() error: %v", err)
+		}
+		if len(calls.names) != 0 || calls.all != 1 {
+			t.Fatalf("unexpected removal calls: %+v", calls)
+		}
+	})
 
-		// Only skip on specific keychain interaction errors (errSecInteractionNotAllowed = -25301)
-		// This is expected in CI environments where keychain is locked
-		if execErr != nil && (strings.Contains(execErr.Error(), "errSecInteractionNotAllowed") ||
-			strings.Contains(execErr.Error(), "(-25301)")) {
-			t.Skipf("skipping: keychain interaction not allowed - %v", execErr)
+	t.Run("missing confirm warns during compatibility window", func(t *testing.T) {
+		calls := stubLogoutRemovers(t)
+
+		cmd := AuthLogoutCommand()
+		if err := cmd.FlagSet.Parse([]string{"--name", "legacy"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			if err := cmd.Exec(context.Background(), []string{}); err != nil {
+				t.Fatalf("Exec() error: %v", err)
+			}
+		})
+		wantWarning := "Warning: auth logout without --confirm is deprecated and will be rejected in 5.0.0; pass --confirm to acknowledge credential removal.\n"
+		if stderr != wantWarning {
+			t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
 		}
 
-		// Verify: either no error (success) or config was cleared
-		cfg, err := config.LoadAt(cfgPath)
-		if err != nil {
-			t.Fatalf("LoadAt() error: %v", err)
+		if len(calls.names) != 1 || calls.names[0] != "legacy" || calls.all != 0 {
+			t.Fatalf("unexpected removal calls: %+v", calls)
 		}
-		if len(cfg.Keys) != 0 || cfg.DefaultKeyName != "" || cfg.KeyID != "" {
-			t.Fatalf("expected cleared credentials, got %+v", cfg)
+	})
+
+	t.Run("unexpected arguments are rejected before removal", func(t *testing.T) {
+		calls := stubLogoutRemovers(t)
+
+		cmd := AuthLogoutCommand()
+		if err := cmd.FlagSet.Parse([]string{"--all", "--confirm"}); err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+		_, stderr := captureAuthOutput(t, func() {
+			err := cmd.Exec(context.Background(), []string{"unexpected"})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("Exec() error = %v, want flag.ErrHelp", err)
+			}
+		})
+		if !strings.Contains(stderr, "unexpected argument(s): unexpected") {
+			t.Fatalf("expected unexpected-argument error, got %q", stderr)
+		}
+
+		if len(calls.names) != 0 || calls.all != 0 {
+			t.Fatalf("expected no removal, got %+v", calls)
 		}
 	})
 }
@@ -1302,6 +1370,14 @@ func TestAuthStatusCommand(t *testing.T) {
 			t.Fatalf("expected permission warning message, got %q", stdout)
 		}
 	})
+}
+
+func TestAuthStatusEnvironmentNoteReportsCompleteEnvironmentPrecedence(t *testing.T) {
+	note := authStatusEnvironmentNote("", false, true, true, true)
+	want := "Complete environment credential fields take precedence when no profile is selected; stored credential lookup is skipped."
+	if note != want {
+		t.Fatalf("authStatusEnvironmentNote() = %q, want %q", note, want)
+	}
 }
 
 func TestCredentialStorageLabel(t *testing.T) {

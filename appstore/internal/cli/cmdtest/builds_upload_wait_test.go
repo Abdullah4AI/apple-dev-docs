@@ -330,6 +330,88 @@ func TestBuildsUploadTestNotesWritesBeforeProcessingCompletes(t *testing.T) {
 	}
 }
 
+func TestBuildsUploadTestNotesFailurePreservesDiscoveredBuildRecoveryContext(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	testNotes := "Line one\nLine two\x1b[31m"
+
+	ipaPath := writeBuildUploadIPA(t, "com.example.demo")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/apps/123456789":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"apps","id":"123456789","attributes":{"name":"Demo","bundleId":"com.example.demo"}}}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploads":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","attributes":{"cfBundleShortVersionString":"1.0.0","cfBundleVersion":"42","platform":"IOS"}}}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/buildUploadFiles":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploadFiles","id":"file-1","attributes":{"fileName":"app.ipa","fileSize":4,"uti":"com.apple.itunes.ipa","assetType":"ASSET","uploadOperations":[{"method":"PUT","url":"https://upload.example.com/part-1","length":4,"offset":0,"requestHeaders":[{"name":"Content-Type","value":"application/octet-stream"}]}]}}}`)
+		case req.Method == http.MethodPut && req.URL.Host == "upload.example.com":
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/buildUploadFiles/file-1":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploadFiles","id":"file-1","attributes":{"uploaded":true}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/buildUploads/upload-1":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"buildUploads","id":"upload-1","relationships":{"build":{"data":{"type":"builds","id":"build-1"}}}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/builds/build-1":
+			return jsonResponse(http.StatusOK, `{"data":{"type":"builds","id":"build-1","attributes":{"version":"42","processingState":"PROCESSING"}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/builds/build-1/betaBuildLocalizations":
+			return jsonResponse(http.StatusOK, `{"data":[]}`)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/betaBuildLocalizations":
+			return jsonResponse(http.StatusUnprocessableEntity, `{"errors":[{"status":"422","code":"ENTITY_ERROR.ATTRIBUTE.INVALID","title":"The provided entity has an invalid attribute","detail":"What to Test was rejected by the server"}]}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, _ := captureOutput(t, func() {
+		if err := root.Parse([]string{
+			"builds", "upload",
+			"--app", "123456789",
+			"--ipa", ipaPath,
+			"--version", "1.0.0",
+			"--build-number", "42",
+			"--test-notes", testNotes,
+			"--locale", "en-US",
+			"--poll-interval", "1ms",
+		}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if runErr == nil {
+		t.Fatal("expected test notes rejection after upload")
+	}
+	if stdout != "" {
+		t.Fatalf("expected no new structured output contract on failure, got %q", stdout)
+	}
+	wantParts := []string{
+		`build "build-1" is available`,
+		`locale "en-US"`,
+		"The provided entity has an invalid attribute: What to Test was rejected by the server",
+		"retry without uploading the build again",
+		"reuse the original notes",
+		"asc builds test-notes create --build-id BUILD_ID --locale LOCALE --whats-new NOTES",
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(runErr.Error(), want) {
+			t.Fatalf("expected recovery error to contain %q, got %v", want, runErr)
+		}
+	}
+	if asc.HasInterpretedTerminalSequence(runErr.Error()) || strings.Contains(runErr.Error(), "Line one") {
+		t.Fatalf("expected sanitized human recovery without embedded notes, got %q", runErr)
+	}
+}
+
 func TestBuildsUploadPostCommitVerificationUsesFreshTimeoutWindow(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))

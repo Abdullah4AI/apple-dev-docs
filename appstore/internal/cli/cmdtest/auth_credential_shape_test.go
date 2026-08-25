@@ -13,12 +13,14 @@ import (
 
 func TestAuthDoctorWarnsWhenEnvironmentIdentifiersLookSwapped(t *testing.T) {
 	withTempRepo(t, func(repo string) {
+		keyPath := filepath.Join(repo, "AuthKey.p8")
+		writeECDSAPEM(t, keyPath)
 		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 		t.Setenv("ASC_CONFIG_PATH", filepath.Join(repo, "config.json"))
 		t.Setenv("ASC_KEY_ID", "69a6de00-aaaa-bbbb-cccc-123456789abc")
 		t.Setenv("ASC_ISSUER_ID", "39MX87M9Y4")
 		t.Setenv("ASC_KEY_TYPE", "team")
-		t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", keyPath)
 
 		root := RootCommand("1.2.3")
 		root.FlagSet.SetOutput(io.Discard)
@@ -46,12 +48,14 @@ func TestAuthDoctorWarnsWhenEnvironmentIdentifiersLookSwapped(t *testing.T) {
 
 func TestAuthDoctorStaysQuietForValidEnvironmentIdentifiers(t *testing.T) {
 	withTempRepo(t, func(repo string) {
+		keyPath := filepath.Join(repo, "AuthKey.p8")
+		writeECDSAPEM(t, keyPath)
 		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 		t.Setenv("ASC_CONFIG_PATH", filepath.Join(repo, "config.json"))
 		t.Setenv("ASC_KEY_ID", "1234567890")
 		t.Setenv("ASC_ISSUER_ID", "A7EFEF21-3432-404F-A488-083800B570FF")
 		t.Setenv("ASC_KEY_TYPE", "team")
-		t.Setenv("ASC_PRIVATE_KEY_PATH", "/tmp/AuthKey.p8")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", keyPath)
 
 		root := RootCommand("1.2.3")
 		root.FlagSet.SetOutput(io.Discard)

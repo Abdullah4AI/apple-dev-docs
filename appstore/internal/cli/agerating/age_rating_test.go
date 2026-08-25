@@ -19,16 +19,17 @@ func TestAgeRatingCommandShape(t *testing.T) {
 	if cmd.Name != "age-rating" {
 		t.Fatalf("unexpected command name: %q", cmd.Name)
 	}
-	if len(cmd.Subcommands) != 2 {
-		t.Fatalf("expected 2 subcommands, got %d", len(cmd.Subcommands))
+	if len(cmd.Subcommands) != 3 {
+		t.Fatalf("expected 3 subcommands, got %d", len(cmd.Subcommands))
 	}
 	if got := AgeRatingCommand(); got == nil {
 		t.Fatal("expected Command wrapper to return command")
 	}
 	usage := cmd.UsageFunc(cmd)
 	for _, visible := range []string{
-		"\n  view  View an age rating declaration.",
-		"\n  edit  Update an age rating declaration.",
+		"\n  view   View an age rating declaration.",
+		"\n  edit   Update an age rating declaration.",
+		"\n  audit  [experimental] Audit social-media age rating responses across apps.",
 	} {
 		if !strings.Contains(usage, visible) {
 			t.Fatalf("expected age-rating help to include canonical verb %q, got %q", strings.TrimSpace(visible), usage)
@@ -37,6 +38,19 @@ func TestAgeRatingCommandShape(t *testing.T) {
 	for _, hidden := range []string{"\n  get\t", "\n  set\t"} {
 		if strings.Contains(usage, hidden) {
 			t.Fatalf("expected age-rating help to hide legacy verb %q, got %q", strings.TrimSpace(hidden), usage)
+		}
+	}
+}
+
+func TestAgeRatingAuditFlagsAreExperimental(t *testing.T) {
+	cmd := AgeRatingAuditCommand()
+	for _, name := range []string{"app", "paginate"} {
+		flag := cmd.FlagSet.Lookup(name)
+		if flag == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
+		if !strings.HasPrefix(flag.Usage, "[experimental] ") {
+			t.Fatalf("--%s usage = %q, want [experimental] prefix", name, flag.Usage)
 		}
 	}
 }

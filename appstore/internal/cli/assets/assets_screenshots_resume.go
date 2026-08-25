@@ -297,7 +297,7 @@ func executeAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 
 	orderedIDs := append([]string(nil), progress.OrderedIDs...)
 	if cfg.SkipExisting && len(prepared.SkippedResults) > 0 && (len(prepared.Files) > 0 || strings.TrimSpace(progress.FailedFile) != "") {
-		desiredIDs := orderScreenshotIDsForLocalFiles(prepared.OrderedIDs, cfg.Files, prepared.SkippedResults, progress.Results)
+		desiredIDs := orderAssetIDsForLocalFiles(prepared.OrderedIDs, cfg.Files, prepared.SkippedResults, progress.Results)
 		if len(desiredIDs) > 0 {
 			orderedIDs = desiredIDs
 		}
@@ -383,7 +383,7 @@ func resumeAppScreenshotUpload(ctx context.Context, client *asc.Client, artifact
 		currentOrder, err := GetOrderedAppScreenshotIDs(uploadCtx, client, artifact.SetID)
 		if err != nil {
 			uploadErr = err
-		} else if desiredIDs := orderScreenshotIDsForLocalFiles(currentOrder, artifact.Files, skippedResults, uploadedResults); len(desiredIDs) > 0 && !sameScreenshotIDOrder(currentOrder, desiredIDs) {
+		} else if desiredIDs := orderAssetIDsForLocalFiles(currentOrder, artifact.Files, skippedResults, uploadedResults); len(desiredIDs) > 0 && !sameAssetIDOrder(currentOrder, desiredIDs) {
 			if err := SetOrderedAppScreenshots(uploadCtx, client, artifact.SetID, desiredIDs); err != nil {
 				progress.OrderedIDs = desiredIDs
 				uploadErr = err

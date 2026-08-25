@@ -26,7 +26,10 @@ var (
 	statusValidateCredential = validateStoredCredential
 	listStoredCredentials    = authsvc.ListCredentials
 	listCredentialSummaries  = authsvc.ListCredentialSummaries
+	keychainAvailable        = authsvc.KeychainAvailable
 	migrateKeychainToConfig  = authsvc.MigrateKeychainToConfig
+	removeStoredCredential   = authsvc.RemoveCredentials
+	removeStoredCredentials  = authsvc.RemoveAllCredentials
 )
 
 // Auth command factory
@@ -42,14 +45,17 @@ func AuthCommand() *ffcli.Command {
 Authentication is handled via App Store Connect API keys. Generate keys at:
 https://appstoreconnect.apple.com/access/integrations/api
 
-Credentials are stored in the system keychain when available, with a config fallback.
-A repo-local ./.asc/config.json (if present) takes precedence.
+Credentials can come from the system keychain, the active config file, or environment variables.
 
-Credential resolution order:
-  1) Selected profile (keychain/config)
-  2) Environment variables (fallback for missing fields)
+Credential resolution:
+  - --profile or ASC_PROFILE selects a stored profile and disables the env-only fast path.
+  - With no profile and keychain bypass disabled, a complete environment set skips stored lookup.
+  - After stored selection succeeds, environment variables can fill eligible missing fields.
+  - ASC_BYPASS_KEYCHAIN skips keychain; env fallback follows only missing/default-selection config errors.
 
-Use --strict-auth or ASC_STRICT_AUTH=true (also: 1, yes, y, on) to fail when sources are mixed.
+Config selection: ASC_CONFIG_PATH; otherwise nearest ancestor .asc/config.json; otherwise ~/.asc/config.json.
+
+Use --strict-auth or ASC_STRICT_AUTH=true (also: 1, yes, y, on) to reject split-source fields.
 Set ASC_BYPASS_KEYCHAIN to 1/true/yes/on to bypass keychain.
 
 Use "asc auth status" to see which credentials/profile are currently active.
@@ -57,6 +63,7 @@ Use "asc auth status" to see which credentials/profile are currently active.
 Examples:
   asc auth status
   asc auth status --verbose
+  asc --profile work apps list
   asc auth switch --name work
   asc auth export-to-config --confirm`,
 		FlagSet:   fs,
@@ -184,7 +191,11 @@ Examples:
 			}
 
 			report := authsvc.DoctorWithMigrationResolver(
-				authsvc.DoctorOptions{Fix: *fix && *confirm},
+				authsvc.DoctorOptions{
+					Fix:        *fix && *confirm,
+					Profile:    shared.ResolveProfileName(),
+					StrictAuth: shared.StrictAuthEnabled(),
+				},
 				doctorMigrationSuggestionResolver(),
 			)
 			if normalizedOutput == "json" {
@@ -800,25 +811,42 @@ Examples:
 	}
 }
 
+const authLogoutConfirmDeprecationWarning = "Warning: auth logout without --confirm is deprecated and will be rejected in 5.0.0; pass --confirm to acknowledge credential removal."
+
 // AuthLogout command factory
 func AuthLogoutCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("auth logout", flag.ExitOnError)
-	all := fs.Bool("all", false, "Remove all stored credentials (default)")
+	all := fs.Bool("all", false, "Remove all stored credentials")
 	name := fs.String("name", "", "Remove a named credential")
+	confirm := fs.Bool("confirm", false, "Confirm credential removal (required in 5.0.0)")
 
 	return &ffcli.Command{
 		Name:       "logout",
-		ShortUsage: "asc auth logout [flags]",
+		ShortUsage: "asc auth logout [--name NAME | --all] [--confirm]",
 		ShortHelp:  "Remove stored API credentials.",
 		LongHelp: `Remove stored API credentials.
 
+Omitting --name continues to remove all credentials during the compatibility
+window. Pass --confirm now; it will be required in 5.0.0.
+
 Examples:
-  asc auth logout
-  asc auth logout --all
-  asc auth logout --name "MyKey"`,
+  asc auth logout --all --confirm
+  asc auth logout --name "MyKey" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := shared.RejectPositionalArgs(args); err != nil {
+				return err
+			}
+			confirmProvided := false
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "confirm" {
+					confirmProvided = true
+				}
+			})
+			if confirmProvided && !*confirm {
+				return shared.UsageError("--confirm must be true when specified")
+			}
 			trimmedName := strings.TrimSpace(*name)
 			if trimmedName == "" && *name != "" {
 				return shared.UsageError("--name cannot be blank")
@@ -826,16 +854,19 @@ Examples:
 			if trimmedName != "" && *all {
 				return shared.UsageError("--all and --name are mutually exclusive")
 			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, authLogoutConfirmDeprecationWarning)
+			}
 
 			if trimmedName != "" {
-				if err := authsvc.RemoveCredentials(trimmedName); err != nil {
+				if err := removeStoredCredential(trimmedName); err != nil {
 					return fmt.Errorf("auth logout: failed to remove credentials: %w", err)
 				}
 				fmt.Printf("Successfully removed stored credential '%s'\n", trimmedName)
 				return nil
 			}
 
-			if err := authsvc.RemoveAllCredentials(); err != nil {
+			if err := removeStoredCredentials(); err != nil {
 				return fmt.Errorf("auth logout: failed to remove credentials: %w", err)
 			}
 
@@ -889,7 +920,7 @@ Examples:
 			}
 
 			bypassKeychain := authsvc.ShouldBypassKeychain()
-			keychainAvailable, keychainErr := authsvc.KeychainAvailable()
+			isKeychainAvailable, keychainErr := keychainAvailable()
 			configPath, configErr := config.Path()
 			storageBackend := "System Keychain"
 			storageLocation := "system keychain"
@@ -905,7 +936,7 @@ Examples:
 					storageLocation = configPath
 				}
 				warnings = append(warnings, "Keychain bypassed via ASC_BYPASS_KEYCHAIN (truthy values: 1/true/yes/on).")
-			} else if !keychainAvailable {
+			} else if !isKeychainAvailable {
 				storageBackend = "Config File"
 				storageLocation = "unknown"
 				if configErr == nil {
@@ -925,7 +956,7 @@ Examples:
 					break
 				}
 			}
-			if hasConfigCreds && keychainAvailable && !bypassKeychain {
+			if hasConfigCreds && isKeychainAvailable && !bypassKeychain {
 				warnings = append(warnings, "Some credentials are stored in config file (less secure).")
 			}
 
@@ -936,7 +967,7 @@ Examples:
 					fmt.Printf("Warning: %s\n", warning)
 				}
 				if *verbose {
-					fmt.Printf("Keychain available: %t\n", keychainAvailable)
+					fmt.Printf("Keychain available: %t\n", isKeychainAvailable)
 					if keychainErr != nil {
 						fmt.Printf("Keychain error: %v\n", keychainErr)
 					}
@@ -947,6 +978,24 @@ Examples:
 				fmt.Println()
 			}
 
+			profile := shared.ResolveProfileName()
+			envKeyID := strings.TrimSpace(os.Getenv("ASC_KEY_ID"))
+			envIssuerID := strings.TrimSpace(os.Getenv("ASC_ISSUER_ID"))
+			envKeyTypeRaw := strings.TrimSpace(os.Getenv("ASC_KEY_TYPE"))
+			envKeyType := config.NormalizeCredentialKeyType(envKeyTypeRaw)
+			envKeyTypeValid := envKeyTypeRaw == "" || config.IsValidCredentialKeyType(envKeyType)
+			hasKeyEnv := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "" ||
+				strings.TrimSpace(os.Getenv(shared.PrivateKeyEnvVar)) != "" ||
+				strings.TrimSpace(os.Getenv(shared.PrivateKeyBase64EnvVar)) != ""
+			envProvided := envKeyID != "" || envIssuerID != "" || hasKeyEnv || envKeyTypeRaw != ""
+			envComplete := shared.HasCompleteEnvironmentCredentials()
+			envUsable := envComplete
+			if profile == "" && !bypassKeychain && envComplete {
+				envUsable = shared.CanResolveCompleteEnvironmentCredentials()
+			}
+			environmentNote := authStatusEnvironmentNote(profile, bypassKeychain, envProvided, envUsable, envKeyTypeValid)
+			activeEnvironmentSource := profile == "" && !bypassKeychain && envUsable && envKeyTypeValid
+
 			validationFailures := 0
 			var validationDiagnostic shared.Diagnostic
 			hasValidationDiagnostic := false
@@ -954,7 +1003,11 @@ Examples:
 			credentialOutput := make([]authStatusCredentialOutput, 0, len(credentials))
 			if len(credentials) == 0 {
 				if normalizedOutput == "table" {
-					fmt.Println("No credentials stored. Run 'asc auth login' to get started.")
+					if activeEnvironmentSource {
+						fmt.Println("No stored credentials found.")
+					} else {
+						fmt.Println("No credentials stored. Run 'asc auth login' to get started.")
+					}
 				}
 			} else {
 				if normalizedOutput == "table" {
@@ -1008,21 +1061,6 @@ Examples:
 				}
 			}
 
-			profile := shared.ResolveProfileName()
-			envKeyID := strings.TrimSpace(os.Getenv("ASC_KEY_ID"))
-			envIssuerID := strings.TrimSpace(os.Getenv("ASC_ISSUER_ID"))
-			envKeyTypeRaw := strings.TrimSpace(os.Getenv("ASC_KEY_TYPE"))
-			envKeyType := config.NormalizeCredentialKeyType(envKeyTypeRaw)
-			envKeyTypeValid := envKeyTypeRaw == "" || config.IsValidCredentialKeyType(envKeyType)
-			hasKeyEnv := strings.TrimSpace(os.Getenv("ASC_PRIVATE_KEY_PATH")) != "" ||
-				strings.TrimSpace(os.Getenv(shared.PrivateKeyEnvVar)) != "" ||
-				strings.TrimSpace(os.Getenv(shared.PrivateKeyBase64EnvVar)) != ""
-			envProvided := envKeyID != "" || envIssuerID != "" || hasKeyEnv || envKeyTypeRaw != ""
-			envComplete := envKeyID != "" && hasKeyEnv &&
-				envKeyTypeValid &&
-				(envIssuerID != "" || config.IsIndividualCredentialKeyType(envKeyType))
-
-			environmentNote := authStatusEnvironmentNote(profile, bypassKeychain, envProvided, envComplete, envKeyTypeValid)
 			if normalizedOutput == "table" && environmentNote != "" {
 				fmt.Println(environmentNote)
 			}
@@ -1040,7 +1078,7 @@ Examples:
 					ValidationFailures:             validationFailures,
 				}
 				if *verbose {
-					payload.KeychainAvailable = boolPointer(keychainAvailable)
+					payload.KeychainAvailable = boolPointer(isKeychainAvailable)
 					if keychainErr != nil {
 						payload.KeychainError = keychainErr.Error()
 					}
@@ -1128,7 +1166,13 @@ func authStatusEnvironmentNote(profile string, bypassKeychain, envProvided, envC
 	if profile != "" && envProvided {
 		return fmt.Sprintf("Profile %q selected; environment credentials will be ignored.", profile)
 	}
-	if !bypassKeychain || !envProvided {
+	if !envProvided {
+		return ""
+	}
+	if !bypassKeychain {
+		if envComplete && envKeyTypeValid {
+			return "Complete environment credential fields take precedence when no profile is selected; stored credential lookup is skipped."
+		}
 		return ""
 	}
 	if !envKeyTypeValid {

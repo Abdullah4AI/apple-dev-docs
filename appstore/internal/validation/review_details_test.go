@@ -47,7 +47,7 @@ func TestReviewDetailsChecks_DemoAccountRequiredMissingCredentials(t *testing.T)
 		ContactFirstName:    "A",
 		ContactLastName:     "B",
 		ContactEmail:        "a@example.com",
-		ContactPhone:        "123",
+		ContactPhone:        "+1 555 010 1234",
 		DemoAccountRequired: true,
 		// Missing demo account name/password.
 	})
@@ -79,11 +79,81 @@ func TestReviewDetailsChecks_Pass(t *testing.T) {
 		ContactFirstName:    "A",
 		ContactLastName:     "B",
 		ContactEmail:        "a@example.com",
-		ContactPhone:        "123",
+		ContactPhone:        "+1 555 010 1234",
 		DemoAccountRequired: false,
 	})
 	if len(checks) != 0 {
 		t.Fatalf("expected no checks, got %d (%v)", len(checks), checks)
+	}
+}
+
+func TestReviewDetailsChecks_InvalidContactEmail(t *testing.T) {
+	for _, email := range []string{"reviewer", "reviewer@", "@example.com", "reviewer example.com", "Reviewer <reviewer@example.com>"} {
+		checks := reviewDetailsChecks(&ReviewDetails{
+			ID:               "detail-1",
+			ContactFirstName: "A",
+			ContactLastName:  "B",
+			ContactEmail:     email,
+			ContactPhone:     "+1 555 010 1234",
+		})
+		if !hasCheckID(checks, "review_details.format.contact_email") {
+			t.Fatalf("expected contact email format check for %q, got %+v", email, checks)
+		}
+		for _, check := range checks {
+			if check.ID == "review_details.format.contact_email" && check.Severity != SeverityError {
+				t.Fatalf("expected error severity for %q, got %+v", email, check)
+			}
+		}
+	}
+}
+
+func TestReviewDetailsChecks_AcceptsValidContactEmails(t *testing.T) {
+	for _, email := range []string{"reviewer@example.com", "  reviewer@example.com  ", "reviewer+app-review@example.co.uk"} {
+		checks := reviewDetailsChecks(&ReviewDetails{
+			ID:               "detail-1",
+			ContactFirstName: "A",
+			ContactLastName:  "B",
+			ContactEmail:     email,
+			ContactPhone:     "+1 555 010 1234",
+		})
+		if len(checks) != 0 {
+			t.Fatalf("expected no checks for %q, got %+v", email, checks)
+		}
+	}
+}
+
+func TestReviewDetailsChecks_ImplausibleContactPhone(t *testing.T) {
+	for _, phone := range []string{"123", "call me", "+1-555"} {
+		checks := reviewDetailsChecks(&ReviewDetails{
+			ID:               "detail-1",
+			ContactFirstName: "A",
+			ContactLastName:  "B",
+			ContactEmail:     "a@example.com",
+			ContactPhone:     phone,
+		})
+		if !hasCheckID(checks, "review_details.format.contact_phone") {
+			t.Fatalf("expected contact phone format check for %q, got %+v", phone, checks)
+		}
+		for _, check := range checks {
+			if check.ID == "review_details.format.contact_phone" && check.Severity != SeverityWarning {
+				t.Fatalf("expected warning severity for %q, got %+v", phone, check)
+			}
+		}
+	}
+}
+
+func TestReviewDetailsChecks_AcceptsPlausibleContactPhones(t *testing.T) {
+	for _, phone := range []string{"5550101", "+1 (555) 010-1234", "+81 3-1234-5678", "+1 555 010 1234 ext. 42"} {
+		checks := reviewDetailsChecks(&ReviewDetails{
+			ID:               "detail-1",
+			ContactFirstName: "A",
+			ContactLastName:  "B",
+			ContactEmail:     "a@example.com",
+			ContactPhone:     phone,
+		})
+		if len(checks) != 0 {
+			t.Fatalf("expected no checks for %q, got %+v", phone, checks)
+		}
 	}
 }
 
@@ -93,7 +163,7 @@ func TestReviewDetailsChecks_PassWithDemoAccount(t *testing.T) {
 		ContactFirstName:    "A",
 		ContactLastName:     "B",
 		ContactEmail:        "a@example.com",
-		ContactPhone:        "123",
+		ContactPhone:        "+1 555 010 1234",
 		DemoAccountRequired: true,
 		DemoAccountName:     "demo",
 		DemoAccountPassword: "pass",
@@ -134,7 +204,7 @@ func TestReviewDetailsChecks_DemoCredentialPermutations(t *testing.T) {
 							ContactFirstName:    "A",
 							ContactLastName:     "B",
 							ContactEmail:        "a@example.com",
-							ContactPhone:        "123",
+							ContactPhone:        "+1 555 010 1234",
 							DemoAccountRequired: required,
 							DemoAccountName:     name,
 							DemoAccountPassword: password,

@@ -117,6 +117,92 @@ func TestReviewValidationDiagnosticsPreserveErrorContracts(t *testing.T) {
 	}
 }
 
+func TestReviewSubmitInputFailuresKeepStructuredDiagnostics(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+		wantCode   shared.DiagnosticCode
+		wantParam  string
+	}{
+		{
+			name:       "missing app",
+			args:       nil,
+			wantStderr: "Error: --app is required (or set ASC_APP_ID)\n",
+			wantCode:   shared.DiagnosticRequiredInputMissing,
+			wantParam:  "--app",
+		},
+		{
+			name:       "missing build",
+			args:       []string{"--app", "123456789"},
+			wantStderr: "Error: --build-id is required\n",
+			wantCode:   shared.DiagnosticRequiredInputMissing,
+			wantParam:  "--build-id",
+		},
+		{
+			name:       "missing version selector",
+			args:       []string{"--app", "123456789", "--build-id", "BUILD_ID"},
+			wantStderr: "Error: --version or --version-id is required\n",
+			wantCode:   shared.DiagnosticRequiredInputMissing,
+			wantParam:  "",
+		},
+		{
+			name:       "conflicting version selectors",
+			args:       []string{"--app", "123456789", "--build-id", "BUILD_ID", "--version", "1.2.3", "--version-id", "VERSION_ID"},
+			wantStderr: "Error: --version and --version-id are mutually exclusive\n",
+			wantCode:   shared.DiagnosticConflictingInput,
+			wantParam:  "",
+		},
+		{
+			name:       "missing confirm",
+			args:       []string{"--app", "123456789", "--build-id", "BUILD_ID", "--version", "1.2.3"},
+			wantStderr: "Error: --confirm is required unless --dry-run is set\n",
+			wantCode:   shared.DiagnosticRequiredInputMissing,
+			wantParam:  "--confirm",
+		},
+		{
+			name:       "unsupported platform",
+			args:       []string{"--app", "123456789", "--build-id", "BUILD_ID", "--version", "1.2.3", "--dry-run", "--platform", "WATCH_OS"},
+			wantStderr: "Error: --platform must be one of: IOS, MAC_OS, TV_OS, VISION_OS\n",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--platform",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			command := ReviewSubmitCommand()
+			if err := command.FlagSet.Parse(test.args); err != nil {
+				t.Fatalf("parse flags: %v", err)
+			}
+
+			var err error
+			stderr := captureReviewDiagnosticStderr(t, func() {
+				err = command.Exec(context.Background(), nil)
+			})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if stderr != test.wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr, test.wantStderr)
+			}
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("error = %v, want flag.ErrHelp usage contract", err)
+			}
+
+			diagnostic, ok := shared.DiagnosticFromError(err)
+			if !ok {
+				t.Fatalf("DiagnosticFromError(%v) found no metadata", err)
+			}
+			if diagnostic.Code != test.wantCode || diagnostic.Parameter != test.wantParam {
+				t.Fatalf("diagnostic = %+v, want code %q parameter %q", diagnostic, test.wantCode, test.wantParam)
+			}
+		})
+	}
+}
+
 func TestReviewAttachmentUnreadableSourceIsDiagnosedBeforeAuth(t *testing.T) {
 	attachmentPath := filepath.Join(t.TempDir(), "attachment.pdf")
 	if err := os.WriteFile(attachmentPath, []byte("review attachment"), 0o600); err != nil {

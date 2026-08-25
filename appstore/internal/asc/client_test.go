@@ -3215,6 +3215,22 @@ func TestWithRetry_SuccessOnFirstTry(t *testing.T) {
 	}
 }
 
+func TestWithRetry_ExplicitCancellationWinsOverRetryableError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	cancel()
+
+	_, err := WithRetry(ctx, func() (string, error) {
+		return "", &RetryableError{
+			Err:        errors.New("retryable failure"),
+			RetryAfter: time.Hour,
+		}
+	}, RetryOptions{MaxRetries: 1})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want explicit context cancellation", err)
+	}
+}
+
 func TestPaginateAll_CiBuildRuns_ManyPages(t *testing.T) {
 	const totalPages = 20
 	const perPage = 50

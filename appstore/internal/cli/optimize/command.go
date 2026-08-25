@@ -31,7 +31,7 @@ func OptimizeCommand() *ffcli.Command {
 		LongHelp:    "Build read-only cross-API optimization plans from official Apple APIs. [experimental]",
 		FlagSet:     fs,
 		UsageFunc:   shared.DefaultUsageFunc,
-		Subcommands: []*ffcli.Command{SearchCommand()},
+		Subcommands: []*ffcli.Command{SearchCommand(), KeywordsCommand()},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
 		},

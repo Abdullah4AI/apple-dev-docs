@@ -254,6 +254,18 @@ func InvalidValueUsageError(parameters ...string) error {
 	)
 }
 
+// reportedUsageErrHelp preserves the flag.ErrHelp usage contract for a
+// validation failure whose message has already been written to stderr, while
+// forwarding any structured diagnostic the validator attached so telemetry
+// keeps the failing parameter.
+func reportedUsageErrHelp(err error) error {
+	diagnostic, ok := DiagnosticFromError(err)
+	if !ok {
+		return flag.ErrHelp
+	}
+	return WithDiagnostic(flag.ErrHelp, diagnostic.Code, diagnostic.Parameter)
+}
+
 func ClassifyUsageError(err error) UsageErrorKind {
 	var classified interface{ UsageErrorKind() UsageErrorKind }
 	if errors.As(err, &classified) {

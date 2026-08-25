@@ -2,6 +2,7 @@ package assets
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -227,6 +229,88 @@ func TestUploadPreviewsRejectsUnsupportedFileBeforeRequests(t *testing.T) {
 				t.Fatalf("DELETE requests = %d, want 0", deleteRequests)
 			}
 		})
+	}
+}
+
+func TestUploadPreviewsSkipExistingSyncsSortedOrder(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "01-first.mov")
+	second := filepath.Join(dir, "02-second.mov")
+	if err := os.WriteFile(first, []byte("first-preview"), 0o600); err != nil {
+		t.Fatalf("write first preview: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("second-preview"), 0o600); err != nil {
+		t.Fatalf("write second preview: %v", err)
+	}
+	firstChecksum, err := computeFileChecksum(first)
+	if err != nil {
+		t.Fatalf("checksum first preview: %v", err)
+	}
+	secondChecksum, err := computeFileChecksum(second)
+	if err != nil {
+		t.Fatalf("checksum second preview: %v", err)
+	}
+
+	patched := make([][]string, 0, 1)
+	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/appStoreVersionLocalizations/LOC_ID/appPreviewSets":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appPreviewSets","id":"set-1","attributes":{"previewType":"IPHONE_65"}}],"links":{}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/appPreviewSets/set-1/appPreviews":
+			writeAssetsTestJSON(w, http.StatusOK, fmt.Sprintf(
+				`{"data":[{"type":"appPreviews","id":"preview-second","attributes":{"fileName":"02-second.mov","sourceFileChecksum":"%s"}},{"type":"appPreviews","id":"preview-first","attributes":{"fileName":"01-first.mov","sourceFileChecksum":"%s"}}],"links":{}}`,
+				secondChecksum, firstChecksum,
+			))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/appPreviewSets/set-1/relationships/appPreviews":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appPreviews","id":"preview-second"},{"type":"appPreviews","id":"preview-first"}],"links":{}}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/appPreviewSets/set-1/relationships/appPreviews":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read relationship body: %v", err)
+			}
+			var payload asc.RelationshipRequest
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode relationship body: %v", err)
+			}
+			ids := make([]string, 0, len(payload.Data))
+			for _, item := range payload.Data {
+				ids = append(ids, item.ID)
+			}
+			patched = append(patched, ids)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			writeAssetsTestJSON(w, http.StatusInternalServerError, `{"errors":[{"status":"500","detail":"unexpected request"}]}`)
+		}
+	}))
+
+	result, err := uploadPreviews(
+		context.Background(),
+		client,
+		"LOC_ID",
+		"IPHONE_65",
+		[]string{first, second},
+		true,
+		false,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("uploadPreviews() error: %v", err)
+	}
+	if len(patched) != 1 {
+		t.Fatalf("expected exactly one preview order PATCH, got %d (%v)", len(patched), patched)
+	}
+	want := []string{"preview-first", "preview-second"}
+	if !reflect.DeepEqual(patched[0], want) {
+		t.Fatalf("preview order PATCH = %v, want %v", patched[0], want)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 skipped results, got %#v", result.Results)
+	}
+	for _, item := range result.Results {
+		if !item.Skipped || strings.TrimSpace(item.AssetID) == "" {
+			t.Fatalf("expected skipped results to carry the existing preview ID, got %#v", item)
+		}
 	}
 }
 
@@ -572,6 +656,9 @@ func TestUploadPreviewFilesRollsBackAllCreatedItemsOnPostCreateConflict(t *testi
 	if results[0].AssetID != "created-1" || results[1].AssetID != "created-2" {
 		t.Fatalf("uploadPreviewFiles() results = %#v, want created asset IDs", results)
 	}
+	if results[0].State != "rolled-back" || results[1].State != "rolled-back" {
+		t.Fatalf("uploadPreviewFiles() states = %#v, want rolled-back results", results)
+	}
 	wantRequests := []string{
 		"DELETE /v1/appPreviews/created-2",
 		"DELETE /v1/appPreviews/created-1",
@@ -618,6 +705,9 @@ func TestUploadPreviewFilesPreservesResultsWhenRollbackFails(t *testing.T) {
 	}
 	if results[0].AssetID != "created-1" || results[1].AssetID != "created-2" {
 		t.Fatalf("uploadPreviewFiles() results = %#v, want created asset IDs", results)
+	}
+	if results[0].State != "rollback-failed" || results[1].State != "rollback-failed" {
+		t.Fatalf("uploadPreviewFiles() states = %#v, want rollback-failed results", results)
 	}
 }
 

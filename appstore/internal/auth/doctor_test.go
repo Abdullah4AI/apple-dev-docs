@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -77,6 +79,656 @@ func TestDoctorEnvironmentRedactsCredentialIdentifiers(t *testing.T) {
 		if strings.Contains(check.Message, "issuer-uuid") {
 			t.Fatalf("ASC_ISSUER_ID leaked in message: %q", check.Message)
 		}
+	}
+}
+
+func TestDoctorEnvironmentValidatesSelectedPrivateKey(t *testing.T) {
+	validKeyPath := filepath.Join(t.TempDir(), "AuthKey.p8")
+	writeECDSAPEM(t, validKeyPath, 0o600, true)
+	validKey, err := os.ReadFile(validKeyPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+
+	tests := []struct {
+		name            string
+		keyPath         string
+		privateKey      string
+		privateKeyB64   string
+		wantStatus      DoctorStatus
+		wantMessage     string
+		forbiddenSecret string
+	}{
+		{
+			name:        "missing path",
+			keyPath:     filepath.Join(t.TempDir(), "missing.p8"),
+			wantStatus:  DoctorFail,
+			wantMessage: "ASC_PRIVATE_KEY_PATH - file not found",
+		},
+		{
+			name:            "invalid base64",
+			privateKeyB64:   "not-base64-secret",
+			wantStatus:      DoctorFail,
+			wantMessage:     "ASC_PRIVATE_KEY_B64 is not valid base64",
+			forbiddenSecret: "not-base64-secret",
+		},
+		{
+			name:            "invalid raw pem",
+			privateKey:      "not-a-private-key-secret",
+			wantStatus:      DoctorFail,
+			wantMessage:     "ASC_PRIVATE_KEY is not a valid private key",
+			forbiddenSecret: "not-a-private-key-secret",
+		},
+		{
+			name:        "mixed escaped and real newlines",
+			privateKey:  strings.Replace(string(validKey), "\n", `\n`, 1),
+			wantStatus:  DoctorOK,
+			wantMessage: "ASC_PRIVATE_KEY contains a valid ECDSA private key",
+		},
+		{
+			name:          "valid base64",
+			privateKeyB64: base64.StdEncoding.EncodeToString(validKey),
+			wantStatus:    DoctorOK,
+			wantMessage:   "ASC_PRIVATE_KEY_B64 contains a valid ECDSA private key",
+		},
+		{
+			name:          "path takes precedence",
+			keyPath:       validKeyPath,
+			privateKey:    "ignored-invalid-raw-key",
+			privateKeyB64: "ignored-invalid-base64",
+			wantStatus:    DoctorOK,
+			wantMessage:   "ASC_PRIVATE_KEY_PATH - valid ECDSA key",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+			t.Setenv("ASC_KEY_ID", "ENVKEY")
+			t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+			t.Setenv("ASC_PRIVATE_KEY_PATH", test.keyPath)
+			t.Setenv("ASC_PRIVATE_KEY", test.privateKey)
+			t.Setenv("ASC_PRIVATE_KEY_B64", test.privateKeyB64)
+
+			report := Doctor(DoctorOptions{})
+			section := findDoctorSection(t, report, "Environment")
+			if !sectionHasStatus(section, test.wantStatus, test.wantMessage) {
+				t.Fatalf("expected %s check containing %q, got %#v", test.wantStatus, test.wantMessage, section.Checks)
+			}
+			if test.wantStatus == DoctorFail && report.Summary.Errors == 0 {
+				t.Fatalf("expected failed key validation in summary, got %#v", report.Summary)
+			}
+			if test.forbiddenSecret != "" {
+				for _, check := range section.Checks {
+					if strings.Contains(check.Message, test.forbiddenSecret) || strings.Contains(check.Recommendation, test.forbiddenSecret) {
+						t.Fatalf("private key material leaked in check: %#v", check)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorEnvironmentRequiresWritablePrivateKeyTempDir(t *testing.T) {
+	validKeyPath := filepath.Join(t.TempDir(), "AuthKey.p8")
+	writeECDSAPEM(t, validKeyPath, 0o600, true)
+	validKey, err := os.ReadFile(validKeyPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		privateKey    string
+		privateKeyB64 string
+		wantMessage   string
+	}{
+		{
+			name:        "inline pem",
+			privateKey:  string(validKey),
+			wantMessage: "ASC_PRIVATE_KEY cannot be materialized as a temporary private key",
+		},
+		{
+			name:          "base64 pem",
+			privateKeyB64: base64.StdEncoding.EncodeToString(validKey),
+			wantMessage:   "ASC_PRIVATE_KEY_B64 cannot be materialized as a temporary private key",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			blockedTemp := filepath.Join(tempDir, "not-a-directory")
+			if err := os.WriteFile(blockedTemp, []byte("blocked"), 0o600); err != nil {
+				t.Fatalf("WriteFile() error: %v", err)
+			}
+
+			t.Setenv("TMPDIR", blockedTemp)
+			t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+			t.Setenv("ASC_PROFILE", "")
+			t.Setenv("ASC_STRICT_AUTH", "")
+			t.Setenv("ASC_KEY_TYPE", "")
+			t.Setenv("ASC_KEY_ID", "ENVKEY")
+			t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+			t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+			t.Setenv("ASC_PRIVATE_KEY", test.privateKey)
+			t.Setenv("ASC_PRIVATE_KEY_B64", test.privateKeyB64)
+
+			report := Doctor(DoctorOptions{})
+			section := findDoctorSection(t, report, "Environment")
+			if !sectionHasStatus(section, DoctorFail, test.wantMessage) {
+				t.Fatalf("expected temp-key materialization failure, got %#v", section.Checks)
+			}
+			if report.Summary.Errors == 0 {
+				t.Fatalf("expected materialization failure in summary, got %#v", report.Summary)
+			}
+		})
+	}
+}
+
+func TestDoctorEnvironmentSkipsIgnoredPrivateKeys(t *testing.T) {
+	t.Run("selected profile", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+		configPath := filepath.Join(tempDir, "config.json")
+		if err := config.SaveAt(configPath, &config.Config{
+			DefaultKeyName: "stored",
+			Keys: []config.Credential{{
+				Name:           "stored",
+				KeyID:          "STOREDKEY",
+				IssuerID:       "12345678-abcd-1234-abcd-123456789012",
+				PrivateKeyPath: storedKeyPath,
+			}},
+		}); err != nil {
+			t.Fatalf("SaveAt() error: %v", err)
+		}
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", configPath)
+		t.Setenv("ASC_KEY_ID", "ENVKEY")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "missing.p8"))
+
+		report := Doctor(DoctorOptions{Profile: "stored"})
+		section := findDoctorSection(t, report, "Environment")
+		if sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH") {
+			t.Fatalf("expected selected profile to suppress ignored environment key failure, got %#v", section.Checks)
+		}
+		if !sectionHasStatus(section, DoctorInfo, "ignored because profile \"stored\" provides stored private key material") {
+			t.Fatalf("expected ignored environment key note, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("missing selected profile", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+		configPath := filepath.Join(tempDir, "config.json")
+		if err := config.SaveAt(configPath, &config.Config{
+			DefaultKeyName: "other",
+			Keys: []config.Credential{{
+				Name:           "other",
+				KeyID:          "STOREDKEY",
+				IssuerID:       "12345678-abcd-1234-abcd-123456789012",
+				PrivateKeyPath: storedKeyPath,
+			}},
+		}); err != nil {
+			t.Fatalf("SaveAt() error: %v", err)
+		}
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", configPath)
+		t.Setenv("ASC_KEY_ID", "ENVKEY")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "unused-missing-env.p8"))
+
+		report := Doctor(DoctorOptions{Profile: "missing"})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Selected profile \"missing\" could not be resolved") {
+			t.Fatalf("expected missing selected profile failure, got %#v", section.Checks)
+		}
+		if sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH") {
+			t.Fatalf("expected unused environment key to remain ignored, got %#v", section.Checks)
+		}
+		if report.Summary.Errors == 0 {
+			t.Fatalf("expected missing selected profile in error summary, got %#v", report.Summary)
+		}
+	})
+
+	t.Run("incomplete selected profile without environment fallback", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+		if err := StoreCredentials("doctor-incomplete-selected", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-incomplete-selected"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{Profile: "doctor-incomplete-selected"})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Selected profile \"doctor-incomplete-selected\" is incomplete after environment fallback (missing issuer ID)") {
+			t.Fatalf("expected incomplete selected profile failure, got %#v", section.Checks)
+		}
+		if report.Summary.Errors == 0 {
+			t.Fatalf("expected incomplete selected profile in error summary, got %#v", report.Summary)
+		}
+	})
+
+	t.Run("selected profile validates required environment private key", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "missing-env.p8"))
+		if err := StoreCredentials("doctor-selected-needs-key", "STOREDKEY", "12345678-abcd-1234-abcd-123456789012", ""); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-selected-needs-key"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{Profile: "doctor-selected-needs-key"})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH - file not found") {
+			t.Fatalf("expected required environment key validation, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("selected profile accepts individual environment key type", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", config.CredentialKeyTypeIndividual)
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+		if err := StoreCredentials("doctor-selected-individual-fallback", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-selected-individual-fallback"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{Profile: "doctor-selected-individual-fallback"})
+		section := findDoctorSection(t, report, "Environment")
+		if sectionHasStatus(section, DoctorFail, "Selected profile \"doctor-selected-individual-fallback\"") {
+			t.Fatalf("expected individual environment key type to remove issuer requirement, got %#v", section.Checks)
+		}
+		if report.Summary.Errors != 0 {
+			t.Fatalf("expected no doctor errors for effective individual credentials, got %#v", report.Summary)
+		}
+	})
+
+	t.Run("selected profile preserves unsupported stored key type", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		if err := StoreCredentialsWithKeyType("doctor-selected-unsupported-key-type", "STOREDKEY", "", storedKeyPath, "personal"); err != nil {
+			t.Fatalf("StoreCredentialsWithKeyType() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-selected-unsupported-key-type"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", config.CredentialKeyTypeIndividual)
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+
+		report := Doctor(DoctorOptions{Profile: "doctor-selected-unsupported-key-type"})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Selected profile \"doctor-selected-unsupported-key-type\" is incomplete after environment fallback (missing issuer ID)") {
+			t.Fatalf("expected stored key type to prevent environment type fallback, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("selected profile rejects invalid environment key type", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", "invalid")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+		if err := StoreCredentials("doctor-selected-invalid-key-type", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-selected-invalid-key-type"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{Profile: "doctor-selected-invalid-key-type"})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Selected profile \"doctor-selected-invalid-key-type\" cannot use environment fallback: ASC_KEY_TYPE must be team or individual") {
+			t.Fatalf("expected invalid fallback key type failure, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("selected profile rejects mixed sources in strict auth", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+		if err := StoreCredentials("doctor-selected-strict-mixed", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-selected-strict-mixed"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{Profile: "doctor-selected-strict-mixed", StrictAuth: true})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Selected profile \"doctor-selected-strict-mixed\" requires mixed stored and environment credential sources while strict authentication is enabled") {
+			t.Fatalf("expected strict mixed-source failure, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("default profile rejects mixed sources in strict auth", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		if err := StoreCredentials("doctor-default-strict-mixed", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-default-strict-mixed"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+
+		report := Doctor(DoctorOptions{StrictAuth: true})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Default stored credentials require mixed stored and environment credential sources while strict authentication is enabled") {
+			t.Fatalf("expected strict mixed-source failure for default credentials, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("default profile preserves unsupported stored key type", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		if err := StoreCredentialsWithKeyType("doctor-default-unsupported-key-type", "STOREDKEY", "", storedKeyPath, "personal"); err != nil {
+			t.Fatalf("StoreCredentialsWithKeyType() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-default-unsupported-key-type"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", config.CredentialKeyTypeIndividual)
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+
+		report := Doctor(DoctorOptions{})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Default stored credentials are incomplete after environment fallback (missing issuer ID)") {
+			t.Fatalf("expected stored key type to prevent default environment type fallback, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("default profile rejects invalid environment key type", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		if err := StoreCredentials("doctor-default-invalid-env-key-type", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-default-invalid-env-key-type"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_KEY_TYPE", "invalid")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+
+		report := Doctor(DoctorOptions{})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Default stored credentials cannot use environment fallback: ASC_KEY_TYPE must be team or individual") {
+			t.Fatalf("expected invalid default fallback key type failure, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("default strict auth checks failed environment materialization", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+		rawKey, err := os.ReadFile(storedKeyPath)
+		if err != nil {
+			t.Fatalf("ReadFile() error: %v", err)
+		}
+		blockedTemp := filepath.Join(tempDir, "not-a-directory")
+		if err := os.WriteFile(blockedTemp, []byte("blocked"), 0o600); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+
+		if err := StoreCredentials("doctor-default-materialization-strict", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-default-materialization-strict"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		t.Setenv("TMPDIR", blockedTemp)
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "ENVKEY")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", string(rawKey))
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", "")
+
+		report := Doctor(DoctorOptions{StrictAuth: true})
+		section := findDoctorSection(t, report, "Environment")
+		if !sectionHasStatus(section, DoctorFail, "Default stored credentials require mixed stored and environment credential sources while strict authentication is enabled") {
+			t.Fatalf("expected strict fallback check after environment materialization failure, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("complete bypass config", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+		configPath := filepath.Join(tempDir, "config.json")
+		if err := config.SaveAt(configPath, &config.Config{
+			DefaultKeyName: "stored",
+			Keys: []config.Credential{{
+				Name:           "stored",
+				KeyID:          "STOREDKEY",
+				IssuerID:       "12345678-abcd-1234-abcd-123456789012",
+				PrivateKeyPath: storedKeyPath,
+			}},
+		}); err != nil {
+			t.Fatalf("SaveAt() error: %v", err)
+		}
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+		t.Setenv("ASC_CONFIG_PATH", configPath)
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "ENVKEY")
+		t.Setenv("ASC_ISSUER_ID", "87654321-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "missing-env.p8"))
+
+		report := Doctor(DoctorOptions{})
+		section := findDoctorSection(t, report, "Environment")
+		if sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH") {
+			t.Fatalf("expected complete bypass config to suppress ignored environment key failure, got %#v", section.Checks)
+		}
+		if !sectionHasStatus(section, DoctorInfo, "ignored because complete stored config credentials are selected") {
+			t.Fatalf("expected bypass config ignore note, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("complete default keychain credentials", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "missing-env.p8"))
+		if err := StoreCredentials("doctor-default-keychain", "STOREDKEY", "12345678-abcd-1234-abcd-123456789012", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-default-keychain"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{})
+		section := findDoctorSection(t, report, "Environment")
+		if sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH") {
+			t.Fatalf("expected complete default keychain credentials to suppress ignored environment key failure, got %#v", section.Checks)
+		}
+		if !sectionHasStatus(section, DoctorInfo, "ignored because complete default stored credentials are selected") {
+			t.Fatalf("expected default stored credentials ignore note, got %#v", section.Checks)
+		}
+	})
+
+	t.Run("default keychain key with environment issuer fallback", func(t *testing.T) {
+		tempDir := t.TempDir()
+		storedKeyPath := filepath.Join(tempDir, "stored.p8")
+		writeECDSAPEM(t, storedKeyPath, 0o600, true)
+
+		t.Setenv("ASC_BYPASS_KEYCHAIN", "")
+		t.Setenv("ASC_CONFIG_PATH", filepath.Join(tempDir, "config.json"))
+		t.Setenv("ASC_PROFILE", "")
+		t.Setenv("ASC_KEY_ID", "")
+		t.Setenv("ASC_ISSUER_ID", "12345678-abcd-1234-abcd-123456789012")
+		t.Setenv("ASC_KEY_TYPE", "")
+		t.Setenv("ASC_PRIVATE_KEY", "")
+		t.Setenv("ASC_PRIVATE_KEY_B64", "")
+		t.Setenv("ASC_PRIVATE_KEY_PATH", filepath.Join(tempDir, "unused-missing-env.p8"))
+		if err := StoreCredentials("doctor-partial-keychain", "STOREDKEY", "", storedKeyPath); err != nil {
+			t.Fatalf("StoreCredentials() error: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := RemoveCredentials("doctor-partial-keychain"); err != nil {
+				t.Errorf("RemoveCredentials() error: %v", err)
+			}
+		})
+
+		report := Doctor(DoctorOptions{})
+		section := findDoctorSection(t, report, "Environment")
+		if sectionHasStatus(section, DoctorFail, "ASC_PRIVATE_KEY_PATH") {
+			t.Fatalf("expected selected default key material to suppress unused environment key failure, got %#v", section.Checks)
+		}
+		if !sectionHasStatus(section, DoctorInfo, "ignored because default stored private key is selected") {
+			t.Fatalf("expected default stored key material ignore note, got %#v", section.Checks)
+		}
+	})
+}
+
+func TestDoctorEnvironmentPrivateKeyPathRedactsEveryOccurrence(t *testing.T) {
+	path := `/private/ci/secret\AuthKey.p8`
+	check := DoctorCheck{
+		Message:        path + " - failed to read: open " + path + ": permission denied",
+		Recommendation: "Run: chmod 600 " + strconv.Quote(path),
+	}
+	redactEnvironmentPrivateKeyPath(&check, path)
+	if strings.Contains(check.Message, path) || strings.Contains(check.Recommendation, path) {
+		t.Fatalf("expected every private key path occurrence to be redacted, got %#v", check)
+	}
+	if strings.Count(check.Message, "ASC_PRIVATE_KEY_PATH") != 2 || check.Recommendation != `Run: chmod 600 "$ASC_PRIVATE_KEY_PATH"` {
+		t.Fatalf("expected repeated path occurrences to remain understandable after redaction, got %#v", check)
 	}
 }
 
@@ -213,6 +865,21 @@ func TestDoctorTempFilesWarns(t *testing.T) {
 	section := findDoctorSection(t, report, "Temp Files")
 	if !sectionHasStatus(section, DoctorWarn, "orphaned temp key file") {
 		t.Fatalf("expected temp file warning, got %#v", section.Checks)
+	}
+}
+
+func TestDoctorPrivateKeyPathRejectsSpecialFiles(t *testing.T) {
+	info, err := os.Stat(os.DevNull)
+	if err != nil {
+		t.Fatalf("Stat(%q) error: %v", os.DevNull, err)
+	}
+	if info.Mode().IsRegular() {
+		t.Skipf("%s is a regular file on this platform", os.DevNull)
+	}
+
+	check := inspectPrivateKeyPath(os.DevNull, DoctorOptions{})
+	if check.Status != DoctorFail || !strings.Contains(check.Message, "not a regular file") {
+		t.Fatalf("expected special-file rejection, got %#v", check)
 	}
 }
 
