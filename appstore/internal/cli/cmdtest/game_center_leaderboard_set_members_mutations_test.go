@@ -102,6 +102,7 @@ func TestGameCenterLeaderboardSetMembersSetAddsMembersToEmptySet(t *testing.T) {
 			"game-center", "leaderboard-sets", "members", "set",
 			"--set-id", "set-1",
 			"--leaderboard-ids", "lb-1,lb-1,lb-2",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
@@ -204,6 +205,7 @@ func TestGameCenterLeaderboardSetMembersV2SetAddsMembersToEmptySet(t *testing.T)
 			"game-center", "leaderboard-sets", "v2", "members", "set",
 			"--set-id", "set-1",
 			"--leaderboard-ids", "lb-1,lb-1,lb-2",
+			"--confirm",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}

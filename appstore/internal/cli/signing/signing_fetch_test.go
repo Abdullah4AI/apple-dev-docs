@@ -384,6 +384,163 @@ func TestFindActiveProfilesUseBundleIDRelationship(t *testing.T) {
 	}
 }
 
+func TestSigningFetchPaginationRejectsRepeatedNextURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		response   string
+		fetch      func(context.Context, *asc.Client) error
+		wantSecond string
+	}{
+		{
+			name:     "certificates",
+			path:     "/v1/certificates",
+			response: `{"data":[],"links":{"next":"https://api.appstoreconnect.apple.com/v1/certificates?cursor=repeat"}}`,
+			fetch: func(ctx context.Context, client *asc.Client) error {
+				_, err := findCertificates(ctx, client, "IOS_APP_STORE", "IOS_DISTRIBUTION")
+				return err
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/certificates?cursor=repeat",
+		},
+		{
+			name:     "bundle ID profiles",
+			path:     "/v1/bundleIds/bundle-main/profiles",
+			response: `{"data":[],"links":{"next":"https://api.appstoreconnect.apple.com/v1/bundleIds/bundle-main/profiles?cursor=repeat"}}`,
+			fetch: func(ctx context.Context, client *asc.Client) error {
+				_, err := findActiveProfiles(ctx, client, "bundle-main", "IOS_APP_STORE")
+				return err
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/bundleIds/bundle-main/profiles?cursor=repeat",
+		},
+		{
+			name:     "profile certificates",
+			path:     "/v1/profiles/profile-main/certificates",
+			response: `{"data":[],"links":{"next":"https://api.appstoreconnect.apple.com/v1/profiles/profile-main/certificates?cursor=repeat"}}`,
+			fetch: func(ctx context.Context, client *asc.Client) error {
+				_, err := findProfileCertificates(ctx, client, "profile-main", "")
+				return err
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/profiles/profile-main/certificates?cursor=repeat",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			requestURLs := []string{}
+			client := newSigningFetchTestClient(t, func(req *http.Request) *http.Response {
+				calls++
+				requestURLs = append(requestURLs, req.URL.String())
+				if req.URL.Path != tt.path {
+					t.Fatalf("request path = %q, want %q", req.URL.Path, tt.path)
+				}
+				if calls <= 2 {
+					return signingFetchJSONResponse(http.StatusOK, tt.response)
+				}
+				return signingFetchJSONResponse(http.StatusBadRequest, `{"errors":[{"status":"400","detail":"test stop"}]}`)
+			})
+
+			err := tt.fetch(context.Background(), client)
+			if !errors.Is(err, asc.ErrRepeatedPaginationURL) {
+				t.Fatalf("fetch error = %v, want ErrRepeatedPaginationURL", err)
+			}
+			if calls != 2 {
+				t.Fatalf("request count = %d, want 2", calls)
+			}
+			if len(requestURLs) != 2 || requestURLs[1] != tt.wantSecond {
+				t.Fatalf("request URLs = %v, want continuation %q", requestURLs, tt.wantSecond)
+			}
+		})
+	}
+}
+
+func TestSigningFetchPaginationFollowsDistinctNextURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		first      string
+		second     string
+		fetch      func(context.Context, *asc.Client) (int, error)
+		wantSecond string
+	}{
+		{
+			name:   "certificates",
+			path:   "/v1/certificates",
+			first:  `{"data":[{"type":"certificates","id":"cert-1","attributes":{"certificateType":"IOS_DISTRIBUTION"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/certificates?cursor=page-2"}}`,
+			second: `{"data":[{"type":"certificates","id":"cert-2","attributes":{"certificateType":"IOS_DISTRIBUTION"}}],"links":{}}`,
+			fetch: func(ctx context.Context, client *asc.Client) (int, error) {
+				response, err := findCertificates(ctx, client, "IOS_APP_STORE", "IOS_DISTRIBUTION")
+				if err != nil {
+					return 0, err
+				}
+				return len(response.Data), nil
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/certificates?cursor=page-2",
+		},
+		{
+			name:   "bundle ID profiles",
+			path:   "/v1/bundleIds/bundle-main/profiles",
+			first:  `{"data":[{"type":"profiles","id":"profile-1","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/bundleIds/bundle-main/profiles?cursor=page-2"}}`,
+			second: `{"data":[{"type":"profiles","id":"profile-2","attributes":{"profileType":"IOS_APP_STORE","profileState":"ACTIVE"}}],"links":{}}`,
+			fetch: func(ctx context.Context, client *asc.Client) (int, error) {
+				response, err := findActiveProfiles(ctx, client, "bundle-main", "IOS_APP_STORE")
+				return len(response), err
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/bundleIds/bundle-main/profiles?cursor=page-2",
+		},
+		{
+			name:   "profile certificates",
+			path:   "/v1/profiles/profile-main/certificates",
+			first:  `{"data":[{"type":"certificates","id":"cert-1","attributes":{"certificateType":"IOS_DISTRIBUTION"}}],"links":{"next":"https://api.appstoreconnect.apple.com/v1/profiles/profile-main/certificates?cursor=page-2"}}`,
+			second: `{"data":[{"type":"certificates","id":"cert-2","attributes":{"certificateType":"IOS_DISTRIBUTION"}}],"links":{}}`,
+			fetch: func(ctx context.Context, client *asc.Client) (int, error) {
+				response, err := findProfileCertificates(ctx, client, "profile-main", "")
+				if err != nil {
+					return 0, err
+				}
+				return len(response.Data), nil
+			},
+			wantSecond: "https://api.appstoreconnect.apple.com/v1/profiles/profile-main/certificates?cursor=page-2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			requestURLs := []string{}
+			client := newSigningFetchTestClient(t, func(req *http.Request) *http.Response {
+				calls++
+				requestURLs = append(requestURLs, req.URL.String())
+				if req.URL.Path != tt.path {
+					t.Fatalf("request path = %q, want %q", req.URL.Path, tt.path)
+				}
+				switch calls {
+				case 1:
+					return signingFetchJSONResponse(http.StatusOK, tt.first)
+				case 2:
+					return signingFetchJSONResponse(http.StatusOK, tt.second)
+				default:
+					return signingFetchJSONResponse(http.StatusBadRequest, `{"errors":[{"status":"400","detail":"unexpected third request"}]}`)
+				}
+			})
+
+			count, err := tt.fetch(context.Background(), client)
+			if err != nil {
+				t.Fatalf("fetch error = %v", err)
+			}
+			if count != 2 {
+				t.Fatalf("result count = %d, want 2", count)
+			}
+			if calls != 2 {
+				t.Fatalf("request count = %d, want 2", calls)
+			}
+			if len(requestURLs) != 2 || requestURLs[1] != tt.wantSecond {
+				t.Fatalf("request URLs = %v, want continuation %q", requestURLs, tt.wantSecond)
+			}
+		})
+	}
+}
+
 func TestResolveSigningAssetsUsesOnlyExistingProfileCertificates(t *testing.T) {
 	profileContent := base64.StdEncoding.EncodeToString([]byte("profile"))
 	profileCertificateContent := base64.StdEncoding.EncodeToString([]byte("profile-certificate"))

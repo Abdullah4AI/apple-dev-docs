@@ -462,6 +462,7 @@ func TestPublicRetryDelayParsesRetryAfterHeader(t *testing.T) {
 		{name: "seconds", value: "2", want: 2 * time.Second},
 		{name: "seconds capped", value: "600", want: maxDelay},
 		{name: "seconds overflow capped", value: "9223372036854775807", want: maxDelay},
+		{name: "seconds beyond int64 capped", value: "9223372036854775808", want: maxDelay},
 		{name: "zero seconds", value: "0", want: 0},
 		{name: "negative seconds", value: "-5", want: 0},
 		{name: "unparsable", value: "soon", want: 0},

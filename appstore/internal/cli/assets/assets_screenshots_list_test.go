@@ -53,6 +53,52 @@ func TestExecuteScreenshotListCommandResolvesVersionLocalizationByVersionIDAndLo
 	}
 }
 
+func TestExecuteScreenshotListCommandIncludesPaginatedScreenshotSetsAndScreenshots(t *testing.T) {
+	const setsNext = "https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/loc-1/appScreenshotSets?cursor=sets-2"
+	const screenshotsNext = "https://api.appstoreconnect.apple.com/v1/appScreenshotSets/set-1/appScreenshots?cursor=screenshots-2"
+
+	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/appStoreVersionLocalizations/loc-1/appScreenshotSets":
+			if req.URL.Query().Get("cursor") == "sets-2" {
+				writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-2","attributes":{"screenshotDisplayType":"APP_IPAD_PRO_129"}}],"links":{}}`)
+				return
+			}
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{"next":"`+setsNext+`"}}`)
+		case "/v1/appScreenshotSets/set-1/appScreenshots":
+			if req.URL.Query().Get("cursor") == "screenshots-2" {
+				writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"shot-2","attributes":{"fileName":"02-settings.png"}}],"links":{}}`)
+				return
+			}
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"01-home.png"}}],"links":{"next":"`+screenshotsNext+`"}}`)
+		case "/v1/appScreenshotSets/set-2/appScreenshots":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"shot-3","attributes":{"fileName":"03-ipad.png"}}],"links":{}}`)
+		default:
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.String())
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+
+	result, err := executeScreenshotListCommand(context.Background(), screenshotListCommandOptions{
+		VersionLocalizationID: "loc-1",
+	}, screenshotListDependencies{
+		GetClient:      func() (*asc.Client, error) { return client, nil },
+		RequestContext: shared.ContextWithTimeout,
+	})
+	if err != nil {
+		t.Fatalf("executeScreenshotListCommand() error: %v", err)
+	}
+	if len(result.Sets) != 2 {
+		t.Fatalf("screenshot sets = %d, want 2", len(result.Sets))
+	}
+	if got := result.Sets[0].Screenshots; len(got) != 2 || got[0].ID != "shot-1" || got[1].ID != "shot-2" {
+		t.Fatalf("set-1 screenshots = %#v, want shot-1 and shot-2", got)
+	}
+	if got := result.Sets[1].Screenshots; len(got) != 1 || got[0].ID != "shot-3" {
+		t.Fatalf("set-2 screenshots = %#v, want shot-3", got)
+	}
+}
+
 func TestExecuteScreenshotListCommandUsesASCAppIDForVersionIDPlatformVerification(t *testing.T) {
 	t.Setenv("ASC_APP_ID", "123456789")
 	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,6 +115,96 @@ func TestAssetsScreenshotsDownloadCommandRequiredFlags(t *testing.T) {
 				t.Fatalf("error = %v, want flag.ErrHelp", runErr)
 			}
 		})
+	}
+}
+
+func TestAssetsScreenshotsDownloadCommandIncludesPaginatedSetsAndScreenshots(t *testing.T) {
+	const setsNext = "https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/loc-1/appScreenshotSets?cursor=sets-2"
+	const screenshotsNext = "https://api.appstoreconnect.apple.com/v1/appScreenshotSets/set-1/appScreenshots?cursor=screenshots-2"
+	mediaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/media/png" {
+			t.Errorf("unexpected media request: %s %s", req.Method, req.URL.String())
+			http.Error(w, "unexpected media request", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "image-data")
+	}))
+	t.Cleanup(mediaServer.Close)
+	imageAsset := fmt.Sprintf(`"imageAsset":{"templateUrl":%q,"width":1,"height":1}`, mediaServer.URL+"/media/{f}")
+
+	client := newAssetsUploadTestServerClient(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/appStoreVersionLocalizations/loc-1/appScreenshotSets":
+			if req.URL.Query().Get("cursor") == "sets-2" {
+				writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-2","attributes":{"screenshotDisplayType":"APP_IPAD_PRO_129"}}],"links":{}}`)
+				return
+			}
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshotSets","id":"set-1","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}}],"links":{"next":"`+setsNext+`"}}`)
+		case "/v1/appScreenshotSets/set-1/appScreenshots":
+			if req.URL.Query().Get("cursor") == "screenshots-2" {
+				writeAssetsTestJSON(w, http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"shot-2","attributes":{"fileName":"02-settings.png",%s}}],"links":{}}`, imageAsset))
+				return
+			}
+			writeAssetsTestJSON(w, http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"shot-1","attributes":{"fileName":"01-home.png",%s}}],"links":{"next":"`+screenshotsNext+`"}}`, imageAsset))
+		case "/v1/appScreenshotSets/set-2/appScreenshots":
+			writeAssetsTestJSON(w, http.StatusOK, fmt.Sprintf(`{"data":[{"type":"appScreenshots","id":"shot-3","attributes":{"fileName":"03-ipad.png",%s}}],"links":{}}`, imageAsset))
+		case "/v1/appScreenshotSets/set-1/relationships/appScreenshots":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"shot-1"},{"type":"appScreenshots","id":"shot-2"}],"links":{}}`)
+		case "/v1/appScreenshotSets/set-2/relationships/appScreenshots":
+			writeAssetsTestJSON(w, http.StatusOK, `{"data":[{"type":"appScreenshots","id":"shot-3"}],"links":{}}`)
+		default:
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.String())
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		return client, nil
+	}))
+
+	outputDir := filepath.Join(t.TempDir(), "screenshots")
+	cmd := AssetsScreenshotsDownloadCommand()
+	cmd.FlagSet.SetOutput(io.Discard)
+	if err := cmd.FlagSet.Parse([]string{
+		"--version-localization", "loc-1",
+		"--output-dir", outputDir,
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), cmd.FlagSet.Args())
+	})
+	if runErr != nil {
+		t.Fatalf("download command error: %v (stdout=%q, stderr=%q)", runErr, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	var result struct {
+		Total      int `json:"total"`
+		Downloaded int `json:"downloaded"`
+		Failed     int `json:"failed"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode stdout JSON: %v (stdout=%q)", err, stdout)
+	}
+	if result.Total != 3 || result.Downloaded != 3 || result.Failed != 0 {
+		t.Fatalf("unexpected result summary: %+v", result)
+	}
+	for _, path := range []string{
+		filepath.Join(outputDir, "APP_IPHONE_65", "01_shot-1_01-home.png"),
+		filepath.Join(outputDir, "APP_IPHONE_65", "02_shot-2_02-settings.png"),
+		filepath.Join(outputDir, "APP_IPAD_PRO_129", "01_shot-3_03-ipad.png"),
+	} {
+		if data, err := os.ReadFile(path); err != nil {
+			t.Fatalf("read downloaded file %q: %v", path, err)
+		} else if string(data) != "image-data" {
+			t.Fatalf("downloaded file %q = %q, want image-data", path, data)
+		}
 	}
 }
 

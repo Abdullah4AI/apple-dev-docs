@@ -101,3 +101,32 @@ func TestAnalyticsReportRequestOutputUsesCurrentSchema(t *testing.T) {
 		})
 	}
 }
+
+func TestSalesReportResultRowsShowsMissingAvailabilityWithoutFileColumns(t *testing.T) {
+	available := false
+	headers, rows := salesReportResultRows(&SalesReportResult{
+		VendorNumber:  "12345678",
+		ReportType:    "SALES",
+		ReportSubType: "SUMMARY",
+		Frequency:     "DAILY",
+		ReportDate:    "2026-08-18",
+		Version:       "1_0",
+		Available:     &available,
+	})
+	if len(headers) != 7 || headers[6] != "Available" {
+		t.Fatalf("headers = %v, want availability metadata without file columns", headers)
+	}
+	if len(rows) != 1 || len(rows[0]) != 7 || rows[0][6] != "false" {
+		t.Fatalf("rows = %v, want available=false", rows)
+	}
+}
+
+func TestSalesReportResultRowsPreservesDownloadedFileColumns(t *testing.T) {
+	headers, rows := salesReportResultRows(&SalesReportResult{FilePath: "report.tsv.gz"})
+	if len(headers) != 10 || headers[6] != "Compressed File" {
+		t.Fatalf("headers = %v, want existing download columns", headers)
+	}
+	if len(rows) != 1 || len(rows[0]) != 10 || rows[0][6] != "report.tsv.gz" {
+		t.Fatalf("rows = %v, want existing download row", rows)
+	}
+}

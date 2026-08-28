@@ -545,7 +545,7 @@ func EncryptionDeclarationsAssignBuildsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("encryption declarations assign-builds", flag.ExitOnError)
 
 	declarationID := fs.String("id", "", "Encryption declaration ID (required)")
-	builds := fs.String("build-id", "", "Build IDs to assign (comma-separated)")
+	builds := shared.BindOnceCSVFlag(fs, "build-id", "Build IDs to assign (comma-separated)")
 	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	output := shared.BindOutputFlags(fs)
 
@@ -561,7 +561,8 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuilds.Apply(builds); err != nil {
+			buildValue := builds.String()
+			if err := legacyBuilds.Apply(&buildValue); err != nil {
 				return err
 			}
 
@@ -571,7 +572,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 
-			buildIDs := shared.SplitCSV(*builds)
+			buildIDs := shared.SplitCSV(buildValue)
 			if len(buildIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
 				return shared.MissingRequiredUsageError("--build-id")

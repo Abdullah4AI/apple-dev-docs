@@ -304,18 +304,11 @@ func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID st
 		seen  = make(map[string]bool)
 	)
 
-	if strings.TrimSpace(next) != "" {
-		resp, err := getAnalyticsReportsPage(ctx, client, requestID, asc.WithAnalyticsReportsNextURL(next))
-		if err != nil {
-			return nil, asc.Links{}, err
-		}
-		return resp.Data, resp.Links, nil
-	}
-
 	if limit <= 0 {
 		limit = analyticsMaxLimit
 	}
-	nextURL := ""
+	nextURL := strings.TrimSpace(next)
+	firstPage := true
 	for {
 		var resp *asc.AnalyticsReportsResponse
 		var err error
@@ -331,11 +324,14 @@ func fetchAnalyticsReports(ctx context.Context, client *asc.Client, requestID st
 		if err != nil {
 			return nil, asc.Links{}, err
 		}
-		if links.Self == "" {
+		if firstPage && nextURL != "" {
+			links = resp.Links
+		} else if links.Self == "" {
 			links.Self = resp.Links.Self
 		}
 		all = append(all, resp.Data...)
 		links.Next = resp.Links.Next
+		firstPage = false
 		if !paginate || resp.Links.Next == "" {
 			break
 		}

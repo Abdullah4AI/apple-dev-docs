@@ -354,6 +354,7 @@ func isKnownFailureParameter(name string) bool {
 // dimension, so only public flags and compatibility aliases that help diagnose
 // common agent failures belong here.
 var knownFailureParameters = map[string]struct{}{
+	"access-all-builds":                 {},
 	"access-type":                       {},
 	"achievement-id":                    {},
 	"activated":                         {},
@@ -489,6 +490,7 @@ var knownFailureParameters = map[string]struct{}{
 	"language":                          {},
 	"last-name":                         {},
 	"leaderboard-id":                    {},
+	"leaderboard-ids":                   {},
 	"leaderboard-set-id":                {},
 	"limit":                             {},
 	"link":                              {},
@@ -602,6 +604,8 @@ var knownFailureParameters = map[string]struct{}{
 	"term":                              {},
 	"territories":                       {},
 	"territory":                         {},
+	"territory-fields":                  {},
+	"territory-limit":                   {},
 	"territory-availability":            {},
 	"test-notes":                        {},
 	"tester":                            {},

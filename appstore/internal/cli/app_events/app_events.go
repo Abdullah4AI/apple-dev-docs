@@ -57,6 +57,12 @@ func AppEventsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
+	eventState := fs.String("event-state", "", "[experimental] Filter by lifecycle state(s), comma-separated: "+strings.Join(appEventStateList(), ", "))
+	ids := fs.String("id", "", "[experimental] Filter by app event ID(s), comma-separated")
+	fields := fs.String("fields", "", "[experimental] Fields to include: "+strings.Join(appEventFieldsList(), ", "))
+	localizationFields := fs.String("localization-fields", "", "[experimental] Fields to include for localizations: "+strings.Join(appEventLocalizationFieldsList(), ", "))
+	include := fs.String("include", "", "[experimental] Include related resources: "+strings.Join(appEventIncludeList(), ", "))
+	localizationsLimit := fs.Int("localizations-limit", 0, "[experimental] Maximum included localizations (1-50)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -70,15 +76,73 @@ func AppEventsListCommand() *ffcli.Command {
 
 Examples:
   asc app-events list --app "APP_ID"
+  asc app-events list --app "APP_ID" --event-state PUBLISHED --include localizations --localizations-limit 10
   asc app-events list --app "APP_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events list: --limit must be between 1 and 200")
-			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("app-events list: %w", err)
+			}
+			if err := shared.RejectNextFlagConflicts(
+				fs,
+				*next,
+				"app-events list",
+				"event-state",
+				"id",
+				"fields",
+				"localization-fields",
+				"include",
+				"localizations-limit",
+			); err != nil {
+				return err
+			}
+			for _, selection := range []struct {
+				name  string
+				value string
+			}{
+				{name: "event-state", value: *eventState},
+				{name: "id", value: *ids},
+				{name: "fields", value: *fields},
+				{name: "localization-fields", value: *localizationFields},
+				{name: "include", value: *include},
+			} {
+				if !appEventFlagWasProvided(fs, selection.name) {
+					continue
+				}
+				if err := validateAppEventCSV(selection.value, "--"+selection.name); err != nil {
+					return shared.UsageErrorf("app-events list: %v", err)
+				}
+			}
+			localizationsLimitProvided := appEventFlagWasProvided(fs, "localizations-limit")
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return shared.UsageErrorf("app-events list: --limit must be between 1 and 200")
+			}
+			if localizationsLimitProvided && (*localizationsLimit < 1 || *localizationsLimit > 50) {
+				return shared.UsageErrorf("app-events list: --localizations-limit must be between 1 and 50")
+			}
+
+			stateValues, err := normalizeAppEventStates(*eventState)
+			if err != nil {
+				return shared.UsageErrorf("app-events list: %v", err)
+			}
+			fieldValues, err := shared.NormalizeSelection(*fields, appEventFieldsList(), "--fields")
+			if err != nil {
+				return shared.UsageErrorf("app-events list: %v", err)
+			}
+			localizationFieldValues, err := shared.NormalizeSelection(*localizationFields, appEventLocalizationFieldsList(), "--localization-fields")
+			if err != nil {
+				return shared.UsageErrorf("app-events list: %v", err)
+			}
+			includeValues, err := shared.NormalizeSelection(*include, appEventIncludeList(), "--include")
+			if err != nil {
+				return shared.UsageErrorf("app-events list: %v", err)
+			}
+			if len(localizationFieldValues) > 0 && !shared.HasInclude(includeValues, "localizations") {
+				return shared.UsageError("app-events list: --localization-fields requires --include localizations")
+			}
+			if *localizationsLimit > 0 && !shared.HasInclude(includeValues, "localizations") {
+				return shared.UsageError("app-events list: --localizations-limit requires --include localizations")
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -96,6 +160,12 @@ Examples:
 			defer cancel()
 
 			opts := []asc.AppEventsOption{
+				asc.WithAppEventsStates(stateValues),
+				asc.WithAppEventsIDs(shared.SplitCSV(*ids)),
+				asc.WithAppEventsFields(fieldValues),
+				asc.WithAppEventsLocalizationFields(localizationFieldValues),
+				asc.WithAppEventsInclude(includeValues),
+				asc.WithAppEventsLocalizationsLimit(*localizationsLimit),
 				asc.WithAppEventsLimit(*limit),
 				asc.WithAppEventsNextURL(*next),
 			}

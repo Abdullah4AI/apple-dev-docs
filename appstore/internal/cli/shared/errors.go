@@ -213,7 +213,7 @@ func IsValidationError(err error) bool {
 // UsageError prints a CLI validation error and returns flag.ErrHelp so callers
 // map the failure to usage exit code semantics.
 func UsageError(message string) error {
-	trimmed := strings.TrimSpace(message)
+	trimmed := strings.TrimSpace(SanitizeTerminal(message))
 	if trimmed != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", trimmed)
 	}

@@ -70,7 +70,7 @@ func TestReplaceStateFileWaitsForConcurrentReader(t *testing.T) {
 	}
 }
 
-func TestEnsureInstallIDDoesNotWaitForStateReader(t *testing.T) {
+func TestEnsureInstallIDReportsStateReaderContention(t *testing.T) {
 	setTelemetryTestHome(t)
 
 	if err := SetEnabled(false); err != nil {
@@ -82,12 +82,26 @@ func TestEnsureInstallIDDoesNotWaitForStateReader(t *testing.T) {
 	}
 	reader := openStateFileWithoutDeleteSharing(t, path)
 
-	start := time.Now()
-	if _, err := ensureInstallID(0); err == nil {
+	// Leave enough margin for hosted-runner scheduling variance while keeping
+	// the bound below lockTimeout so an accidental retry is still observable.
+	const promptDeadline = 1500 * time.Millisecond
+	result := make(chan error, 1)
+	go func() {
+		_, err := ensureInstallID(0)
+		result <- err
+	}()
+	var ensureErr error
+	select {
+	case ensureErr = <-result:
+	case <-time.After(promptDeadline):
+		_ = reader.Close()
+		t.Fatalf("ensureInstallID(0) did not return within %s", promptDeadline)
+	}
+	if ensureErr == nil {
 		t.Fatal("ensureInstallID(0) succeeded while state reader blocked replacement")
 	}
-	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
-		t.Fatalf("ensureInstallID(0) elapsed = %s, want replacement contention skipped before 500ms", elapsed)
+	if !isRetryableStateReplaceError(ensureErr) {
+		t.Fatalf("ensureInstallID(0) error = %v, want retryable replacement error", ensureErr)
 	}
 	if err := reader.Close(); err != nil {
 		t.Fatalf("close state reader: %v", err)

@@ -202,10 +202,14 @@ type BumpVersionResult struct {
 }
 
 func resolvedProjectDir(projectDir string) string {
+	projectDir = trimTrailingPathSeparators(projectDir)
 	if projectDir == "" {
 		return "."
 	}
 	if strings.HasSuffix(projectDir, ".xcodeproj") {
+		if resolved, err := resolveProjectParentTraversal(projectDir); err == nil {
+			projectDir = resolved
+		}
 		return filepath.Dir(projectDir)
 	}
 	return projectDir
@@ -729,6 +733,7 @@ func findXcodeproj(projectDir string) (string, error) {
 	if projectDir == "" {
 		projectDir = "."
 	}
+	projectDir = trimTrailingPathSeparators(projectDir)
 	if strings.HasSuffix(projectDir, ".xcodeproj") {
 		info, err := os.Stat(projectDir)
 		if err != nil {
@@ -737,9 +742,18 @@ func findXcodeproj(projectDir string) (string, error) {
 		if !info.IsDir() {
 			return "", fmt.Errorf("%s is not an .xcodeproj directory", projectDir)
 		}
-		return projectDir, nil
+		resolved, err := resolveProjectParentTraversal(projectDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve Xcode project path %s: %w", projectDir, err)
+		}
+		return resolved, nil
 	}
 
+	resolvedProjectDir, err := resolveProjectParentTraversal(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve Xcode project directory %s: %w", projectDir, err)
+	}
+	projectDir = resolvedProjectDir
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to read project directory: %w", err)
@@ -758,6 +772,39 @@ func findXcodeproj(projectDir string) (string, error) {
 	default:
 		return "", fmt.Errorf("multiple .xcodeproj found in %s (%s); use --project to pick one", projectDir, strings.Join(matches, ", "))
 	}
+}
+
+func resolveProjectParentTraversal(path string) (string, error) {
+	slashPath := filepath.ToSlash(path)
+	components := strings.Split(slashPath, "/")
+	lastParent := -1
+	for index, component := range components {
+		if component == ".." {
+			lastParent = index
+		}
+	}
+	if lastParent == -1 {
+		return path, nil
+	}
+
+	prefix := filepath.FromSlash(strings.Join(components[:lastParent+1], "/"))
+	resolvedPrefix, err := filepath.EvalSymlinks(prefix)
+	if err != nil {
+		return "", err
+	}
+	suffix := filepath.FromSlash(strings.Join(components[lastParent+1:], "/"))
+	if suffix == "" {
+		return resolvedPrefix, nil
+	}
+	return filepath.Join(resolvedPrefix, suffix), nil
+}
+
+func trimTrailingPathSeparators(path string) string {
+	minimumLength := len(filepath.VolumeName(path)) + 1
+	for len(path) > minimumLength && os.IsPathSeparator(path[len(path)-1]) {
+		path = path[:len(path)-1]
+	}
+	return path
 }
 
 // isVariableReference checks if a value is an Xcode variable like $(MARKETING_VERSION).

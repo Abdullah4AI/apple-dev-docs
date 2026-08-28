@@ -120,6 +120,31 @@ func TestAppStoreVersionsRows_UsesDisplayPlatform(t *testing.T) {
 	}
 }
 
+func TestPrintTable_AppStoreVersionsLatestResult(t *testing.T) {
+	result := &AppStoreVersionsLatestResult{
+		Items: []Resource[AppStoreVersionAttributes]{
+			{
+				ID: "v1",
+				Attributes: AppStoreVersionAttributes{
+					VersionString: "2.4.1",
+					Platform:      PlatformIOS,
+					AppStoreState: "READY_FOR_SALE",
+					CreatedDate:   "2026-02-20T00:30:00Z",
+				},
+			},
+		},
+		TotalCount: 1,
+		HasMore:    false,
+	}
+
+	output := captureStdout(t, func() error {
+		return PrintTable(result)
+	})
+	if !strings.Contains(output, "2.4.1") || !strings.Contains(output, "iOS") {
+		t.Fatalf("expected latest-version table row, got %q", output)
+	}
+}
+
 func TestPreReleaseVersionsRows_UsesDisplayPlatform(t *testing.T) {
 	t.Parallel()
 

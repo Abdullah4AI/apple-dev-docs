@@ -78,7 +78,14 @@ func (c *Client) GetRatings(ctx context.Context, appID, country string) (*AppRat
 	}
 
 	// Histogram scraping is best-effort and must remain non-fatal.
-	_ = c.fetchHistogram(ctx, appID, normalizedCountry, ratings)
+	if err := c.fetchHistogram(ctx, appID, normalizedCountry, ratings); err != nil {
+		// A best-effort auxiliary request may fail for storefront reasons, but
+		// it must not turn an explicit caller cancellation into a successful
+		// ratings response.
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+	}
 	return ratings, nil
 }
 

@@ -42,9 +42,9 @@ func TestRepeatedCSVFlagRejectedEndToEnd(t *testing.T) {
 
 	// The rejection is a flag parse failure, not a help request: `--help` exits
 	// 0 and starts with the usage banner, so the first stderr line has to be the
-	// flag error itself.
+	// concise flag error itself.
 	firstLine, _, _ := strings.Cut(stderr, "\n")
-	wantFirstLine := fmt.Sprintf("invalid value %q for flag -certificate: %s", "CERT_B", wantMessage)
+	wantFirstLine := fmt.Sprintf("Error: invalid value %q for flag -certificate: %s", "CERT_B", wantMessage)
 	if firstLine != wantFirstLine {
 		t.Fatalf("first stderr line = %q, want %q", firstLine, wantFirstLine)
 	}

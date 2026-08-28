@@ -58,8 +58,18 @@ Examples:
 func ProfilesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
+	name := fs.String("name", "", "[experimental] Filter by profile name(s), comma-separated")
+	ids := fs.String("id", "", "[experimental] Filter by profile ID(s), comma-separated")
 	profileType := fs.String("profile-type", "", "Filter by profile type(s), comma-separated")
 	profileState := fs.String("profile-state", "", "Filter by profile state(s): ACTIVE, INVALID (default: ACTIVE,INVALID)")
+	sort := fs.String("sort", "", "[experimental] Sort by: "+strings.Join(profileSortList(), ", "))
+	fields := fs.String("fields", "", "[experimental] Fields to include: "+strings.Join(profileFieldsList(), ", "))
+	bundleIDFields := fs.String("bundle-id-fields", "", "[experimental] Bundle ID fields to include: "+strings.Join(profileBundleIDFieldsList(), ", "))
+	deviceFields := fs.String("device-fields", "", "[experimental] Device fields to include: "+strings.Join(profileDeviceFieldsList(), ", "))
+	certificateFields := fs.String("certificate-fields", "", "[experimental] Certificate fields to include: "+strings.Join(profileCertificateFieldsList(), ", "))
+	include := fs.String("include", "", "[experimental] Include related resources: "+strings.Join(profileIncludeList(), ", "))
+	devicesLimit := fs.Int("limit-devices", 0, "[experimental] Maximum included devices (1-50)")
+	certificatesLimit := fs.Int("limit-certificates", 0, "[experimental] Maximum included certificates (1-50)")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -73,17 +83,107 @@ func ProfilesListCommand() *ffcli.Command {
 
 Examples:
   asc profiles list
+  asc profiles list --name "Profile"
+  asc profiles list --id "PROFILE_ID"
   asc profiles list --profile-type IOS_APP_DEVELOPMENT
   asc profiles list --profile-state INVALID
+  asc profiles list --include devices --device-fields name,udid --limit-devices 25
   asc profiles list --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("profiles list: --limit must be between 1 and 200")
-			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("profiles list: %w", err)
+			}
+			if err := shared.RejectNextFlagConflicts(
+				fs,
+				*next,
+				"profiles list",
+				"name", "id", "profile-type", "profile-state", "sort", "fields", "bundle-id-fields", "device-fields", "certificate-fields", "include", "limit-devices", "limit-certificates", "limit",
+			); err != nil {
+				return err
+			}
+			provided := map[string]bool{}
+			fs.Visit(func(parsed *flag.Flag) {
+				provided[parsed.Name] = true
+			})
+			for _, selector := range []struct {
+				name  string
+				value string
+			}{
+				{name: "name", value: *name},
+				{name: "id", value: *ids},
+				{name: "profile-type", value: *profileType},
+				{name: "profile-state", value: *profileState},
+				{name: "sort", value: *sort},
+				{name: "fields", value: *fields},
+				{name: "bundle-id-fields", value: *bundleIDFields},
+				{name: "device-fields", value: *deviceFields},
+				{name: "certificate-fields", value: *certificateFields},
+				{name: "include", value: *include},
+			} {
+				if provided[selector.name] && len(shared.SplitCSV(selector.value)) == 0 {
+					return shared.UsageErrorf("profiles list: --%s must not be empty", selector.name)
+				}
+			}
+			if *limit != 0 && (*limit < 1 || *limit > 200) {
+				return shared.UsageError("profiles list: --limit must be between 1 and 200")
+			}
+			if profilesListFlagWasProvided(fs, "limit-devices") && (*devicesLimit < 1 || *devicesLimit > 50) {
+				return shared.UsageError("profiles list: --limit-devices must be between 1 and 50")
+			}
+			if profilesListFlagWasProvided(fs, "limit-certificates") && (*certificatesLimit < 1 || *certificatesLimit > 50) {
+				return shared.UsageError("profiles list: --limit-certificates must be between 1 and 50")
+			}
+
+			profileSort, err := normalizeProfileSort(*sort)
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			profileFields, err := normalizeProfileFields(*fields, "--fields")
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			bundleIDFieldsValue, err := normalizeProfileFieldsSelection(*bundleIDFields, profileBundleIDFieldsList(), "--bundle-id-fields")
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			deviceFieldsValue, err := normalizeProfileFieldsSelection(*deviceFields, profileDeviceFieldsList(), "--device-fields")
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			certificateFieldsValue, err := normalizeProfileFieldsSelection(*certificateFields, profileCertificateFieldsList(), "--certificate-fields")
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			includeValues, err := normalizeProfileInclude(*include)
+			if err != nil {
+				return shared.UsageError(fmt.Sprintf("profiles list: %v", err))
+			}
+			if len(bundleIDFieldsValue) > 0 && !shared.HasInclude(includeValues, "bundleId") {
+				const message = "--bundle-id-fields requires --include bundleId"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
+			}
+			if len(deviceFieldsValue) > 0 && !shared.HasInclude(includeValues, "devices") {
+				const message = "--device-fields requires --include devices"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
+			}
+			if len(certificateFieldsValue) > 0 && !shared.HasInclude(includeValues, "certificates") {
+				const message = "--certificate-fields requires --include certificates"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
+			}
+			if *devicesLimit != 0 && !shared.HasInclude(includeValues, "devices") {
+				const message = "--limit-devices requires --include devices"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
+			}
+			if *certificatesLimit != 0 && !shared.HasInclude(includeValues, "certificates") {
+				const message = "--limit-certificates requires --include certificates"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
 			}
 
 			profileTypes := shared.SplitCSVUpper(*profileType)
@@ -105,8 +205,38 @@ Examples:
 				asc.WithProfilesNextURL(*next),
 				asc.WithProfilesStates(profileStates),
 			}
+			if strings.TrimSpace(*name) != "" {
+				opts = append(opts, asc.WithProfilesFilterName(*name))
+			}
+			if idsValue := shared.SplitCSV(*ids); len(idsValue) > 0 {
+				opts = append(opts, asc.WithProfilesFilterIDs(idsValue))
+			}
 			if len(profileTypes) > 0 {
 				opts = append(opts, asc.WithProfilesTypes(profileTypes))
+			}
+			if profileSort != "" {
+				opts = append(opts, asc.WithProfilesSort(profileSort))
+			}
+			if len(profileFields) > 0 {
+				opts = append(opts, asc.WithProfilesFields(profileFields))
+			}
+			if len(bundleIDFieldsValue) > 0 {
+				opts = append(opts, asc.WithProfilesBundleIDFields(bundleIDFieldsValue))
+			}
+			if len(deviceFieldsValue) > 0 {
+				opts = append(opts, asc.WithProfilesDeviceFields(deviceFieldsValue))
+			}
+			if len(certificateFieldsValue) > 0 {
+				opts = append(opts, asc.WithProfilesCertificateFields(certificateFieldsValue))
+			}
+			if len(includeValues) > 0 {
+				opts = append(opts, asc.WithProfilesInclude(includeValues))
+			}
+			if *devicesLimit > 0 {
+				opts = append(opts, asc.WithProfilesDevicesLimit(*devicesLimit))
+			}
+			if *certificatesLimit > 0 {
+				opts = append(opts, asc.WithProfilesCertificatesLimit(*certificatesLimit))
 			}
 
 			if *paginate {
@@ -135,6 +265,16 @@ Examples:
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+func profilesListFlagWasProvided(fs *flag.FlagSet, name string) bool {
+	provided := false
+	fs.Visit(func(parsed *flag.Flag) {
+		if parsed.Name == name {
+			provided = true
+		}
+	})
+	return provided
 }
 
 // ProfilesGetCommand returns the profiles view subcommand.
@@ -408,6 +548,64 @@ func normalizeProfileInclude(value string) ([]string, error) {
 
 func profileIncludeList() []string {
 	return []string{"bundleId", "certificates", "devices"}
+}
+
+func normalizeProfileSort(value string) (string, error) {
+	sortValues := shared.SplitCSV(value)
+	if len(sortValues) == 0 {
+		return "", nil
+	}
+	allowed := make(map[string]struct{}, len(profileSortList()))
+	for _, item := range profileSortList() {
+		allowed[item] = struct{}{}
+	}
+	for _, item := range sortValues {
+		if _, ok := allowed[item]; !ok {
+			return "", fmt.Errorf("--sort must be one of: %s", strings.Join(profileSortList(), ", "))
+		}
+	}
+	return strings.Join(sortValues, ","), nil
+}
+
+func normalizeProfileFields(value, flagName string) ([]string, error) {
+	return normalizeProfileFieldsSelection(value, profileFieldsList(), flagName)
+}
+
+func normalizeProfileFieldsSelection(value string, allowed []string, flagName string) ([]string, error) {
+	fields := shared.SplitCSV(value)
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		allowedSet[field] = struct{}{}
+	}
+	for _, field := range fields {
+		if _, ok := allowedSet[field]; !ok {
+			return nil, fmt.Errorf("%s must be one of: %s", flagName, strings.Join(allowed, ", "))
+		}
+	}
+	return fields, nil
+}
+
+func profileSortList() []string {
+	return []string{"name", "-name", "profileType", "-profileType", "profileState", "-profileState", "id", "-id"}
+}
+
+func profileFieldsList() []string {
+	return []string{"name", "platform", "profileType", "profileState", "profileContent", "uuid", "createdDate", "expirationDate", "bundleId", "devices", "certificates"}
+}
+
+func profileBundleIDFieldsList() []string {
+	return []string{"name", "platform", "identifier", "seedId", "profiles", "bundleIdCapabilities", "app"}
+}
+
+func profileDeviceFieldsList() []string {
+	return []string{"name", "platform", "udid", "deviceClass", "status", "model", "addedDate"}
+}
+
+func profileCertificateFieldsList() []string {
+	return []string{"name", "certificateType", "displayName", "serialNumber", "platform", "expirationDate", "certificateContent", "activated", "passTypeId"}
 }
 
 func normalizeProfileStates(value string) ([]string, error) {

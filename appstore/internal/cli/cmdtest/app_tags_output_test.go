@@ -332,14 +332,17 @@ func TestAppTagsListRejectsInvalidNextURL(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
 	if !strings.Contains(runErr.Error(), "app-tags list: --next must be an App Store Connect URL") {
 		t.Fatalf("expected invalid --next error, got %v", runErr)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
+	if !strings.Contains(stderr, "app-tags list: --next must be an App Store Connect URL") {
+		t.Fatalf("expected invalid --next diagnostic in stderr, got %q", stderr)
 	}
 }
 
@@ -455,6 +458,7 @@ func TestAppTagsListValidationErrors(t *testing.T) {
 			name:    "invalid fields",
 			args:    []string{"app-tags", "list", "--app", "app-1", "--paginate", "--fields", "name,bad"},
 			wantErr: "app-tags list: --fields must be one of:",
+			isHelp:  true,
 		},
 		{
 			name:    "territory fields require include",

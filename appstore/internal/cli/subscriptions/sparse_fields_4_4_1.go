@@ -47,3 +47,7 @@ func subscriptionGroupFieldsList() []string {
 func subscriptionPricePointFieldsList() []string {
 	return []string{"customerPrice", "proceeds", "proceedsYear2", "territory", "equalizations", "adjustedEqualizations"}
 }
+
+func subscriptionPriceFieldsList() []string {
+	return []string{"startDate", "preserved", "planType", "territory", "subscriptionPricePoint"}
+}

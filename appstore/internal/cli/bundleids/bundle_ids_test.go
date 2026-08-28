@@ -77,6 +77,22 @@ func TestBundleIDsCreateCommand_UsesBundleIDPlatformContract(t *testing.T) {
 	}
 }
 
+func TestBundleIDsListQueryFlagsAreExperimental(t *testing.T) {
+	cmd := BundleIDsListCommand()
+	for _, name := range []string{
+		"name", "platform", "identifier", "seed-id", "id", "sort", "fields",
+		"profile-fields", "capability-fields", "app-fields", "include", "profiles-limit", "capabilities-limit",
+	} {
+		flagValue := cmd.FlagSet.Lookup(name)
+		if flagValue == nil {
+			t.Fatalf("--%s is not registered", name)
+		}
+		if !strings.HasPrefix(flagValue.Usage, "[experimental] ") {
+			t.Fatalf("--%s usage = %q, want experimental lifecycle label", name, flagValue.Usage)
+		}
+	}
+}
+
 func TestBundleIDsUpdateCommand_MissingID(t *testing.T) {
 	cmd := BundleIDsUpdateCommand()
 

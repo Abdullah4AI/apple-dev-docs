@@ -15,6 +15,7 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared/errfmt"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -1222,6 +1223,73 @@ func TestWebAppsCreateRollsBackCreatedBundleIDWhenCreateFails(t *testing.T) {
 	}
 	if !errors.Is(err, createErr) {
 		t.Fatalf("expected wrapped create error, got %v", err)
+	}
+	if deletedBundleID != "com.example.app" {
+		t.Fatalf("expected rollback for bundle id %q, got %q", "com.example.app", deletedBundleID)
+	}
+}
+
+func TestWebAppsCreateMissingCompanyNameProvidesActionableHint(t *testing.T) {
+	origResolveAppCreateSession := resolveAppCreateSessionFn
+	origNewWebClient := newWebClientFn
+	origEnsureBundleID := ensureBundleIDFn
+	origDeleteBundleID := deleteBundleIDFn
+	t.Cleanup(func() {
+		resolveAppCreateSessionFn = origResolveAppCreateSession
+		newWebClientFn = origNewWebClient
+		ensureBundleIDFn = origEnsureBundleID
+		deleteBundleIDFn = origDeleteBundleID
+	})
+
+	const secret = "account-secret-token"
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnprocessableEntity,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"errors":[{
+				"title":"The provided entity is missing a required attribute",
+				"detail":"You must provide a value for the attribute 'companyName' with this request",
+				"code":"ENTITY_ERROR.ATTRIBUTE.REQUIRED",
+				"secret":"` + secret + `"
+			}]}`)),
+			Request: req,
+		}, nil
+	})
+	resolveAppCreateSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{Client: &http.Client{Transport: transport}}, "cache", nil
+	}
+	newWebClientFn = webcore.NewClient
+	ensureBundleIDFn = func(ctx context.Context, bundleID, appName, platform string) (bool, error) {
+		return true, nil
+	}
+	deletedBundleID := ""
+	deleteBundleIDFn = func(ctx context.Context, bundleID string) error {
+		deletedBundleID = bundleID
+		return nil
+	}
+	t.Setenv("ASC_WEB_MIN_REQUEST_INTERVAL", "0")
+
+	err := RunAppsCreate(context.Background(), AppsCreateRunOptions{
+		Name:     "My App",
+		BundleID: "com.example.app",
+		SKU:      "SKU123",
+		AppleID:  "user@example.com",
+		Output:   "json",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "Apple requires a company name for this account") {
+		t.Fatalf("error = %q, want actionable company-name guidance", err)
+	}
+	if !strings.Contains(err.Error(), "--company-name") {
+		t.Fatalf("error = %q, want --company-name hint", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked raw response body secret: %q", err)
+	}
+	if got := errfmt.FormatStderr(err); !strings.Contains(got, "Error: web apps create failed:") {
+		t.Fatalf("formatted stderr = %q, want command error prefix", got)
 	}
 	if deletedBundleID != "com.example.app" {
 		t.Fatalf("expected rollback for bundle id %q, got %q", "com.example.app", deletedBundleID)

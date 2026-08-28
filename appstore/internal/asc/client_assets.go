@@ -117,8 +117,24 @@ type AppPreviewUpdateRequest struct {
 }
 
 // GetAppScreenshotSets retrieves screenshot sets for a localization.
-func (c *Client) GetAppScreenshotSets(ctx context.Context, localizationID string) (*AppScreenshotSetsResponse, error) {
+func (c *Client) GetAppScreenshotSets(ctx context.Context, localizationID string, opts ...AppScreenshotSetsOption) (*AppScreenshotSetsResponse, error) {
+	query := &appScreenshotSetsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+	if query.limitSet && (query.limit < 1 || query.limit > appScreenshotCollectionLimitMax) {
+		return nil, fmt.Errorf("appScreenshotSets: limit must be between 1 and %d", appScreenshotCollectionLimitMax)
+	}
+
 	path := fmt.Sprintf("/v1/appStoreVersionLocalizations/%s/appScreenshotSets", localizationID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("appScreenshotSets: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildAppScreenshotSetsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -219,8 +235,24 @@ func (c *Client) DeleteAppScreenshotSet(ctx context.Context, setID string) error
 }
 
 // GetAppScreenshots retrieves screenshots for a set.
-func (c *Client) GetAppScreenshots(ctx context.Context, setID string) (*AppScreenshotsResponse, error) {
+func (c *Client) GetAppScreenshots(ctx context.Context, setID string, opts ...AppScreenshotsOption) (*AppScreenshotsResponse, error) {
+	query := &appScreenshotsQuery{}
+	for _, opt := range opts {
+		opt(query)
+	}
+	if query.limitSet && (query.limit < 1 || query.limit > appScreenshotCollectionLimitMax) {
+		return nil, fmt.Errorf("appScreenshots: limit must be between 1 and %d", appScreenshotCollectionLimitMax)
+	}
+
 	path := fmt.Sprintf("/v1/appScreenshotSets/%s/appScreenshots", setID)
+	if query.nextURL != "" {
+		if err := validateNextURL(query.nextURL); err != nil {
+			return nil, fmt.Errorf("appScreenshots: %w", err)
+		}
+		path = query.nextURL
+	} else if queryString := buildAppScreenshotsQuery(query); queryString != "" {
+		path += "?" + queryString
+	}
 	data, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err

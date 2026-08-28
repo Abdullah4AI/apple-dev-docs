@@ -61,12 +61,23 @@ type betaTesterUsagesQuery struct {
 
 type betaGroupsQuery struct {
 	listQuery
-	isInternalGroup *bool
-	appIDs          []string
-	buildIDs        []string
-	fields          []string
-	name            string
-	sort            string
+	isInternalGroup               *bool
+	publicLinkEnabled             *bool
+	publicLinkLimitEnabled        *bool
+	appIDs                        []string
+	buildIDs                      []string
+	ids                           []string
+	publicLink                    string
+	fields                        []string
+	appFields                     []string
+	buildFields                   []string
+	betaTesterFields              []string
+	betaRecruitmentCriteriaFields []string
+	include                       []string
+	betaTestersLimit              int
+	buildsLimit                   int
+	name                          string
+	sort                          string
 }
 
 type betaGroupBuildsQuery struct {
@@ -85,6 +96,9 @@ type betaTestersQuery struct {
 	ids          []string
 	groupIDs     []string
 	filterBuilds string
+	inviteTypes  []string
+	sort         string
+	include      []string
 }
 
 type betaAppReviewDetailsQuery struct {
@@ -182,14 +196,40 @@ func buildCrashQuery(query *crashQuery) string {
 
 func buildBetaGroupsQuery(query *betaGroupsQuery) string {
 	values := url.Values{}
+	fields := normalizeList(query.fields)
+	if len(fields) > 0 {
+		// A primary sparse fieldset must retain every included relationship or
+		// App Store Connect can omit the linkage and leave included resources
+		// unreachable from the primary data.
+		fields = normalizeUniqueList(append(fields, query.include...))
+	}
 	addCSV(values, "filter[app]", query.appIDs)
 	addCSV(values, "filter[builds]", query.buildIDs)
+	addCSV(values, "filter[id]", query.ids)
 	addValue(values, "filter[name]", query.name)
-	addCSV(values, "fields[betaGroups]", query.fields)
+	addValue(values, "filter[publicLink]", query.publicLink)
+	addCSV(values, "fields[betaGroups]", fields)
+	addCSV(values, "fields[apps]", query.appFields)
+	addCSV(values, "fields[builds]", query.buildFields)
+	addCSV(values, "fields[betaTesters]", query.betaTesterFields)
+	addCSV(values, "fields[betaRecruitmentCriteria]", query.betaRecruitmentCriteriaFields)
+	addCSV(values, "include", query.include)
 	addValue(values, "sort", query.sort)
 	addLimit(values, query.limit)
 	if query.isInternalGroup != nil {
 		values.Set("filter[isInternalGroup]", strconv.FormatBool(*query.isInternalGroup))
+	}
+	if query.publicLinkEnabled != nil {
+		values.Set("filter[publicLinkEnabled]", strconv.FormatBool(*query.publicLinkEnabled))
+	}
+	if query.publicLinkLimitEnabled != nil {
+		values.Set("filter[publicLinkLimitEnabled]", strconv.FormatBool(*query.publicLinkLimitEnabled))
+	}
+	if query.betaTestersLimit > 0 {
+		values.Set("limit[betaTesters]", strconv.Itoa(query.betaTestersLimit))
+	}
+	if query.buildsLimit > 0 {
+		values.Set("limit[builds]", strconv.Itoa(query.buildsLimit))
 	}
 	return values.Encode()
 }
@@ -232,6 +272,9 @@ func buildBetaTestersQuery(appID string, query *betaTestersQuery) (string, error
 		values.Set("filter[lastName]", strings.TrimSpace(query.lastName))
 	}
 	addCSV(values, "filter[id]", query.ids)
+	addCSV(values, "filter[inviteType]", query.inviteTypes)
+	addCSV(values, "include", query.include)
+	addValue(values, "sort", query.sort)
 	addLimit(values, query.limit)
 	return values.Encode(), nil
 }
@@ -575,6 +618,20 @@ func WithBetaGroupsIsInternal(isInternal bool) BetaGroupsOption {
 	}
 }
 
+// WithBetaGroupsPublicLinkEnabled filters beta groups by public-link state.
+func WithBetaGroupsPublicLinkEnabled(enabled bool) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.publicLinkEnabled = &enabled
+	}
+}
+
+// WithBetaGroupsPublicLinkLimitEnabled filters beta groups by public-link limit state.
+func WithBetaGroupsPublicLinkLimitEnabled(enabled bool) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.publicLinkLimitEnabled = &enabled
+	}
+}
+
 // WithBetaGroupsApps filters beta groups by related app IDs.
 func WithBetaGroupsApps(appIDs []string) BetaGroupsOption {
 	return func(q *betaGroupsQuery) {
@@ -589,10 +646,24 @@ func WithBetaGroupsBuilds(buildIDs []string) BetaGroupsOption {
 	}
 }
 
+// WithBetaGroupsIDs filters beta groups by ID(s).
+func WithBetaGroupsIDs(ids []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.ids = normalizeList(ids)
+	}
+}
+
 // WithBetaGroupsName filters beta groups by group name.
 func WithBetaGroupsName(name string) BetaGroupsOption {
 	return func(q *betaGroupsQuery) {
 		q.name = strings.TrimSpace(name)
+	}
+}
+
+// WithBetaGroupsPublicLink filters beta groups by public-link value.
+func WithBetaGroupsPublicLink(publicLink string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.publicLink = strings.TrimSpace(publicLink)
 	}
 }
 
@@ -607,6 +678,60 @@ func WithBetaGroupsSort(sort string) BetaGroupsOption {
 func WithBetaGroupsFields(fields []string) BetaGroupsOption {
 	return func(q *betaGroupsQuery) {
 		q.fields = normalizeList(fields)
+	}
+}
+
+// WithBetaGroupsAppFields sets fields[apps] for included apps.
+func WithBetaGroupsAppFields(fields []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.appFields = normalizeList(fields)
+	}
+}
+
+// WithBetaGroupsBuildFields sets fields[builds] for included builds.
+func WithBetaGroupsBuildFields(fields []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.buildFields = normalizeList(fields)
+	}
+}
+
+// WithBetaGroupsBetaTesterFields sets fields[betaTesters] for included testers.
+func WithBetaGroupsBetaTesterFields(fields []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.betaTesterFields = normalizeList(fields)
+	}
+}
+
+// WithBetaGroupsBetaRecruitmentCriteriaFields sets fields[betaRecruitmentCriteria]
+// for included beta recruitment criteria.
+func WithBetaGroupsBetaRecruitmentCriteriaFields(fields []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.betaRecruitmentCriteriaFields = normalizeList(fields)
+	}
+}
+
+// WithBetaGroupsInclude includes related resources in beta group responses.
+func WithBetaGroupsInclude(include []string) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		q.include = normalizeList(include)
+	}
+}
+
+// WithBetaGroupsBetaTestersLimit sets limit[betaTesters] for included testers.
+func WithBetaGroupsBetaTestersLimit(limit int) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		if limit > 0 {
+			q.betaTestersLimit = limit
+		}
+	}
+}
+
+// WithBetaGroupsBuildsLimit sets limit[builds] for included builds.
+func WithBetaGroupsBuildsLimit(limit int) BetaGroupsOption {
+	return func(q *betaGroupsQuery) {
+		if limit > 0 {
+			q.buildsLimit = limit
+		}
 	}
 }
 
@@ -703,6 +828,35 @@ func WithBetaTestersGroupIDs(ids []string) BetaTestersOption {
 func WithBetaTestersBuildID(buildID string) BetaTestersOption {
 	return func(q *betaTestersQuery) {
 		q.filterBuilds = strings.TrimSpace(buildID)
+	}
+}
+
+// WithBetaTestersInviteTypes filters beta testers by invite type
+// (EMAIL, PUBLIC_LINK). Unlike the relationship filters, filter[inviteType]
+// combines freely with the app, group, and build filters.
+func WithBetaTestersInviteTypes(inviteTypes []string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		q.inviteTypes = normalizeList(inviteTypes)
+	}
+}
+
+// WithBetaTestersSort sets the sort order for beta testers.
+func WithBetaTestersSort(sort string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		if strings.TrimSpace(sort) != "" {
+			q.sort = strings.TrimSpace(sort)
+		}
+	}
+}
+
+// WithBetaTestersInclude specifies related resources to include in beta tester
+// responses (apps, betaGroups, builds). Including betaGroups returns each
+// tester's group memberships in one call instead of a per-tester lookup.
+func WithBetaTestersInclude(include []string) BetaTestersOption {
+	return func(q *betaTestersQuery) {
+		if normalized := normalizeList(include); len(normalized) > 0 {
+			q.include = normalized
+		}
 	}
 }
 

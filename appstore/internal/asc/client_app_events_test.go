@@ -80,6 +80,47 @@ func TestGetAppEvents_WithLimit(t *testing.T) {
 	}
 }
 
+func TestGetAppEvents_WithQueryOptions(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/apps/app-123/appEvents" {
+			t.Fatalf("expected path /v1/apps/app-123/appEvents, got %s", req.URL.Path)
+		}
+		want := map[string]string{
+			"filter[eventState]":            "APPROVED,ARCHIVED",
+			"filter[id]":                    "event-1,event-2",
+			"fields[appEvents]":             "referenceName,eventState,localizations",
+			"fields[appEventLocalizations]": "locale,name",
+			"include":                       "localizations",
+			"limit[localizations]":          "10",
+			"limit":                         "25",
+		}
+		for key, expected := range want {
+			if got := req.URL.Query().Get(key); got != expected {
+				t.Errorf("query[%q] = %q, want %q", key, got, expected)
+			}
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	if _, err := client.GetAppEvents(
+		context.Background(),
+		"app-123",
+		WithAppEventsStates([]string{"APPROVED", "ARCHIVED"}),
+		WithAppEventsIDs([]string{"event-1", "event-2"}),
+		WithAppEventsFields([]string{"referenceName", "eventState", "localizations"}),
+		WithAppEventsLocalizationFields([]string{"locale", "name"}),
+		WithAppEventsInclude([]string{"localizations"}),
+		WithAppEventsLocalizationsLimit(10),
+		WithAppEventsLimit(25),
+	); err != nil {
+		t.Fatalf("GetAppEvents() error: %v", err)
+	}
+}
+
 func TestGetAppEvents_UsesNextURL(t *testing.T) {
 	next := "https://api.appstoreconnect.apple.com/v1/apps/app-123/appEvents?cursor=abc"
 	response := jsonResponse(http.StatusOK, `{"data":[]}`)

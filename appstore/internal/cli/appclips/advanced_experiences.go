@@ -232,7 +232,7 @@ func AppClipAdvancedExperiencesCreateCommand() *ffcli.Command {
 	action := fs.String("action", "", "Action (OPEN, VIEW, PLAY)")
 	category := fs.String("category", "", "Business category")
 	headerImageID := fs.String("header-image-id", "", "Header image ID")
-	localizationIDs := fs.String("localization-id", "", "Existing localization ID(s), comma-separated")
+	localizationIDs := shared.BindOnceCSVFlag(fs, "localization-id", "Existing localization ID(s), comma-separated")
 	var inlineLocalizationJSON inlineLocalizationFlag
 	fs.Var(&inlineLocalizationJSON, "inline-localization", "Inline localization as JSON with language, title, and optional subtitle (repeatable)")
 	language := fs.String("language", "", "Inline localization language (use with --title)")
@@ -287,7 +287,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--header-image-id")
 			}
 
-			localizationValues := shared.SplitCSV(*localizationIDs)
+			localizationValues := shared.SplitCSV(localizationIDs.String())
 			languageValue := strings.TrimSpace(*language)
 			titleValue := strings.TrimSpace(*title)
 			subtitleValue := strings.TrimSpace(*subtitle)
@@ -397,7 +397,7 @@ func AppClipAdvancedExperiencesUpdateCommand() *ffcli.Command {
 	isPoweredBy := fs.Bool("is-powered-by", false, "Powered by your app")
 	removed := fs.Bool("removed", false, "Mark the experience as removed")
 	headerImageID := fs.String("header-image-id", "", "Header image ID")
-	localizationIDs := fs.String("localization-id", "", "Localization ID(s), comma-separated")
+	localizationIDs := shared.BindOnceCSVFlag(fs, "localization-id", "Localization ID(s), comma-separated")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -472,7 +472,7 @@ Examples:
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
 			defer cancel()
 
-			resp, err := client.UpdateAppClipAdvancedExperience(requestCtx, experienceValue, attrs, *appClipID, *headerImageID, shared.SplitCSV(*localizationIDs))
+			resp, err := client.UpdateAppClipAdvancedExperience(requestCtx, experienceValue, attrs, *appClipID, *headerImageID, shared.SplitCSV(localizationIDs.String()))
 			if err != nil {
 				return fmt.Errorf("app-clips advanced-experiences update: failed to update: %w", err)
 			}

@@ -90,45 +90,51 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-tags list: --limit must be between 1 and 200")
+				return shared.UsageErrorf("app-tags list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 			if err := shared.ValidateSort(*sort, "name", "-name"); err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 			if *territoryLimit != 0 && (*territoryLimit < 1 || *territoryLimit > 50) {
-				return fmt.Errorf("app-tags list: --territory-limit must be between 1 and 50")
+				return shared.UsageErrorf("app-tags list: --territory-limit must be between 1 and 50")
 			}
 
 			visibleValues, err := normalizeAppTagVisibilityFilter(*visible)
 			if err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 
 			fieldsValue, err := normalizeAppTagFields(*fields)
 			if err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 
 			includeValues, err := normalizeAppTagInclude(*include)
 			if err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 
 			territoryFieldsValue, err := normalizeTerritoryFields(*territoryFields)
 			if err != nil {
-				return fmt.Errorf("app-tags list: %w", err)
+				return shared.UsageErrorf("app-tags list: %v", err)
 			}
 
 			if len(territoryFieldsValue) > 0 && !shared.HasInclude(includeValues, "territories") {
-				fmt.Fprintf(os.Stderr, "Error: --territory-fields requires --include territories\n\n")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(
+					shared.UsageErrorf("--territory-fields requires --include territories"),
+					shared.DiagnosticConflictingInput,
+					"--territory-fields",
+				)
 			}
 			if *territoryLimit != 0 && !shared.HasInclude(includeValues, "territories") {
-				fmt.Fprintf(os.Stderr, "Error: --territory-limit requires --include territories\n\n")
-				return flag.ErrHelp
+				return shared.WithDiagnostic(
+					shared.UsageErrorf("--territory-limit requires --include territories"),
+					shared.DiagnosticConflictingInput,
+					"--territory-limit",
+				)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

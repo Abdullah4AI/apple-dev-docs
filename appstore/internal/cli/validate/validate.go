@@ -56,8 +56,13 @@ Use it instead of ` + "`asc submit preflight`" + `.
 
 The default validate response includes an ordered remediation plan, so the first step is the next thing to fix.
 
+Placeholder checks preserve shorter Lorem Ipsum product wording and ordinary
+localized TODO copy without marker punctuation; only template-like residue is
+reported.
+
 Checks:
   - Metadata length limits
+  - Placeholder copy in localized listing fields (warning; --strict to block)
   - Required fields and localizations
   - App Store review details completeness
   - Primary category configured
@@ -256,9 +261,7 @@ func fetchScreenshotSets(ctx context.Context, client *asc.Client, localizations 
 		index := index
 		setTasks = append(setTasks, func(taskCtx context.Context) error {
 			localization := localizations[index]
-			response, err := doReadinessRequest(taskCtx, func(requestCtx context.Context) (*asc.AppScreenshotSetsResponse, error) {
-				return client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, localization.ID)
-			})
+			response, err := fetchAllScreenshotSetsForValidation(taskCtx, client, localization.ID)
 			if err != nil {
 				return fmt.Errorf("validate: failed to fetch screenshot sets for %s: %w", localization.ID, err)
 			}
@@ -290,9 +293,7 @@ func fetchScreenshotSets(ctx context.Context, client *asc.Client, localizations 
 		index := index
 		screenshotTasks = append(screenshotTasks, func(taskCtx context.Context) error {
 			set := setRefs[index].set
-			response, err := doReadinessRequest(taskCtx, func(requestCtx context.Context) (*asc.AppScreenshotsResponse, error) {
-				return client.GetAppScreenshots(requestCtx, set.ID)
-			})
+			response, err := fetchAllScreenshotsForValidation(taskCtx, client, set.ID)
 			if err != nil {
 				return fmt.Errorf("validate: failed to fetch screenshots for %s: %w", set.ID, err)
 			}
@@ -349,6 +350,54 @@ func fetchScreenshotSets(ctx context.Context, client *asc.Client, localizations 
 		return sets[i].ID < sets[j].ID
 	})
 	return sets, nil
+}
+
+func fetchAllScreenshotSetsForValidation(ctx context.Context, client *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
+	firstPage, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.AppScreenshotSetsResponse, error) {
+		return client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, localizationID, asc.WithAppStoreVersionLocalizationScreenshotSetsLimit(200))
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return doReadinessRequest(ctx, func(requestCtx context.Context) (asc.PaginatedResponse, error) {
+			return client.GetAppStoreVersionLocalizationScreenshotSets(requestCtx, "", asc.WithAppStoreVersionLocalizationScreenshotSetsNextURL(nextURL))
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	response, ok := paginated.(*asc.AppScreenshotSetsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected screenshot sets pagination response type %T", paginated)
+	}
+	return response, nil
+}
+
+func fetchAllScreenshotsForValidation(ctx context.Context, client *asc.Client, setID string) (*asc.AppScreenshotsResponse, error) {
+	firstPage, err := doReadinessRequest(ctx, func(requestCtx context.Context) (*asc.AppScreenshotsResponse, error) {
+		return client.GetAppScreenshots(requestCtx, setID, asc.WithAppScreenshotsLimit(200))
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	paginated, err := asc.PaginateAll(ctx, firstPage, func(_ context.Context, nextURL string) (asc.PaginatedResponse, error) {
+		return doReadinessRequest(ctx, func(requestCtx context.Context) (asc.PaginatedResponse, error) {
+			return client.GetAppScreenshots(requestCtx, "", asc.WithAppScreenshotsNextURL(nextURL))
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	response, ok := paginated.(*asc.AppScreenshotsResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected screenshots pagination response type %T", paginated)
+	}
+	return response, nil
 }
 
 func mapAgeRatingDeclaration(attrs asc.AgeRatingDeclarationAttributes) *validation.AgeRatingDeclaration {

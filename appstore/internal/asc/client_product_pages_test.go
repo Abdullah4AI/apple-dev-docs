@@ -85,6 +85,47 @@ func TestAppCustomProductPageListEndpoints_WithLimit(t *testing.T) {
 	}
 }
 
+func TestGetAppCustomProductPages_SendsQuerySurface(t *testing.T) {
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/apps/app-1/appCustomProductPages" {
+			t.Fatalf("expected custom product pages path, got %s", req.URL.Path)
+		}
+		query := req.URL.Query()
+		want := map[string]string{
+			"filter[visible]":                      "false,true",
+			"fields[appCustomProductPages]":        "name,visible,app,appCustomProductPageVersions",
+			"fields[apps]":                         "name,bundleId",
+			"fields[appCustomProductPageVersions]": "version,state",
+			"include":                              "app,appCustomProductPageVersions",
+			"limit[appCustomProductPageVersions]":  "25",
+			"limit":                                "10",
+		}
+		for key, expected := range want {
+			if got := query.Get(key); got != expected {
+				t.Fatalf("query[%q] = %q, want %q (full query %s)", key, got, expected, query.Encode())
+			}
+		}
+	}, jsonResponse(http.StatusOK, `{"data":[{"type":"appCustomProductPages","id":"page-1"}]}`))
+
+	_, err := client.GetAppCustomProductPages(
+		context.Background(),
+		"app-1",
+		WithAppCustomProductPagesVisible([]string{"false", "true"}),
+		WithAppCustomProductPagesFields([]string{"name", "visible", "app"}),
+		WithAppCustomProductPagesAppFields([]string{"name", "bundleId"}),
+		WithAppCustomProductPagesVersionFields([]string{"version", "state"}),
+		WithAppCustomProductPagesInclude([]string{"app", "appCustomProductPageVersions"}),
+		WithAppCustomProductPagesVersionsLimit(25),
+		WithAppCustomProductPagesLimit(10),
+	)
+	if err != nil {
+		t.Fatalf("GetAppCustomProductPages() error: %v", err)
+	}
+}
+
 func TestGetAppCustomProductPage_SendsRequest(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":{"type":"appCustomProductPages","id":"page-1","attributes":{"name":"Summer"}}}`)
 	client := newTestClient(t, func(req *http.Request) {

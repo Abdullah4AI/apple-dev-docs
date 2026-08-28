@@ -51,25 +51,29 @@ func MetadataValidateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("metadata validate", flag.ExitOnError)
 
 	dir := fs.String("dir", "", "Metadata root directory (required)")
+	checkURLs := fs.Bool("check-urls", false, "[experimental] Fetch support and privacy policy URLs to detect redirects and root pages")
 	subscriptionApp := fs.Bool("subscription-app", false, "Enable subscription-specific Terms of Use / EULA link checks")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "validate",
-		ShortUsage: "asc metadata validate --dir \"./metadata\" [--subscription-app]",
-		ShortHelp:  "Validate canonical metadata files offline.",
-		LongHelp: `Validate canonical metadata files offline.
+		ShortUsage: "asc metadata validate --dir \"./metadata\" [--check-urls] [--subscription-app]",
+		ShortHelp:  "Validate canonical metadata files (offline by default).",
+		LongHelp: `Validate canonical metadata files. Validation is offline by default;
+--check-urls opts into bounded HTTP checks.
 
 Checks:
   - strict JSON schema decode (unknown keys rejected)
   - required fields
   - metadata character limits
   - URL syntax and length for marketing, support, privacy policy, and privacy choices URLs
+  - optional redirect, final-host, status, and site-root checks for support and privacy policy URLs
   - implausibly short app name and description values
   - optional subscription-app Terms of Use / EULA description link heuristic
 
 Examples:
   asc metadata validate --dir "./metadata"
+  asc metadata validate --dir "./metadata" --check-urls
   asc metadata validate --dir "./metadata" --subscription-app
   asc metadata validate --dir "./metadata" --output table`,
 		FlagSet:   fs,
@@ -84,7 +88,10 @@ Examples:
 				return metadataRequiredInputError("--dir", "--dir is required")
 			}
 
-			result, err := validateDir(dirValue, *subscriptionApp)
+			result, err := validateDirWithOptions(ctx, dirValue, validateDirOptions{
+				checkURLs:       *checkURLs,
+				subscriptionApp: *subscriptionApp,
+			})
 			if err != nil {
 				return err
 			}
@@ -107,11 +114,22 @@ Examples:
 	}
 }
 
-func validateDir(dir string, subscriptionApp bool) (ValidateResult, error) {
+func validateDir(dir string) (ValidateResult, error) {
+	return validateDirWithOptions(context.Background(), dir, validateDirOptions{})
+}
+
+type validateDirOptions struct {
+	checkURLs       bool
+	subscriptionApp bool
+	urlChecker      metadataURLChecker
+}
+
+func validateDirWithOptions(ctx context.Context, dir string, options validateDirOptions) (ValidateResult, error) {
 	result := ValidateResult{
 		Dir:    dir,
 		Issues: make([]ValidateIssue, 0),
 	}
+	urlTargets := make([]metadataURLTarget, 0)
 
 	appInfoDir := filepath.Join(dir, appInfoDirName)
 	appInfoEntries, err := os.ReadDir(appInfoDir)
@@ -163,6 +181,11 @@ func validateDir(dir string, subscriptionApp bool) (ValidateResult, error) {
 			result.Issues = append(result.Issues, appInfoLengthIssues(filePath, resolvedLocale, loc)...)
 			result.Issues = append(result.Issues, appInfoURLIssues(filePath, resolvedLocale, loc)...)
 			result.Issues = append(result.Issues, appInfoMinimumLengthIssues(filePath, resolvedLocale, loc)...)
+			if options.checkURLs {
+				urlTargets = append(urlTargets, metadataURLTargets(appInfoDirName, filePath, resolvedLocale, "", []metadataURLField{
+					{field: "privacyPolicyUrl", label: "privacy policy URL", value: loc.PrivacyPolicyURL},
+				})...)
+			}
 		}
 	}
 
@@ -229,11 +252,28 @@ func validateDir(dir string, subscriptionApp bool) (ValidateResult, error) {
 				result.Issues = append(result.Issues, versionLengthIssues(filePath, version, resolvedLocale, loc)...)
 				result.Issues = append(result.Issues, versionURLIssues(filePath, version, resolvedLocale, loc)...)
 				result.Issues = append(result.Issues, versionMinimumLengthIssues(filePath, version, resolvedLocale, loc)...)
-				if subscriptionApp {
+				if options.subscriptionApp {
 					result.Issues = append(result.Issues, versionTermsIssues(filePath, version, resolvedLocale, loc)...)
+				}
+				if options.checkURLs {
+					urlTargets = append(urlTargets, metadataURLTargets(versionDirName, filePath, resolvedLocale, version, []metadataURLField{
+						{field: "supportUrl", label: "support URL", value: loc.SupportURL},
+					})...)
 				}
 			}
 		}
+	}
+
+	if options.checkURLs && len(urlTargets) > 0 {
+		checker := options.urlChecker
+		if checker == nil {
+			checker = newMetadataURLChecker()
+		}
+		urlIssues, urlErr := metadataURLCheckIssues(ctx, checker, urlTargets)
+		if urlErr != nil {
+			return ValidateResult{}, urlErr
+		}
+		result.Issues = append(result.Issues, urlIssues...)
 	}
 
 	if result.FilesScanned == 0 {

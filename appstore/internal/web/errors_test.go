@@ -63,6 +63,73 @@ func TestIsDuplicateAppNameError(t *testing.T) {
 	}
 }
 
+func TestIsMissingCompanyNameError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "required attribute detail",
+			err: &APIError{rawBody: []byte(`{
+				"errors":[{
+					"title":"The provided entity is missing a required attribute",
+					"detail":"You must provide a value for the attribute 'companyName' with this request"
+				}]
+			}`)},
+			want: true,
+		},
+		{
+			name: "required attribute name",
+			err: &APIError{rawBody: []byte(`{
+				"errors":[{
+					"attributeName":"companyName",
+					"detail":"This attribute is required"
+				}]
+			}`)},
+			want: true,
+		},
+		{
+			name: "different required attribute",
+			err: &APIError{rawBody: []byte(`{
+				"errors":[{
+					"attributeName":"sku",
+					"detail":"This attribute is required"
+				}]
+			}`)},
+			want: false,
+		},
+		{
+			name: "company name explicitly optional",
+			err: &APIError{rawBody: []byte(`{
+				"errors":[{
+					"attributeName":"companyName",
+					"detail":"This attribute is not required"
+				}]
+			}`)},
+			want: false,
+		},
+		{
+			name: "malformed body",
+			err:  &APIError{rawBody: []byte(`{"errors":[`)},
+			want: false,
+		},
+		{
+			name: "non api error",
+			err:  errors.New("nope"),
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsMissingCompanyNameError(tc.err); got != tc.want {
+				t.Fatalf("IsMissingCompanyNameError()=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsAlreadyExistsConflict(t *testing.T) {
 	cases := []struct {
 		name string

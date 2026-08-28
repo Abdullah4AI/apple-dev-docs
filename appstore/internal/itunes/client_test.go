@@ -3,6 +3,8 @@ package itunes
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -204,6 +206,50 @@ func TestGetRatings_HistogramFailureIsNonFatal(t *testing.T) {
 	}
 	if len(ratings.Histogram) != 0 {
 		t.Fatalf("expected empty histogram on failure, got %v", ratings.Histogram)
+	}
+}
+
+func TestGetRatings_PropagatesHistogramCancellation(t *testing.T) {
+	lookupBody := `{"resultCount":1,"results":[{"trackId":123,"trackName":"Canceled Histogram","averageUserRating":4.0,"userRatingCount":10}]}`
+	histogramStarted := make(chan struct{})
+	client := &Client{
+		BaseURL: "https://example.test",
+		HTTPClient: &http.Client{Transport: ratingsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/lookup":
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(lookupBody)), Request: req}, nil
+			case "/us/customer-reviews/id123":
+				close(histogramStarted)
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			default:
+				return nil, fmt.Errorf("unexpected request path %s", req.URL.Path)
+			}
+		})},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := client.GetRatings(ctx, "123", "us")
+		resultCh <- err
+	}()
+
+	select {
+	case <-histogramStarted:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for histogram request")
+	}
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("GetRatings() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GetRatings()")
 	}
 }
 

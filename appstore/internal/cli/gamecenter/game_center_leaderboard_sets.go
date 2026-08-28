@@ -31,7 +31,7 @@ Examples:
   asc game-center leaderboard-sets update --id "SET_ID" --reference-name "Season 1 - Updated"
   asc game-center leaderboard-sets delete --id "SET_ID" --confirm
   asc game-center leaderboard-sets members list --set-id "SET_ID"
-  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3"
+  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3" --confirm
   asc game-center leaderboard-sets member-localizations list --set-id "SET_ID" --leaderboard-id "LEADERBOARD_ID"
   asc game-center leaderboard-sets releases list --set-id "SET_ID"
   asc game-center leaderboard-sets releases create --app "APP_ID" --set-id "SET_ID"

@@ -2,10 +2,11 @@
 
 ## Decision
 
-`asc metadata validate` remains an offline, directory-based command. It does not
-accept `--app` or `--version`; those unsupported flags now produce a targeted
-recovery message that points to `--dir` and shows `asc metadata pull` when local
-metadata must be fetched first.
+`asc metadata validate` remains a directory-based command that is offline by
+default. The explicit experimental `--check-urls` flag can opt into bounded URL
+destination checks. The command does not accept `--app` or `--version`; those
+unsupported flags produce a targeted recovery message that points to `--dir`
+and shows `asc metadata pull` when local metadata must be fetched first.
 
 `asc metadata pull --version` remains required. The CLI does not select a
 version implicitly because that could fetch or overwrite metadata for the wrong

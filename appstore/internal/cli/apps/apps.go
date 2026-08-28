@@ -324,13 +324,13 @@ Examples:
 
 func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool, bundleID string, name string, sku string, versionState string, reviewSubmissionState string, sort string, limit int, next string, paginate bool, appInfoFields string, iapFields string, subscriptionGroupFields string) error {
 	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("apps: --limit must be between 1 and 200")
+		return shared.UsageErrorf("apps: --limit must be between 1 and 200")
 	}
 	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("apps: %w", err)
+		return shared.UsageErrorf("apps: %v", err)
 	}
 	if err := shared.ValidateSort(sort, "name", "-name", "bundleId", "-bundleId", "sku", "-sku"); err != nil {
-		return fmt.Errorf("apps: %w", err)
+		return shared.UsageErrorf("apps: %v", err)
 	}
 	if strings.TrimSpace(next) != "" {
 		if flagName, ok := appFlagWasProvided(
@@ -338,8 +338,11 @@ func appsList(ctx context.Context, fs *flag.FlagSet, output string, pretty bool,
 			"bundle-id", "name", "sku", "version-state", "review-submission-state", "sort", "limit",
 			"app-info-fields", "iap-fields", "subscription-group-fields",
 		); ok {
-			fmt.Fprintf(os.Stderr, "Error: --next cannot be combined with %s\n", flagName)
-			return flag.ErrHelp
+			return shared.WithDiagnostic(
+				shared.UsageErrorf("--next cannot be combined with %s", flagName),
+				shared.DiagnosticConflictingInput,
+				flagName,
+			)
 		}
 	}
 	versionStateValues := shared.SplitCSVUpper(versionState)

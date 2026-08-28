@@ -163,8 +163,43 @@ func TestCompletionZshPrintsScriptToStdout(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if strings.Contains(stdout, "offer-codes") || strings.Contains(stdout, "win-back-offers") || strings.Contains(stdout, "promoted-purchases") {
-		t.Fatalf("expected hidden deprecated root commands to be omitted from completion output, got %q", stdout)
+	completionRootGroup := func(variable string) string {
+		t.Helper()
+		prefix := variable + "=('"
+		start := strings.Index(stdout, prefix)
+		if start < 0 {
+			t.Fatalf("expected %s root completion data, got %q", variable, stdout)
+		}
+		group := stdout[start+len(prefix):]
+		end := strings.IndexByte(group, '\'')
+		if end < 0 {
+			t.Fatalf("expected terminated %s root completion data, got %q", variable, group)
+		}
+		return group[:end]
+	}
+	rootGroup := completionRootGroup("_ASC_COMPLETION_SUBCOMMAND_GROUPS")
+	if strings.Contains(rootGroup, "offer-codes") || strings.Contains(rootGroup, "win-back-offers") || strings.Contains(rootGroup, "promoted-purchases") {
+		t.Fatalf("expected hidden deprecated root commands to be omitted from root completions, got %q", rootGroup)
+	}
+	rootFlags := completionRootGroup("_ASC_COMPLETION_FLAG_GROUPS")
+	for _, expected := range []string{"--profile", "--report", "--version"} {
+		if !strings.Contains(rootFlags, expected) {
+			t.Fatalf("expected root flag completion metadata %q, got %q", expected, rootFlags)
+		}
+	}
+	rootValueFlags := completionRootGroup("_ASC_COMPLETION_VALUE_FLAG_GROUPS")
+	for _, expected := range []string{"--profile", "--report", "--report-file"} {
+		if !strings.Contains(rootValueFlags, expected) {
+			t.Fatalf("expected root value flag completion metadata %q, got %q", expected, rootValueFlags)
+		}
+	}
+	if strings.Contains(rootValueFlags, "--version") {
+		t.Fatalf("expected boolean root flag to be omitted from value flags, got %q", rootValueFlags)
+	}
+	for _, expected := range []string{"apps info", "builds list", "--bundle-id", "--processing-state"} {
+		if !strings.Contains(stdout, expected) {
+			t.Fatalf("expected nested command completion metadata %q, got %q", expected, stdout)
+		}
 	}
 }
 

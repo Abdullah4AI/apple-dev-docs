@@ -673,6 +673,45 @@ func TestPaginateAll_BuildsPreservesIncluded(t *testing.T) {
 	}
 }
 
+func TestMergeRawJSONArrayDeduplicatesJSONAPIResourcesByIdentity(t *testing.T) {
+	merged, err := mergeRawJSONArray(
+		json.RawMessage(`[
+			{"type":"betaGroups","id":"group-a","attributes":{"name":"Alpha"}},
+			{"type":"apps","id":"shared-id"}
+		]`),
+		json.RawMessage(`[
+			{"id":"group-a","type":"betaGroups","attributes":{"name":"Alpha updated"}},
+			{"type":"betaGroups","id":"group-b","attributes":{"name":"Bravo"}},
+			{"type":"builds","id":"shared-id"}
+		]`),
+	)
+	if err != nil {
+		t.Fatalf("mergeRawJSONArray() error: %v", err)
+	}
+
+	var included []struct {
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		Attributes struct {
+			Name string `json:"name"`
+		} `json:"attributes"`
+	}
+	if err := json.Unmarshal(merged, &included); err != nil {
+		t.Fatalf("decode merged resources: %v", err)
+	}
+	if len(included) != 4 {
+		t.Fatalf("expected four distinct type-and-ID resources, got %+v", included)
+	}
+	if included[0].Type != "betaGroups" || included[0].ID != "group-a" || included[0].Attributes.Name != "Alpha" {
+		t.Fatalf("expected the first group-a representation to win, got %+v", included[0])
+	}
+	if included[1].Type != "apps" || included[1].ID != "shared-id" ||
+		included[2].Type != "betaGroups" || included[2].ID != "group-b" ||
+		included[3].Type != "builds" || included[3].ID != "shared-id" {
+		t.Fatalf("expected stable order with type-scoped identities, got %+v", included)
+	}
+}
+
 func TestPaginateAll_GameCenterEnabledVersions(t *testing.T) {
 	const totalPages = 2
 	const perPage = 3

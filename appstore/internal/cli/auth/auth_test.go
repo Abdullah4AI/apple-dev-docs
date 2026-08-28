@@ -654,6 +654,44 @@ func TestAuthLoginCommand(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("success message echoes normalized name", func(t *testing.T) {
+		withTempRepo(t, func(repo string) {
+			keyPath := writeTempECDSAKeyFile(t)
+			cmd := AuthLoginCommand()
+			if err := cmd.FlagSet.Parse([]string{
+				"--name", "  spaced  ",
+				"--key-id", "KEY",
+				"--issuer-id", "ISS",
+				"--private-key", keyPath,
+				"--bypass-keychain",
+				"--local",
+				"--skip-validation",
+			}); err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			stdout, _ := captureAuthOutput(t, func() {
+				if err := cmd.Exec(context.Background(), []string{}); err != nil {
+					t.Fatalf("Exec() error: %v", err)
+				}
+			})
+			if !strings.Contains(stdout, "Successfully registered API key 'spaced'") {
+				t.Fatalf("expected normalized profile name in success message, got %q", stdout)
+			}
+			if strings.Contains(stdout, "'  spaced  '") {
+				t.Fatalf("success message echoed pre-normalized name: %q", stdout)
+			}
+
+			cfgPath := filepath.Join(repo, ".asc", "config.json")
+			cfg, err := config.LoadAt(cfgPath)
+			if err != nil {
+				t.Fatalf("LoadAt() error: %v", err)
+			}
+			if cfg.DefaultKeyName != "spaced" {
+				t.Fatalf("DefaultKeyName = %q, want spaced", cfg.DefaultKeyName)
+			}
+		})
+	})
 }
 
 func assertAuthDiagnostic(t *testing.T, err error, code shared.DiagnosticCode, parameter string) {

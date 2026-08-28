@@ -185,6 +185,7 @@ func TestBuildsListRejectsInvalidNextURLPhase63(t *testing.T) {
 		t,
 		[]string{"builds", "list"},
 		"builds: --next",
+		true,
 	)
 }
 

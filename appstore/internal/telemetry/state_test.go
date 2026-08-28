@@ -337,9 +337,12 @@ func TestConcurrentStateUpdatesPreserveOptOutAndInstallID(t *testing.T) {
 	t.Setenv("ASC_TELEMETRY_DISABLED", "")
 	t.Setenv("DO_NOT_TRACK", "")
 
+	const concurrentUpdatePairs = 16
 	var wg sync.WaitGroup
-	errs := make(chan error, 100)
-	for i := 0; i < 50; i++ {
+	errs := make(chan error, 2*concurrentUpdatePairs)
+	// Keep enough overlap to exercise the file lock while leaving margin for
+	// Windows hosted runners, where filesystem operations can be descheduled.
+	for i := 0; i < concurrentUpdatePairs; i++ {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

@@ -122,6 +122,22 @@ func TestSubscriptionSetupPriceStateMatchesAllowsOmittedStartDate(t *testing.T) 
 	}
 }
 
+func TestSubscriptionSetupPriceMatrixMatchesUsesCoverageSemantics(t *testing.T) {
+	index := &subscriptionPriceImportStateIndex{states: []subscriptionPriceImportState{
+		{territoryID: "CAN", pricePointID: "pp-can", startDate: "2026-08-01", planType: asc.SubscriptionPlanTypeUpfront},
+		{territoryID: "JPN", pricePointID: "pp-historical", startDate: "2026-07-01", planType: asc.SubscriptionPlanTypeUpfront},
+		{territoryID: "USA", pricePointID: "pp-usa", startDate: "2026-08-01", planType: asc.SubscriptionPlanTypeUpfront},
+	}}
+	matrix := []asc.SubscriptionInlinePrice{
+		{TerritoryID: "CAN", PricePointID: "pp-can", Attributes: asc.SubscriptionPriceCreateAttributes{StartDate: "2026-08-01", PlanType: asc.SubscriptionPlanTypeUpfront}},
+		{TerritoryID: "USA", PricePointID: "pp-usa", Attributes: asc.SubscriptionPriceCreateAttributes{StartDate: "2026-08-01", PlanType: asc.SubscriptionPlanTypeUpfront}},
+	}
+
+	if !subscriptionSetupPriceMatrixMatches(index, matrix) {
+		t.Fatal("expected requested matrix coverage to match while retaining an extra historical row")
+	}
+}
+
 func TestSubscriptionSetupStateIsComplete(t *testing.T) {
 	for _, state := range []string{"READY_TO_SUBMIT", "WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_BINARY_APPROVAL", "APPROVED"} {
 		if !subscriptionSetupStateIsComplete(state) {

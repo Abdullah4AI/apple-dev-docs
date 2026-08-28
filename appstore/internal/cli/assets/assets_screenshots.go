@@ -40,7 +40,7 @@ var knownAppStoreLocalizationLocales = func() map[string]struct{} {
 }()
 
 // ScreenshotSetListFunc fetches screenshot sets for a localization kind.
-type ScreenshotSetListFunc func(context.Context, *asc.Client, string) (*asc.AppScreenshotSetsResponse, error)
+type ScreenshotSetListFunc func(context.Context, *asc.Client, string, asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error)
 
 // ScreenshotSetCreateFunc creates a screenshot set for a localization kind.
 type ScreenshotSetCreateFunc func(context.Context, *asc.Client, string, string) (*asc.AppScreenshotSetResponse, error)
@@ -142,8 +142,8 @@ type screenshotLocaleAssetFiles struct {
 }
 
 var appStoreVersionScreenshotSetAccess = ScreenshotSetAccess{
-	List: func(ctx context.Context, client *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
-		return client.GetAppScreenshotSets(ctx, localizationID)
+	List: func(ctx context.Context, client *asc.Client, localizationID string, requestContext asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error) {
+		return client.GetAllAppScreenshotSets(ctx, localizationID, asc.WithAppScreenshotSetsRequestContext(requestContext))
 	},
 	Create: func(ctx context.Context, client *asc.Client, localizationID, displayType string) (*asc.AppScreenshotSetResponse, error) {
 		return client.CreateAppScreenshotSet(ctx, localizationID, displayType)
@@ -517,9 +517,7 @@ func fetchScreenshotList(
 	localizationID string,
 	requestContext func(context.Context) (context.Context, context.CancelFunc),
 ) (*asc.AppScreenshotListResult, error) {
-	requestCtx, cancel := requestContext(ctx)
-	setsResp, err := client.GetAppScreenshotSets(requestCtx, localizationID)
-	cancel()
+	setsResp, err := client.GetAllAppScreenshotSets(ctx, localizationID, asc.WithAppScreenshotSetsRequestContext(requestContext))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch sets: %w", err)
 	}
@@ -530,9 +528,7 @@ func fetchScreenshotList(
 	}
 
 	for _, set := range setsResp.Data {
-		requestCtx, cancel := requestContext(ctx)
-		screenshots, err := client.GetAppScreenshots(requestCtx, set.ID)
-		cancel()
+		screenshots, err := client.GetAllAppScreenshots(ctx, set.ID, asc.WithAppScreenshotsRequestContext(requestContext))
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch screenshots for set %s: %w", set.ID, err)
 		}

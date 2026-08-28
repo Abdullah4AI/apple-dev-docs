@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -50,12 +51,74 @@ type CiProductResource struct {
 	ID            string                  `json:"id"`
 	Attributes    CiProductAttributes     `json:"attributes"`
 	Relationships *CiProductRelationships `json:"relationships,omitempty"`
+
+	attributesDecoded bool
+	attributesPresent bool
+	attributesNull    bool
+}
+
+// UnmarshalJSON records whether the API supplied attributes so relationship-only
+// sparse resources can be rendered without inventing an attributes object.
+func (r *CiProductResource) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		Type          ResourceType            `json:"type"`
+		ID            string                  `json:"id"`
+		Attributes    json.RawMessage         `json:"attributes"`
+		Relationships *CiProductRelationships `json:"relationships,omitempty"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	*r = CiProductResource{
+		Type:              decoded.Type,
+		ID:                decoded.ID,
+		Relationships:     decoded.Relationships,
+		attributesDecoded: true,
+		attributesPresent: decoded.Attributes != nil,
+		attributesNull:    bytes.Equal(bytes.TrimSpace(decoded.Attributes), []byte("null")),
+	}
+	if !r.attributesPresent || r.attributesNull {
+		return nil
+	}
+	return json.Unmarshal(decoded.Attributes, &r.Attributes)
+}
+
+// MarshalJSON preserves decoded attribute presence while keeping the existing
+// behavior for resources constructed directly by callers.
+func (r CiProductResource) MarshalJSON() ([]byte, error) {
+	var attributes json.RawMessage
+	if !r.attributesDecoded || r.attributesPresent || r.attributesNull || r.Attributes != (CiProductAttributes{}) {
+		if r.attributesNull {
+			attributes = json.RawMessage("null")
+		} else {
+			encoded, err := json.Marshal(r.Attributes)
+			if err != nil {
+				return nil, err
+			}
+			attributes = encoded
+		}
+	}
+
+	return json.Marshal(struct {
+		Type          ResourceType            `json:"type"`
+		ID            string                  `json:"id"`
+		Attributes    json.RawMessage         `json:"attributes,omitempty"`
+		Relationships *CiProductRelationships `json:"relationships,omitempty"`
+	}{
+		Type:          r.Type,
+		ID:            r.ID,
+		Attributes:    attributes,
+		Relationships: r.Relationships,
+	})
 }
 
 // CiProductsResponse is the response from CI products endpoints.
 type CiProductsResponse struct {
-	Data  []CiProductResource `json:"data"`
-	Links Links               `json:"links"`
+	Data     []CiProductResource `json:"data"`
+	Links    Links               `json:"links"`
+	Included json.RawMessage     `json:"included,omitempty"`
+	Meta     json.RawMessage     `json:"meta,omitempty"`
 }
 
 // GetLinks returns the links field for pagination.
@@ -66,6 +129,11 @@ func (r *CiProductsResponse) GetLinks() *Links {
 // GetData returns the data field for aggregation.
 func (r *CiProductsResponse) GetData() any {
 	return r.Data
+}
+
+// GetMeta returns the raw paging metadata for CI product responses.
+func (r *CiProductsResponse) GetMeta() json.RawMessage {
+	return r.Meta
 }
 
 // CiProductResponse is the response from CI product detail endpoints.
@@ -254,7 +322,14 @@ type CiWorkflowResponse struct {
 
 type ciProductsQuery struct {
 	listQuery
-	appID string
+	appID                    string
+	productTypes             []string
+	fields                   []string
+	appFields                []string
+	bundleIDFields           []string
+	scmRepositoryFields      []string
+	include                  []string
+	primaryRepositoriesLimit int
 }
 
 // CiProductsOption is a functional option for GetCiProducts.
@@ -287,13 +362,94 @@ func WithCiProductsAppID(appID string) CiProductsOption {
 	}
 }
 
+// WithCiProductsProductTypes filters CI products by product type.
+func WithCiProductsProductTypes(productTypes []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.productTypes = normalizeUpperList(productTypes)
+	}
+}
+
+// WithCiProductsFields sets fields[ciProducts] for CI product responses.
+func WithCiProductsFields(fields []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithCiProductsAppFields sets fields[apps] for included apps.
+func WithCiProductsAppFields(fields []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.appFields = normalizeList(fields)
+	}
+}
+
+// WithCiProductsBundleIDFields sets fields[bundleIds] for included bundle IDs.
+func WithCiProductsBundleIDFields(fields []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.bundleIDFields = normalizeList(fields)
+	}
+}
+
+// WithCiProductsScmRepositoryFields sets fields[scmRepositories] for included repositories.
+func WithCiProductsScmRepositoryFields(fields []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.scmRepositoryFields = normalizeList(fields)
+	}
+}
+
+// WithCiProductsInclude includes related resources in CI product responses.
+func WithCiProductsInclude(include []string) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		q.include = normalizeList(include)
+	}
+}
+
+// WithCiProductsPrimaryRepositoriesLimit sets the maximum included primary repositories.
+func WithCiProductsPrimaryRepositoriesLimit(limit int) CiProductsOption {
+	return func(q *ciProductsQuery) {
+		if limit > 0 {
+			q.primaryRepositoriesLimit = limit
+		}
+	}
+}
+
 func buildCiProductsQuery(query *ciProductsQuery) string {
 	values := url.Values{}
+	addCSV(values, "filter[productType]", query.productTypes)
 	if query.appID != "" {
 		values.Set("filter[app]", query.appID)
 	}
+	addCSV(values, "fields[ciProducts]", ciProductsFieldsWithIncludes(query.fields, query.include))
+	addCSV(values, "fields[apps]", query.appFields)
+	addCSV(values, "fields[bundleIds]", query.bundleIDFields)
+	addCSV(values, "fields[scmRepositories]", query.scmRepositoryFields)
+	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
+	if query.primaryRepositoriesLimit > 0 {
+		values.Set("limit[primaryRepositories]", strconv.Itoa(query.primaryRepositoriesLimit))
+	}
 	return values.Encode()
+}
+
+func ciProductsFieldsWithIncludes(fields, include []string) []string {
+	fields = normalizeUniqueList(fields)
+	if len(fields) == 0 || len(include) == 0 {
+		return fields
+	}
+
+	seen := make(map[string]struct{}, len(fields)+len(include))
+	for _, field := range fields {
+		seen[field] = struct{}{}
+	}
+	combined := append([]string(nil), fields...)
+	for _, relationship := range normalizeUniqueList(include) {
+		if _, ok := seen[relationship]; ok {
+			continue
+		}
+		seen[relationship] = struct{}{}
+		combined = append(combined, relationship)
+	}
+	return combined
 }
 
 type ciWorkflowsQuery struct {
@@ -358,7 +514,7 @@ func buildCiProductRepositoriesQuery(query *ciProductRepositoriesQuery) string {
 	return values.Encode()
 }
 
-// GetCiProducts retrieves CI products, optionally filtered by app ID.
+// GetCiProducts retrieves CI products with optional filters, sparse fields, includes, and pagination.
 func (c *Client) GetCiProducts(ctx context.Context, opts ...CiProductsOption) (*CiProductsResponse, error) {
 	query := &ciProductsQuery{}
 	for _, opt := range opts {

@@ -192,32 +192,25 @@ Examples:
 				return fmt.Errorf("custom-pages localizations screenshot-sets list: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			opts := []asc.AppCustomProductPageLocalizationScreenshotSetsOption{
 				asc.WithAppCustomProductPageLocalizationScreenshotSetsLimit(*limit),
 				asc.WithAppCustomProductPageLocalizationScreenshotSetsNextURL(*next),
 			}
 
 			if *paginate {
-				paginateOpts := append(opts, asc.WithAppCustomProductPageLocalizationScreenshotSetsLimit(productPagesMaxLimit))
-				firstPage, err := client.GetAppCustomProductPageLocalizationScreenshotSets(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("custom-pages localizations screenshot-sets list: failed to fetch: %w", err)
-				}
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppCustomProductPageLocalizationScreenshotSets(ctx, trimmedID, asc.WithAppCustomProductPageLocalizationScreenshotSetsNextURL(nextURL))
-				})
+				paginateOpts := make([]asc.AppCustomProductPageLocalizationScreenshotSetsOption, 0, len(opts)+2)
+				paginateOpts = append(paginateOpts, opts...)
+				paginateOpts = append(
+					paginateOpts,
+					asc.WithAppCustomProductPageLocalizationScreenshotSetsLimit(productPagesMaxLimit),
+					asc.WithAppCustomProductPageLocalizationScreenshotSetsRequestContext(shared.ContextWithTimeout),
+				)
+				resp, err := client.GetAllAppCustomProductPageLocalizationScreenshotSets(ctx, trimmedID, paginateOpts...)
 				if err != nil {
 					return fmt.Errorf("custom-pages localizations screenshot-sets list: %w", err)
 				}
 				if *includeScreenshots {
-					setsResponse, ok := resp.(*asc.AppScreenshotSetsResponse)
-					if !ok {
-						return fmt.Errorf("custom-pages localizations screenshot-sets list: unexpected response type %T", resp)
-					}
-					result, err := screenshotSetListResult(ctx, client, trimmedID, setsResponse)
+					result, err := screenshotSetListResult(ctx, client, trimmedID, resp)
 					if err != nil {
 						return fmt.Errorf("custom-pages localizations screenshot-sets list: %w", err)
 					}
@@ -226,6 +219,8 @@ Examples:
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
 			resp, err := client.GetAppCustomProductPageLocalizationScreenshotSets(requestCtx, trimmedID, opts...)
 			if err != nil {
 				return fmt.Errorf("custom-pages localizations screenshot-sets list: failed to fetch: %w", err)

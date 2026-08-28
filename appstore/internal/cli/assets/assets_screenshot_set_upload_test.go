@@ -70,7 +70,7 @@ func TestExecuteScreenshotSetUploadCompletesUploadFlow(t *testing.T) {
 			return newAssetsUploadTestClient(t), nil
 		},
 		Access: ScreenshotSetAccess{
-			List: func(_ context.Context, _ *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
+			List: func(_ context.Context, _ *asc.Client, localizationID string, _ asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error) {
 				listCalls++
 				if localizationID != "LOC_123" {
 					t.Fatalf("expected localization ID LOC_123, got %q", localizationID)
@@ -152,7 +152,7 @@ func TestExecuteScreenshotSetUploadFullSetUsesOwnerSpecificInspectionCommand(t *
 			return client, nil
 		},
 		Access: ScreenshotSetAccess{
-			List: func(_ context.Context, _ *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
+			List: func(_ context.Context, _ *asc.Client, localizationID string, _ asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error) {
 				if localizationID != "CUSTOM_LOC_123" {
 					t.Fatalf("expected localization ID CUSTOM_LOC_123, got %q", localizationID)
 				}

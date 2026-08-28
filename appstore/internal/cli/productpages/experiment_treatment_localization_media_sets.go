@@ -194,34 +194,26 @@ Examples:
 				return fmt.Errorf("experiments treatments localizations screenshot-sets list: %w", err)
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
 			opts := []asc.AppStoreVersionExperimentTreatmentLocalizationScreenshotSetsOption{
 				asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsLimit(*limit),
 				asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsNextURL(*next),
 			}
 
 			if *paginate {
-				paginateOpts := append(opts, asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsLimit(productPagesMaxLimit))
-				firstPage, err := client.GetAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(requestCtx, trimmedID, paginateOpts...)
-				if err != nil {
-					return fmt.Errorf("experiments treatments localizations screenshot-sets list: failed to fetch: %w", err)
-				}
-
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(ctx, trimmedID, asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsNextURL(nextURL))
-				})
+				paginateOpts := make([]asc.AppStoreVersionExperimentTreatmentLocalizationScreenshotSetsOption, 0, len(opts)+2)
+				paginateOpts = append(paginateOpts, opts...)
+				paginateOpts = append(
+					paginateOpts,
+					asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsLimit(productPagesMaxLimit),
+					asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsRequestContext(shared.ContextWithTimeout),
+				)
+				resp, err := client.GetAllAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(ctx, trimmedID, paginateOpts...)
 				if err != nil {
 					return fmt.Errorf("experiments treatments localizations screenshot-sets list: %w", err)
 				}
 
 				if *includeScreenshots {
-					setsResponse, ok := resp.(*asc.AppScreenshotSetsResponse)
-					if !ok {
-						return fmt.Errorf("experiments treatments localizations screenshot-sets list: unexpected response type %T", resp)
-					}
-					result, err := screenshotSetListResult(ctx, client, trimmedID, setsResponse)
+					result, err := screenshotSetListResult(ctx, client, trimmedID, resp)
 					if err != nil {
 						return fmt.Errorf("experiments treatments localizations screenshot-sets list: %w", err)
 					}
@@ -231,6 +223,8 @@ Examples:
 				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
 			}
 
+			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			defer cancel()
 			resp, err := client.GetAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(requestCtx, trimmedID, opts...)
 			if err != nil {
 				return fmt.Errorf("experiments treatments localizations screenshot-sets list: failed to fetch: %w", err)
@@ -335,8 +329,8 @@ func executeExperimentTreatmentLocalizationScreenshotUpload(
 		RequestContext:           shared.ContextWithTimeout,
 		UploadContext:            assets.ContextWithAssetUploadTimeout,
 		Access: assets.ScreenshotSetAccess{
-			List: func(ctx context.Context, client *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
-				return client.GetAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(ctx, localizationID)
+			List: func(ctx context.Context, client *asc.Client, localizationID string, requestContext asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error) {
+				return client.GetAllAppStoreVersionExperimentTreatmentLocalizationScreenshotSets(ctx, localizationID, asc.WithAppStoreVersionExperimentTreatmentLocalizationScreenshotSetsRequestContext(requestContext))
 			},
 			Create: func(ctx context.Context, client *asc.Client, localizationID, displayType string) (*asc.AppScreenshotSetResponse, error) {
 				return client.CreateAppScreenshotSetForExperimentTreatmentLocalization(ctx, localizationID, displayType)

@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -13,8 +15,10 @@ func runAppsInvalidNextURLCases(
 	t *testing.T,
 	argsPrefix []string,
 	wantErrPrefix string,
+	expectUsage ...bool,
 ) {
 	t.Helper()
+	usageExpected := len(expectUsage) > 0 && expectUsage[0]
 
 	tests := []struct {
 		name    string
@@ -57,7 +61,18 @@ func runAppsInvalidNextURLCases(
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
+			if usageExpected {
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("expected ErrHelp, got %v", runErr)
+				}
+				if !strings.Contains(stderr, test.wantErr) {
+					t.Fatalf("expected stderr to contain %q, got %q", test.wantErr, stderr)
+				}
+			} else if errors.Is(runErr, flag.ErrHelp) {
+				if !strings.Contains(stderr, test.wantErr) {
+					t.Fatalf("expected stderr to contain %q, got %q", test.wantErr, stderr)
+				}
+			} else if stderr != "" {
 				t.Fatalf("expected empty stderr, got %q", stderr)
 			}
 		})
@@ -141,6 +156,7 @@ func TestAppsListRejectsInvalidNextURL(t *testing.T) {
 		t,
 		[]string{"apps", "list"},
 		"apps: --next",
+		true,
 	)
 }
 

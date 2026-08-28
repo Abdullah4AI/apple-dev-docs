@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -25,6 +26,7 @@ func AnalyticsSalesCommand() *ffcli.Command {
 	version := fs.String("version", "", "Report format version allowed for the selected type, subtype, and frequency")
 	output := fs.String("output", "", "Output file path (default: sales_report_{date|latest}_{type}.tsv.gz)")
 	decompress := fs.Bool("decompress", false, "Decompress gzip output to .tsv")
+	allowMissing := fs.Bool("allow-missing", false, "[experimental] Return available=false instead of failing when no report exists for the requested date")
 	outputFlags := shared.BindMetadataOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -38,6 +40,7 @@ Examples:
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency WEEKLY --date "2024-01-15" # Monday start accepted
   asc analytics sales --vendor "12345678" --type SUBSCRIBER --subtype DETAILED --frequency DAILY
+  asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20" --allow-missing
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20" --decompress
   asc analytics sales --vendor "12345678" --type SALES --subtype SUMMARY --frequency DAILY --date "2024-01-20" --output "reports/daily_sales.tsv.gz"`,
 		FlagSet:   fs,
@@ -105,6 +108,18 @@ Examples:
 				Version:       reportVersion,
 			})
 			if err != nil {
+				if *allowMissing && isMissingSalesReportError(err) {
+					available := false
+					return shared.PrintOutput(&asc.SalesReportResult{
+						VendorNumber:  vendorNumber,
+						ReportType:    string(salesType),
+						ReportSubType: string(subType),
+						Frequency:     string(freq),
+						ReportDate:    reportDate,
+						Version:       string(reportVersion),
+						Available:     &available,
+					}, *outputFlags.OutputFormat, *outputFlags.Pretty)
+				}
 				return fmt.Errorf("analytics sales: failed to download report: %w", err)
 			}
 			defer download.Body.Close()
@@ -139,4 +154,17 @@ Examples:
 			return shared.PrintOutput(result, *outputFlags.OutputFormat, *outputFlags.Pretty)
 		},
 	}
+}
+
+func isMissingSalesReportError(err error) bool {
+	if !errors.Is(err, asc.ErrNotFound) {
+		return false
+	}
+
+	var apiErr *asc.APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(apiErr.Detail), "no sales for the date specified")
 }

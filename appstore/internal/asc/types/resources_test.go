@@ -55,6 +55,111 @@ func TestResponseGetMeta(t *testing.T) {
 	}
 }
 
+func TestResourcePreservesDecodedAttributesPresence(t *testing.T) {
+	type attributes struct {
+		Name string `json:"name,omitempty"`
+	}
+
+	tests := []struct {
+		name       string
+		input      string
+		want       string
+		attributes bool
+	}{
+		{
+			name:       "absent",
+			input:      `{"type":"apps","id":"app-1"}`,
+			want:       `{"type":"apps","id":"app-1"}`,
+			attributes: false,
+		},
+		{
+			name:       "null",
+			input:      `{"type":"apps","id":"app-1","attributes":null}`,
+			want:       `{"type":"apps","id":"app-1","attributes":null}`,
+			attributes: true,
+		},
+		{
+			name:       "empty object",
+			input:      `{"type":"apps","id":"app-1","attributes":{}}`,
+			want:       `{"type":"apps","id":"app-1","attributes":{}}`,
+			attributes: true,
+		},
+		{
+			name:       "sparse object",
+			input:      `{"type":"apps","id":"app-1","attributes":{"name":"Example"}}`,
+			want:       `{"type":"apps","id":"app-1","attributes":{"name":"Example"}}`,
+			attributes: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var resource Resource[attributes]
+			if err := json.Unmarshal([]byte(tc.input), &resource); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			got, err := json.Marshal(resource)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("output = %s, want %s", got, tc.want)
+			}
+
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(got, &fields); err != nil {
+				t.Fatalf("decode output: %v", err)
+			}
+			_, present := fields["attributes"]
+			if present != tc.attributes {
+				t.Fatalf("attributes present = %t, want %t", present, tc.attributes)
+			}
+		})
+	}
+}
+
+type nullAwareResourceAttributes struct {
+	sawNull bool
+}
+
+func (a *nullAwareResourceAttributes) UnmarshalJSON(data []byte) error {
+	a.sawNull = string(data) == "null"
+	return nil
+}
+
+func TestResourceDecodesPresentNullAttributesIntoTypedValue(t *testing.T) {
+	var resource Resource[nullAwareResourceAttributes]
+	if err := json.Unmarshal([]byte(`{"type":"apps","id":"app-1","attributes":null}`), &resource); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resource.Attributes.sawNull {
+		t.Fatal("expected the typed attributes decoder to receive null")
+	}
+
+	got, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(got) != `{"type":"apps","id":"app-1","attributes":null}` {
+		t.Fatalf("output = %s", got)
+	}
+}
+
+func TestResourceConstructedByCallerKeepsAttributes(t *testing.T) {
+	resource := Resource[struct{}]{
+		Type:       ResourceTypeApps,
+		ID:         "app-1",
+		Attributes: struct{}{},
+	}
+	got, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(got) != `{"type":"apps","id":"app-1","attributes":{}}` {
+		t.Fatalf("output = %s", got)
+	}
+}
+
 func TestLinkagesResponseAccessors(t *testing.T) {
 	r := &LinkagesResponse{
 		Data: []ResourceData{

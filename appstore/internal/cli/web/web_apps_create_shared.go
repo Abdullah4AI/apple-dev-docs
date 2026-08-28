@@ -94,6 +94,16 @@ func normalizeAppsCreateRunOptions(opts AppsCreateRunOptions) AppsCreateRunOptio
 	return opts
 }
 
+func explainAppsCreateError(err error) error {
+	if webcore.IsMissingCompanyNameError(err) {
+		return fmt.Errorf(
+			"web apps create failed: Apple requires a company name for this account; retry with --company-name \"Your Company\": %w",
+			err,
+		)
+	}
+	return fmt.Errorf("web apps create failed: %w", err)
+}
+
 func promptAppsCreateFields(opts *AppsCreateRunOptions) error {
 	if opts == nil {
 		return fmt.Errorf("app create options are required")
@@ -416,7 +426,7 @@ func RunAppsCreate(ctx context.Context, opts AppsCreateRunOptions) error {
 				err = errors.Join(err, fmt.Errorf("failed to roll back created bundle id %q: %w", opts.BundleID, rollbackErr))
 			}
 		}
-		return fmt.Errorf("web apps create failed: %w", err)
+		return explainAppsCreateError(err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Created app successfully (id=%s)\n", strings.TrimSpace(app.Data.ID))

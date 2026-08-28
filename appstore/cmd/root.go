@@ -41,12 +41,15 @@ func rootLongHelp() string {
 // RootCommand returns the root command
 func RootCommand(version string) *ffcli.Command {
 	catalog := registry.NewCatalog(version)
-	return newRootCommand(version, catalog.All())
+	root := newRootCommand(version, catalog.All())
+	catalog.SetCompletionRootFlagSet(root.FlagSet)
+	return root
 }
 
 func rootCommandForArgs(version string, args []string) *ffcli.Command {
 	catalog := registry.NewCatalog(version)
 	root := newRootCommand(version, catalog.MetadataCommands())
+	catalog.SetCompletionRootFlagSet(root.FlagSet)
 	// Command discovery must understand the same liberal `--bool false` form
 	// as final parsing. Otherwise the separated value looks positional and the
 	// lazy catalog can materialize the wrong command tree.

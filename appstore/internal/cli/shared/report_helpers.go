@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/config"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 // ResolveVendorNumber resolves the vendor number for reports.
@@ -58,28 +59,12 @@ func ResolveReportOutputPaths(outputPath, defaultCompressed, decompressedExt str
 
 // WriteStreamToFile writes a reader to a file securely.
 func WriteStreamToFile(path string, reader io.Reader) (int64, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return 0, err
-	}
-	file, err := OpenNewFileNoFollow(path, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return 0, fmt.Errorf("output file already exists: %w", err)
-		}
-		return 0, err
-	}
-	defer file.Close()
-
-	written, err := io.Copy(file, reader)
-	if err != nil {
-		return 0, err
-	}
-	return written, file.Sync()
+	return createNewOutputFile(path, reader)
 }
 
 // DecompressGzipFile inflates a gzip file to the destination path.
 func DecompressGzipFile(sourcePath, destPath string) (int64, error) {
-	in, err := OpenExistingNoFollow(sourcePath)
+	in, err := rootfs.OpenFile(sourcePath)
 	if err != nil {
 		return 0, err
 	}
@@ -91,21 +76,53 @@ func DecompressGzipFile(sourcePath, destPath string) (int64, error) {
 	}
 	defer reader.Close()
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return 0, err
-	}
-	out, err := OpenNewFileNoFollow(destPath, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return 0, fmt.Errorf("output file already exists: %w", err)
-		}
-		return 0, err
-	}
-	defer out.Close()
+	return createNewOutputFile(destPath, reader)
+}
 
-	written, err := io.Copy(out, reader)
+// createNewOutputFile writes a complete stream below the filesystem root. The
+// rooted traversal rejects symlinks in every parent component, and atomic
+// no-replace publication keeps a failed stream from leaving a partial output.
+func createNewOutputFile(path string, reader io.Reader) (int64, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return 0, fmt.Errorf("resolve output path %q: %w", path, err)
+	}
+	rootPath := filepath.VolumeName(absolute) + string(filepath.Separator)
+	workingDir, _ := os.Getwd()
+	for _, candidate := range []string{workingDir, os.TempDir()} {
+		candidate, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		candidate = filepath.Clean(candidate)
+		if !pathWithinOutputRoot(candidate, absolute) {
+			continue
+		}
+		if len(candidate) > len(rootPath) {
+			rootPath = candidate
+		}
+	}
+	root, err := rootfs.New(rootPath)
 	if err != nil {
 		return 0, err
 	}
-	return written, out.Sync()
+	defer root.Close()
+
+	relative, err := filepath.Rel(root.Path(), absolute)
+	if err != nil {
+		return 0, fmt.Errorf("resolve output path %q: %w", path, err)
+	}
+	written, err := root.CreateNewFrom(relative, reader, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return 0, fmt.Errorf("output file already exists: %w", err)
+	}
+	return written, err
+}
+
+func pathWithinOutputRoot(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }

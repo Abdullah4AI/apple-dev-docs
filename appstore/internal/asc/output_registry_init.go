@@ -29,6 +29,7 @@ func registerAllOutputRenderers() {
 	registerRowsWithSingleResourceAdapter(reviewsRows)
 	registerRows(customerReviewSummarizationsRows)
 	registerRowsWithSingleResourceAdapter(appsRows)
+	registerDirect(appsPublishedReportTables)
 	registerRows(appRenameResultRows)
 	registerRows(appsWallRows)
 	registerRowsWithSingleResourceAdapter(appClipsRows)
@@ -94,11 +95,21 @@ func registerAllOutputRenderers() {
 	registerSingleLinkageRows(func(v *AppInfoSecondaryCategoryLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *AppInfoSecondarySubcategoryOneLinkageResponse) ResourceData { return v.Data })
 	registerSingleLinkageRows(func(v *AppInfoSecondarySubcategoryTwoLinkageResponse) ResourceData { return v.Data })
-	registerRowsWithSingleResourceAdapter(bundleIDsRows)
+	registerRows(bundleIDsRows)
+	registerRows(bundleIDResponseRows)
 	registerRowsWithSingleResourceAdapter(merchantIDsRows)
 	registerRowsWithSingleResourceAdapter(passTypeIDsRows)
 	registerRowsWithSingleResourceAdapter(certificatesRows)
-	registerRowsWithSingleResourceAdapter(profilesRows)
+	registerRows(profilesRows)
+	registerRows(func(v *ProfileResponse) ([]string, [][]string) {
+		single := ptrOrZero(v)
+		return profilesRows(&ProfilesResponse{
+			Data:     []Resource[ProfileAttributes]{single.Data},
+			Links:    single.Links,
+			Included: single.Included,
+			Meta:     single.Meta,
+		})
+	})
 	registerRowsWithSingleResourceAdapter(legacyInAppPurchasesRows)
 	registerRowsWithSingleResourceAdapter(inAppPurchasesRows)
 	registerRowsWithSingleResourceAdapter(inAppPurchaseVersionsRows)
@@ -160,6 +171,7 @@ func registerAllOutputRenderers() {
 	registerRowsWithSingleResourceAdapter(winBackOffersRows)
 	registerRowsErr(winBackOfferPricesRows)
 	registerRowsWithSingleResourceAdapter(appStoreVersionsRows)
+	registerRows(appStoreVersionsLatestRows)
 	registerRowsWithSingleToListAdapter[PreReleaseVersionResponse, PreReleaseVersionsResponse](preReleaseVersionsRows)
 	registerRows(buildIconsRows)
 	registerRowsWithSingleResourceAdapter(buildUploadsRows)
@@ -246,6 +258,7 @@ func registerAllOutputRenderers() {
 	registerRows(betaRecruitmentCriteriaRows)
 	registerRows(betaRecruitmentCriteriaDeleteResultRows)
 	registerResponseDataRows(betaGroupMetricsRows)
+	registerRows(betaGroupTesterUsagesRows)
 	registerRowsWithSingleResourceAdapter(sandboxTestersRows)
 	registerRowsWithSingleResourceAdapter(bundleIDCapabilitiesRows)
 	registerRows(localizationDownloadResultRows)

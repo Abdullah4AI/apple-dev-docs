@@ -25,3 +25,13 @@ func TestRelationshipResourceIDMissingID(t *testing.T) {
 		t.Fatalf("expected error for missing relationship id")
 	}
 }
+
+func TestNormalizeIAPListEnumDeduplicatesAfterNormalization(t *testing.T) {
+	got, err := normalizeIAPListEnum("ready_to_submit,READY_TO_SUBMIT", "--state", iapListStates)
+	if err != nil {
+		t.Fatalf("unexpected normalization error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "READY_TO_SUBMIT" {
+		t.Fatalf("normalized states = %v, want [READY_TO_SUBMIT]", got)
+	}
+}

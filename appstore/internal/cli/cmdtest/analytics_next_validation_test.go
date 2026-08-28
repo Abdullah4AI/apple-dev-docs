@@ -4,9 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func runAnalyticsInvalidNextURLCases(
@@ -330,5 +336,124 @@ func TestAnalyticsViewPaginateFromNextWithoutRequestID(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"id":"analytics-report-next-1"`) || !strings.Contains(stdout, `"id":"analytics-instance-next-1"`) {
 		t.Fatalf("expected report and instance IDs in output, got %q", stdout)
+	}
+}
+
+func TestAnalyticsViewPaginateFromNextFollowsReportPages(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	const (
+		firstReportsURL    = "https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports?cursor=AQ&limit=200"
+		secondReportsURL   = "https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports?cursor=BQ&limit=200"
+		firstInstancesURL  = "https://api.appstoreconnect.apple.com/v1/analyticsReports/analytics-report-next-1/instances?limit=200"
+		secondInstancesURL = "https://api.appstoreconnect.apple.com/v1/analyticsReports/analytics-report-next-2/instances?limit=200"
+	)
+
+	pages := []struct {
+		url  string
+		body string
+	}{
+		{
+			url:  firstReportsURL,
+			body: `{"data":[{"type":"analyticsReports","id":"analytics-report-next-1","attributes":{"name":"Retention","category":"APP_USAGE","granularity":"DAILY"}}],"links":{"first":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports","prev":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports?cursor=9w","next":"` + secondReportsURL + `"}}`,
+		},
+		{
+			url:  secondReportsURL,
+			body: `{"data":[{"type":"analyticsReports","id":"analytics-report-next-2","attributes":{"name":"Acquisition","category":"APP_STORE","granularity":"DAILY"}}],"links":{"next":""}}`,
+		},
+		{
+			url:  firstInstancesURL,
+			body: `{"data":[{"type":"analyticsReportInstances","id":"analytics-instance-next-1","attributes":{"reportDate":"2024-01-01","processingDate":"2024-01-02T00:00:00Z","granularity":"DAILY","version":"1"}}],"links":{"next":""}}`,
+		},
+		{
+			url:  secondInstancesURL,
+			body: `{"data":[{"type":"analyticsReportInstances","id":"analytics-instance-next-2","attributes":{"reportDate":"2024-01-03","processingDate":"2024-01-04T00:00:00Z","granularity":"DAILY","version":"1"}}],"links":{"next":""}}`,
+		},
+	}
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if requestCount < 1 || requestCount > len(pages) {
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+		}
+		expectedURL, err := url.Parse(pages[requestCount-1].url)
+		if err != nil {
+			t.Fatalf("parse expected URL: %v", err)
+		}
+		if req.Method != http.MethodGet || req.URL.RequestURI() != expectedURL.RequestURI() {
+			t.Fatalf("unexpected server request: %s %s", req.Method, req.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, pages[requestCount-1].body)
+	}))
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if requestCount > len(pages) {
+			t.Fatalf("unexpected extra request: %s %s", req.Method, req.URL.String())
+		}
+		if req.Method != http.MethodGet || req.URL.String() != pages[requestCount-1].url {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+		routed := req.Clone(req.Context())
+		routed.URL.Scheme = serverURL.Scheme
+		routed.URL.Host = serverURL.Host
+		routed.Host = serverURL.Host
+		return server.Client().Transport.RoundTrip(routed)
+	})
+	client, err := asc.NewClientWithHTTPClient(
+		"TEST_KEY",
+		"TEST_ISSUER",
+		os.Getenv("ASC_PRIVATE_KEY_PATH"),
+		&http.Client{Transport: transport},
+	)
+	if err != nil {
+		t.Fatalf("create analytics pagination test client: %v", err)
+	}
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		return client, nil
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"analytics", "view", "--paginate", "--next", firstReportsURL}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if requestCount != 4 {
+		t.Fatalf("request count = %d, want 4", requestCount)
+	}
+	for _, link := range []string{
+		`"first":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports"`,
+		`"prev":"https://api.appstoreconnect.apple.com/v1/analyticsReportRequests/request-1/reports?cursor=9w"`,
+	} {
+		if !strings.Contains(stdout, link) {
+			t.Fatalf("expected output to contain %q, got %q", link, stdout)
+		}
+	}
+	for _, id := range []string{
+		"analytics-report-next-1",
+		"analytics-report-next-2",
+		"analytics-instance-next-1",
+		"analytics-instance-next-2",
+	} {
+		if !strings.Contains(stdout, `"id":"`+id+`"`) {
+			t.Fatalf("expected output to contain %q, got %q", id, stdout)
+		}
 	}
 }

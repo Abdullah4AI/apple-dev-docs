@@ -112,12 +112,34 @@ func publicRetryDelay(headers http.Header, now time.Time, maxDelay time.Duration
 	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
 		return publicRetryDelayFromSeconds(seconds, maxDelay)
 	}
+	// ParseInt rejects positive values above MaxInt64, but Retry-After's
+	// delay-seconds grammar has no such bound. Treat an all-digit positive
+	// overflow as an arbitrarily long delay and apply the configured cap.
+	if isPositiveDecimal(value) {
+		const maxDuration = time.Duration(1<<63 - 1)
+		return capPublicRetryDelay(maxDuration, maxDelay)
+	}
 	if deadline, err := http.ParseTime(value); err == nil {
 		if delay := deadline.Sub(now); delay > 0 {
 			return capPublicRetryDelay(delay, maxDelay)
 		}
 	}
 	return 0
+}
+
+func isPositiveDecimal(value string) bool {
+	value = strings.TrimPrefix(value, "+")
+	if value == "" {
+		return false
+	}
+	positive := false
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+		positive = positive || value[i] != '0'
+	}
+	return positive
 }
 
 func publicRetryDelayFromSeconds(seconds int64, maxDelay time.Duration) time.Duration {

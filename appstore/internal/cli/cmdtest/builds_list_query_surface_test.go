@@ -6,12 +6,16 @@ import (
 	"flag"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 // buildsListQuerySurfaceRequest records what the CLI sent, so tests can assert
@@ -22,8 +26,8 @@ type buildsListQuerySurfaceRequest struct {
 	query url.Values
 }
 
-// buildsListQuerySurfaceStub installs a transport that captures the builds
-// request the CLI issues and replies with a minimal envelope.
+// buildsListQuerySurfaceStub installs a server-backed ASC client that captures
+// the builds request the CLI issues and replies with a minimal envelope.
 func buildsListQuerySurfaceStub(t *testing.T) *buildsListQuerySurfaceRequest {
 	t.Helper()
 
@@ -31,24 +35,43 @@ func buildsListQuerySurfaceStub(t *testing.T) *buildsListQuerySurfaceRequest {
 	t.Setenv("ASC_APP_ID", "")
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
 	captured := &buildsListQuerySurfaceRequest{}
-
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		captured.calls++
 		captured.path = req.URL.Path
 		captured.query = req.URL.Query()
 		body := `{"data":[{"type":"builds","id":"build-1","attributes":{"version":"42"}}]}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.URL.Scheme + "://" + req.URL.Host; got != asc.BaseURL {
+			t.Errorf("request origin = %s, want %s", got, asc.BaseURL)
+		}
+		routed := req.Clone(req.Context())
+		routed.URL.Scheme = serverURL.Scheme
+		routed.URL.Host = serverURL.Host
+		routed.Host = serverURL.Host
+		return server.Client().Transport.RoundTrip(routed)
 	})
+	client, err := asc.NewClientWithHTTPClient(
+		"TEST_KEY",
+		"TEST_ISSUER",
+		os.Getenv("ASC_PRIVATE_KEY_PATH"),
+		&http.Client{Transport: transport},
+	)
+	if err != nil {
+		t.Fatalf("create test client: %v", err)
+	}
+	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+		return client, nil
+	}))
 
 	return captured
 }
@@ -283,18 +306,33 @@ func TestBuildsListRejectsQueryFlagsCombinedWithNext(t *testing.T) {
 		{name: "beta review state", flag: "--beta-review-state", args: []string{"--beta-review-state", "APPROVED"}},
 		{name: "include", flag: "--include", args: []string{"--include", "betaGroups"}},
 		{name: "sort", flag: "--sort", args: []string{"--sort", "version"}},
+		{name: "platform", flag: "--platform", args: []string{"--platform", "IOS"}},
+		{name: "processing state", flag: "--processing-state", args: []string{"--processing-state", "VALID"}},
+		{name: "version", flag: "--version", args: []string{"--version", "1.2.3"}},
+		{name: "build number", flag: "--build-number", args: []string{"--build-number", "77"}},
+		{name: "limit", flag: "--limit", args: []string{"--limit", "10"}},
+		{name: "limit explicit zero", flag: "--limit", args: []string{"--limit", "0"}},
+		{name: "exclude expired", flag: "--exclude-expired", args: []string{"--exclude-expired"}},
+		{name: "not expired alias", flag: "--not-expired", args: []string{"--not-expired"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			captured := buildsListQuerySurfaceStub(t)
 
 			args := append([]string{"builds", "list", "--next", nextURL}, testCase.args...)
-			_, stderr, err := runBuildsListQuerySurface(t, args...)
+			stdout, stderr, err := runBuildsListQuerySurface(t, args...)
 
 			if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
 				t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 			}
-			if !strings.Contains(stderr, "--next cannot be combined with "+testCase.flag) {
-				t.Fatalf("expected stderr to reject %s with --next, got %q", testCase.flag, stderr)
+			wantError := "builds list: --next cannot be combined with " + testCase.flag
+			if err == nil || !errors.Is(err, flag.ErrHelp) || err.Error() != wantError {
+				t.Fatalf("error = %v, want usage error %q", err, wantError)
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if firstLine := strings.SplitN(stderr, "\n", 2)[0]; firstLine != "Error: "+wantError {
+				t.Fatalf("expected concise first stderr line %q, got %q", "Error: "+wantError, firstLine)
 			}
 			captured.assertNoRequest(t)
 		})

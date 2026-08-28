@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestSubscriptionsPricePointsListPaginateUsesPerPageTimeout(t *testing.T) {
@@ -119,8 +121,62 @@ func TestSubscriptionsPricePointsListStreamRequiresPaginate(t *testing.T) {
 	}
 }
 
+func TestSubscriptionsPricePointsListStreamRejectsIncompatibleOutputFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "table output",
+			args:    []string{"--output", "table"},
+			wantErr: "--stream requires --output json",
+		},
+		{
+			name:    "markdown output",
+			args:    []string{"--output", "markdown"},
+			wantErr: "--stream requires --output json",
+		},
+		{
+			name:    "pretty JSON",
+			args:    []string{"--pretty"},
+			wantErr: "--stream cannot be combined with --pretty",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := []string{
+				"subscriptions", "pricing", "price-points", "list",
+				"--subscription-id", "8000000001",
+				"--paginate",
+				"--stream",
+			}
+			args = append(args, test.args...)
+
+			stdout, stderr, runErr := runRootCommand(t, args)
+			if runErr == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
+			}
+			if !strings.Contains(runErr.Error(), test.wantErr) {
+				t.Fatalf("error = %q, want it to contain %q", runErr, test.wantErr)
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, test.wantErr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestSubscriptionsPricePointsListStreamOutput(t *testing.T) {
 	setupAuth(t)
+	t.Setenv("ASC_DEFAULT_OUTPUT", "table")
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
@@ -185,6 +241,58 @@ func TestSubscriptionsPricePointsListStreamOutput(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], `"id":"pp-2"`) {
 		t.Fatalf("expected second page to contain pp-2, got %q", lines[1])
+	}
+}
+
+func TestSubscriptionsPricePointsListStreamAcceptsNormalizedJSONOutput(t *testing.T) {
+	setupAuth(t)
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"data":[{"type":"subscriptionPricePoints","id":"pp-1"}],"links":{}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "uppercase", value: "JSON"},
+		{name: "padded", value: " json "},
+		{name: "empty fallback", value: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse([]string{
+					"subscriptions", "pricing", "price-points", "list",
+					"--subscription-id", "8000000001",
+					"--paginate",
+					"--stream",
+					"--output", tc.value,
+				}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				if err := root.Run(context.Background()); err != nil {
+					t.Fatalf("run error: %v", err)
+				}
+			})
+
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+			if !strings.Contains(stdout, `"id":"pp-1"`) {
+				t.Fatalf("stdout = %q, want streamed JSON output", stdout)
+			}
+		})
 	}
 }
 

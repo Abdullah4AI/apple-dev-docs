@@ -1,0 +1,166 @@
+package cmdtest
+
+import (
+	"encoding/json"
+	"net/http"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
+)
+
+func TestEncryptionAssignBuildsRepeatedBuildIDRejectedBeforeRequest(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	requestCount := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		return jsonHTTPResponse(http.StatusNoContent, ""), nil
+	}))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := rootcmd.Run([]string{
+			"encryption", "declarations", "assign-builds",
+			"--id", "DECL_ID",
+			"--build-id", "BUILD_A",
+			"--build-id", "BUILD_B",
+		}, "1.2.3")
+		if code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	wantMessage := repeatedCSVFlagMessage("build-id", "BUILD_A", "BUILD_B")
+	if !strings.Contains(stderr, wantMessage) {
+		t.Fatalf("stderr = %q, want it to contain %q", stderr, wantMessage)
+	}
+	if requestCount != 0 {
+		t.Fatalf("repeated --build-id made %d HTTP requests, want 0", requestCount)
+	}
+}
+
+func TestEncryptionAssignBuildsCSVPreservesDuplicatesAndSkipsEmptyFields(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	var requestIDs []string
+	requestCount := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if req.Method != http.MethodPost || req.URL.Path != "/v1/appEncryptionDeclarations/DECL_ID/relationships/builds" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		var payload struct {
+			Data []struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		for _, item := range payload.Data {
+			if item.Type != "builds" {
+				t.Fatalf("request relationship type = %q, want builds", item.Type)
+			}
+			requestIDs = append(requestIDs, item.ID)
+		}
+		return jsonHTTPResponse(http.StatusNoContent, ""), nil
+	}))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := rootcmd.Run([]string{
+			"encryption", "declarations", "assign-builds",
+			"--id", "DECL_ID",
+			"--build-id", "BUILD_A,, BUILD_A, ",
+			"--output", "json",
+		}, "1.2.3")
+		if code != rootcmd.ExitSuccess {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitSuccess)
+		}
+	})
+
+	if requestCount != 1 {
+		t.Fatalf("HTTP request count = %d, want 1", requestCount)
+	}
+	if want := []string{"BUILD_A", "BUILD_A"}; !reflect.DeepEqual(requestIDs, want) {
+		t.Fatalf("request build IDs = %#v, want %#v", requestIDs, want)
+	}
+	if !strings.Contains(stdout, `"buildIds":["BUILD_A","BUILD_A"]`) {
+		t.Fatalf("stdout = %q, want duplicate build IDs in receipt", stdout)
+	}
+	if !strings.Contains(stderr, "Successfully assigned 2 build(s) to declaration DECL_ID") {
+		t.Fatalf("stderr = %q, want success diagnostic", stderr)
+	}
+}
+
+func TestEncryptionAssignBuildsExplicitEmptyValueKeepsRequiredValidation(t *testing.T) {
+	requestCount := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		return jsonHTTPResponse(http.StatusNoContent, ""), nil
+	}))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := rootcmd.Run([]string{
+			"encryption", "declarations", "assign-builds",
+			"--id", "DECL_ID",
+			"--build-id", "",
+		}, "1.2.3")
+		if code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "Error: --build-id is required") {
+		t.Fatalf("stderr = %q, want required build-id error", stderr)
+	}
+	if requestCount != 0 {
+		t.Fatalf("empty --build-id made %d HTTP requests, want 0", requestCount)
+	}
+}
+
+func TestEncryptionAssignBuildsCanonicalAndLegacyFlagsConflictBeforeRequest(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	requestCount := 0
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		return jsonHTTPResponse(http.StatusNoContent, ""), nil
+	}))
+
+	stdout, stderr := captureOutput(t, func() {
+		code := rootcmd.Run([]string{
+			"encryption", "declarations", "assign-builds",
+			"--id", "DECL_ID",
+			"--build-id", "BUILD_A",
+			"--build", "BUILD_B",
+		}, "1.2.3")
+		if code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "Warning: `--build` is deprecated. Use `--build-id`.") {
+		t.Fatalf("stderr = %q, want deprecation warning", stderr)
+	}
+	if !strings.Contains(stderr, "--build conflicts with --build-id") {
+		t.Fatalf("stderr = %q, want conflict error", stderr)
+	}
+	if requestCount != 0 {
+		t.Fatalf("conflicting flags made %d HTTP requests, want 0", requestCount)
+	}
+}

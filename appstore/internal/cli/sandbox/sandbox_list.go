@@ -84,7 +84,9 @@ Examples:
 
 				// Fetch all remaining pages
 				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetSandboxTesters(ctx, asc.WithSandboxTestersNextURL(nextURL))
+					continuationOpts := append([]asc.SandboxTestersOption(nil), opts...)
+					continuationOpts = append(continuationOpts, asc.WithSandboxTestersNextURL(nextURL))
+					return client.GetSandboxTesters(ctx, continuationOpts...)
 				})
 				if err != nil {
 					return fmt.Errorf("sandbox list: %w", err)

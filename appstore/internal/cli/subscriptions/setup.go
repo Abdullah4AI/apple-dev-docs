@@ -1400,29 +1400,48 @@ func ensureSubscriptionsSetupPriceMatrix(ctx context.Context, client *asc.Client
 	if err != nil {
 		return nil, false, err
 	}
-	complete := true
-	for _, target := range matrix {
-		resolved := subscriptionPriceImportResolvedRow{
-			territoryID:  target.TerritoryID,
-			pricePointID: target.PricePointID,
-			startDate:    strings.TrimSpace(attrs.StartDate),
-			planType:     attrs.PlanType,
-		}
-		if !subscriptionSetupPriceStateMatches(state, resolved) {
-			complete = false
-			break
-		}
-	}
-	if complete && !repair {
+	preMutationMatched := subscriptionSetupPriceMatrixMatches(state, matrix)
+	if preMutationMatched && !repair {
 		return territories, false, nil
 	}
-	priceCtx, priceCancel := shared.ContextWithTimeout(ctx)
-	_, err = client.SetSubscriptionPriceMatrix(priceCtx, subscriptionID, matrix)
-	priceCancel()
+	// The complete matrix PATCH may apply before a transport/5xx response is
+	// observed, so reconcile its exact state without replaying the write.
+	_, _, err = shared.RunReconciledMutationNoReplay(
+		ctx,
+		func(requestCtx context.Context) (struct{}, error) {
+			_, mutationErr := client.SetSubscriptionPriceMatrix(requestCtx, subscriptionID, matrix)
+			return struct{}{}, mutationErr
+		},
+		func(readbackCtx context.Context) (struct{}, bool, error) {
+			readbackState, readbackErr := fetchSubscriptionPriceImportState(readbackCtx, client, subscriptionID)
+			if readbackErr != nil {
+				return struct{}{}, false, readbackErr
+			}
+			matches := subscriptionSetupPriceMatrixMatches(readbackState, matrix)
+			return struct{}{}, matches && (!repair || !preMutationMatched), nil
+		},
+	)
 	if err != nil {
 		return nil, false, err
 	}
 	return territories, true, nil
+}
+
+func subscriptionSetupPriceMatrixMatches(index *subscriptionPriceImportStateIndex, matrix []asc.SubscriptionInlinePrice) bool {
+	if index == nil {
+		return false
+	}
+	for _, target := range matrix {
+		if !subscriptionSetupPriceStateMatches(index, subscriptionPriceImportResolvedRow{
+			territoryID:  target.TerritoryID,
+			pricePointID: target.PricePointID,
+			startDate:    strings.TrimSpace(target.Attributes.StartDate),
+			planType:     target.Attributes.PlanType,
+		}) {
+			return false
+		}
+	}
+	return true
 }
 
 // subscriptionSetupPriceStateMatches accepts an omitted start date only when

@@ -60,6 +60,13 @@ func CertificatesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	certificateType := fs.String("certificate-type", "", "Filter by certificate type(s), comma-separated")
+	displayName := fs.String("display-name", "", "[experimental] Filter by display name(s), comma-separated")
+	serialNumber := fs.String("serial-number", "", "[experimental] Filter by serial number(s), comma-separated")
+	ids := fs.String("id", "", "[experimental] Filter by certificate ID(s), comma-separated")
+	sort := fs.String("sort", "", "[experimental] Sort by key(s), comma-separated: "+strings.Join(certificateSortList(), ", "))
+	fields := fs.String("fields", "", "[experimental] Fields to include: "+strings.Join(certificateFieldsList(), ", "))
+	passTypeIDFields := fs.String("pass-type-id-fields", "", "[experimental] Fields to include for pass type IDs: "+strings.Join(certificatePassTypeIDFieldsList(), ", "))
+	include := fs.String("include", "", "[experimental] Include relationships: "+strings.Join(certificateIncludeList(), ", "))
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -74,6 +81,8 @@ func CertificatesListCommand() *ffcli.Command {
 Examples:
   asc certificates list
   asc certificates list --certificate-type IOS_DISTRIBUTION
+  asc certificates list --display-name "Example Certificate"
+  asc certificates list --sort "-displayName" --fields "displayName,serialNumber"
   asc certificates list --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
@@ -81,15 +90,74 @@ Examples:
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("certificates list: %w", err)
 			}
-			if err := shared.RejectNextFlagConflicts(fs, *next, "certificates list", "certificate-type", "limit"); err != nil {
+			if err := shared.RejectNextFlagConflicts(
+				fs,
+				*next,
+				"certificates list",
+				"display-name",
+				"certificate-type",
+				"serial-number",
+				"id",
+				"sort",
+				"fields",
+				"pass-type-id-fields",
+				"include",
+				"limit",
+			); err != nil {
 				return err
+			}
+			provided := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) {
+				provided[f.Name] = true
+			})
+			for _, selector := range []struct {
+				name  string
+				value string
+			}{
+				{name: "certificate-type", value: *certificateType},
+				{name: "display-name", value: *displayName},
+				{name: "serial-number", value: *serialNumber},
+				{name: "id", value: *ids},
+				{name: "sort", value: *sort},
+				{name: "fields", value: *fields},
+				{name: "pass-type-id-fields", value: *passTypeIDFields},
+				{name: "include", value: *include},
+			} {
+				if provided[selector.name] && len(shared.SplitCSV(selector.value)) == 0 {
+					return shared.UsageErrorf("certificates list: --%s must not be empty", selector.name)
+				}
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return fmt.Errorf("certificates list: --limit must be between 1 and 200")
 			}
+			sortValue, err := normalizeCertificateSort(*sort)
+			if err != nil {
+				return shared.UsageErrorf("certificates list: %v", err)
+			}
+			fieldsValue, err := normalizeCertificateFields(*fields, "--fields")
+			if err != nil {
+				return shared.UsageErrorf("certificates list: %v", err)
+			}
+			passTypeIDFieldsValue, err := normalizeCertificatePassTypeIDFields(*passTypeIDFields, "--pass-type-id-fields")
+			if err != nil {
+				return shared.UsageErrorf("certificates list: %v", err)
+			}
+			includeValues, err := normalizeCertificatesInclude(*include)
+			if err != nil {
+				return shared.UsageErrorf("certificates list: %v", err)
+			}
+			if len(passTypeIDFieldsValue) > 0 && !shared.HasInclude(includeValues, "passTypeId") {
+				const message = "--pass-type-id-fields requires --include passTypeId"
+				fmt.Fprintln(os.Stderr, "Error: "+message)
+				return shared.WithDiagnostic(
+					shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message),
+					shared.DiagnosticInvalidInput,
+					"--pass-type-id-fields",
+				)
+			}
 
 			certificateTypes := shared.SplitCSVUpper(*certificateType)
-
+			displayNames := shared.SplitCSV(*displayName)
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("certificates list: %w", err)
@@ -102,8 +170,31 @@ Examples:
 				asc.WithCertificatesLimit(*limit),
 				asc.WithCertificatesNextURL(*next),
 			}
+			if len(displayNames) > 0 {
+				opts = append(opts, asc.WithCertificatesFilterDisplayNames(displayNames))
+			}
 			if len(certificateTypes) > 0 {
 				opts = append(opts, asc.WithCertificatesTypes(certificateTypes))
+			}
+			serialNumbers := shared.SplitCSV(*serialNumber)
+			if len(serialNumbers) > 0 {
+				opts = append(opts, asc.WithCertificatesFilterSerialNumbers(serialNumbers))
+			}
+			idsValue := shared.SplitCSV(*ids)
+			if len(idsValue) > 0 {
+				opts = append(opts, asc.WithCertificatesFilterIDs(idsValue))
+			}
+			if sortValue != "" {
+				opts = append(opts, asc.WithCertificatesSort(sortValue))
+			}
+			if len(fieldsValue) > 0 {
+				opts = append(opts, asc.WithCertificatesFields(fieldsValue))
+			}
+			if len(passTypeIDFieldsValue) > 0 {
+				opts = append(opts, asc.WithCertificatesPassTypeIDFields(passTypeIDFieldsValue))
+			}
+			if len(includeValues) > 0 {
+				opts = append(opts, asc.WithCertificatesInclude(includeValues))
 			}
 
 			if *paginate {
@@ -450,6 +541,27 @@ func encodeCSRContent(data []byte) (string, error) {
 	return normalized, nil
 }
 
+func normalizeCertificateSort(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+
+	allowed := certificateSortList()
+	parts := strings.Split(value, ",")
+	for index, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return "", fmt.Errorf("--sort must be one of: %s", strings.Join(allowed, ", "))
+		}
+		if err := shared.ValidateSort(part, allowed...); err != nil {
+			return "", err
+		}
+		parts[index] = part
+	}
+	return strings.Join(parts, ","), nil
+}
+
 func normalizeCertificatesInclude(value string) ([]string, error) {
 	include := shared.SplitCSV(value)
 	if len(include) == 0 {
@@ -467,6 +579,71 @@ func normalizeCertificatesInclude(value string) ([]string, error) {
 	return include, nil
 }
 
+func normalizeCertificateFields(value, flagName string) ([]string, error) {
+	fields := shared.SplitCSV(value)
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	allowed := map[string]struct{}{}
+	for _, field := range certificateFieldsList() {
+		allowed[field] = struct{}{}
+	}
+	for _, field := range fields {
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("%s must be one of: %s", flagName, strings.Join(certificateFieldsList(), ", "))
+		}
+	}
+	return fields, nil
+}
+
+func normalizeCertificatePassTypeIDFields(value, flagName string) ([]string, error) {
+	fields := shared.SplitCSV(value)
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	allowed := map[string]struct{}{}
+	for _, field := range certificatePassTypeIDFieldsList() {
+		allowed[field] = struct{}{}
+	}
+	for _, field := range fields {
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("%s must be one of: %s", flagName, strings.Join(certificatePassTypeIDFieldsList(), ", "))
+		}
+	}
+	return fields, nil
+}
+
 func certificateIncludeList() []string {
 	return []string{"passTypeId"}
+}
+
+func certificateFieldsList() []string {
+	return []string{
+		"name",
+		"certificateType",
+		"displayName",
+		"serialNumber",
+		"platform",
+		"expirationDate",
+		"certificateContent",
+		"activated",
+		"passTypeId",
+	}
+}
+
+func certificatePassTypeIDFieldsList() []string {
+	return []string{"name", "identifier", "certificates"}
+}
+
+func certificateSortList() []string {
+	return []string{
+		"displayName",
+		"-displayName",
+		"certificateType",
+		"-certificateType",
+		"serialNumber",
+		"-serialNumber",
+		"id",
+		"-id",
+	}
 }

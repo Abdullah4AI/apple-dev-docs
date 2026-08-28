@@ -162,3 +162,32 @@ func betaGroupMetricsRows(items []Resource[BetaGroupMetricAttributes]) ([]string
 	}
 	return headers, rows
 }
+
+func betaGroupTesterUsagesRows(resp *BetaGroupTesterUsagesResponse) ([]string, [][]string) {
+	headers := []string{"Tester ID", "Start", "End", "Sessions", "Crashes", "Feedback"}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, metric := range resp.Data {
+		testerID := ""
+		if metric.Dimensions != nil && metric.Dimensions.BetaTesters != nil && metric.Dimensions.BetaTesters.Data != nil {
+			testerID = metric.Dimensions.BetaTesters.Data.ID
+		}
+		for _, point := range metric.DataPoints {
+			rows = append(rows, []string{
+				testerID,
+				point.Start,
+				point.End,
+				formatBetaGroupMetricCount(point.Values.SessionCount),
+				formatBetaGroupMetricCount(point.Values.CrashCount),
+				formatBetaGroupMetricCount(point.Values.FeedbackCount),
+			})
+		}
+	}
+	return headers, rows
+}
+
+func formatBetaGroupMetricCount(value *int) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *value)
+}

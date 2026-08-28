@@ -37,6 +37,115 @@ func TestRunReconciledMutationReadsAgainBeforeReplay(t *testing.T) {
 	}
 }
 
+func TestRunReconciledMutationNoReplayStopsAfterNegativeReadback(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	mutations := 0
+	readbacks := 0
+	_, _, err := RunReconciledMutationNoReplay(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", &asc.RetryableError{Err: &asc.APIError{StatusCode: http.StatusBadGateway}}
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "", false, nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected ambiguous mutation error, got nil")
+	}
+	if mutations != 1 || readbacks != 2 {
+		t.Fatalf("expected one mutation and two readbacks without replay, got mutations=%d readbacks=%d", mutations, readbacks)
+	}
+}
+
+func TestRunReconciledMutationNoReplayRecoversOnDelayedReadback(t *testing.T) {
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	mutations := 0
+	readbacks := 0
+	value, status, err := RunReconciledMutationNoReplay(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", &asc.RetryableError{Err: &asc.APIError{StatusCode: http.StatusBadGateway}}
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "subscription-id", readbacks == 2, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("RunReconciledMutationNoReplay() error: %v", err)
+	}
+	if value != "subscription-id" || status != ReconciledMutationRecovered || mutations != 1 || readbacks != 2 {
+		t.Fatalf("unexpected delayed recovery: value=%q status=%q mutations=%d readbacks=%d", value, status, mutations, readbacks)
+	}
+}
+
+func TestRunReconciledMutationNoReplayPreservesDeterministicFailure(t *testing.T) {
+	mutations := 0
+	readbacks := 0
+	wantErr := &asc.APIError{StatusCode: http.StatusUnprocessableEntity, Code: "INVALID_PRICE"}
+	_, _, err := RunReconciledMutationNoReplay(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", wantErr
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "", false, nil
+		},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected original deterministic error, got %v", err)
+	}
+	if mutations != 1 || readbacks != 0 {
+		t.Fatalf("expected one mutation and no readback for deterministic failure, got mutations=%d readbacks=%d", mutations, readbacks)
+	}
+}
+
+func TestRunReconciledMutationNoReplayDoesNotReadRateLimitRejection(t *testing.T) {
+	mutations := 0
+	readbacks := 0
+	_, _, err := RunReconciledMutationNoReplay(
+		context.Background(),
+		func(context.Context) (string, error) {
+			mutations++
+			return "", &asc.RetryableError{Err: &asc.APIError{Code: "RATE_LIMIT_EXCEEDED", StatusCode: http.StatusTooManyRequests}}
+		},
+		func(context.Context) (string, bool, error) {
+			readbacks++
+			return "", false, nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected rate-limit error, got nil")
+	}
+	if mutations != 1 || readbacks != 0 {
+		t.Fatalf("expected one mutation and no readback for rate-limit rejection, got mutations=%d readbacks=%d", mutations, readbacks)
+	}
+}
+
+func TestMutationReadbackDelayCapsRetryAfter(t *testing.T) {
+	opts := asc.RetryOptions{BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond}
+	err := &asc.RetryableError{
+		RetryAfter: time.Hour,
+		Err:        &asc.APIError{StatusCode: http.StatusBadGateway},
+	}
+
+	if got := mutationReadbackDelay(opts, 0, err); got != opts.MaxDelay {
+		t.Fatalf("mutationReadbackDelay() = %s, want %s", got, opts.MaxDelay)
+	}
+}
+
 func TestRunReconciledMutationDoesNotRetryRateLimitRejection(t *testing.T) {
 	t.Setenv("ASC_MAX_RETRIES", "1")
 	t.Setenv("ASC_BASE_DELAY", "1ms")

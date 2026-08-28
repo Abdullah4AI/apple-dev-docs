@@ -41,15 +41,27 @@ func bundleIDsRows(resp *BundleIDsResponse) ([]string, [][]string) {
 	headers := []string{"ID", "Name", "Identifier", "Platform", "Seed ID"}
 	rows := make([][]string, 0, len(resp.Data))
 	for _, item := range resp.Data {
-		rows = append(rows, []string{
-			item.ID,
-			compactWhitespace(item.Attributes.Name),
-			item.Attributes.Identifier,
-			string(item.Attributes.Platform),
-			item.Attributes.SeedID,
-		})
+		rows = append(rows, bundleIDRow(item))
 	}
 	return headers, rows
+}
+
+func bundleIDResponseRows(resp *BundleIDResponse) ([]string, [][]string) {
+	item := resp.Data
+	return []string{"ID", "Name", "Identifier", "Platform", "Seed ID"}, [][]string{bundleIDRow(Resource[BundleIDAttributes]{
+		ID:         item.ID,
+		Attributes: item.Attributes,
+	})}
+}
+
+func bundleIDRow(item Resource[BundleIDAttributes]) []string {
+	return []string{
+		item.ID,
+		compactWhitespace(item.Attributes.Name),
+		item.Attributes.Identifier,
+		string(item.Attributes.Platform),
+		item.Attributes.SeedID,
+	}
 }
 
 func bundleIDCapabilitiesRows(resp *BundleIDCapabilitiesResponse) ([]string, [][]string) {

@@ -38,6 +38,25 @@ func TestRun_UnknownFlagSanitizesUnicodeTerminalControlsAndInvalidUTF8(t *testin
 	assertSafeTerminalDiagnostic(t, stderr, "Error: unknown flag `--evil31m \ufffdtail` for `asc builds list`\n")
 }
 
+func TestRun_UsageErrorSanitizesCommandArguments(t *testing.T) {
+	resetReportFlags(t)
+
+	hostile := "bad\x1b[31m\r\ncommand"
+	stdout, stderr := captureCommandOutput(t, func() {
+		if code := Run([]string{"analytics", "compare", hostile}, "1.0.0"); code != ExitUsage {
+			t.Fatalf("Run() exit code = %d, want %d", code, ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	assertSafeTerminalDiagnostic(t, stderr, "Error: unexpected argument(s): bad[31m  command\n")
+	if strings.ContainsAny(stderr, "\x1b\r") {
+		t.Fatalf("stderr contains raw terminal control bytes: %q", stderr)
+	}
+}
+
 func assertSafeTerminalDiagnostic(t *testing.T, stderr, wantLine string) {
 	t.Helper()
 

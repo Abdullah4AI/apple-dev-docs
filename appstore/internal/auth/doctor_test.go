@@ -229,6 +229,8 @@ func TestDoctorEnvironmentRequiresWritablePrivateKeyTempDir(t *testing.T) {
 }
 
 func TestDoctorEnvironmentSkipsIgnoredPrivateKeys(t *testing.T) {
+	withSeparateKeyrings(t)
+
 	t.Run("selected profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		storedKeyPath := filepath.Join(tempDir, "stored.p8")

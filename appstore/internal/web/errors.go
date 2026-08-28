@@ -41,6 +41,43 @@ func IsDuplicateAppNameError(err error) bool {
 	return false
 }
 
+// IsMissingCompanyNameError reports whether an internal API error means Apple
+// requires a company name for the app-creation request. The response body is
+// only used for this package-internal classification; APIError.Error keeps it
+// out of user-facing messages.
+func IsMissingCompanyNameError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil || len(apiErr.rawResponseBody()) == 0 {
+		return false
+	}
+
+	var payload struct {
+		Errors []struct {
+			AttributeName string `json:"attributeName"`
+			Detail        string `json:"detail"`
+			Title         string `json:"title"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(apiErr.rawResponseBody(), &payload) != nil {
+		return false
+	}
+
+	for _, responseError := range payload.Errors {
+		attributeName := strings.ToLower(strings.TrimSpace(responseError.AttributeName))
+		text := strings.ToLower(strings.TrimSpace(responseError.Title + " " + responseError.Detail))
+		if attributeName == "companyname" &&
+			(strings.Contains(text, "is required") || strings.Contains(text, "required attribute") ||
+				strings.Contains(text, "missing") || strings.Contains(text, "must provide")) {
+			return true
+		}
+		if strings.Contains(text, "missing a required attribute") &&
+			strings.Contains(text, "attribute 'companyname'") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAlreadyExistsConflict reports whether an internal API error is a 409 caused
 // by an exact already-exists response. It intentionally avoids treating broader
 // "already attached/submitted" wording as idempotent success.

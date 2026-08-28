@@ -12,15 +12,11 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-func xcodeCloudProductsListFlags(fs *flag.FlagSet) (appID *string, limit *int, next *string, paginate *bool, output *string, pretty *bool) {
-	return xcodeCloudWorkflowsListFlags(fs)
-}
-
 // XcodeCloudProductsCommand returns the xcode-cloud products command with subcommands.
 func XcodeCloudProductsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("products", flag.ExitOnError)
 
-	appID, limit, next, paginate, output, pretty := xcodeCloudProductsListFlags(fs)
+	flags := bindCiProductsListFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "products",
@@ -31,6 +27,7 @@ func XcodeCloudProductsCommand() *ffcli.Command {
 Examples:
   asc xcode-cloud products --app "APP_ID"
   asc xcode-cloud products list --app "APP_ID"
+  asc xcode-cloud products list --product-type APP --include app
   asc xcode-cloud products view --id "PRODUCT_ID"
   asc xcode-cloud products delete --id "PRODUCT_ID" --confirm`,
 		FlagSet:   fs,
@@ -46,7 +43,7 @@ Examples:
 			XcodeCloudProductsDeleteCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
-			return xcodeCloudProductsList(ctx, *appID, *limit, *next, *paginate, *output, *pretty)
+			return xcodeCloudProductsList(ctx, flags)
 		},
 	}
 }
@@ -54,7 +51,7 @@ Examples:
 func XcodeCloudProductsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
-	appID, limit, next, paginate, output, pretty := xcodeCloudProductsListFlags(fs)
+	flags := bindCiProductsListFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "list",
@@ -65,12 +62,14 @@ func XcodeCloudProductsListCommand() *ffcli.Command {
 Examples:
   asc xcode-cloud products list
   asc xcode-cloud products list --app "APP_ID"
+  asc xcode-cloud products list --product-type APP --include app
+  asc xcode-cloud products list --fields "name,productType" --output json
   asc xcode-cloud products list --limit 50
   asc xcode-cloud products list --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			return xcodeCloudProductsList(ctx, *appID, *limit, *next, *paginate, *output, *pretty)
+			return xcodeCloudProductsList(ctx, flags)
 		},
 	}
 }
@@ -312,22 +311,90 @@ Examples:
 	})
 }
 
-func xcodeCloudProductsList(ctx context.Context, appID string, limit int, next string, paginate bool, output string, pretty bool) error {
-	if limit != 0 && (limit < 1 || limit > 200) {
+func xcodeCloudProductsList(ctx context.Context, flags ciProductsListFlags) error {
+	if *flags.limit != 0 && (*flags.limit < 1 || *flags.limit > 200) {
 		return fmt.Errorf("xcode-cloud products: --limit must be between 1 and 200")
 	}
+
+	next := strings.TrimSpace(*flags.next)
 	if err := shared.ValidateNextURL(next); err != nil {
 		return fmt.Errorf("xcode-cloud products: %w", err)
 	}
+	if err := shared.RejectNextFlagConflicts(
+		flags.flagSet,
+		next,
+		"xcode-cloud products",
+		"product-type",
+		"fields",
+		"app-fields",
+		"bundle-id-fields",
+		"scm-repository-fields",
+		"include",
+		"primary-repositories-limit",
+		"limit",
+	); err != nil {
+		return err
+	}
 
-	resolvedAppID := shared.ResolveAppID(appID)
-	opts := []asc.CiProductsOption{
-		asc.WithCiProductsLimit(limit),
-		asc.WithCiProductsNextURL(next),
+	productTypes, err := normalizeCiProductsProductTypes(flags.flagSet, *flags.productType)
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
 	}
-	if strings.TrimSpace(next) == "" && resolvedAppID != "" {
-		opts = append(opts, asc.WithCiProductsAppID(resolvedAppID))
+	fields, err := normalizeCiProductsSelection(flags.flagSet, *flags.fields, ciProductsFieldsValues, "--fields")
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
 	}
+	appFields, err := normalizeCiProductsSelection(flags.flagSet, *flags.appFields, ciProductsAppFieldsValues, "--app-fields")
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
+	}
+	bundleIDFields, err := normalizeCiProductsSelection(flags.flagSet, *flags.bundleIDFields, ciProductsBundleIDFieldsValues, "--bundle-id-fields")
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
+	}
+	scmRepositoryFields, err := normalizeCiProductsSelection(flags.flagSet, *flags.scmRepositoryFields, ciProductsScmRepositoryFieldsValues, "--scm-repository-fields")
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
+	}
+	include, err := normalizeCiProductsSelection(flags.flagSet, *flags.include, ciProductsIncludeValues, "--include")
+	if err != nil {
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
+	}
+	if ciProductsFlagProvided(flags.flagSet, "primary-repositories-limit") && (*flags.primaryRepositoriesLimit < 1 || *flags.primaryRepositoriesLimit > 50) {
+		return shared.UsageError("xcode-cloud products: --primary-repositories-limit must be between 1 and 50")
+	}
+	if len(appFields) > 0 && !shared.HasInclude(include, "app") {
+		return shared.UsageError("xcode-cloud products: --app-fields requires --include app")
+	}
+	if len(bundleIDFields) > 0 && !shared.HasInclude(include, "bundleId") {
+		return shared.UsageError("xcode-cloud products: --bundle-id-fields requires --include bundleId")
+	}
+	if len(scmRepositoryFields) > 0 && !shared.HasInclude(include, "primaryRepositories") {
+		return shared.UsageError("xcode-cloud products: --scm-repository-fields requires --include primaryRepositories")
+	}
+	if *flags.primaryRepositoriesLimit > 0 && !shared.HasInclude(include, "primaryRepositories") {
+		return shared.UsageError("xcode-cloud products: --primary-repositories-limit requires --include primaryRepositories")
+	}
+
+	resolvedAppID := shared.ResolveAppID(*flags.appID)
+	buildOptions := func(appID string) []asc.CiProductsOption {
+		opts := []asc.CiProductsOption{
+			asc.WithCiProductsProductTypes(productTypes),
+			asc.WithCiProductsFields(fields),
+			asc.WithCiProductsAppFields(appFields),
+			asc.WithCiProductsBundleIDFields(bundleIDFields),
+			asc.WithCiProductsScmRepositoryFields(scmRepositoryFields),
+			asc.WithCiProductsInclude(include),
+			asc.WithCiProductsPrimaryRepositoriesLimit(*flags.primaryRepositoriesLimit),
+			asc.WithCiProductsLimit(*flags.limit),
+			asc.WithCiProductsNextURL(next),
+		}
+		if next == "" && strings.TrimSpace(appID) != "" {
+			opts = append(opts, asc.WithCiProductsAppID(appID))
+		}
+		return opts
+	}
+	opts := buildOptions(resolvedAppID)
 
 	client, err := shared.GetASCClient()
 	if err != nil {
@@ -337,19 +404,15 @@ func xcodeCloudProductsList(ctx context.Context, appID string, limit int, next s
 	requestCtx, cancel := contextWithXcodeCloudTimeout(ctx, 0)
 	defer cancel()
 
-	if strings.TrimSpace(next) == "" && resolvedAppID != "" {
+	if next == "" && resolvedAppID != "" {
 		resolvedAppID, err = resolveXcodeCloudAppID(requestCtx, client, resolvedAppID)
 		if err != nil {
 			return fmt.Errorf("xcode-cloud products: %w", err)
 		}
-		opts = []asc.CiProductsOption{
-			asc.WithCiProductsLimit(limit),
-			asc.WithCiProductsNextURL(next),
-			asc.WithCiProductsAppID(resolvedAppID),
-		}
+		opts = buildOptions(resolvedAppID)
 	}
 
-	if paginate {
+	if *flags.paginate {
 		paginateOpts := append(opts, asc.WithCiProductsLimit(200))
 		paginatedResp, err := shared.PaginateWithSpinner(
 			requestCtx,
@@ -368,26 +431,26 @@ func xcodeCloudProductsList(ctx context.Context, appID string, limit int, next s
 		if !ok {
 			return fmt.Errorf("xcode-cloud products: unexpected response type %T", paginatedResp)
 		}
-		if shouldHydrateCiProductBundleIDs(output) {
+		if shouldHydrateCiProductBundleIDs(*flags.output) {
 			if err := hydrateCiProductBundleIDs(requestCtx, client, resp); err != nil {
 				return fmt.Errorf("xcode-cloud products: %w", err)
 			}
 		}
 
-		return shared.PrintOutput(resp, output, pretty)
+		return shared.PrintOutput(resp, *flags.output, *flags.pretty)
 	}
 
 	resp, err := client.GetCiProducts(requestCtx, opts...)
 	if err != nil {
 		return fmt.Errorf("xcode-cloud products: %w", err)
 	}
-	if shouldHydrateCiProductBundleIDs(output) {
+	if shouldHydrateCiProductBundleIDs(*flags.output) {
 		if err := hydrateCiProductBundleIDs(requestCtx, client, resp); err != nil {
 			return fmt.Errorf("xcode-cloud products: %w", err)
 		}
 	}
 
-	return shared.PrintOutput(resp, output, pretty)
+	return shared.PrintOutput(resp, *flags.output, *flags.pretty)
 }
 
 func shouldHydrateCiProductBundleIDs(output string) bool {

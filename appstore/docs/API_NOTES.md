@@ -17,7 +17,7 @@ Quirks and tips for specific App Store Connect API endpoints.
 - Although Apple's current Sales Reports documentation describes `YYYY-MM-DD` for non-daily dates, the live endpoint requires `YYYY-MM` for monthly reports and `YYYY` for yearly reports. The CLI accepts either form and reduces full monthly or yearly dates to those live period identifiers before the request.
 - Vendor number comes from Sales and Trends → Reports URL (`vendorNumber=...`)
 - Sales Reports validates the complete report type/subtype/frequency/version tuple against Apple's endpoint table. Although the current table lists `SUBSCRIPTION` `1_3`, live verification in PR #1842 proved `1_4` succeeds and is required by some accounts, so both are accepted and `1_4` remains the default.
-- Use `--paginate` with `asc analytics view --processing-date` to search every report page; the CLI forwards the value as `filter[processingDate]` when fetching instances
+- Use `--paginate` with `asc analytics view --processing-date` to search every report page; the CLI forwards the value as `filter[processingDate]` when fetching instances. To resume from a saved report-page `links.next` URL, pass it with `--next <links.next> --paginate`.
 - Use `--granularity "DAILY,WEEKLY,MONTHLY"` with `asc analytics view` to filter instances by one or more documented granularities
 - Long analytics runs may require raising `ASC_TIMEOUT`
 
@@ -99,6 +99,11 @@ Finance reports use Apple fiscal months (`YYYY-MM`), not calendar months.
 - The public storefront retry path is validated with deterministic `httptest` coverage for status boundaries, Retry-After parsing/capping, response-body draining, request replay, concurrency, and cancellation. It does not perform live mutations. The additive behavior can increase latency and request volume during transient failures, and Apple's undocumented storefront responses remain an external compatibility risk.
 - `--api-debug` and `ASC_DEBUG=api` log each response's raw `X-Rate-Limit` value to stderr without changing stdout.
 - Some endpoints return 403 when the API key role lacks permission (e.g., finance reports, reviews).
+
+## Builds
+
+- `GET /v1/apps/{id}/builds` has no documented default order and rejects `sort` with 400 `PARAMETER_ERROR.ILLEGAL`; with `limit=1` it can return a weeks-stale build that reads as "latest". Use the top-level collection instead: `GET /v1/builds?filter[app]={id}&sort=-uploadedDate&limit=1`.
+- General shape of the trap: a relationship endpoint (`/v1/{parent}/{id}/{children}`) and its top-level collection (`/v1/{children}?filter[{parent}]=`) accept different query parameters, so a `sort` or `filter` that works on one can 400 on the other.
 
 ## Devices
 

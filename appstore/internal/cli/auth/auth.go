@@ -621,7 +621,7 @@ so commands continue to work even if the original .p8 file is removed.`,
 				}
 			}
 
-			fmt.Printf("Successfully registered API key '%s'\n", *name)
+			fmt.Printf("Successfully registered API key '%s'\n", strings.TrimSpace(*name))
 			return nil
 		},
 	}

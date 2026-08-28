@@ -79,6 +79,19 @@ func TestBuildSubscriptionPricesQueryFields(t *testing.T) {
 	}
 }
 
+func TestBuildSubscriptionPricesQueryPricePointFilter(t *testing.T) {
+	query := &subscriptionPricesQuery{}
+	WithSubscriptionPricesPricePointIDs([]string{"point-1", " point-2 "})(query)
+
+	values, err := url.ParseQuery(buildSubscriptionPricesQuery(query))
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := values.Get("filter[subscriptionPricePoint]"); got != "point-1,point-2" {
+		t.Fatalf("expected filter[subscriptionPricePoint]=point-1,point-2, got %q", got)
+	}
+}
+
 func TestBuildSubscriptionPricesQueryRejectsEmptyPlanType(t *testing.T) {
 	query := &subscriptionPricesQuery{}
 	WithSubscriptionPricesPlanType("")(query)

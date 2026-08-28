@@ -56,15 +56,23 @@ func TestLocalizationFetchesUseFreshDeadlinePerPage(t *testing.T) {
 			originalTransport := http.DefaultTransport
 			t.Cleanup(func() { http.DefaultTransport = originalTransport })
 			calls := 0
+			var firstDeadline time.Time
 			http.DefaultTransport = metadataFetchRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
 				if calls == 1 {
-					time.Sleep(60 * time.Millisecond)
+					var ok bool
+					firstDeadline, ok = req.Context().Deadline()
+					if !ok {
+						t.Fatal("expected first-page request deadline")
+					}
 					return metadataFetchJSONResponse(test.firstBody), nil
 				}
 				deadline, ok := req.Context().Deadline()
-				if !ok || time.Until(deadline) < 70*time.Millisecond {
-					t.Fatalf("expected fresh second-page deadline, remaining=%s", time.Until(deadline))
+				if !ok {
+					t.Fatal("expected second-page request deadline")
+				}
+				if !deadline.After(firstDeadline) {
+					t.Fatalf("expected second-page deadline after first-page deadline: first=%s second=%s", firstDeadline, deadline)
 				}
 				return metadataFetchJSONResponse(test.lastBody), nil
 			})

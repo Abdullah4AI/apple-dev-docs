@@ -211,6 +211,60 @@ func TestBetaGroupsListAppScopedFilterPaginatesBeforeApplyingLimit(t *testing.T)
 	}
 }
 
+func TestBetaGroupsListAppScopedFilterKeepsStableSemanticsWithSparseFields(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	const nextURL = "https://api.appstoreconnect.apple.com/v1/betaGroups?cursor=page2&filter%5Bapp%5D=app-1&filter%5BisInternalGroup%5D=true&fields%5BbetaGroups%5D=name&limit=200"
+	var requests atomic.Int64
+	installDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		count := requests.Add(1)
+		if req.URL.Path != "/v1/betaGroups" {
+			t.Errorf("expected path /v1/betaGroups, got %s", req.URL.Path)
+		}
+		query := req.URL.Query()
+		if got := query.Get("filter[app]"); got != "app-1" {
+			t.Errorf("filter[app] = %q, want app-1", got)
+		}
+		if got := query.Get("filter[isInternalGroup]"); got != "true" {
+			t.Errorf("filter[isInternalGroup] = %q, want true", got)
+		}
+		if got := query.Get("fields[betaGroups]"); got != "name" {
+			t.Errorf("fields[betaGroups] = %q, want name", got)
+		}
+		if got := query.Get("limit"); got != "200" {
+			t.Errorf("limit = %q, want 200 for the stable filtered aggregate", got)
+		}
+		switch count {
+		case 1:
+			body := `{"data":[{"type":"betaGroups","id":"bg-int-1","attributes":{"name":"Internal 1"}}],` +
+				`"links":{"next":"` + nextURL + `"}}`
+			return betaGroupsJSONResponse(body), nil
+		case 2:
+			if got := query.Get("cursor"); got != "page2" {
+				t.Errorf("cursor = %q, want page2", got)
+			}
+			return betaGroupsJSONResponse(`{"data":[{"type":"betaGroups","id":"bg-int-2","attributes":{"name":"Internal 2"}}]}`), nil
+		default:
+			t.Errorf("unexpected request %d: %s", count, req.URL.String())
+			return betaGroupsJSONResponse(`{"data":[]}`), nil
+		}
+	}))
+
+	stdout, stderr := runBetaGroupsList(t, "--app", "app-1", "--internal", "--fields", "name", "--paginate", "--limit", "1")
+
+	wantWarning := "Warning: showing 1 of 2 filtered groups (--limit 1); rerun without --limit for all\n"
+	if stderr != wantWarning {
+		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("expected 2 requests with --paginate, got %d", got)
+	}
+	if !strings.Contains(stdout, `"id":"bg-int-1"`) || strings.Contains(stdout, `"id":"bg-int-2"`) {
+		t.Fatalf("expected stable --limit cap with sparse fields, got %q", stdout)
+	}
+}
+
 // TestBetaGroupsListNextStillPagesWithoutQueryFlags proves a bare --next keeps
 // following the cursor URL verbatim.
 func TestBetaGroupsListNextStillPagesWithoutQueryFlags(t *testing.T) {

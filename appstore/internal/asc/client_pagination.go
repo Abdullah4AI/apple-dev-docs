@@ -10,6 +10,17 @@ import (
 // PaginateFunc is a function that fetches a page of results
 type PaginateFunc func(ctx context.Context, nextURL string) (PaginatedResponse, error)
 
+// RequestContextFunc creates a fresh context for one outbound request while
+// retaining the caller's parent context and cancellation.
+type RequestContextFunc func(context.Context) (context.Context, context.CancelFunc)
+
+func requestContextFor(parent context.Context, factory RequestContextFunc) (context.Context, context.CancelFunc) {
+	if factory == nil {
+		return parent, func() {}
+	}
+	return factory(parent)
+}
+
 // PageConsumer handles one pagination page.
 type PageConsumer func(page PaginatedResponse) error
 
@@ -310,7 +321,7 @@ func mergeRawJSONArray(dst, src json.RawMessage) (json.RawMessage, error) {
 	seen := make(map[string]struct{}, len(dstItems)+len(srcItems))
 	appendUnique := func(items []json.RawMessage) {
 		for _, item := range items {
-			key := string(item)
+			key := rawJSONArrayItemKey(item)
 			if _, ok := seen[key]; ok {
 				continue
 			}
@@ -326,4 +337,18 @@ func mergeRawJSONArray(dst, src json.RawMessage) (json.RawMessage, error) {
 		return nil, fmt.Errorf("marshal merged array: %w", err)
 	}
 	return result, nil
+}
+
+// rawJSONArrayItemKey follows JSON:API's resource identity rule when an item
+// has both type and id. Items without a usable resource identity retain the
+// previous raw-JSON equality behavior instead of being collapsed together.
+func rawJSONArrayItemKey(item json.RawMessage) string {
+	var identity struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(item, &identity); err == nil && identity.Type != "" && identity.ID != "" {
+		return "resource\x00" + identity.Type + "\x00" + identity.ID
+	}
+	return "raw\x00" + string(item)
 }

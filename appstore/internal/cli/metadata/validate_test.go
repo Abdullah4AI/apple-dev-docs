@@ -78,7 +78,7 @@ func TestValidateDirAcceptsArabicKeywordsWithinCharacterLimit(t *testing.T) {
 		t.Fatalf("write Arabic localization: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestValidateDirWarnsForInvalidURLSyntax(t *testing.T) {
 		t.Fatalf("write version file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestValidateDirWarnsForImplausiblyShortMetadata(t *testing.T) {
 		t.Fatalf("write version file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestValidateDirAcceptsValidURLSyntax(t *testing.T) {
 		t.Fatalf("write version file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestValidateDirTreatsDefaultLocaleCaseInsensitively(t *testing.T) {
 		t.Fatalf("write version default file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestValidateDirAllowsDefaultAppInfoWithoutName(t *testing.T) {
 		t.Fatalf("write app-info default file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestValidateDirNormalizesVersionDefaultLocaleInIssues(t *testing.T) {
 		t.Fatalf("write version default file: %v", err)
 	}
 
-	result, err := validateDir(dir, false)
+	result, err := validateDir(dir)
 	if err != nil {
 		t.Fatalf("validateDir() error: %v", err)
 	}

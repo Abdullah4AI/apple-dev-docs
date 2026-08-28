@@ -87,8 +87,8 @@ func TestCategoriesListInvalidNextPrecedesLimitConflict(t *testing.T) {
 			"--next", "http://api.appstoreconnect.apple.com/v1/appCategories?cursor=next",
 			"--limit", "201",
 		}, "1.2.3")
-		if code != rootcmd.ExitError {
-			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitError)
+		if code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
 		}
 	})
 	if stdout != "" {
@@ -97,7 +97,8 @@ func TestCategoriesListInvalidNextPrecedesLimitConflict(t *testing.T) {
 	if !strings.Contains(stderr, "categories list: --next must be an App Store Connect URL") {
 		t.Fatalf("stderr = %q, want invalid --next error", stderr)
 	}
-	if strings.Contains(stderr, "--limit") {
+	firstLine, _, _ := strings.Cut(stderr, "\n")
+	if strings.Contains(firstLine, "--limit") {
 		t.Fatalf("stderr = %q, want --next validation to take precedence", stderr)
 	}
 }
@@ -111,8 +112,8 @@ func TestCategoriesListRejectsInvalidLimit(t *testing.T) {
 	defer restore()
 
 	stdout, stderr := captureOutput(t, func() {
-		if code := rootcmd.Run([]string{"categories", "list", "--limit", "0"}, "1.2.3"); code != rootcmd.ExitError {
-			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitError)
+		if code := rootcmd.Run([]string{"categories", "list", "--limit", "0"}, "1.2.3"); code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
 		}
 	})
 	if stdout != "" {

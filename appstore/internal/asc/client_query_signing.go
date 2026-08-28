@@ -8,7 +8,21 @@ import (
 
 type bundleIDsQuery struct {
 	listQuery
-	identifier string
+	names                      []string
+	platforms                  []string
+	identifier                 string
+	seedIDs                    []string
+	ids                        []string
+	sort                       string
+	fields                     []string
+	profilesFields             []string
+	bundleIDCapabilitiesFields []string
+	appFields                  []string
+	include                    []string
+	profilesLimit              int
+	bundleIDCapabilitiesLimit  int
+	splitPagination            bool
+	splitPaginationSet         bool
 }
 
 type merchantIDsQuery struct {
@@ -59,7 +73,13 @@ type passTypeIDCertificatesQuery struct {
 
 type certificatesQuery struct {
 	listQuery
+	displayNames     []string
 	certificateTypes []string
+	serialNumbers    []string
+	ids              []string
+	sort             string
+	fields           []string
+	passTypeIDFields []string
 	include          []string
 }
 
@@ -77,17 +97,31 @@ type merchantIDCertificatesQuery struct {
 
 type profilesQuery struct {
 	listQuery
-	bundleID      string
-	profileTypes  []string
-	profileStates []string
-	include       []string
+	bundleID          string
+	name              string
+	ids               string
+	profileTypes      []string
+	profileStates     []string
+	sort              string
+	fields            []string
+	bundleIDFields    []string
+	deviceFields      []string
+	certificateFields []string
+	include           []string
+	devicesLimit      int
+	certificatesLimit int
 }
 
 type usersQuery struct {
 	listQuery
-	email   string
-	roles   []string
-	include []string
+	email            string
+	roles            []string
+	visibleAppIDs    []string
+	sort             string
+	fields           []string
+	appFields        []string
+	include          []string
+	visibleAppsLimit int
 }
 
 type profileCertificatesQuery struct {
@@ -133,8 +167,26 @@ type userInvitationsQuery struct {
 
 func buildBundleIDsQuery(query *bundleIDsQuery) string {
 	values := url.Values{}
+	addCSV(values, "filter[name]", query.names)
+	addCSV(values, "filter[platform]", query.platforms)
 	if strings.TrimSpace(query.identifier) != "" {
 		values.Set("filter[identifier]", strings.TrimSpace(query.identifier))
+	}
+	addCSV(values, "filter[seedId]", query.seedIDs)
+	addCSV(values, "filter[id]", query.ids)
+	if strings.TrimSpace(query.sort) != "" {
+		values.Set("sort", strings.TrimSpace(query.sort))
+	}
+	addCSV(values, "fields[bundleIds]", query.fields)
+	addCSV(values, "fields[profiles]", query.profilesFields)
+	addCSV(values, "fields[bundleIdCapabilities]", query.bundleIDCapabilitiesFields)
+	addCSV(values, "fields[apps]", query.appFields)
+	addCSV(values, "include", query.include)
+	if query.profilesLimit > 0 {
+		values.Set("limit[profiles]", strconv.Itoa(query.profilesLimit))
+	}
+	if query.bundleIDCapabilitiesLimit > 0 {
+		values.Set("limit[bundleIdCapabilities]", strconv.Itoa(query.bundleIDCapabilitiesLimit))
 	}
 	addLimit(values, query.limit)
 	return values.Encode()
@@ -203,9 +255,25 @@ func buildBundleIDCapabilitiesQuery(_ *bundleIDCapabilitiesQuery) string {
 
 func buildCertificatesQuery(query *certificatesQuery) string {
 	values := url.Values{}
+	addCSV(values, "filter[displayName]", query.displayNames)
 	addCSV(values, "filter[certificateType]", query.certificateTypes)
+	addCSV(values, "filter[serialNumber]", query.serialNumbers)
+	addCSV(values, "filter[id]", query.ids)
+	if strings.TrimSpace(query.sort) != "" {
+		values.Set("sort", strings.TrimSpace(query.sort))
+	}
+	addCSV(values, "fields[certificates]", query.fields)
+	addCSV(values, "fields[passTypeIds]", query.passTypeIDFields)
 	addCSV(values, "include", query.include)
 	addLimit(values, query.limit)
+	return values.Encode()
+}
+
+func buildCertificateDetailQuery(query *certificatesQuery) string {
+	values := url.Values{}
+	addCSV(values, "fields[certificates]", query.fields)
+	addCSV(values, "fields[passTypeIds]", query.passTypeIDFields)
+	addCSV(values, "include", query.include)
 	return values.Encode()
 }
 
@@ -251,23 +319,56 @@ func buildPassTypeIDCertificatesQuery(query *passTypeIDCertificatesQuery) string
 
 func buildProfilesQuery(query *profilesQuery) string {
 	values := url.Values{}
+	if strings.TrimSpace(query.name) != "" {
+		values.Set("filter[name]", strings.TrimSpace(query.name))
+	}
+	if strings.TrimSpace(query.ids) != "" {
+		values.Set("filter[id]", strings.TrimSpace(query.ids))
+	}
 	if strings.TrimSpace(query.bundleID) != "" {
 		values.Set("filter[bundleId]", strings.TrimSpace(query.bundleID))
 	}
 	addCSV(values, "filter[profileType]", query.profileTypes)
 	addCSV(values, "filter[profileState]", query.profileStates)
+	if strings.TrimSpace(query.sort) != "" {
+		values.Set("sort", strings.TrimSpace(query.sort))
+	}
+	addCSV(values, "fields[profiles]", query.fields)
+	addCSV(values, "fields[bundleIds]", query.bundleIDFields)
+	addCSV(values, "fields[devices]", query.deviceFields)
+	addCSV(values, "fields[certificates]", query.certificateFields)
 	addCSV(values, "include", query.include)
+	if query.devicesLimit > 0 {
+		values.Set("limit[devices]", strconv.Itoa(query.devicesLimit))
+	}
+	if query.certificatesLimit > 0 {
+		values.Set("limit[certificates]", strconv.Itoa(query.certificatesLimit))
+	}
 	addLimit(values, query.limit)
 	return values.Encode()
 }
 
 func buildUsersQuery(query *usersQuery) string {
 	values := url.Values{}
+	include := normalizeUniqueList(query.include)
+	fields := query.fields
+	if len(fields) > 0 {
+		fields = normalizeUniqueList(append(append([]string{}, fields...), include...))
+	}
 	if strings.TrimSpace(query.email) != "" {
 		values.Set("filter[username]", strings.TrimSpace(query.email))
 	}
 	addCSV(values, "filter[roles]", query.roles)
-	addCSV(values, "include", query.include)
+	addCSV(values, "filter[visibleApps]", query.visibleAppIDs)
+	if strings.TrimSpace(query.sort) != "" {
+		values.Set("sort", strings.TrimSpace(query.sort))
+	}
+	addCSV(values, "fields[users]", fields)
+	addCSV(values, "fields[apps]", query.appFields)
+	addCSV(values, "include", include)
+	if query.visibleAppsLimit > 0 {
+		values.Set("limit[visibleApps]", strconv.Itoa(query.visibleAppsLimit))
+	}
 	addLimit(values, query.limit)
 	return values.Encode()
 }
@@ -417,6 +518,15 @@ func WithBundleIDsNextURL(next string) BundleIDsOption {
 	}
 }
 
+// WithBundleIDsSplitPagination controls whether split identifier requests follow links.next.
+// It defaults to enabled for direct client callers.
+func WithBundleIDsSplitPagination(enabled bool) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.splitPagination = enabled
+		q.splitPaginationSet = true
+	}
+}
+
 // WithBundleIDProfilesLimit sets the max number of bundle ID profiles to return.
 func WithBundleIDProfilesLimit(limit int) BundleIDProfilesOption {
 	return func(q *bundleIDProfilesQuery) {
@@ -441,6 +551,96 @@ func WithBundleIDsFilterIdentifier(identifier string) BundleIDsOption {
 		normalized := normalizeCSVString(identifier)
 		if normalized != "" {
 			q.identifier = normalized
+		}
+	}
+}
+
+// WithBundleIDsFilterNames filters bundle IDs by name(s).
+func WithBundleIDsFilterNames(names []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.names = normalizeList(names)
+	}
+}
+
+// WithBundleIDsFilterPlatforms filters bundle IDs by platform(s).
+func WithBundleIDsFilterPlatforms(platforms []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.platforms = normalizeUpperList(platforms)
+	}
+}
+
+// WithBundleIDsFilterSeedIDs filters bundle IDs by seed ID(s).
+func WithBundleIDsFilterSeedIDs(seedIDs []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.seedIDs = normalizeList(seedIDs)
+	}
+}
+
+// WithBundleIDsFilterIDs filters bundle IDs by ID(s).
+func WithBundleIDsFilterIDs(ids []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.ids = normalizeList(ids)
+	}
+}
+
+// WithBundleIDsSort sets the sort order for bundle IDs.
+func WithBundleIDsSort(sort string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		if strings.TrimSpace(sort) != "" {
+			q.sort = strings.TrimSpace(sort)
+		}
+	}
+}
+
+// WithBundleIDsFields sets fields[bundleIds] for bundle ID responses.
+func WithBundleIDsFields(fields []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithBundleIDsProfilesFields sets fields[profiles] for included profiles.
+func WithBundleIDsProfilesFields(fields []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.profilesFields = normalizeList(fields)
+	}
+}
+
+// WithBundleIDsCapabilitiesFields sets fields[bundleIdCapabilities] for included capabilities.
+func WithBundleIDsCapabilitiesFields(fields []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.bundleIDCapabilitiesFields = normalizeList(fields)
+	}
+}
+
+// WithBundleIDsAppFields sets fields[apps] for the included app.
+func WithBundleIDsAppFields(fields []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.appFields = normalizeList(fields)
+	}
+}
+
+// WithBundleIDsInclude sets include for bundle ID responses.
+func WithBundleIDsInclude(include []string) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		q.include = normalizeList(include)
+	}
+}
+
+// WithBundleIDsProfilesLimit sets the maximum number of included profiles.
+func WithBundleIDsProfilesLimit(limit int) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		if limit > 0 {
+			q.profilesLimit = limit
+		}
+	}
+}
+
+// WithBundleIDsCapabilitiesLimit sets the maximum number of included capabilities.
+func WithBundleIDsCapabilitiesLimit(limit int) BundleIDsOption {
+	return func(q *bundleIDsQuery) {
+		if limit > 0 {
+			q.bundleIDCapabilitiesLimit = limit
 		}
 	}
 }
@@ -837,6 +1037,48 @@ func WithCertificatesTypes(types []string) CertificatesOption {
 	}
 }
 
+// WithCertificatesFilterDisplayNames filters certificates by display name(s).
+func WithCertificatesFilterDisplayNames(names []string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.displayNames = normalizeList(names)
+	}
+}
+
+// WithCertificatesFilterSerialNumbers filters certificates by serial number(s).
+func WithCertificatesFilterSerialNumbers(serialNumbers []string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.serialNumbers = normalizeList(serialNumbers)
+	}
+}
+
+// WithCertificatesFilterIDs filters certificates by ID(s).
+func WithCertificatesFilterIDs(ids []string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.ids = normalizeList(ids)
+	}
+}
+
+// WithCertificatesSort sets the certificate sort expression.
+func WithCertificatesSort(sort string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.sort = strings.TrimSpace(sort)
+	}
+}
+
+// WithCertificatesFields sets fields[certificates] for certificate responses.
+func WithCertificatesFields(fields []string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithCertificatesPassTypeIDFields sets fields[passTypeIds] for included pass type IDs.
+func WithCertificatesPassTypeIDFields(fields []string) CertificatesOption {
+	return func(q *certificatesQuery) {
+		q.passTypeIDFields = normalizeList(fields)
+	}
+}
+
 // WithCertificatesInclude sets include for certificate responses.
 func WithCertificatesInclude(include []string) CertificatesOption {
 	return func(q *certificatesQuery) {
@@ -873,6 +1115,26 @@ func WithProfilesNextURL(next string) ProfilesOption {
 	}
 }
 
+// WithProfilesFilterName filters profiles by name (supports CSV).
+func WithProfilesFilterName(name string) ProfilesOption {
+	return func(q *profilesQuery) {
+		normalized := normalizeCSVString(name)
+		if normalized != "" {
+			q.name = normalized
+		}
+	}
+}
+
+// WithProfilesFilterIDs filters profiles by ID(s).
+func WithProfilesFilterIDs(ids []string) ProfilesOption {
+	return func(q *profilesQuery) {
+		normalized := normalizeList(ids)
+		if len(normalized) > 0 {
+			q.ids = strings.Join(normalized, ",")
+		}
+	}
+}
+
 // WithProfilesTypes filters profiles by profile type.
 func WithProfilesTypes(types []string) ProfilesOption {
 	return func(q *profilesQuery) {
@@ -887,10 +1149,65 @@ func WithProfilesStates(states []string) ProfilesOption {
 	}
 }
 
+// WithProfilesSort sets the sort order for profiles.
+func WithProfilesSort(sort string) ProfilesOption {
+	return func(q *profilesQuery) {
+		if strings.TrimSpace(sort) != "" {
+			q.sort = strings.TrimSpace(sort)
+		}
+	}
+}
+
+// WithProfilesFields sets fields[profiles] for profile responses.
+func WithProfilesFields(fields []string) ProfilesOption {
+	return func(q *profilesQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithProfilesBundleIDFields sets fields[bundleIds] for included bundle IDs.
+func WithProfilesBundleIDFields(fields []string) ProfilesOption {
+	return func(q *profilesQuery) {
+		q.bundleIDFields = normalizeList(fields)
+	}
+}
+
+// WithProfilesDeviceFields sets fields[devices] for included devices.
+func WithProfilesDeviceFields(fields []string) ProfilesOption {
+	return func(q *profilesQuery) {
+		q.deviceFields = normalizeList(fields)
+	}
+}
+
+// WithProfilesCertificateFields sets fields[certificates] for included certificates.
+func WithProfilesCertificateFields(fields []string) ProfilesOption {
+	return func(q *profilesQuery) {
+		q.certificateFields = normalizeList(fields)
+	}
+}
+
 // WithProfilesInclude sets include for profile responses.
 func WithProfilesInclude(include []string) ProfilesOption {
 	return func(q *profilesQuery) {
 		q.include = normalizeList(include)
+	}
+}
+
+// WithProfilesDevicesLimit sets limit[devices] for included devices.
+func WithProfilesDevicesLimit(limit int) ProfilesOption {
+	return func(q *profilesQuery) {
+		if limit > 0 {
+			q.devicesLimit = limit
+		}
+	}
+}
+
+// WithProfilesCertificatesLimit sets limit[certificates] for included certificates.
+func WithProfilesCertificatesLimit(limit int) ProfilesOption {
+	return func(q *profilesQuery) {
+		if limit > 0 {
+			q.certificatesLimit = limit
+		}
 	}
 }
 
@@ -973,10 +1290,49 @@ func WithUsersRoles(roles []string) UsersOption {
 	}
 }
 
+// WithUsersVisibleAppIDs filters users by visible app ID(s).
+func WithUsersVisibleAppIDs(appIDs []string) UsersOption {
+	return func(q *usersQuery) {
+		q.visibleAppIDs = normalizeList(appIDs)
+	}
+}
+
+// WithUsersSort sets the user list sort order.
+func WithUsersSort(sort string) UsersOption {
+	return func(q *usersQuery) {
+		if strings.TrimSpace(sort) != "" {
+			q.sort = strings.TrimSpace(sort)
+		}
+	}
+}
+
+// WithUsersFields sets fields[users] for user responses.
+func WithUsersFields(fields []string) UsersOption {
+	return func(q *usersQuery) {
+		q.fields = normalizeList(fields)
+	}
+}
+
+// WithUsersAppFields sets fields[apps] for included app responses.
+func WithUsersAppFields(fields []string) UsersOption {
+	return func(q *usersQuery) {
+		q.appFields = normalizeList(fields)
+	}
+}
+
 // WithUsersInclude sets include for user responses.
 func WithUsersInclude(include []string) UsersOption {
 	return func(q *usersQuery) {
 		q.include = normalizeList(include)
+	}
+}
+
+// WithUsersVisibleAppsLimit sets the maximum number of included visible apps.
+func WithUsersVisibleAppsLimit(limit int) UsersOption {
+	return func(q *usersQuery) {
+		if limit > 0 {
+			q.visibleAppsLimit = limit
+		}
 	}
 }
 

@@ -228,8 +228,6 @@ func TestBuildsListNextURLSkipsAppLookupForNonNumericApp(t *testing.T) {
 			"builds", "list",
 			"--next", nextURL,
 			"--app", "com.example.lookup",
-			"--version", "1.2.3",
-			"--build-number", "77",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}

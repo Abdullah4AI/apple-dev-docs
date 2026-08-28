@@ -60,12 +60,15 @@ func uploadScreenshots(ctx context.Context, client *asc.Client, localizationID, 
 	return result, err
 }
 
-func findScreenshotSetWithAccess(ctx context.Context, client *asc.Client, localizationID, displayType string, access ScreenshotSetAccess) (asc.Resource[asc.AppScreenshotSetAttributes], error) {
+func findScreenshotSetWithAccess(ctx context.Context, client *asc.Client, localizationID, displayType string, access ScreenshotSetAccess, requestContext asc.RequestContextFunc) (asc.Resource[asc.AppScreenshotSetAttributes], error) {
 	if access.List == nil {
 		return asc.Resource[asc.AppScreenshotSetAttributes]{}, fmt.Errorf("screenshot set list function is required")
 	}
+	if requestContext == nil {
+		requestContext = shared.ContextWithTimeout
+	}
 
-	resp, err := access.List(ctx, client, localizationID)
+	resp, err := access.List(ctx, client, localizationID, requestContext)
 	if err != nil {
 		return asc.Resource[asc.AppScreenshotSetAttributes]{}, err
 	}
@@ -79,12 +82,15 @@ func findScreenshotSetWithAccess(ctx context.Context, client *asc.Client, locali
 	}, nil
 }
 
-func ensureScreenshotSetWithAccess(ctx context.Context, client *asc.Client, localizationID, displayType string, access ScreenshotSetAccess) (asc.Resource[asc.AppScreenshotSetAttributes], error) {
+func ensureScreenshotSetWithAccess(ctx context.Context, client *asc.Client, localizationID, displayType string, access ScreenshotSetAccess, requestContext asc.RequestContextFunc) (asc.Resource[asc.AppScreenshotSetAttributes], error) {
 	if access.Create == nil {
 		return asc.Resource[asc.AppScreenshotSetAttributes]{}, fmt.Errorf("screenshot set create function is required")
 	}
+	if requestContext == nil {
+		requestContext = shared.ContextWithTimeout
+	}
 
-	set, err := findScreenshotSetWithAccess(ctx, client, localizationID, displayType, access)
+	set, err := findScreenshotSetWithAccess(ctx, client, localizationID, displayType, access, requestContext)
 	if err != nil {
 		return asc.Resource[asc.AppScreenshotSetAttributes]{}, err
 	}
@@ -92,7 +98,9 @@ func ensureScreenshotSetWithAccess(ctx context.Context, client *asc.Client, loca
 		return set, nil
 	}
 
-	created, err := access.Create(ctx, client, localizationID, displayType)
+	createCtx, cancel := requestContext(ctx)
+	created, err := access.Create(createCtx, client, localizationID, displayType)
+	cancel()
 	if err != nil {
 		return asc.Resource[asc.AppScreenshotSetAttributes]{}, err
 	}
@@ -130,26 +138,22 @@ func uploadScreenshotsWithConfig[T any](ctx context.Context, cfg screenshotUploa
 		}
 	}
 
-	requestCtx, reqCancel := cfg.RequestContext(ctx)
 	var (
 		set asc.Resource[asc.AppScreenshotSetAttributes]
 		err error
 	)
 	if cfg.DryRun {
-		set, err = findScreenshotSetWithAccess(requestCtx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access)
+		set, err = findScreenshotSetWithAccess(ctx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access, cfg.RequestContext)
 	} else {
-		set, err = ensureScreenshotSetWithAccess(requestCtx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access)
+		set, err = ensureScreenshotSetWithAccess(ctx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access, cfg.RequestContext)
 	}
-	reqCancel()
 	if err != nil {
 		return zero, err
 	}
 
 	existingScreenshots := make([]asc.Resource[asc.AppScreenshotAttributes], 0)
 	if (cfg.SkipExisting || cfg.Replace || (!cfg.Replace && len(cfg.Files) > 0)) && set.ID != "" {
-		fetchCtx, fetchCancel := cfg.RequestContext(ctx)
-		existingResp, err := cfg.Client.GetAppScreenshots(fetchCtx, set.ID)
-		fetchCancel()
+		existingResp, err := cfg.Client.GetAllAppScreenshots(ctx, set.ID, asc.WithAppScreenshotsRequestContext(cfg.RequestContext))
 		if err != nil {
 			return zero, err
 		}

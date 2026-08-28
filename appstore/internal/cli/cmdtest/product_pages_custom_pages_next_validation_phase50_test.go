@@ -153,7 +153,7 @@ func TestCustomPagesListPaginateFromNext(t *testing.T) {
 
 	runProductPagesPaginateFromNext(
 		t,
-		[]string{"product-pages", "custom-pages", "list", "--app", "app-1"},
+		[]string{"product-pages", "custom-pages", "list"},
 		firstURL,
 		secondURL,
 		firstBody,

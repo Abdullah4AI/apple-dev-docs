@@ -148,26 +148,22 @@ func prepareAppScreenshotUpload(ctx context.Context, cfg screenshotUploadConfig[
 		cfg.ReplaceCommand = "--replace --confirm"
 	}
 
-	requestCtx, reqCancel := cfg.RequestContext(ctx)
 	var (
 		set asc.Resource[asc.AppScreenshotSetAttributes]
 		err error
 	)
 	if cfg.DryRun {
-		set, err = findScreenshotSetWithAccess(requestCtx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access)
+		set, err = findScreenshotSetWithAccess(ctx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access, cfg.RequestContext)
 	} else {
-		set, err = ensureScreenshotSetWithAccess(requestCtx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access)
+		set, err = ensureScreenshotSetWithAccess(ctx, cfg.Client, cfg.LocalizationID, cfg.DisplayType, cfg.Access, cfg.RequestContext)
 	}
-	reqCancel()
 	if err != nil {
 		return screenshotUploadPreparedState{}, err
 	}
 
 	existingScreenshots := make([]asc.Resource[asc.AppScreenshotAttributes], 0)
 	if (cfg.SkipExisting || cfg.Replace || (!cfg.Replace && len(cfg.Files) > 0)) && set.ID != "" {
-		fetchCtx, fetchCancel := cfg.RequestContext(ctx)
-		existingResp, err := cfg.Client.GetAppScreenshots(fetchCtx, set.ID)
-		fetchCancel()
+		existingResp, err := cfg.Client.GetAllAppScreenshots(ctx, set.ID, asc.WithAppScreenshotsRequestContext(cfg.RequestContext))
 		if err != nil {
 			return screenshotUploadPreparedState{}, err
 		}

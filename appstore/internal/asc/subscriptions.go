@@ -163,9 +163,55 @@ type SubscriptionPriceInlineRelationships struct {
 
 // SubscriptionPriceAttributes describes a subscription price resource.
 type SubscriptionPriceAttributes struct {
-	StartDate string               `json:"startDate,omitempty"`
-	Preserved bool                 `json:"preserved,omitempty"`
-	PlanType  SubscriptionPlanType `json:"planType,omitempty"`
+	StartDate    string               `json:"startDate,omitempty"`
+	Preserved    bool                 `json:"-"`
+	PlanType     SubscriptionPlanType `json:"planType,omitempty"`
+	preservedSet bool
+}
+
+// UnmarshalJSON records whether the API supplied preserved so an explicit
+// false survives subsequent JSON output without changing the public bool field.
+func (a *SubscriptionPriceAttributes) UnmarshalJSON(data []byte) error {
+	type subscriptionPriceAttributesAlias SubscriptionPriceAttributes
+	*a = SubscriptionPriceAttributes{}
+	aux := struct {
+		*subscriptionPriceAttributesAlias
+		Preserved *bool `json:"preserved"`
+	}{
+		subscriptionPriceAttributesAlias: (*subscriptionPriceAttributesAlias)(a),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	a.preservedSet = aux.Preserved != nil
+	if aux.Preserved != nil {
+		a.Preserved = *aux.Preserved
+	}
+	return nil
+}
+
+// MarshalJSON preserves the distinction between an absent preserved
+// attribute and an explicit false value returned by App Store Connect.
+func (a SubscriptionPriceAttributes) MarshalJSON() ([]byte, error) {
+	type subscriptionPriceAttributesAlias SubscriptionPriceAttributes
+	var preserved *bool
+	if a.preservedSet || a.Preserved {
+		preserved = &a.Preserved
+	}
+	return json.Marshal(struct {
+		subscriptionPriceAttributesAlias
+		Preserved *bool `json:"preserved,omitempty"`
+	}{
+		subscriptionPriceAttributesAlias: subscriptionPriceAttributesAlias(a),
+		Preserved:                        preserved,
+	})
+}
+
+// PreservedValue reports the preserved value and whether App Store Connect
+// supplied the attribute. The presence result keeps sparse table output from
+// treating an omitted boolean as an explicit false value.
+func (a SubscriptionPriceAttributes) PreservedValue() (bool, bool) {
+	return a.Preserved, a.preservedSet || a.Preserved
 }
 
 // SubscriptionPriceCreateAttributes describes attributes for creating a price.

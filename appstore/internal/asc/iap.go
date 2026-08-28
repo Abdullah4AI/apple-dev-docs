@@ -127,6 +127,9 @@ type inAppPurchasesQuery struct {
 	listQuery
 	productIDs          []string
 	names               []string
+	states              []string
+	types               []string
+	sort                []string
 	fields              []string
 	include             []string
 	versionFields       []string
@@ -175,6 +178,27 @@ func WithIAPProductIDs(productIDs []string) IAPOption {
 func WithIAPNames(names []string) IAPOption {
 	return func(q *inAppPurchasesQuery) {
 		q.names = normalizeUniqueList(names)
+	}
+}
+
+// WithIAPStates filters in-app purchases by state.
+func WithIAPStates(states []string) IAPOption {
+	return func(q *inAppPurchasesQuery) {
+		q.states = normalizeUniqueList(states)
+	}
+}
+
+// WithIAPTypes filters in-app purchases by type.
+func WithIAPTypes(types []string) IAPOption {
+	return func(q *inAppPurchasesQuery) {
+		q.types = normalizeUniqueList(types)
+	}
+}
+
+// WithIAPSort sets the in-app purchase sort expressions.
+func WithIAPSort(sort []string) IAPOption {
+	return func(q *inAppPurchasesQuery) {
+		q.sort = normalizeUniqueList(sort)
 	}
 }
 
@@ -259,6 +283,9 @@ func buildInAppPurchasesQuery(query *inAppPurchasesQuery) string {
 	addLimit(values, query.limit)
 	addCSV(values, "filter[productId]", query.productIDs)
 	addCSV(values, "filter[name]", query.names)
+	addCSV(values, "filter[state]", query.states)
+	addCSV(values, "filter[inAppPurchaseType]", query.types)
+	addCSV(values, "sort", query.sort)
 	addCSV(values, "fields[inAppPurchases]", query.fields)
 	addCSV(values, "include", query.include)
 	addCSV(values, "fields[inAppPurchaseVersions]", query.versionFields)

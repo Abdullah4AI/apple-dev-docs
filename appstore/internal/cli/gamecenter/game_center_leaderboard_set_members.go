@@ -25,7 +25,7 @@ func GameCenterLeaderboardSetMembersCommand() *ffcli.Command {
 
 Examples:
   asc game-center leaderboard-sets members list --set-id "SET_ID"
-  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3"`,
+  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -120,20 +120,22 @@ func GameCenterLeaderboardSetMembersSetCommand() *ffcli.Command {
 
 	setID := fs.String("set-id", "", "Game Center leaderboard set ID")
 	leaderboardIDs := shared.BindOnceCSVFlag(fs, "leaderboard-ids", "Comma-separated list of leaderboard IDs to set as members")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm replacing all members")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "set",
-		ShortUsage: "asc game-center leaderboard-sets members set --set-id \"SET_ID\" --leaderboard-ids \"id1,id2,id3\"",
+		ShortUsage: "asc game-center leaderboard-sets members set --set-id \"SET_ID\" --leaderboard-ids \"id1,id2,id3\" [--confirm]",
 		ShortHelp:  "Replace all leaderboard members in a leaderboard set.",
 		LongHelp: `Replace all leaderboard members in a leaderboard set.
 
 This command replaces ALL members of a leaderboard set with the specified leaderboard IDs.
-To remove all members, pass an empty string for --leaderboard-ids.
+Because replacement can remove existing members, pass --confirm now; it will be required in 5.0.0.
+To remove all members, pass an empty string for --leaderboard-ids with --confirm.
 
 Examples:
-  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3"
-  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids ""`,
+  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "id1,id2,id3" --confirm
+  asc game-center leaderboard-sets members set --set-id "SET_ID" --leaderboard-ids "" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -141,6 +143,21 @@ Examples:
 			if id == "" {
 				fmt.Fprintln(os.Stderr, "Error: --set-id is required")
 				return shared.MissingRequiredUsageError("--set-id")
+			}
+
+			leaderboardIDsProvided := false
+			fs.Visit(func(flag *flag.Flag) {
+				if flag.Name == "leaderboard-ids" {
+					leaderboardIDsProvided = true
+				}
+			})
+			if !leaderboardIDsProvided {
+				fmt.Fprintln(os.Stderr, "Error: --leaderboard-ids is required")
+				return shared.MissingRequiredUsageError("--leaderboard-ids")
+			}
+
+			if err := validateGameCenterReplacementConfirm(fs, *confirm); err != nil {
+				return err
 			}
 
 			ids := shared.SplitUniqueCSV(leaderboardIDs.String())

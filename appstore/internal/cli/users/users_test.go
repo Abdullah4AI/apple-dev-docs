@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"strings"
 	"testing"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -354,11 +355,25 @@ func TestUsersInvitesListCommand_HasPaginationFlags(t *testing.T) {
 func TestUsersListCommand_HasFilterFlags(t *testing.T) {
 	cmd := UsersListCommand()
 
-	flags := []string{"email", "role"}
+	flags := []string{"email", "role", "visible-app", "sort", "fields", "app-fields", "include"}
 	for _, flagName := range flags {
 		f := cmd.FlagSet.Lookup(flagName)
 		if f == nil {
 			t.Fatalf("expected --%s flag to be defined", flagName)
+		}
+	}
+}
+
+func TestUsersListExperimentalQueryFlagsAreMarked(t *testing.T) {
+	cmd := UsersListCommand()
+
+	for _, flagName := range []string{"visible-app", "sort", "fields", "app-fields", "include", "visible-apps-limit"} {
+		f := cmd.FlagSet.Lookup(flagName)
+		if f == nil {
+			t.Fatalf("expected --%s flag to be defined", flagName)
+		}
+		if !strings.HasPrefix(f.Usage, "[experimental] ") {
+			t.Fatalf("--%s usage = %q, want [experimental] marker", flagName, f.Usage)
 		}
 	}
 }

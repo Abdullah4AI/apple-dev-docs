@@ -214,6 +214,8 @@ func findCertificates(ctx context.Context, client *asc.Client, profileType, cert
 		links asc.Links
 		next  string
 	)
+	page := 1
+	seenNext := make(map[string]struct{})
 	for {
 		resp, err := client.GetCertificates(
 			ctx,
@@ -228,6 +230,11 @@ func findCertificates(ctx context.Context, client *asc.Client, profileType, cert
 		if strings.TrimSpace(resp.Links.Next) == "" {
 			break
 		}
+		if _, ok := seenNext[resp.Links.Next]; ok {
+			return nil, fmt.Errorf("page %d: %w", page+1, asc.ErrRepeatedPaginationURL)
+		}
+		seenNext[resp.Links.Next] = struct{}{}
+		page++
 		next = resp.Links.Next
 	}
 	if len(all) == 0 {
@@ -453,6 +460,8 @@ func resolveSigningCertificateTypes(profileType, raw string) (string, error) {
 func findActiveProfiles(ctx context.Context, client *asc.Client, bundleIDResourceID, profileType string) ([]asc.Resource[asc.ProfileAttributes], error) {
 	var matches []asc.Resource[asc.ProfileAttributes]
 	next := ""
+	page := 1
+	seenNext := make(map[string]struct{})
 	for {
 		profiles, err := client.GetBundleIDProfiles(
 			ctx,
@@ -475,6 +484,11 @@ func findActiveProfiles(ctx context.Context, client *asc.Client, bundleIDResourc
 		if strings.TrimSpace(profiles.Links.Next) == "" {
 			return matches, nil
 		}
+		if _, ok := seenNext[profiles.Links.Next]; ok {
+			return nil, fmt.Errorf("page %d: %w", page+1, asc.ErrRepeatedPaginationURL)
+		}
+		seenNext[profiles.Links.Next] = struct{}{}
+		page++
 		next = profiles.Links.Next
 	}
 }
@@ -485,6 +499,8 @@ func findProfileCertificates(ctx context.Context, client *asc.Client, profileID,
 		links asc.Links
 		next  string
 	)
+	page := 1
+	seenNext := make(map[string]struct{})
 	for {
 		response, err := client.GetProfileCertificates(
 			ctx,
@@ -499,6 +515,11 @@ func findProfileCertificates(ctx context.Context, client *asc.Client, profileID,
 		if strings.TrimSpace(response.Links.Next) == "" {
 			break
 		}
+		if _, ok := seenNext[response.Links.Next]; ok {
+			return nil, fmt.Errorf("page %d: %w", page+1, asc.ErrRepeatedPaginationURL)
+		}
+		seenNext[response.Links.Next] = struct{}{}
+		page++
 		next = response.Links.Next
 	}
 

@@ -254,6 +254,134 @@ func TestFindXcodeprojAcceptsExplicitProjectPath(t *testing.T) {
 	}
 }
 
+func TestFindXcodeprojAcceptsExplicitProjectPathWithTrailingSeparator(t *testing.T) {
+	tempDir := t.TempDir()
+	projectPath := filepath.Join(tempDir, "App.xcodeproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	got, err := findXcodeproj(projectPath + string(os.PathSeparator))
+	if err != nil {
+		t.Fatalf("expected trailing separator project path to succeed, got %v", err)
+	}
+	if got != projectPath {
+		t.Fatalf("findXcodeproj() = %q, want %q", got, projectPath)
+	}
+}
+
+func TestResolvedProjectDirNormalizesExplicitProjectPathWithTrailingSeparator(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "App.xcodeproj")
+	got := resolvedProjectDir(projectPath + string(os.PathSeparator))
+	want := filepath.Dir(projectPath)
+	if got != want {
+		t.Fatalf("resolvedProjectDir() = %q, want %q", got, want)
+	}
+}
+
+func TestFindXcodeprojPreservesSymlinkParentTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	realDir := filepath.Join(tempDir, "real")
+	childDir := filepath.Join(realDir, "child")
+	projectPath := filepath.Join(realDir, "App.xcodeproj")
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatalf("mkdir child: %v", err)
+	}
+	if err := os.Mkdir(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	linkPath := filepath.Join(tempDir, "link")
+	if err := os.Symlink(childDir, linkPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	separator := string(os.PathSeparator)
+	input := linkPath + separator + ".." + separator + "App.xcodeproj" + separator
+	got, err := findXcodeproj(input)
+	if err != nil {
+		t.Fatalf("findXcodeproj() error = %v", err)
+	}
+	want, err := filepath.EvalSymlinks(projectPath)
+	if err != nil {
+		t.Fatalf("resolve project path: %v", err)
+	}
+	if got != want {
+		t.Fatalf("findXcodeproj() = %q, want %q", got, want)
+	}
+	if gotDir := resolvedProjectDir(input); gotDir != filepath.Dir(want) {
+		t.Fatalf("resolvedProjectDir() = %q, want %q", gotDir, filepath.Dir(want))
+	}
+}
+
+func TestFindXcodeprojResolvesDirectoryTraversalBeforeJoiningProject(t *testing.T) {
+	tempDir := t.TempDir()
+	realDir := filepath.Join(tempDir, "real")
+	childDir := filepath.Join(realDir, "child")
+	realProject := filepath.Join(realDir, "App.xcodeproj")
+	siblingProject := filepath.Join(tempDir, "App.xcodeproj")
+	for _, path := range []string{childDir, realProject, siblingProject} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+	}
+	linkPath := filepath.Join(tempDir, "link")
+	if err := os.Symlink(childDir, linkPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	got, err := findXcodeproj(linkPath + string(os.PathSeparator) + "..")
+	if err != nil {
+		t.Fatalf("findXcodeproj() error = %v", err)
+	}
+	want, err := filepath.EvalSymlinks(realProject)
+	if err != nil {
+		t.Fatalf("resolve real project: %v", err)
+	}
+	if got != want {
+		t.Fatalf("findXcodeproj() = %q, want %q", got, want)
+	}
+}
+
+func TestFindXcodeprojPreservesProjectSymlinkAfterParentTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tempDir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	targetProject := filepath.Join(t.TempDir(), "Target.xcodeproj")
+	if err := os.Mkdir(targetProject, 0o755); err != nil {
+		t.Fatalf("mkdir target project: %v", err)
+	}
+	aliasProject := filepath.Join(tempDir, "Alias.xcodeproj")
+	if err := os.Symlink(targetProject, aliasProject); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	separator := string(os.PathSeparator)
+	input := filepath.Join(tempDir, "sub") + separator + ".." + separator + "Alias.xcodeproj" + separator
+	got, err := findXcodeproj(input)
+	if err != nil {
+		t.Fatalf("findXcodeproj() error = %v", err)
+	}
+	info, err := os.Lstat(got)
+	if err != nil {
+		t.Fatalf("lstat selected project: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("findXcodeproj() = %q, want selected project symlink", got)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("resolve selected project: %v", err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(targetProject)
+	if err != nil {
+		t.Fatalf("resolve target project: %v", err)
+	}
+	if resolvedTarget != wantTarget {
+		t.Fatalf("selected project target = %q, want %q", resolvedTarget, wantTarget)
+	}
+}
+
 func TestFindXcodeprojDoesNotRetargetTrailingWhitespaceProjectPath(t *testing.T) {
 	tempDir := t.TempDir()
 	exactProject := filepath.Join(tempDir, "Foo.xcodeproj")

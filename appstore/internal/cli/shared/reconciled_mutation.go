@@ -28,6 +28,28 @@ func RunReconciledMutation[T any](
 	mutate func(context.Context) (T, error),
 	readback func(context.Context) (T, bool, error),
 ) (T, ReconciledMutationStatus, error) {
+	return runReconciledMutation(ctx, mutate, readback, true)
+}
+
+// RunReconciledMutationNoReplay executes an ambiguous mutation once and uses
+// immediate and one delayed readback to determine whether that attempt
+// applied. It never replays a mutation after a negative readback.
+// Deterministic failures are returned directly so strict API errors keep their
+// existing classification.
+func RunReconciledMutationNoReplay[T any](
+	ctx context.Context,
+	mutate func(context.Context) (T, error),
+	readback func(context.Context) (T, bool, error),
+) (T, ReconciledMutationStatus, error) {
+	return runReconciledMutation(ctx, mutate, readback, false)
+}
+
+func runReconciledMutation[T any](
+	ctx context.Context,
+	mutate func(context.Context) (T, error),
+	readback func(context.Context) (T, bool, error),
+	replay bool,
+) (T, ReconciledMutationStatus, error) {
 	var zero T
 	if err := ctx.Err(); err != nil {
 		return zero, "", err
@@ -42,6 +64,9 @@ func RunReconciledMutation[T any](
 		if err := ctx.Err(); err != nil {
 			return zero, "", err
 		}
+		if !replay && !isAmbiguousMutationError(ctx, mutationErr) {
+			return zero, "", mutationErr
+		}
 
 		value, matches, readErr := runMutationReadback(ctx, readback)
 		if readErr != nil {
@@ -49,6 +74,23 @@ func RunReconciledMutation[T any](
 		}
 		if matches {
 			return value, ReconciledMutationRecovered, nil
+		}
+		if !replay {
+			if retry >= retryOpts.MaxRetries {
+				return zero, "", mutationErr
+			}
+			if err := sleepForMutationRetry(ctx, mutationReadbackDelay(retryOpts, retry, mutationErr)); err != nil {
+				return zero, "", err
+			}
+
+			value, matches, readErr = runMutationReadback(ctx, readback)
+			if readErr != nil {
+				return zero, "", fmt.Errorf("mutation and pre-retry readback failed: %w", errors.Join(mutationErr, readErr))
+			}
+			if matches {
+				return value, ReconciledMutationRecovered, nil
+			}
+			return zero, "", mutationErr
 		}
 		if isRateLimitRejection(mutationErr) || !IsTransientMutationError(ctx, mutationErr) || retry >= retryOpts.MaxRetries {
 			return zero, "", mutationErr
@@ -66,6 +108,10 @@ func RunReconciledMutation[T any](
 			return value, ReconciledMutationRecovered, nil
 		}
 	}
+}
+
+func isAmbiguousMutationError(parent context.Context, err error) bool {
+	return !isRateLimitRejection(err) && IsTransientMutationError(parent, err)
 }
 
 func isRateLimitRejection(err error) bool {
@@ -110,6 +156,14 @@ func mutationRetryDelay(opts asc.RetryOptions, retry int, err error) time.Durati
 		delay *= time.Duration(1 << retry)
 	}
 	if opts.MaxDelay > 0 && (delay > opts.MaxDelay || delay <= 0) {
+		return opts.MaxDelay
+	}
+	return delay
+}
+
+func mutationReadbackDelay(opts asc.RetryOptions, retry int, err error) time.Duration {
+	delay := mutationRetryDelay(opts, retry, err)
+	if opts.MaxDelay > 0 && delay > opts.MaxDelay {
 		return opts.MaxDelay
 	}
 	return delay

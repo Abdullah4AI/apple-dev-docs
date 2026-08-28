@@ -177,7 +177,7 @@ func AppClipInvocationsCreateCommand() *ffcli.Command {
 
 	buildBundleID := fs.String("build-bundle-id", "", "Build bundle ID")
 	url := fs.String("url", "", "Invocation URL")
-	localizationIDs := fs.String("localization-id", "", "Existing localization ID(s), comma-separated")
+	localizationIDs := shared.BindOnceCSVFlag(fs, "localization-id", "Existing localization ID(s), comma-separated")
 	locale := fs.String("locale", "", "Inline localization locale (use with --title)")
 	title := fs.String("title", "", "Inline localization title (use with --locale)")
 	output := shared.BindOutputFlags(fs)
@@ -208,7 +208,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--url")
 			}
 
-			localizationValues := shared.SplitCSV(*localizationIDs)
+			localizationValues := shared.SplitCSV(localizationIDs.String())
 			localeValue := strings.TrimSpace(*locale)
 			titleValue := strings.TrimSpace(*title)
 			if titleValue != "" && localeValue == "" {

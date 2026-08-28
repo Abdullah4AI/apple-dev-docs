@@ -71,13 +71,13 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("categories list: %w", err)
+				return shared.UsageErrorf("categories list: %v", err)
 			}
 			if err := rejectCategoriesListNextFlagConflicts(fs, *next); err != nil {
 				return err
 			}
 			if *limit < 1 || *limit > 200 {
-				return fmt.Errorf("categories list: --limit must be between 1 and 200")
+				return shared.UsageErrorf("categories list: --limit must be between 1 and 200")
 			}
 
 			client, err := shared.GetASCClient()

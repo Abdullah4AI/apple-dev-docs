@@ -10,6 +10,12 @@ const (
 	LimitSubtitle        = 30
 )
 
+// LimitScreenshotsPerSet is the maximum number of screenshots the App Store
+// accepts in a single screenshot set, meaning one display type within one
+// localization. The App Store Connect OpenAPI snapshot does not express this
+// cap, so it is enforced server-side at upload time.
+const LimitScreenshotsPerSet = 10
+
 // App Store metadata URL length limits.
 //
 // Apple's App Store Connect OpenAPI specification carries no maxLength for

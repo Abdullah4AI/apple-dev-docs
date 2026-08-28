@@ -63,7 +63,7 @@ func SubscriptionsPricePointsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	stream := fs.Bool("stream", false, "Stream pages as NDJSON (one JSON object per page, requires --paginate)")
+	stream := fs.Bool("stream", false, "Stream pages as NDJSON (requires --paginate; explicit --output must be json; incompatible with --pretty)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -84,7 +84,8 @@ When --territory-fields is set, the CLI automatically includes the territory
 relationship so the requested fields are present in the response.
 
 Use --stream with --paginate to emit each page as a separate JSON line (NDJSON)
-instead of buffering all pages in memory. This gives immediate feedback and
+instead of buffering all pages in memory. If --output is set, it must be json;
+streaming cannot be combined with --pretty. This gives immediate feedback and
 reduces memory usage for very large result sets.
 
 Examples:
@@ -115,6 +116,16 @@ Examples:
 			}
 			if *stream && !*paginate {
 				return shared.UsageError("--stream requires --paginate")
+			}
+			streamOutput := shared.NormalizeOutputFormat(*output.Output)
+			if streamOutput == "" {
+				streamOutput = "json"
+			}
+			if *stream && flagWasProvided(fs, "output") && streamOutput != "json" {
+				return shared.UsageError("--stream requires --output json")
+			}
+			if *stream && *output.Pretty {
+				return shared.UsageError("--stream cannot be combined with --pretty")
 			}
 
 			priceFilter := shared.PriceFilter{

@@ -10,6 +10,30 @@ import (
 	"testing"
 )
 
+const groupTesterMetricsFixture = `{
+	"data":[
+		{
+			"type":"appsBetaTesterUsages",
+			"dataPoints":[{
+				"start":"2026-08-01T00:00:00Z",
+				"end":"2026-08-02T00:00:00Z",
+				"values":{"sessionCount":12,"crashCount":1,"feedbackCount":2}
+			}],
+			"dimensions":{"betaTesters":{"data":{"type":"betaTesters","id":"tester-1"}}}
+		},
+		{
+			"type":"appsBetaTesterUsages",
+			"dataPoints":[{
+				"start":"2026-08-02T00:00:00Z",
+				"end":"2026-08-03T00:00:00Z",
+				"values":{"sessionCount":3,"crashCount":0,"feedbackCount":1}
+			}],
+			"dimensions":{"betaTesters":{"data":{"type":"betaTesters","id":"tester-2"}}}
+		}
+	],
+	"links":{"self":"https://api.example.test/v1/betaGroups/group-1/metrics/betaTesterUsages?groupBy=betaTesters"}
+}`
+
 func TestTestFlightMetricsPublicLinkOutput(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -82,7 +106,7 @@ func TestTestFlightMetricsTestersOutput(t *testing.T) {
 		if req.URL.Query().Get("groupBy") != "betaTesters" {
 			t.Fatalf("expected groupBy=betaTesters, got %q", req.URL.Query().Get("groupBy"))
 		}
-		body := `{"data":[{"type":"betaGroupTesterUsages","id":"tester-usage-1"}]}`
+		body := groupTesterMetricsFixture
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(body)),
@@ -108,13 +132,41 @@ func TestTestFlightMetricsTestersOutput(t *testing.T) {
 
 	var out struct {
 		Data []struct {
-			ID string `json:"id"`
+			Type       string `json:"type"`
+			DataPoints []struct {
+				Start  string `json:"start"`
+				End    string `json:"end"`
+				Values struct {
+					SessionCount  int `json:"sessionCount"`
+					CrashCount    int `json:"crashCount"`
+					FeedbackCount int `json:"feedbackCount"`
+				} `json:"values"`
+			} `json:"dataPoints"`
+			Dimensions struct {
+				BetaTesters struct {
+					Data struct {
+						Type string `json:"type"`
+						ID   string `json:"id"`
+					} `json:"data"`
+				} `json:"betaTesters"`
+			} `json:"dimensions"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("unmarshal output: %v\nstdout: %s", err, stdout)
 	}
-	if len(out.Data) != 1 || out.Data[0].ID != "tester-usage-1" {
+	if len(out.Data) != 2 {
+		t.Fatalf("unexpected output data length: %+v", out)
+	}
+	first := out.Data[0]
+	if first.Type != "appsBetaTesterUsages" || len(first.DataPoints) != 1 || first.Dimensions.BetaTesters.Data.Type != "betaTesters" || first.Dimensions.BetaTesters.Data.ID != "tester-1" {
+		t.Fatalf("unexpected first metric: %+v", first)
+	}
+	point := first.DataPoints[0]
+	if point.Start != "2026-08-01T00:00:00Z" || point.End != "2026-08-02T00:00:00Z" || point.Values.SessionCount != 12 || point.Values.CrashCount != 1 || point.Values.FeedbackCount != 2 {
+		t.Fatalf("unexpected first metric data point: %+v", point)
+	}
+	if out.Data[1].Dimensions.BetaTesters.Data.ID != "tester-2" {
 		t.Fatalf("unexpected output: %+v", out)
 	}
 }
@@ -138,7 +190,7 @@ func TestTestFlightMetricsTestersTableOutput(t *testing.T) {
 		if req.URL.Query().Get("groupBy") != "betaTesters" {
 			t.Fatalf("expected groupBy=betaTesters, got %q", req.URL.Query().Get("groupBy"))
 		}
-		body := `{"data":[{"type":"betaGroupTesterUsages","id":"tester-table-1","attributes":{"betaTesters":42}}]}`
+		body := groupTesterMetricsFixture
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(body)),
@@ -161,8 +213,137 @@ func TestTestFlightMetricsTestersTableOutput(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	if !strings.Contains(stdout, "tester-table-1") {
-		t.Fatalf("expected table output to contain tester usage id, got %q", stdout)
+	for _, want := range []string{"Tester ID", "Start", "End", "Sessions", "Crashes", "Feedback", "tester-1", "2026-08-01T00:00:00Z", "12", "1", "2", "tester-2", "3", "0"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected table output to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestTestFlightMetricsTestersMarkdownOutput(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/betaGroups/group-1/metrics/betaTesterUsages" {
+			t.Fatalf("expected path /v1/betaGroups/group-1/metrics/betaTesterUsages, got %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("groupBy") != "betaTesters" {
+			t.Fatalf("expected groupBy=betaTesters, got %q", req.URL.Query().Get("groupBy"))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(groupTesterMetricsFixture)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"testflight", "metrics", "group-testers", "--group", "group-1", "--output", "markdown"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{"| Tester ID", "| Start", "| Sessions", "| tester-1", "| 12", "| tester-2", "| 3"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected Markdown output to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestTestFlightMetricsTestersEmptyResponse(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"data":[],"links":{"self":"https://api.example.test/metrics"}}`)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"testflight", "metrics", "group-testers", "--group", "group-1"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var out struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshal output: %v\nstdout: %s", err, stdout)
+	}
+	if len(out.Data) != 0 {
+		t.Fatalf("expected empty data, got %+v", out.Data)
+	}
+}
+
+func TestTestFlightMetricsTestersMalformedResponse(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"data":[{"type":"appsBetaTesterUsages","dimensions":{"betaTesters":{"data":42}}}],"links":{"self":"https://api.example.test/metrics"}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"testflight", "metrics", "group-testers", "--group", "group-1"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil {
+		t.Fatal("expected malformed response error")
+	}
+	if !strings.Contains(runErr.Error(), "testflight metrics group-testers: failed to fetch") || !strings.Contains(runErr.Error(), "betaTesters.data") {
+		t.Fatalf("unexpected malformed response error: %v", runErr)
+	}
+	if stdout != "" || stderr != "" {
+		t.Fatalf("expected no output for malformed response, stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 

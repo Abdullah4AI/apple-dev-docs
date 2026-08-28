@@ -10,6 +10,7 @@ type SalesReportResult struct {
 	Frequency        string `json:"frequency"`
 	ReportDate       string `json:"reportDate"`
 	Version          string `json:"version,omitempty"`
+	Available        *bool  `json:"available,omitempty"`
 	FilePath         string `json:"filePath"`
 	FileSize         int64  `json:"fileSize"`
 	Decompressed     bool   `json:"decompressed"`
@@ -99,6 +100,19 @@ type AnalyticsReportGetSegment struct {
 }
 
 func salesReportResultRows(result *SalesReportResult) ([]string, [][]string) {
+	if result.Available != nil {
+		headers := []string{"Vendor", "Type", "Subtype", "Frequency", "Date", "Version", "Available"}
+		rows := [][]string{{
+			result.VendorNumber,
+			result.ReportType,
+			result.ReportSubType,
+			result.Frequency,
+			result.ReportDate,
+			result.Version,
+			fmt.Sprintf("%t", *result.Available),
+		}}
+		return headers, rows
+	}
 	headers := []string{"Vendor", "Type", "Subtype", "Frequency", "Date", "Version", "Compressed File", "Compressed Size", "Decompressed File", "Decompressed Size"}
 	rows := [][]string{{
 		result.VendorNumber,

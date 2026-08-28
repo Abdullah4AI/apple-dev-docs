@@ -3,20 +3,87 @@ package asc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
 const bundleIDsIdentifierFilterMaxLength = 3900
 
+type bundleIDsPaginationRequiredError struct {
+	err error
+}
+
+func (e *bundleIDsPaginationRequiredError) Error() string {
+	return e.err.Error()
+}
+
+func (e *bundleIDsPaginationRequiredError) Unwrap() error {
+	return e.err
+}
+
+// IsBundleIDsPaginationRequired reports whether a request can only be
+// represented by following multiple continuation URLs.
+func IsBundleIDsPaginationRequired(err error) bool {
+	var paginationErr *bundleIDsPaginationRequiredError
+	return errors.As(err, &paginationErr)
+}
+
+// ValidateBundleIDsRequest validates URL capacity and split-request behavior
+// without requiring an authenticated client.
+func ValidateBundleIDsRequest(opts ...BundleIDsOption) error {
+	query := &bundleIDsQuery{splitPagination: true}
+	for _, opt := range opts {
+		opt(query)
+	}
+	return validateBundleIDsRequest(query)
+}
+
+func validateBundleIDsRequest(query *bundleIDsQuery) error {
+	if query.nextURL != "" {
+		return nil
+	}
+
+	if len(bundleIDsRequestPath(query)) > bundleIDsIdentifierFilterMaxLength && !strings.Contains(strings.TrimSpace(query.identifier), ",") {
+		return fmt.Errorf("bundleIds: request exceeds %d-byte URL limit and cannot be split without multiple filter[identifier] values", bundleIDsIdentifierFilterMaxLength)
+	}
+
+	if !shouldSplitBundleIDsIdentifierFilter(query) {
+		return nil
+	}
+	if query.splitPaginationSet && !query.splitPagination {
+		return &bundleIDsPaginationRequiredError{err: fmt.Errorf("bundleIds: split identifier filter requires --paginate because multiple continuation URLs cannot be represented; use pagination")}
+	}
+	if err := validateBundleIDsSplitSort(query); err != nil {
+		return err
+	}
+	_, err := splitBundleIDsIdentifierFilter(query)
+	return err
+}
+
+// BundleIDsRequestRequiresSplit reports whether the request must split its
+// identifier filter to stay within the supported request URL length.
+func BundleIDsRequestRequiresSplit(opts ...BundleIDsOption) bool {
+	query := &bundleIDsQuery{splitPagination: true}
+	for _, opt := range opts {
+		opt(query)
+	}
+	return query.nextURL == "" && shouldSplitBundleIDsIdentifierFilter(query)
+}
+
 // GetBundleIDs retrieves the list of bundle IDs.
 func (c *Client) GetBundleIDs(ctx context.Context, opts ...BundleIDsOption) (*BundleIDsResponse, error) {
-	query := &bundleIDsQuery{}
+	query := &bundleIDsQuery{splitPagination: true}
 	for _, opt := range opts {
 		opt(query)
 	}
 
-	if query.nextURL == "" && shouldSplitBundleIDsIdentifierFilter(query) {
+	if err := validateBundleIDsRequest(query); err != nil {
+		return nil, err
+	}
+
+	if shouldSplitBundleIDsIdentifierFilter(query) {
 		return c.getBundleIDsWithSplitIdentifierFilter(ctx, query)
 	}
 
@@ -42,14 +109,108 @@ func (c *Client) GetBundleIDs(ctx context.Context, opts ...BundleIDsOption) (*Bu
 	return &response, nil
 }
 
+// PaginateBundleIDs fetches and aggregates bundle ID pages while preserving
+// unique included resources. It is intentionally endpoint-specific because
+// generic pagination cannot know how to merge an Included JSON:API member.
+func PaginateBundleIDs(ctx context.Context, firstPage *BundleIDsResponse, fetchNext func(context.Context, string) (*BundleIDsResponse, error)) (*BundleIDsResponse, error) {
+	if firstPage == nil {
+		return nil, nil
+	}
+	if fetchNext == nil {
+		return nil, fmt.Errorf("bundleIds pagination requires a next-page fetcher")
+	}
+
+	result := &BundleIDsResponse{
+		Data:  make([]Resource[BundleIDAttributes], 0, len(firstPage.Data)),
+		Links: firstPage.Links,
+		Meta:  firstPage.Meta,
+	}
+	included := make([]json.RawMessage, 0)
+	includedSeen := make(map[string]struct{})
+	includedPresent := false
+	page := firstPage
+	pageNumber := 1
+	seenNext := make(map[string]struct{})
+
+	for {
+		result.Data = append(result.Data, page.Data...)
+		includedPresent = includedPresent || bundleIDsIncludedArrayPresent(page.Included)
+		if err := appendBundleIDsIncluded(&included, includedSeen, page.Included); err != nil {
+			return result, fmt.Errorf("page %d: %w", pageNumber, err)
+		}
+
+		next := strings.TrimSpace(page.Links.Next)
+		if next == "" {
+			break
+		}
+		if _, ok := seenNext[next]; ok {
+			return result, fmt.Errorf("page %d: %w", pageNumber+1, ErrRepeatedPaginationURL)
+		}
+		seenNext[next] = struct{}{}
+		pageNumber++
+
+		nextPage, err := fetchNext(ctx, next)
+		if err != nil {
+			return result, fmt.Errorf("page %d: %w", pageNumber, err)
+		}
+		if nextPage == nil {
+			return result, fmt.Errorf("page %d: received nil response", pageNumber)
+		}
+		page = nextPage
+		result.Links = Links{}
+		result.Meta = nil
+	}
+
+	result.Links.Next = ""
+	if includedPresent {
+		mergedIncluded, err := json.Marshal(included)
+		if err != nil {
+			return result, fmt.Errorf("failed to merge included resources: %w", err)
+		}
+		result.Included = mergedIncluded
+	}
+	return result, nil
+}
+
 func shouldSplitBundleIDsIdentifierFilter(query *bundleIDsQuery) bool {
 	identifier := strings.TrimSpace(query.identifier)
 	return strings.Contains(identifier, ",") && len(bundleIDsRequestPath(query)) > bundleIDsIdentifierFilterMaxLength
 }
 
+func validateBundleIDsSplitSort(query *bundleIDsQuery) error {
+	terms, ok := parseBundleIDSort(query.sort)
+	if !ok || len(terms) == 0 || len(query.fields) == 0 {
+		return nil
+	}
+
+	// Sparse fieldsets can omit sort keys, so local reordering would be wrong.
+	fields := make(map[string]struct{}, len(query.fields))
+	for _, field := range query.fields {
+		fields[strings.TrimSpace(field)] = struct{}{}
+	}
+	for _, term := range terms {
+		if term.field == "id" {
+			continue
+		}
+		if _, ok := fields[term.field]; !ok {
+			return fmt.Errorf("bundleIds: cannot preserve sort %q across split identifier requests because fields[bundleIds] omits %q", strings.TrimSpace(query.sort), term.field)
+		}
+	}
+	return nil
+}
+
 func (c *Client) getBundleIDsWithSplitIdentifierFilter(ctx context.Context, query *bundleIDsQuery) (*BundleIDsResponse, error) {
-	chunks := splitBundleIDsIdentifierFilter(query, bundleIDsIdentifierFilterMaxLength)
-	combined := &BundleIDsResponse{}
+	chunks, err := splitBundleIDsIdentifierFilter(query)
+	if err != nil {
+		return nil, err
+	}
+	combined := &BundleIDsResponse{
+		Data: make([]Resource[BundleIDAttributes], 0),
+	}
+	included := make([]json.RawMessage, 0)
+	includedSeen := make(map[string]struct{})
+	includedPresent := false
+	dataSeen := make(map[string]struct{})
 
 	for _, chunk := range chunks {
 		chunkQuery := *query
@@ -62,9 +223,13 @@ func (c *Client) getBundleIDsWithSplitIdentifierFilter(ctx context.Context, quer
 			if err != nil {
 				return nil, err
 			}
-			combined.Data = append(combined.Data, resp.Data...)
+			appendBundleIDsData(&combined.Data, dataSeen, resp.Data)
+			includedPresent = includedPresent || bundleIDsIncludedArrayPresent(resp.Included)
+			if err := appendBundleIDsIncluded(&included, includedSeen, resp.Included); err != nil {
+				return nil, err
+			}
 			next := strings.TrimSpace(resp.Links.Next)
-			if next == "" {
+			if next == "" || !query.splitPagination {
 				break
 			}
 			if _, ok := seenNext[next]; ok {
@@ -75,8 +240,132 @@ func (c *Client) getBundleIDsWithSplitIdentifierFilter(ctx context.Context, quer
 			chunkQuery = bundleIDsQuery{listQuery: listQuery{nextURL: next}}
 		}
 	}
+	// Each identifier chunk is sorted independently by ASC. Re-sort the merged
+	// resources so a large filter keeps the endpoint's documented ordering.
+	sortBundleIDsData(combined.Data, query.sort)
+	if includedPresent {
+		mergedIncluded, err := json.Marshal(included)
+		if err != nil {
+			return nil, fmt.Errorf("failed to merge included resources: %w", err)
+		}
+		combined.Included = mergedIncluded
+	}
 
 	return combined, nil
+}
+
+func appendBundleIDsData(resources *[]Resource[BundleIDAttributes], seen map[string]struct{}, page []Resource[BundleIDAttributes]) {
+	for _, resource := range page {
+		if resource.Type == "" || resource.ID == "" {
+			*resources = append(*resources, resource)
+			continue
+		}
+		key := string(resource.Type) + "\x00" + resource.ID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		*resources = append(*resources, resource)
+	}
+}
+
+type bundleIDSortTerm struct {
+	field      string
+	descending bool
+}
+
+func sortBundleIDsData(resources []Resource[BundleIDAttributes], sortValue string) {
+	terms, ok := parseBundleIDSort(sortValue)
+	if !ok || len(terms) == 0 {
+		return
+	}
+
+	sort.SliceStable(resources, func(i, j int) bool {
+		for _, term := range terms {
+			left := bundleIDSortFieldValue(resources[i], term.field)
+			right := bundleIDSortFieldValue(resources[j], term.field)
+			if left == right {
+				continue
+			}
+			if term.descending {
+				return left > right
+			}
+			return left < right
+		}
+		return false
+	})
+}
+
+func parseBundleIDSort(value string) ([]bundleIDSortTerm, bool) {
+	terms := make([]bundleIDSortTerm, 0)
+	for _, expression := range strings.Split(value, ",") {
+		expression = strings.TrimSpace(expression)
+		if expression == "" {
+			continue
+		}
+		descending := strings.HasPrefix(expression, "-")
+		field := strings.TrimPrefix(expression, "-")
+		switch field {
+		case "name", "platform", "identifier", "seedId", "id":
+			terms = append(terms, bundleIDSortTerm{field: field, descending: descending})
+		default:
+			return nil, false
+		}
+	}
+	return terms, true
+}
+
+func bundleIDSortFieldValue(resource Resource[BundleIDAttributes], field string) string {
+	switch field {
+	case "name":
+		return resource.Attributes.Name
+	case "platform":
+		return string(resource.Attributes.Platform)
+	case "identifier":
+		return resource.Attributes.Identifier
+	case "seedId":
+		return resource.Attributes.SeedID
+	case "id":
+		return resource.ID
+	default:
+		return ""
+	}
+}
+
+func appendBundleIDsIncluded(resources *[]json.RawMessage, seen map[string]struct{}, included json.RawMessage) error {
+	trimmed := strings.TrimSpace(string(included))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+
+	var next []json.RawMessage
+	if err := json.Unmarshal(included, &next); err != nil {
+		return fmt.Errorf("failed to parse included resources: %w", err)
+	}
+	for _, resource := range next {
+		var identity struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(resource, &identity); err != nil {
+			return fmt.Errorf("failed to parse included resource: %w", err)
+		}
+		key := identity.Type + "\x00" + identity.ID
+		if identity.Type == "" || identity.ID == "" {
+			key = string(resource)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		*resources = append(*resources, resource)
+	}
+	return nil
+}
+
+func bundleIDsIncludedArrayPresent(included json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(included))
+	return trimmed != "" && trimmed != "null"
 }
 
 func (c *Client) getBundleIDsPage(ctx context.Context, query *bundleIDsQuery) (*BundleIDsResponse, error) {
@@ -109,7 +398,7 @@ func bundleIDsRequestPath(query *bundleIDsQuery) string {
 	return path
 }
 
-func splitBundleIDsIdentifierFilter(query *bundleIDsQuery, maxLength int) [][]string {
+func splitBundleIDsIdentifierFilter(query *bundleIDsQuery) ([][]string, error) {
 	parts := strings.Split(query.identifier, ",")
 	chunks := make([][]string, 0, 1)
 	current := make([]string, 0)
@@ -123,10 +412,18 @@ func splitBundleIDsIdentifierFilter(query *bundleIDsQuery, maxLength int) [][]st
 		candidate := append(append([]string{}, current...), part)
 		candidateQuery := *query
 		candidateQuery.identifier = strings.Join(candidate, ",")
-		if len(current) > 0 && len(bundleIDsRequestPath(&candidateQuery)) > maxLength {
+		if len(current) > 0 && len(bundleIDsRequestPath(&candidateQuery)) > bundleIDsIdentifierFilterMaxLength {
 			chunks = append(chunks, current)
 			current = []string{part}
+			singleQuery := *query
+			singleQuery.identifier = part
+			if len(bundleIDsRequestPath(&singleQuery)) > bundleIDsIdentifierFilterMaxLength {
+				return nil, fmt.Errorf("bundleIds: cannot split bundleIds identifier filter because fixed query parameters leave no room for a single identifier under the %d-byte URL limit", bundleIDsIdentifierFilterMaxLength)
+			}
 			continue
+		}
+		if len(current) == 0 && len(bundleIDsRequestPath(&candidateQuery)) > bundleIDsIdentifierFilterMaxLength {
+			return nil, fmt.Errorf("bundleIds: cannot split bundleIds identifier filter because fixed query parameters leave no room for a single identifier under the %d-byte URL limit", bundleIDsIdentifierFilterMaxLength)
 		}
 
 		current = candidate
@@ -135,7 +432,7 @@ func splitBundleIDsIdentifierFilter(query *bundleIDsQuery, maxLength int) [][]st
 	if len(current) > 0 {
 		chunks = append(chunks, current)
 	}
-	return chunks
+	return chunks, nil
 }
 
 // GetBundleID retrieves a single bundle ID by ID.
@@ -365,9 +662,12 @@ func (c *Client) GetCertificate(ctx context.Context, id string, opts ...Certific
 	for _, opt := range opts {
 		opt(query)
 	}
+	if err := validateCertificateDetailQuery(query); err != nil {
+		return nil, err
+	}
 
 	path := fmt.Sprintf("/v1/certificates/%s", id)
-	if queryString := buildCertificatesQuery(query); queryString != "" {
+	if queryString := buildCertificateDetailQuery(query); queryString != "" {
 		path += "?" + queryString
 	}
 	data, err := c.do(ctx, "GET", path, nil)
@@ -381,6 +681,27 @@ func (c *Client) GetCertificate(ctx context.Context, id string, opts ...Certific
 	}
 
 	return &response, nil
+}
+
+func validateCertificateDetailQuery(query *certificatesQuery) error {
+	switch {
+	case query.limit > 0:
+		return fmt.Errorf("certificates: limit option cannot be used with GetCertificate")
+	case query.nextURL != "":
+		return fmt.Errorf("certificates: next URL option cannot be used with GetCertificate")
+	case len(query.certificateTypes) > 0:
+		return fmt.Errorf("certificates: certificate type option cannot be used with GetCertificate")
+	case len(query.displayNames) > 0:
+		return fmt.Errorf("certificates: display name option cannot be used with GetCertificate")
+	case len(query.serialNumbers) > 0:
+		return fmt.Errorf("certificates: serial number option cannot be used with GetCertificate")
+	case len(query.ids) > 0:
+		return fmt.Errorf("certificates: ID option cannot be used with GetCertificate")
+	case strings.TrimSpace(query.sort) != "":
+		return fmt.Errorf("certificates: sort option cannot be used with GetCertificate")
+	default:
+		return nil
+	}
 }
 
 type certificateCreateOptions struct {

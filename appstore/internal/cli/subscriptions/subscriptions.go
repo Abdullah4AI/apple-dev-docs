@@ -1002,6 +1002,11 @@ func SubscriptionsPricesListCommand() *ffcli.Command {
 	appID := addSubscriptionLookupAppFlag(fs)
 	planType := fs.String("plan-type", "", "Filter by plan type: MONTHLY or UPFRONT")
 	territory := fs.String("territory", "", "Filter by territory (accepts alpha-2, alpha-3, or exact English country name; e.g., US, USA, United States)")
+	pricePointIDs := fs.String("price-point-id", "", "[experimental] Filter by subscription price point IDs (comma-separated)")
+	fields := fs.String("fields", "", "[experimental] Subscription price fields (comma-separated)")
+	territoryFields := fs.String("territory-fields", "", "[experimental] Included territory fields (comma-separated): currency")
+	pricePointFields := fs.String("price-point-fields", "", "[experimental] Included subscription price point fields (comma-separated)")
+	include := fs.String("include", "", "[experimental] Relationships to include (comma-separated): territory, subscriptionPricePoint")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
@@ -1010,19 +1015,23 @@ func SubscriptionsPricesListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc subscriptions prices list --subscription-id \"SUB_ID\" [--plan-type MONTHLY|UPFRONT] [--territory USA]",
+		ShortUsage: "asc subscriptions prices list --subscription-id \"SUB_ID\" [flags]",
 		ShortHelp:  "List prices for a subscription.",
 		LongHelp: `List prices for a subscription.
 
 Use --plan-type to filter by MONTHLY or UPFRONT billing plan prices.
 Use --territory to filter by a single territory.
+Use --price-point-id to filter by subscription price point IDs. Use --fields,
+--price-point-fields, and --territory-fields to request sparse response fields;
+the corresponding relationship is included automatically when needed.
 
 Examples:
   asc subscriptions prices list --subscription-id "SUB_ID"
   asc subscriptions prices list --subscription-id "SUB_ID" --paginate
   asc subscriptions prices list --subscription-id "SUB_ID" --resolved
   asc subscriptions prices list --subscription-id "SUB_ID" --resolved --territory USA
-  asc subscriptions prices list --subscription-id "SUB_ID" --plan-type MONTHLY`,
+  asc subscriptions prices list --subscription-id "SUB_ID" --plan-type MONTHLY
+  asc subscriptions prices list --subscription-id "SUB_ID" --price-point-id "PRICE_POINT_ID" --include subscriptionPricePoint --price-point-fields customerPrice`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -1035,6 +1044,16 @@ Examples:
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")
 				return flag.ErrHelp
+			}
+			if err := validateNextExclusiveFlags(fs, *next, "price-point-id", "fields", "territory-fields", "price-point-fields", "include"); err != nil {
+				return err
+			}
+			if *resolved {
+				for _, name := range []string{"price-point-id", "fields", "territory-fields", "price-point-fields", "include"} {
+					if flagWasProvided(fs, name) {
+						return shared.UsageErrorf("--resolved cannot be combined with --%s", name)
+					}
+				}
 			}
 
 			id := strings.TrimSpace(*subID)
@@ -1079,6 +1098,40 @@ Examples:
 				territoryFilter = normalizedTerritory
 			}
 
+			selectedPricePointIDs, err := normalizeOptionalCSVFilter(fs, "price-point-id", *pricePointIDs, false)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			selectedPriceFields, err := normalizeOptionalSelection(fs, "fields", *fields, subscriptionPriceFieldsList())
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			selectedTerritoryFields, err := normalizeOptionalSelection(fs, "territory-fields", *territoryFields, []string{"currency"})
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			selectedPricePointFields, err := normalizeOptionalSelection(fs, "price-point-fields", *pricePointFields, subscriptionPricePointFieldsList())
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			selectedIncludes, err := normalizeOptionalSelection(fs, "include", *include, []string{"territory", "subscriptionPricePoint"})
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if containsString(selectedPriceFields, "territory") || len(selectedTerritoryFields) != 0 {
+				selectedIncludes = appendIncludeForFields(selectedIncludes, []string{"territory"}, "territory")
+			}
+			if containsString(selectedPriceFields, "subscriptionPricePoint") || len(selectedPricePointFields) != 0 {
+				selectedIncludes = appendIncludeForFields(selectedIncludes, []string{"subscriptionPricePoint"}, "subscriptionPricePoint")
+			}
+			if len(selectedPriceFields) > 0 {
+				for _, relationship := range selectedIncludes {
+					if !containsString(selectedPriceFields, relationship) {
+						selectedPriceFields = append(selectedPriceFields, relationship)
+					}
+				}
+			}
+
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("subscriptions prices list: %w", err)
@@ -1112,6 +1165,11 @@ Examples:
 			opts := []asc.SubscriptionPricesOption{
 				asc.WithSubscriptionPricesLimit(*limit),
 				asc.WithSubscriptionPricesNextURL(nextURL),
+				asc.WithSubscriptionPricesPricePointIDs(selectedPricePointIDs),
+				asc.WithSubscriptionPricesFields(selectedPriceFields),
+				asc.WithSubscriptionPricesTerritoryFields(selectedTerritoryFields),
+				asc.WithSubscriptionPricesPricePointFields(selectedPricePointFields),
+				asc.WithSubscriptionPricesInclude(selectedIncludes),
 			}
 			if planTypeFilter != "" && nextURL == "" {
 				opts = append(opts, asc.WithSubscriptionPricesPlanType(planTypeFilter))
@@ -1128,7 +1186,16 @@ Examples:
 				}
 
 				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					nextURL, err := mergeSubscriptionPricesListFilters(nextURL, planTypeFilter, territoryFilter)
+					nextURL, err := mergeSubscriptionPricesListQuery(
+						nextURL,
+						planTypeFilter,
+						territoryFilter,
+						selectedPricePointIDs,
+						selectedPriceFields,
+						selectedTerritoryFields,
+						selectedPricePointFields,
+						selectedIncludes,
+					)
 					if err != nil {
 						return nil, err
 					}
@@ -1156,8 +1223,19 @@ func mergeSubscriptionPricesPlanType(next string, planType asc.SubscriptionPlanT
 }
 
 func mergeSubscriptionPricesListFilters(next string, planType asc.SubscriptionPlanType, territory string) (string, error) {
+	return mergeSubscriptionPricesListQuery(next, planType, territory, nil, nil, nil, nil, nil)
+}
+
+func mergeSubscriptionPricesListQuery(
+	next string,
+	planType asc.SubscriptionPlanType,
+	territory string,
+	pricePointIDs, priceFields, territoryFields, pricePointFields, include []string,
+) (string, error) {
 	if planType == "" && strings.TrimSpace(territory) == "" {
-		return next, nil
+		if len(pricePointIDs) == 0 && len(priceFields) == 0 && len(territoryFields) == 0 && len(pricePointFields) == 0 && len(include) == 0 {
+			return next, nil
+		}
 	}
 
 	additions := url.Values{}
@@ -1167,8 +1245,21 @@ func mergeSubscriptionPricesListFilters(next string, planType asc.SubscriptionPl
 	if strings.TrimSpace(territory) != "" {
 		additions.Set("filter[territory]", strings.ToUpper(strings.TrimSpace(territory)))
 	}
+	setSubscriptionPricesCSVQuery(additions, "filter[subscriptionPricePoint]", pricePointIDs)
+	setSubscriptionPricesCSVQuery(additions, "fields[subscriptionPrices]", priceFields)
+	setSubscriptionPricesCSVQuery(additions, "fields[territories]", territoryFields)
+	setSubscriptionPricesCSVQuery(additions, "fields[subscriptionPricePoints]", pricePointFields)
+	setSubscriptionPricesCSVQuery(additions, "include", include)
 
 	return mergeSubscriptionPricesNextQuery(next, additions)
+}
+
+func setSubscriptionPricesCSVQuery(values url.Values, key string, items []string) {
+	items = shared.SplitCSV(strings.Join(items, ","))
+	if len(items) == 0 {
+		return
+	}
+	values.Set(key, strings.Join(items, ","))
 }
 
 func mergeSubscriptionPricesNextQuery(next string, additions url.Values) (string, error) {

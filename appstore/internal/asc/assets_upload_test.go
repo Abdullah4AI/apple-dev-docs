@@ -184,6 +184,66 @@ func TestUploadAssetFromFileUploadsChunks(t *testing.T) {
 	}
 }
 
+func TestUploadAssetFromFileRejectsNonPositiveLengthBeforeUpload(t *testing.T) {
+	file := createTempAssetFile(t, []byte("abc"))
+	defer file.Close()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name   string
+		length int64
+		want   string
+	}{
+		{name: "zero", length: 0, want: "non-positive length"},
+		{name: "negative", length: -1, want: "negative offset/length"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := calls.Load()
+			err := UploadAssetFromFile(context.Background(), file, 3, []UploadOperation{{
+				Method: http.MethodPut,
+				URL:    server.URL + "/part",
+				Length: tt.length,
+			}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("UploadAssetFromFile() error = %v, want %q", err, tt.want)
+			}
+			if got := calls.Load(); got != before {
+				t.Fatalf("expected no upload requests, got %d new request(s)", got-before)
+			}
+		})
+	}
+}
+
+func TestUploadAssetFromFilePreflightsAllOperationsBeforeUpload(t *testing.T) {
+	file := createTempAssetFile(t, []byte("abcdef"))
+	defer file.Close()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	err := UploadAssetFromFile(context.Background(), file, 6, []UploadOperation{
+		{Method: http.MethodPut, URL: server.URL + "/part1", Length: 3, Offset: 0},
+		{Method: http.MethodPut, URL: server.URL + "/part2", Length: 0, Offset: 3},
+	})
+	if err == nil || !strings.Contains(err.Error(), "upload operation 1 has non-positive length") {
+		t.Fatalf("UploadAssetFromFile() error = %v, want non-positive length for operation 1", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("expected no upload requests after preflight failure, got %d", got)
+	}
+}
+
 func TestUploadAssetFromFileUsesUploadTimeoutEnv(t *testing.T) {
 	t.Setenv("ASC_TIMEOUT", "10ms")
 	t.Setenv("ASC_TIMEOUT_SECONDS", "")

@@ -160,6 +160,7 @@ type subscriptionPricesQuery struct {
 	listQuery
 	territory        string
 	planType         SubscriptionPlanType
+	pricePointIDs    []string
 	include          []string
 	priceFields      []string
 	pricePointFields []string
@@ -554,6 +555,13 @@ func WithSubscriptionPricesPlanType(planType SubscriptionPlanType) SubscriptionP
 	}
 }
 
+// WithSubscriptionPricesPricePointIDs filters subscription prices by price point IDs.
+func WithSubscriptionPricesPricePointIDs(pricePointIDs []string) SubscriptionPricesOption {
+	return func(q *subscriptionPricesQuery) {
+		q.pricePointIDs = normalizeList(pricePointIDs)
+	}
+}
+
 // WithSubscriptionPricesInclude sets the relationships to include (e.g., "subscriptionPricePoint", "territory").
 func WithSubscriptionPricesInclude(include []string) SubscriptionPricesOption {
 	return func(q *subscriptionPricesQuery) {
@@ -813,6 +821,7 @@ func buildSubscriptionPricesQuery(query *subscriptionPricesQuery) string {
 	if query.planType != "" {
 		values.Set("filter[planType]", string(query.planType))
 	}
+	addCSV(values, "filter[subscriptionPricePoint]", query.pricePointIDs)
 	addCSV(values, "include", query.include)
 	addCSV(values, "fields[subscriptionPrices]", query.priceFields)
 	addCSV(values, "fields[subscriptionPricePoints]", query.pricePointFields)

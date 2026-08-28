@@ -13,6 +13,26 @@ func screenshotChecks(platform string, sets []ScreenshotSet) []CheckResult {
 
 	for _, set := range sets {
 		displayType := strings.TrimSpace(set.DisplayType)
+
+		// The count cap is checked before the display type is resolved so that
+		// over-full sets are still reported for unknown or missing display types.
+		if count := len(set.Screenshots); count > LimitScreenshotsPerSet {
+			message := fmt.Sprintf("screenshot set has %d screenshots, exceeding the maximum of %d", count, LimitScreenshotsPerSet)
+			if displayType != "" {
+				message = fmt.Sprintf("screenshot set %s has %d screenshots, exceeding the maximum of %d", displayType, count, LimitScreenshotsPerSet)
+			}
+
+			checks = append(checks, CheckResult{
+				ID:           "screenshots.count.exceeds_max",
+				Severity:     SeverityError,
+				Locale:       set.Locale,
+				ResourceType: "appScreenshotSet",
+				ResourceID:   set.ID,
+				Message:      message,
+				Remediation:  fmt.Sprintf("Reduce the %s from %d to %d screenshots or fewer", screenshotSetLabel(set), count, LimitScreenshotsPerSet),
+			})
+		}
+
 		if displayType == "" {
 			continue
 		}
@@ -162,6 +182,22 @@ func screenshotPresenceChecks(primaryLocale string, versionLocs []VersionLocaliz
 	}
 
 	return checks
+}
+
+// screenshotSetLabel names a screenshot set by locale and display type so
+// remediation text identifies which set to trim.
+func screenshotSetLabel(set ScreenshotSet) string {
+	parts := make([]string, 0, 2)
+	if locale := strings.TrimSpace(set.Locale); locale != "" {
+		parts = append(parts, locale)
+	}
+	if displayType := strings.TrimSpace(set.DisplayType); displayType != "" {
+		parts = append(parts, displayType)
+	}
+	if len(parts) == 0 {
+		return "screenshot set"
+	}
+	return strings.Join(parts, " ") + " screenshot set"
 }
 
 func screenshotSizesForDisplayType(displayType string) []screenshotcatalog.Dimension {

@@ -170,8 +170,8 @@ func executeCustomPageScreenshotUpload(
 		RequestContext: contextWithCustomPageMediaUploadTimeout,
 		UploadContext:  contextWithCustomPageMediaUploadTimeout,
 		Access: assets.ScreenshotSetAccess{
-			List: func(ctx context.Context, client *asc.Client, localizationID string) (*asc.AppScreenshotSetsResponse, error) {
-				return client.GetAppCustomProductPageLocalizationScreenshotSets(ctx, localizationID)
+			List: func(ctx context.Context, client *asc.Client, localizationID string, requestContext asc.RequestContextFunc) (*asc.AppScreenshotSetsResponse, error) {
+				return client.GetAllAppCustomProductPageLocalizationScreenshotSets(ctx, localizationID, asc.WithAppCustomProductPageLocalizationScreenshotSetsRequestContext(requestContext))
 			},
 			Create: func(ctx context.Context, client *asc.Client, localizationID, displayType string) (*asc.AppScreenshotSetResponse, error) {
 				return client.CreateAppScreenshotSetForCustomProductPageLocalization(ctx, localizationID, displayType)

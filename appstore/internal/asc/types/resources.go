@@ -204,6 +204,71 @@ type Resource[T any] struct {
 	Attributes    T               `json:"attributes"`
 	Relationships json.RawMessage `json:"relationships,omitempty"`
 	Links         json.RawMessage `json:"links,omitempty"`
+
+	attributesDecoded bool
+	attributesPresent bool
+	attributesNull    bool
+}
+
+// UnmarshalJSON records whether attributes was absent, null, or present so
+// sparse JSON:API responses can be rendered without inventing an attributes
+// object that Apple did not return.
+func (r *Resource[T]) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		Type          ResourceType    `json:"type"`
+		ID            string          `json:"id"`
+		Attributes    json.RawMessage `json:"attributes"`
+		Relationships json.RawMessage `json:"relationships,omitempty"`
+		Links         json.RawMessage `json:"links,omitempty"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	*r = Resource[T]{
+		Type:              decoded.Type,
+		ID:                decoded.ID,
+		Relationships:     decoded.Relationships,
+		Links:             decoded.Links,
+		attributesDecoded: true,
+		attributesPresent: decoded.Attributes != nil,
+		attributesNull:    bytes.Equal(bytes.TrimSpace(decoded.Attributes), []byte("null")),
+	}
+	if !r.attributesPresent {
+		return nil
+	}
+	return json.Unmarshal(decoded.Attributes, &r.Attributes)
+}
+
+// MarshalJSON preserves decoded attribute presence while keeping the existing
+// behavior for resources constructed directly by callers.
+func (r Resource[T]) MarshalJSON() ([]byte, error) {
+	var attributes json.RawMessage
+	if !r.attributesDecoded || r.attributesPresent {
+		if r.attributesNull {
+			attributes = json.RawMessage("null")
+		} else {
+			encoded, err := json.Marshal(r.Attributes)
+			if err != nil {
+				return nil, err
+			}
+			attributes = encoded
+		}
+	}
+
+	return json.Marshal(struct {
+		Type          ResourceType    `json:"type"`
+		ID            string          `json:"id"`
+		Attributes    json.RawMessage `json:"attributes,omitempty"`
+		Relationships json.RawMessage `json:"relationships,omitempty"`
+		Links         json.RawMessage `json:"links,omitempty"`
+	}{
+		Type:          r.Type,
+		ID:            r.ID,
+		Attributes:    attributes,
+		Relationships: r.Relationships,
+		Links:         r.Links,
+	})
 }
 
 // Response is a generic ASC API response wrapper.

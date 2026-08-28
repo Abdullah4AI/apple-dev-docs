@@ -1871,3 +1871,235 @@ func TestSubscriptionsSetupNormalizesTerritories(t *testing.T) {
 		t.Fatalf("expected 9 setup requests, got %d", requestCount)
 	}
 }
+
+func TestSubscriptionsSetupReconcilesAppliedEOFWithoutReplay(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureAppliedEOF)
+}
+
+func TestSubscriptionsSetupReconcilesAppliedEOFAfterDelayedVisibility(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureAppliedDelayedEOF)
+}
+
+func TestSubscriptionsSetupReconcilesApplied5xxWithoutReplay(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureApplied5xx)
+}
+
+func TestSubscriptionsSetupDoesNotReplayUnappliedAmbiguousPricePatch(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureUnappliedEOF)
+}
+
+func TestSubscriptionsSetupPreservesDeterministicPricePatchFailure(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureDeterministic)
+}
+
+func TestSubscriptionsSetupReportsVerificationFailureAfterReconciledPricePatch(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureVerification)
+}
+
+func TestSubscriptionsSetupDoesNotInferForcedRepairFromUnchangedMatrix(t *testing.T) {
+	runSubscriptionsSetupPriceFailureCase(t, subscriptionsSetupPriceFailureForcedRepairUnchanged)
+}
+
+type subscriptionsSetupPriceFailureMode string
+
+const (
+	subscriptionsSetupPriceFailureAppliedEOF            subscriptionsSetupPriceFailureMode = "applied-eof"
+	subscriptionsSetupPriceFailureAppliedDelayedEOF     subscriptionsSetupPriceFailureMode = "applied-delayed-eof"
+	subscriptionsSetupPriceFailureApplied5xx            subscriptionsSetupPriceFailureMode = "applied-5xx"
+	subscriptionsSetupPriceFailureUnappliedEOF          subscriptionsSetupPriceFailureMode = "unapplied-eof"
+	subscriptionsSetupPriceFailureDeterministic         subscriptionsSetupPriceFailureMode = "deterministic"
+	subscriptionsSetupPriceFailureVerification          subscriptionsSetupPriceFailureMode = "verification"
+	subscriptionsSetupPriceFailureForcedRepairUnchanged subscriptionsSetupPriceFailureMode = "forced-repair-unchanged"
+)
+
+func runSubscriptionsSetupPriceFailureCase(t *testing.T, mode subscriptionsSetupPriceFailureMode) {
+	t.Helper()
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_MAX_RETRIES", "1")
+	t.Setenv("ASC_BASE_DELAY", "1ms")
+	t.Setenv("ASC_MAX_DELAY", "1ms")
+
+	patchAttempts := 0
+	matrixReads := 0
+	applied := false
+	verify := mode == subscriptionsSetupPriceFailureVerification
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		respond := func(status int, body string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+		}
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionGroups/group-1/subscriptions":
+			respond(http.StatusOK, `{"data":[{"type":"subscriptions","id":"sub-1","attributes":{"name":"Pro Monthly","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"READY_TO_SUBMIT"}}],"links":{"next":""}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/sub-1/prices" && req.URL.Query().Get("filter[planType]") == "":
+			respond(http.StatusOK, `{"data":[],"links":{"next":""}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionPricePoints/pp-usa/equalizations":
+			respond(http.StatusOK, `{"data":[{"type":"subscriptionPricePoints","id":"pp-can","attributes":{"customerPrice":"4.99"},"relationships":{"territory":{"data":{"type":"territories","id":"CAN"}}}}],"links":{"next":""}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/sub-1/subscriptionAvailability":
+			respond(http.StatusOK, `{"data":{"type":"subscriptionAvailabilities","id":"availability-1","attributes":{"availableInNewTerritories":false}}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionAvailabilities/availability-1/availableTerritories":
+			respond(http.StatusOK, `{"data":[{"type":"territories","id":"USA"}],"links":{"next":""}}`)
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/sub-1/prices" && req.URL.Query().Get("filter[planType]") == "UPFRONT":
+			matrixReads++
+			if mode == subscriptionsSetupPriceFailureForcedRepairUnchanged {
+				respond(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-can","attributes":{"startDate":"2026-08-01","planType":"UPFRONT"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"pp-can"}},"territory":{"data":{"type":"territories","id":"CAN"}}}},{"type":"subscriptionPrices","id":"price-usa","attributes":{"startDate":"2026-08-01","planType":"UPFRONT"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"pp-usa"}},"territory":{"data":{"type":"territories","id":"USA"}}}}],"links":{"next":""}}`)
+				return
+			}
+			if applied && (mode != subscriptionsSetupPriceFailureAppliedDelayedEOF || matrixReads != 2) {
+				respond(http.StatusOK, `{"data":[{"type":"subscriptionPrices","id":"price-can","attributes":{"startDate":"2026-08-01","planType":"UPFRONT"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"pp-can"}},"territory":{"data":{"type":"territories","id":"CAN"}}}},{"type":"subscriptionPrices","id":"price-usa","attributes":{"startDate":"2026-08-01","planType":"UPFRONT"},"relationships":{"subscriptionPricePoint":{"data":{"type":"subscriptionPricePoints","id":"pp-usa"}},"territory":{"data":{"type":"territories","id":"USA"}}}}],"links":{"next":""}}`)
+				return
+			}
+			respond(http.StatusOK, `{"data":[],"links":{"next":""}}`)
+		case req.Method == http.MethodPatch && req.URL.Path == "/v1/subscriptions/sub-1":
+			patchAttempts++
+			var payload asc.SubscriptionUpdateRequest
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode matrix PATCH payload: %v", err)
+			}
+			if len(payload.Included) != 2 {
+				t.Fatalf("expected complete USA/CAN matrix, got %+v", payload.Included)
+			}
+			territories := make(map[string]bool, len(payload.Included))
+			for _, included := range payload.Included {
+				if included.Attributes == nil || included.Attributes.PlanType != asc.SubscriptionPlanTypeUpfront || included.Relationships.Territory == nil {
+					t.Fatalf("expected each matrix row to include UPFRONT plan and territory, got %+v", included)
+				}
+				territories[included.Relationships.Territory.Data.ID] = true
+			}
+			if !territories["USA"] || !territories["CAN"] {
+				t.Fatalf("expected USA and CAN matrix territories, got %v", territories)
+			}
+			if mode == subscriptionsSetupPriceFailureAppliedEOF || mode == subscriptionsSetupPriceFailureAppliedDelayedEOF || mode == subscriptionsSetupPriceFailureApplied5xx || mode == subscriptionsSetupPriceFailureVerification {
+				applied = true
+			}
+			switch mode {
+			case subscriptionsSetupPriceFailureAppliedEOF, subscriptionsSetupPriceFailureAppliedDelayedEOF, subscriptionsSetupPriceFailureUnappliedEOF, subscriptionsSetupPriceFailureVerification, subscriptionsSetupPriceFailureForcedRepairUnchanged:
+				panic(http.ErrAbortHandler)
+			case subscriptionsSetupPriceFailureApplied5xx:
+				respond(http.StatusBadGateway, `{"errors":[{"status":"502","code":"SERVER_ERROR","title":"Bad Gateway","detail":"upstream unavailable"}]}`)
+			case subscriptionsSetupPriceFailureDeterministic:
+				respond(http.StatusUnprocessableEntity, `{"errors":[{"status":"422","code":"INVALID_PRICE","title":"Invalid price","detail":"price matrix rejected"}]}`)
+			default:
+				t.Fatalf("unhandled price failure mode %q", mode)
+			}
+		case verify && req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionGroups/group-1":
+			respond(http.StatusOK, `{"data":{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Pro"}}}`)
+		case verify && req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/sub-1":
+			respond(http.StatusOK, `{"data":{"type":"subscriptions","id":"sub-1","attributes":{"name":"Unexpected Name","productId":"com.example.pro.monthly","subscriptionPeriod":"ONE_MONTH","state":"READY_TO_SUBMIT"}}}`)
+		default:
+			t.Fatalf("unexpected request in %s case: %s %s?%s", mode, req.Method, req.URL.Path, req.URL.RawQuery)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		cloned := req.Clone(req.Context())
+		cloned.URL.Scheme = serverURL.Scheme
+		cloned.URL.Host = serverURL.Host
+		return server.Client().Transport.RoundTrip(cloned)
+	})
+	client, err := asc.NewClientWithHTTPClient(
+		os.Getenv("ASC_KEY_ID"),
+		os.Getenv("ASC_ISSUER_ID"),
+		os.Getenv("ASC_PRIVATE_KEY_PATH"),
+		&http.Client{Transport: transport},
+	)
+	if err != nil {
+		t.Fatalf("create setup test client: %v", err)
+	}
+	t.Cleanup(subscriptionscli.SetSetupClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	}))
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+	args := []string{
+		"subscriptions", "setup",
+		"--group-id", "group-1",
+		"--reference-name", "Pro Monthly",
+		"--product-id", "com.example.pro.monthly",
+		"--subscription-period", "ONE_MONTH",
+		"--price-point-id", "pp-usa",
+		"--price-territory", "USA",
+		"--start-date", "2026-08-01",
+		"--output", "json",
+	}
+	if !verify {
+		args = append(args, "--no-verify")
+	}
+	if mode == subscriptionsSetupPriceFailureForcedRepairUnchanged {
+		args = append(args, "--repair")
+	}
+
+	var runErr error
+	var result subscriptionsSetupOutput
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse(args); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse setup result: %v\nstdout=%q", err, stdout)
+	}
+
+	switch mode {
+	case subscriptionsSetupPriceFailureAppliedEOF, subscriptionsSetupPriceFailureAppliedDelayedEOF, subscriptionsSetupPriceFailureApplied5xx:
+		if runErr != nil || result.Status != "ok" {
+			t.Fatalf("expected reconciled setup success, err=%v result=%+v", runErr, result)
+		}
+		foundPriceStep := false
+		for _, step := range result.Steps {
+			if step.Name == "set_price" {
+				foundPriceStep = true
+				if step.Status != "completed" || step.Message != "materialized complete price matrix across 2 territories" {
+					t.Fatalf("unexpected reconciled set_price step: %+v", step)
+				}
+			}
+		}
+		if !foundPriceStep {
+			t.Fatalf("expected completed set_price step, got %+v", result.Steps)
+		}
+		if result.Verification.Status != "skipped" {
+			t.Fatalf("expected skipped verification, got %+v", result.Verification)
+		}
+	case subscriptionsSetupPriceFailureUnappliedEOF, subscriptionsSetupPriceFailureForcedRepairUnchanged:
+		if runErr == nil || result.Status != "error" || result.FailedStep != "set_price" {
+			t.Fatalf("expected unreconciled set_price failure, err=%v result=%+v", runErr, result)
+		}
+	case subscriptionsSetupPriceFailureDeterministic:
+		if runErr == nil || result.Status != "error" || result.FailedStep != "set_price" {
+			t.Fatalf("expected deterministic set_price failure, err=%v result=%+v", runErr, result)
+		}
+		if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.HTTPStatusToExitCode(http.StatusUnprocessableEntity) {
+			t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.HTTPStatusToExitCode(http.StatusUnprocessableEntity), runErr)
+		}
+	case subscriptionsSetupPriceFailureVerification:
+		if runErr == nil || result.Status != "error" || result.FailedStep != "verify_state" || result.Verification.Status != "failed" {
+			t.Fatalf("expected final verification failure, err=%v result=%+v", runErr, result)
+		}
+	}
+
+	if patchAttempts != 1 {
+		t.Fatalf("expected exactly one matrix PATCH in %s case, got %d", mode, patchAttempts)
+	}
+	wantMatrixReads := 1
+	switch mode {
+	case subscriptionsSetupPriceFailureAppliedDelayedEOF, subscriptionsSetupPriceFailureUnappliedEOF, subscriptionsSetupPriceFailureForcedRepairUnchanged:
+		wantMatrixReads = 3
+	case subscriptionsSetupPriceFailureAppliedEOF, subscriptionsSetupPriceFailureApplied5xx, subscriptionsSetupPriceFailureVerification:
+		wantMatrixReads = 2
+	}
+	if matrixReads != wantMatrixReads {
+		t.Fatalf("expected %d filtered matrix reads in %s case, got %d", wantMatrixReads, mode, matrixReads)
+	}
+}

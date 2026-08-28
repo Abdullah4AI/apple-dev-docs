@@ -30,7 +30,26 @@ ELLIPSIS_TOKENS = {"...", "…"}
 REQUIRED_FLAGS_BY_COMMAND: dict[tuple[str, ...], set[str]] = {
     ("submit", "create"): {"--build", "--confirm"},
 }
-BOOLEAN_FLAG_OVERRIDES = {"--api-debug", "--debug", "--retry-log"}
+# Presence-aware booleans intentionally omit a displayed default because unset
+# and explicit false have different behavior. Scope these overrides by command
+# so same-named value flags remain value flags elsewhere in the CLI.
+BOOLEAN_FLAG_OVERRIDES: dict[tuple[str, ...], set[str]] = {
+    (): {"--api-debug", "--debug", "--retry-log"},
+    ("testflight", "groups", "create"): {
+        "--access-all-builds",
+        "--feedback-enabled",
+        "--internal",
+        "--public-link-enabled",
+        "--public-link-limit-enabled",
+    },
+    ("testflight", "beta-groups", "create"): {
+        "--access-all-builds",
+        "--feedback-enabled",
+        "--internal",
+        "--public-link-enabled",
+        "--public-link-limit-enabled",
+    },
+}
 HIDDEN_DEPRECATED_ALIAS_FLAGS: dict[tuple[str, ...], dict[str, bool]] = {
     # DeprecatedUsageFunc intentionally hides FLAGS in help output for
     # compatibility aliases, but we still need accurate flag validation so docs
@@ -72,7 +91,9 @@ class Example:
     source: str = "fenced"
 
 
-def parse_help_text(help_text: str, *, is_root: bool) -> CommandSpec:
+def parse_help_text(
+    help_text: str, *, is_root: bool, path: tuple[str, ...] = ()
+) -> CommandSpec:
     usage = ""
     flags: dict[str, bool] = {}
     subcommands: set[str] = set()
@@ -108,7 +129,7 @@ def parse_help_text(help_text: str, *, is_root: bool) -> CommandSpec:
             if match:
                 flag, description = match.group(1), match.group(2)
                 flags[flag] = (
-                    flag in BOOLEAN_FLAG_OVERRIDES
+                    flag in BOOLEAN_FLAG_OVERRIDES.get(path, set())
                     or description.rstrip().endswith("(default: false)")
                     or description.rstrip().endswith("(default: true)")
                 )
@@ -125,7 +146,7 @@ def parse_help_text(help_text: str, *, is_root: bool) -> CommandSpec:
             if match:
                 subcommands.add(match.group(1))
 
-    return CommandSpec(path=(), usage=usage, flags=flags, subcommands=subcommands)
+    return CommandSpec(path=path, usage=usage, flags=flags, subcommands=subcommands)
 
 
 def command_help(binary_path: Path, path: tuple[str, ...]) -> str:
@@ -159,7 +180,7 @@ def telemetry_disabled_environment() -> dict[str, str]:
 
 def build_command_index(binary_path: Path) -> dict[tuple[str, ...], CommandSpec]:
     root_help = command_help(binary_path, ())
-    root_spec = parse_help_text(root_help, is_root=True)
+    root_spec = parse_help_text(root_help, is_root=True, path=())
     index: dict[tuple[str, ...], CommandSpec] = {
         (): CommandSpec(
             path=(),
@@ -175,7 +196,7 @@ def build_command_index(binary_path: Path) -> dict[tuple[str, ...], CommandSpec]
         for subcommand in sorted(index[path].subcommands):
             child_path = (*path, subcommand)
             child_help = command_help(binary_path, child_path)
-            child_spec = parse_help_text(child_help, is_root=False)
+            child_spec = parse_help_text(child_help, is_root=False, path=child_path)
             index[child_path] = CommandSpec(
                 path=child_path,
                 usage=child_spec.usage,
@@ -488,7 +509,9 @@ def hidden_deprecated_alias_spec(
         return None
 
     deprecated_help = path_help(binary_path, deprecated_path)
-    deprecated_spec = parse_help_text(deprecated_help, is_root=False)
+    deprecated_spec = parse_help_text(
+        deprecated_help, is_root=False, path=deprecated_path
+    )
     canonical_path = usage_command_path(deprecated_spec.usage) or deprecated_path
     flags = dict(deprecated_spec.flags)
     if not flags:

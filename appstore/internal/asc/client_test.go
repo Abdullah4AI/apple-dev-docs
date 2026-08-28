@@ -350,6 +350,64 @@ func TestBuildBetaGroupsQueryOmitsUnsetNameAndSort(t *testing.T) {
 	}
 }
 
+func TestBuildBetaGroupsQueryOpenAPIParity(t *testing.T) {
+	query := &betaGroupsQuery{}
+	opts := []BetaGroupsOption{
+		WithBetaGroupsIDs([]string{" group-1 ", "group-2"}),
+		WithBetaGroupsPublicLinkEnabled(true),
+		WithBetaGroupsPublicLinkLimitEnabled(false),
+		WithBetaGroupsPublicLink(" https://example.com/public "),
+		WithBetaGroupsFields([]string{"name", "publicLink"}),
+		WithBetaGroupsAppFields([]string{"name", "bundleId"}),
+		WithBetaGroupsBuildFields([]string{"version"}),
+		WithBetaGroupsBetaTesterFields([]string{"email"}),
+		WithBetaGroupsBetaRecruitmentCriteriaFields([]string{"lastModifiedDate"}),
+		WithBetaGroupsInclude([]string{"app", "builds", "betaTesters", "betaRecruitmentCriteria"}),
+		WithBetaGroupsBetaTestersLimit(25),
+		WithBetaGroupsBuildsLimit(100),
+	}
+	for _, opt := range opts {
+		opt(query)
+	}
+
+	values, err := url.ParseQuery(buildBetaGroupsQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	for key, want := range map[string]string{
+		"filter[id]":                      "group-1,group-2",
+		"filter[publicLinkEnabled]":       "true",
+		"filter[publicLinkLimitEnabled]":  "false",
+		"filter[publicLink]":              "https://example.com/public",
+		"fields[betaGroups]":              "name,publicLink,app,builds,betaTesters,betaRecruitmentCriteria",
+		"fields[apps]":                    "name,bundleId",
+		"fields[builds]":                  "version",
+		"fields[betaTesters]":             "email",
+		"fields[betaRecruitmentCriteria]": "lastModifiedDate",
+		"include":                         "app,builds,betaTesters,betaRecruitmentCriteria",
+		"limit[betaTesters]":              "25",
+		"limit[builds]":                   "100",
+	} {
+		if got := values.Get(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestBuildBetaGroupsQueryAddsIncludedRelationshipsToSparseFields(t *testing.T) {
+	query := &betaGroupsQuery{}
+	WithBetaGroupsFields([]string{"name"})(query)
+	WithBetaGroupsInclude([]string{"app", "builds"})(query)
+
+	values, err := url.ParseQuery(buildBetaGroupsQuery(query))
+	if err != nil {
+		t.Fatalf("failed to parse query: %v", err)
+	}
+	if got := values.Get("fields[betaGroups]"); got != "name,app,builds" {
+		t.Fatalf("fields[betaGroups] = %q, want included relationships retained", got)
+	}
+}
+
 func TestBuildAppTagsQuery(t *testing.T) {
 	query := &appTagsQuery{}
 	opts := []AppTagsOption{

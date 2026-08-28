@@ -1,5 +1,11 @@
 package asc
 
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
 // BetaRecruitmentCriteriaAttributes describes beta recruitment criteria metadata.
 type BetaRecruitmentCriteriaAttributes struct {
 	LastModifiedDate             string                        `json:"lastModifiedDate,omitempty"`
@@ -86,4 +92,145 @@ type BetaGroupMetricAttributes map[string]any
 type BetaGroupPublicLinkUsagesResponse = Response[BetaGroupMetricAttributes]
 
 // BetaGroupTesterUsagesResponse is the response from beta tester usage metrics.
-type BetaGroupTesterUsagesResponse = Response[BetaGroupMetricAttributes]
+// The metric endpoint returns data-point objects rather than JSON:API resource
+// objects, so it has a dedicated envelope instead of Response[T].
+type BetaGroupTesterUsagesResponse struct {
+	Data     []BetaGroupTesterUsage `json:"data"`
+	Links    Links                  `json:"links"`
+	Included json.RawMessage        `json:"included,omitempty"`
+	Meta     json.RawMessage        `json:"meta,omitempty"`
+}
+
+// GetLinks returns the links field for pagination.
+func (r *BetaGroupTesterUsagesResponse) GetLinks() *Links {
+	if r == nil {
+		return nil
+	}
+	return &r.Links
+}
+
+// GetMeta returns the raw metadata field for pagination warnings.
+func (r *BetaGroupTesterUsagesResponse) GetMeta() json.RawMessage {
+	if r == nil {
+		return nil
+	}
+	return r.Meta
+}
+
+// GetData returns the metric data for aggregation.
+func (r *BetaGroupTesterUsagesResponse) GetData() any {
+	if r == nil {
+		return nil
+	}
+	return r.Data
+}
+
+// BetaGroupTesterUsage is one metric series returned by the group tester
+// usage endpoint. The raw item is retained so JSON output remains faithful to
+// Apple's response while table output can use typed metric fields.
+type BetaGroupTesterUsage struct {
+	Type       string                          `json:"type,omitempty"`
+	ID         string                          `json:"id,omitempty"`
+	DataPoints []BetaGroupTesterUsageDataPoint `json:"dataPoints,omitempty"`
+	Dimensions *BetaGroupTesterUsageDimensions `json:"dimensions,omitempty"`
+	raw        json.RawMessage
+}
+
+func (m *BetaGroupTesterUsage) UnmarshalJSON(data []byte) error {
+	type metricAlias BetaGroupTesterUsage
+	var decoded metricAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	decoded.raw = append(decoded.raw[:0], data...)
+	*m = BetaGroupTesterUsage(decoded)
+	return nil
+}
+
+func (m BetaGroupTesterUsage) MarshalJSON() ([]byte, error) {
+	if len(m.raw) > 0 {
+		return m.raw, nil
+	}
+	type metricAlias BetaGroupTesterUsage
+	return json.Marshal(metricAlias(m))
+}
+
+// BetaGroupTesterUsageDataPoint is one time interval in a metric series.
+type BetaGroupTesterUsageDataPoint struct {
+	Start  string                     `json:"start,omitempty"`
+	End    string                     `json:"end,omitempty"`
+	Values BetaGroupTesterUsageValues `json:"values,omitempty"`
+}
+
+// BetaGroupTesterUsageValues contains the counts Apple reports for a data point.
+type BetaGroupTesterUsageValues struct {
+	CrashCount    *int `json:"crashCount,omitempty"`
+	SessionCount  *int `json:"sessionCount,omitempty"`
+	FeedbackCount *int `json:"feedbackCount,omitempty"`
+}
+
+// BetaGroupTesterUsageDimensions identifies the tester represented by a metric series.
+type BetaGroupTesterUsageDimensions struct {
+	BetaTesters *BetaGroupTesterUsageDimension `json:"betaTesters,omitempty"`
+}
+
+// BetaGroupTesterUsageDimension describes a grouped metric dimension.
+type BetaGroupTesterUsageDimension struct {
+	Data  *BetaGroupTesterUsageDimensionData  `json:"data,omitempty"`
+	Links *BetaGroupTesterUsageDimensionLinks `json:"links,omitempty"`
+}
+
+// BetaGroupTesterUsageDimensionLinks contains links for a metric dimension.
+type BetaGroupTesterUsageDimensionLinks struct {
+	GroupBy string `json:"groupBy,omitempty"`
+	Related string `json:"related,omitempty"`
+}
+
+// BetaGroupTesterUsageDimensionData accepts both the string shape in Apple's
+// schema and the resource identifier object returned by current responses.
+type BetaGroupTesterUsageDimensionData struct {
+	Type string `json:"type,omitempty"`
+	ID   string `json:"id,omitempty"`
+	raw  json.RawMessage
+}
+
+func (d *BetaGroupTesterUsageDimensionData) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*d = BetaGroupTesterUsageDimensionData{}
+		return nil
+	}
+
+	var identifier string
+	if err := json.Unmarshal(trimmed, &identifier); err == nil {
+		d.ID = identifier
+		d.Type = ""
+		d.raw = append(d.raw[:0], trimmed...)
+		return nil
+	}
+
+	var resource struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(trimmed, &resource); err != nil {
+		return fmt.Errorf("betaTesters.data must be a string or object: %w", err)
+	}
+	d.Type = resource.Type
+	d.ID = resource.ID
+	d.raw = append(d.raw[:0], trimmed...)
+	return nil
+}
+
+func (d BetaGroupTesterUsageDimensionData) MarshalJSON() ([]byte, error) {
+	if len(d.raw) > 0 {
+		return d.raw, nil
+	}
+	if d.Type != "" {
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			ID   string `json:"id,omitempty"`
+		}{Type: d.Type, ID: d.ID})
+	}
+	return json.Marshal(d.ID)
+}

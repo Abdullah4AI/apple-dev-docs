@@ -27,6 +27,24 @@ func TestUsageErrorPreservesValidationMessage(t *testing.T) {
 	}
 }
 
+func TestUsageErrorSanitizesTerminalControls(t *testing.T) {
+	var usageErr error
+	_, stderr := captureOutput(t, func() {
+		usageErr = UsageError("bad\x1b[31m\r\ncommand")
+	})
+
+	const wantMessage = "bad[31m  command"
+	if got := usageErr.Error(); got != wantMessage {
+		t.Fatalf("UsageError().Error() = %q, want %q", got, wantMessage)
+	}
+	if !errors.Is(usageErr, flag.ErrHelp) {
+		t.Fatalf("UsageError() should unwrap to flag.ErrHelp, got %v", usageErr)
+	}
+	if got, want := stderr, "Error: "+wantMessage+"\n"; got != want {
+		t.Fatalf("UsageError() stderr = %q, want %q", got, want)
+	}
+}
+
 func TestNewReportedUsageErrorPreservesUsageClassificationWithoutHelp(t *testing.T) {
 	err := NewReportedUsageError(UsageErrorInvalidValue, "invalid value for --territory")
 

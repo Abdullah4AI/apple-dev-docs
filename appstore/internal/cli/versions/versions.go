@@ -1,12 +1,14 @@
 package versions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -67,6 +69,7 @@ func VersionsListCommand() *ffcli.Command {
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Next page URL from a previous response")
 	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
+	latest := fs.Bool("latest", false, "[experimental] Keep only the newest version per platform by createdDate (fetches all pages)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -74,6 +77,12 @@ func VersionsListCommand() *ffcli.Command {
 		ShortUsage: "asc versions list [flags]",
 		ShortHelp:  "List app store versions for an app.",
 		LongHelp: `List app store versions for an app.
+
+The App Store Connect API can report every historical version of an app as
+READY_FOR_SALE, so a state filter alone cannot identify the live version.
+--latest fetches every page and keeps only the newest version per platform by
+createdDate; combine it with --state READY_FOR_SALE to get the version that
+is actually live on each platform.
 
 Use --include to return related resources in the same response instead of
 issuing a follow-up request per version. Included review-detail passwords are
@@ -83,6 +92,7 @@ Examples:
   asc versions list --app "123456789"
   asc versions list --app "123456789" --version "1.0.0"
   asc versions list --app "123456789" --platform IOS --state READY_FOR_REVIEW
+  asc versions list --app "123456789" --state READY_FOR_SALE --latest
   asc versions list --app "123456789" --include "build,appStoreVersionSubmission"
   asc versions list --app "123456789" --paginate`,
 		FlagSet:   fs,
@@ -93,6 +103,9 @@ Examples:
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return fmt.Errorf("versions list: %w", err)
+			}
+			if *latest && strings.TrimSpace(*next) != "" {
+				return shared.UsageError("versions list: --latest fetches all pages itself and cannot be combined with --next")
 			}
 
 			platforms, err := shared.NormalizeAppStoreVersionPlatforms(shared.SplitCSVUpper(*platform))
@@ -138,9 +151,13 @@ Examples:
 				asc.WithAppStoreVersionsNextURL(*next),
 			}
 
-			if *paginate {
-				// Fetch first page with limit set for consistent pagination
-				paginateOpts := append(opts, asc.WithAppStoreVersionsLimit(200))
+			if *paginate || *latest {
+				// Use the caller's page size when provided; otherwise request the
+				// largest page to keep automatic pagination efficient.
+				paginateOpts := opts
+				if *limit == 0 {
+					paginateOpts = append(paginateOpts, asc.WithAppStoreVersionsLimit(200))
+				}
 				firstPage, err := client.GetAppStoreVersions(requestCtx, resolvedAppID, paginateOpts...)
 				if err != nil {
 					return fmt.Errorf("versions list: failed to fetch: %w", err)
@@ -157,6 +174,32 @@ Examples:
 				if !ok {
 					return fmt.Errorf("versions list: unexpected paginated response type %T", versions)
 				}
+				if *latest {
+					selected, err := latestVersionsPerPlatform(versionsResponse.Data)
+					if err != nil {
+						return fmt.Errorf("versions list: %w", err)
+					}
+					included, err := latestVersionsIncluded(selected, versionsResponse.Included)
+					if err != nil {
+						return fmt.Errorf("versions list: %w", err)
+					}
+					selectedResponse := &asc.AppStoreVersionsResponse{Data: selected, Included: included}
+					if *includeSensitive {
+						shared.WarnIncludeSensitive(os.Stderr, true)
+					} else {
+						selectedResponse, err = asc.RedactAppStoreReviewDetailIncludesInListResponse(selectedResponse)
+						if err != nil {
+							return fmt.Errorf("versions list: %w", err)
+						}
+					}
+					result := &asc.AppStoreVersionsLatestResult{
+						Items:      selected,
+						Included:   selectedResponse.Included,
+						TotalCount: len(selected),
+						HasMore:    false,
+					}
+					return shared.PrintOutput(result, *output.Output, *output.Pretty)
+				}
 				return printAppStoreVersionsList(versionsResponse, *includeSensitive, *output.Output, *output.Pretty)
 			}
 
@@ -168,6 +211,104 @@ Examples:
 			return printAppStoreVersionsList(versions, *includeSensitive, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+// latestVersionsPerPlatform keeps the newest version per platform by
+// createdDate; the API reports historical versions with live-looking states,
+// so recency has to be derived rather than filtered.
+func latestVersionsPerPlatform(data []asc.Resource[asc.AppStoreVersionAttributes]) ([]asc.Resource[asc.AppStoreVersionAttributes], error) {
+	type selectedVersion struct {
+		index       int
+		createdDate time.Time
+	}
+
+	newest := map[string]selectedVersion{}
+	order := []string{}
+	for index, version := range data {
+		createdDate, err := time.Parse(time.RFC3339, strings.TrimSpace(version.Attributes.CreatedDate))
+		if err != nil {
+			return nil, fmt.Errorf("version %q has invalid createdDate %q: %w", version.ID, version.Attributes.CreatedDate, err)
+		}
+		platform := string(version.Attributes.Platform)
+		current, seen := newest[platform]
+		if !seen {
+			newest[platform] = selectedVersion{index: index, createdDate: createdDate}
+			order = append(order, platform)
+			continue
+		}
+		if createdDate.After(current.createdDate) {
+			newest[platform] = selectedVersion{index: index, createdDate: createdDate}
+		}
+	}
+	result := make([]asc.Resource[asc.AppStoreVersionAttributes], 0, len(order))
+	for _, platform := range order {
+		result = append(result, data[newest[platform].index])
+	}
+	return result, nil
+}
+
+func latestVersionsIncluded(selected []asc.Resource[asc.AppStoreVersionAttributes], included json.RawMessage) (json.RawMessage, error) {
+	if len(included) == 0 {
+		return nil, nil
+	}
+
+	type linkage struct {
+		Type asc.ResourceType `json:"type"`
+		ID   string           `json:"id"`
+	}
+	linked := map[linkage]struct{}{}
+	for _, version := range selected {
+		if len(version.Relationships) == 0 {
+			continue
+		}
+		var relationships map[string]struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(version.Relationships, &relationships); err != nil {
+			return nil, fmt.Errorf("decode selected version %q relationships: %w", version.ID, err)
+		}
+		for _, relationship := range relationships {
+			raw := bytes.TrimSpace(relationship.Data)
+			if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+				continue
+			}
+			if raw[0] == '[' {
+				var items []linkage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return nil, fmt.Errorf("decode selected version %q relationship linkage: %w", version.ID, err)
+				}
+				for _, item := range items {
+					linked[item] = struct{}{}
+				}
+				continue
+			}
+			var item linkage
+			if err := json.Unmarshal(raw, &item); err != nil {
+				return nil, fmt.Errorf("decode selected version %q relationship linkage: %w", version.ID, err)
+			}
+			linked[item] = struct{}{}
+		}
+	}
+
+	var resources []json.RawMessage
+	if err := json.Unmarshal(included, &resources); err != nil {
+		return nil, fmt.Errorf("decode included resources: %w", err)
+	}
+	filtered := make([]json.RawMessage, 0, len(resources))
+	for _, resource := range resources {
+		var item linkage
+		if err := json.Unmarshal(resource, &item); err != nil {
+			return nil, fmt.Errorf("decode included resource: %w", err)
+		}
+		if _, ok := linked[item]; ok {
+			filtered = append(filtered, resource)
+		}
+	}
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, fmt.Errorf("encode selected included resources: %w", err)
+	}
+	return encoded, nil
 }
 
 func printAppStoreVersionsList(versions *asc.AppStoreVersionsResponse, includeSensitive bool, output string, pretty bool) error {
