@@ -20,6 +20,8 @@ type ReadinessOptions struct {
 	VersionID string
 	Platform  string
 	Strict    bool
+	Deep      bool
+	CheckURLs bool
 	Build     *validation.Build
 }
 
@@ -69,6 +71,8 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 	attachedBuild := versionData.build
 	priceScheduleID := ""
 	pricingFetchSkipReason := ""
+	hasPaidAppPrice := false
+	appPricingKnown := false
 	availabilityID := ""
 	appAvailableTerritories := []string(nil)
 	availableTerritories := 0
@@ -110,6 +114,9 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 				return fmt.Errorf("failed to fetch app price schedule: %w", fetchErr)
 			}
 			priceScheduleID = priceScheduleResp.Data.ID
+			if opts.Deep {
+				hasPaidAppPrice, appPricingKnown = fetchCurrentAppPaidPricingEvidence(taskCtx, client, priceScheduleID)
+			}
 			return nil
 		},
 		func(taskCtx context.Context) error {
@@ -257,7 +264,21 @@ func BuildReadinessReport(ctx context.Context, opts ReadinessOptions) (validatio
 		ReleaseType:                 versionData.response.Data.Attributes.ReleaseType,
 		EarliestReleaseDate:         versionData.response.Data.Attributes.EarliestReleaseDate,
 		Copyright:                   versionData.response.Data.Attributes.Copyright,
+		HasPaidAppPrice:             hasPaidAppPrice,
+		AppPricingKnown:             appPricingKnown,
 	}, opts.Strict)
+	if opts.CheckURLs {
+		targets := validateURLTargets(versionLocalizations, appInfoLocalizations)
+		if len(targets) > 0 {
+			urlChecks, checkErr := checkValidateURLs(ctx, newValidateURLChecker(), targets)
+			if checkErr != nil {
+				return validation.Report{}, checkErr
+			}
+			report.Checks = append(report.Checks, urlChecks...)
+			report.Summary = validation.SummarizeChecks(report.Checks, opts.Strict)
+			report.Remediation = validation.BuildRemediation(report.Checks, opts.Strict)
+		}
+	}
 
 	return report, nil
 }

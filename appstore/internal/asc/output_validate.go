@@ -20,6 +20,10 @@ func registerValidationRenderers() {
 		}
 		oh, or := validationCheckRows(v)
 		render(oh, or)
+		if v.Deep != nil {
+			dh, dr := validationDeepRows(v)
+			render(dh, dr)
+		}
 		return nil
 	})
 
@@ -69,13 +73,21 @@ func validationSummaryRows(report *validation.Report) ([]string, [][]string) {
 
 func validationCheckRows(report *validation.Report) ([]string, [][]string) {
 	headers := []string{"Severity", "Check ID", "Locale", "Field", "Resource", "Message", "Remediation"}
+	deep := report != nil && report.Deep != nil
+	if deep {
+		headers = append(headers, "Fixability", "Commands", "App Store Connect URL")
+	}
 	if report == nil || len(report.Checks) == 0 {
-		return headers, [][]string{{"info", "validation.ok", "", "", "", "No issues found", ""}}
+		row := []string{"info", "validation.ok", "", "", "", "No issues found", ""}
+		if deep {
+			row = append(row, "", "", "")
+		}
+		return headers, [][]string{row}
 	}
 
 	rows := make([][]string, 0, len(report.Checks))
 	for _, check := range report.Checks {
-		rows = append(rows, []string{
+		row := []string{
 			string(check.Severity),
 			check.ID,
 			check.Locale,
@@ -83,20 +95,28 @@ func validationCheckRows(report *validation.Report) ([]string, [][]string) {
 			formatResource(check.ResourceType, check.ResourceID),
 			check.Message,
 			check.Remediation,
-		})
+		}
+		if deep {
+			row = append(row, resolutionCells(check.Resolution)...)
+		}
+		rows = append(rows, row)
 	}
 	return headers, rows
 }
 
 func validationRemediationRows(report *validation.Report) ([]string, [][]string) {
 	headers := []string{"Order", "Severity", "Blocking", "Check ID", "Locale", "Field", "Resource", "Message", "Remediation"}
+	deep := report != nil && report.Deep != nil
+	if deep {
+		headers = append(headers, "Fixability", "Commands", "App Store Connect URL")
+	}
 	if report == nil || len(report.Remediation.Steps) == 0 {
 		return headers, nil
 	}
 
 	rows := make([][]string, 0, len(report.Remediation.Steps))
 	for _, step := range report.Remediation.Steps {
-		rows = append(rows, []string{
+		row := []string{
 			fmt.Sprintf("%d", step.Order),
 			string(step.Severity),
 			formatBool(step.Blocking),
@@ -106,9 +126,39 @@ func validationRemediationRows(report *validation.Report) ([]string, [][]string)
 			formatResource(step.ResourceType, step.ResourceID),
 			step.Message,
 			step.Remediation,
-		})
+		}
+		if deep {
+			row = append(row, resolutionCells(step.Resolution)...)
+		}
+		rows = append(rows, row)
 	}
 	return headers, rows
+}
+
+func validationDeepRows(report *validation.Report) ([]string, [][]string) {
+	headers := []string{"Deep Check", "Status", "Source", "Message", "Fixability", "Commands", "App Store Connect URL"}
+	if report == nil || report.Deep == nil || len(report.Deep.Checks) == 0 {
+		return headers, [][]string{{"deep.none", "unverified", "", "No deep checks collected", "", "", ""}}
+	}
+
+	rows := make([][]string, 0, len(report.Deep.Checks))
+	for _, check := range report.Deep.Checks {
+		row := []string{check.ID, string(check.Status), string(check.Source), check.Message}
+		row = append(row, resolutionCells(check.Resolution)...)
+		rows = append(rows, row)
+	}
+	return headers, rows
+}
+
+func resolutionCells(resolution *validation.Resolution) []string {
+	if resolution == nil {
+		return []string{"", "", ""}
+	}
+	return []string{
+		string(resolution.Fixability),
+		strings.Join(resolution.Commands, " ; "),
+		resolution.AppStoreConnectURL,
+	}
 }
 
 func testflightValidationSummaryRows(report *validation.TestFlightReport) ([]string, [][]string) {

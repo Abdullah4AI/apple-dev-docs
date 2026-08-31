@@ -4,16 +4,17 @@ import "sort"
 
 // RemediationStep represents one actionable item derived from a validation check.
 type RemediationStep struct {
-	Order        int      `json:"order"`
-	Blocking     bool     `json:"blocking"`
-	Severity     Severity `json:"severity"`
-	CheckID      string   `json:"checkId"`
-	Message      string   `json:"message"`
-	Remediation  string   `json:"remediation"`
-	Locale       string   `json:"locale,omitempty"`
-	Field        string   `json:"field,omitempty"`
-	ResourceType string   `json:"resourceType,omitempty"`
-	ResourceID   string   `json:"resourceId,omitempty"`
+	Order        int         `json:"order"`
+	Blocking     bool        `json:"blocking"`
+	Severity     Severity    `json:"severity"`
+	CheckID      string      `json:"checkId"`
+	Message      string      `json:"message"`
+	Remediation  string      `json:"remediation"`
+	Locale       string      `json:"locale,omitempty"`
+	Field        string      `json:"field,omitempty"`
+	ResourceType string      `json:"resourceType,omitempty"`
+	ResourceID   string      `json:"resourceId,omitempty"`
+	Resolution   *Resolution `json:"resolution,omitempty"`
 }
 
 // BuildRemediation derives an ordered remediation plan from validation checks.
@@ -63,6 +64,7 @@ func RemediationSteps(checks []CheckResult, strict bool) []RemediationStep {
 			Field:        check.Field,
 			ResourceType: check.ResourceType,
 			ResourceID:   check.ResourceID,
+			Resolution:   check.Resolution,
 		})
 	}
 

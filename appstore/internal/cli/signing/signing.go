@@ -20,6 +20,7 @@ func SigningCommand() *ffcli.Command {
 
 Examples:
   asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_STORE --output ./signing
+  asc signing keychain install --identity ./signing/App.p12 --identity-password-file ./secrets/p12-password --keychain ./keychains/release.keychain-db --keychain-password-file ./secrets/keychain-password --confirm
   asc signing reconcile plan --archive-path .asc/artifacts/App.xcarchive --devices-file .asc/distribution/devices.json
   asc signing run --identity ./signing/App.p12 --profile ./signing/App.mobileprovision -- xcodebuild -exportArchive
   asc signing sync push --bundle-id com.example.app --profile-type IOS_APP_STORE --repo git@github.com:team/certs.git
@@ -28,6 +29,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			SigningFetchCommand(),
+			SigningKeychainCommand(),
 			SigningReconcileCommand(),
 			SigningRunCommand(),
 			SigningSyncCommand(),

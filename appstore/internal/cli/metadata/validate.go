@@ -15,6 +15,7 @@ import (
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/metadataurl"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
 )
 
@@ -121,7 +122,7 @@ func validateDir(dir string) (ValidateResult, error) {
 type validateDirOptions struct {
 	checkURLs       bool
 	subscriptionApp bool
-	urlChecker      metadataURLChecker
+	urlChecker      metadataurl.Checker
 }
 
 func validateDirWithOptions(ctx context.Context, dir string, options validateDirOptions) (ValidateResult, error) {

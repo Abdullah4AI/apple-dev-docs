@@ -59,6 +59,18 @@ func TestValidationFailuresExposeStructuredDiagnostics(t *testing.T) {
 			wantParam: "--version-id",
 		},
 		{
+			name: "validate apple id requires deep",
+			command: func() interface {
+				ParseAndRun(context.Context, []string) error
+			} {
+				return ValidateCommand()
+			},
+			args:      []string{"--app", "app-1", "--version-id", "version-1", "--apple-id", "person@example.com"},
+			wantError: "--apple-id requires --deep",
+			wantCode:  shared.DiagnosticInvalidInput,
+			wantParam: "--apple-id",
+		},
+		{
 			name: "validate parent flag before subcommand",
 			command: func() interface {
 				ParseAndRun(context.Context, []string) error

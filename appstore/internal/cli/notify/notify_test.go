@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestNotifySlackValidationErrors(t *testing.T) {
@@ -194,8 +196,8 @@ func TestNotifySlackWithInvalidThreadTS(t *testing.T) {
 		if runErr == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !errors.Is(runErr, flag.ErrHelp) {
-			t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+		if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+			t.Fatalf("expected reported usage error without help, got %v", runErr)
 		}
 	})
 
@@ -457,8 +459,8 @@ func TestNotifySlackBlocksValidationErrors(t *testing.T) {
 				if runErr == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if !errors.Is(runErr, flag.ErrHelp) {
-					t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+				if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+					t.Fatalf("expected reported usage error without help, got %v", runErr)
 				}
 			})
 
@@ -530,8 +532,8 @@ func TestNotifySlackPayloadValidationErrors(t *testing.T) {
 				if runErr == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if !errors.Is(runErr, flag.ErrHelp) {
-					t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+				if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+					t.Fatalf("expected reported usage error without help, got %v", runErr)
 				}
 			})
 
@@ -595,8 +597,8 @@ func TestNotifySlackRejectsInvalidWebhookHost(t *testing.T) {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr := cmd.Run(context.Background())
-		if !errors.Is(runErr, flag.ErrHelp) {
-			t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+		if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+			t.Fatalf("expected reported usage error without help, got %v", runErr)
 		}
 	})
 
@@ -635,8 +637,8 @@ func TestNotifySlackRejectsInsecureScheme(t *testing.T) {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr := cmd.Run(context.Background())
-		if !errors.Is(runErr, flag.ErrHelp) {
-			t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+		if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+			t.Fatalf("expected reported usage error without help, got %v", runErr)
 		}
 	})
 
@@ -657,8 +659,8 @@ func TestNotifySlackRejectsMalformedWebhookURL(t *testing.T) {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr := cmd.Run(context.Background())
-		if !errors.Is(runErr, flag.ErrHelp) {
-			t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+		if errors.Is(runErr, flag.ErrHelp) || !shared.IsReportedUsageError(runErr) {
+			t.Fatalf("expected reported usage error without help, got %v", runErr)
 		}
 	})
 

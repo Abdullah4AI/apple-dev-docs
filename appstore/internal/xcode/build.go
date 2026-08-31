@@ -249,12 +249,16 @@ func xcodebuildPassthroughArgumentTakesValue(normalized string) bool {
 	if strings.Contains(normalized, "=") {
 		return false
 	}
-	switch normalized {
-	case "-authenticationkeypath", "-authenticationkeyid", "-authenticationkeyissuerid":
-		return true
-	default:
-		return false
+	return isXcodebuildAuthenticationArgument(normalized)
+}
+
+func isXcodebuildAuthenticationArgument(normalized string) bool {
+	for _, flag := range []string{"-authenticationkeypath", "-authenticationkeyid", "-authenticationkeyissuerid"} {
+		if normalized == flag || strings.HasPrefix(normalized, flag+"=") {
+			return true
+		}
 	}
+	return false
 }
 
 func resolveBuildDerivedDataPath(opts BuildOptions) (string, error) {

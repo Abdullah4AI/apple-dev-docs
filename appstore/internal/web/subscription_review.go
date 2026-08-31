@@ -13,14 +13,15 @@ const reviewSubscriptionsFields = "productId,name,state,isAppStoreReviewInProgre
 
 // ReviewSubscription summarizes a subscription's attach state for the next app version review.
 type ReviewSubscription struct {
-	ID                            string `json:"id"`
-	GroupID                       string `json:"groupId,omitempty"`
-	GroupReferenceName            string `json:"groupReferenceName,omitempty"`
-	ProductID                     string `json:"productId,omitempty"`
-	Name                          string `json:"name,omitempty"`
-	State                         string `json:"state,omitempty"`
-	IsAppStoreReviewInProgress    bool   `json:"isAppStoreReviewInProgress"`
-	SubmitWithNextAppStoreVersion bool   `json:"submitWithNextAppStoreVersion"`
+	ID                                 string `json:"id"`
+	GroupID                            string `json:"groupId,omitempty"`
+	GroupReferenceName                 string `json:"groupReferenceName,omitempty"`
+	ProductID                          string `json:"productId,omitempty"`
+	Name                               string `json:"name,omitempty"`
+	State                              string `json:"state,omitempty"`
+	IsAppStoreReviewInProgress         bool   `json:"isAppStoreReviewInProgress"`
+	SubmitWithNextAppStoreVersion      bool   `json:"submitWithNextAppStoreVersion"`
+	SubmitWithNextAppStoreVersionKnown bool   `json:"submitWithNextAppStoreVersionKnown"`
 }
 
 // ReviewSubscriptionSubmission captures the hidden submission resource returned by the web attach flow.
@@ -47,19 +48,33 @@ func decodeReviewSubscriptions(resources []jsonAPIResource, included []jsonAPIRe
 			if !ok {
 				resource = jsonAPIResource{ID: ref.ID, Type: ref.Type}
 			}
+			attached, attachedKnown := boolAttrKnown(resource.Attributes, "submitWithNextAppStoreVersion")
 			subscriptions = append(subscriptions, ReviewSubscription{
-				ID:                            strings.TrimSpace(ref.ID),
-				GroupID:                       groupID,
-				GroupReferenceName:            groupName,
-				ProductID:                     stringAttr(resource.Attributes, "productId"),
-				Name:                          stringAttr(resource.Attributes, "name"),
-				State:                         stringAttr(resource.Attributes, "state"),
-				IsAppStoreReviewInProgress:    boolAttr(resource.Attributes, "isAppStoreReviewInProgress"),
-				SubmitWithNextAppStoreVersion: boolAttr(resource.Attributes, "submitWithNextAppStoreVersion"),
+				ID:                                 strings.TrimSpace(ref.ID),
+				GroupID:                            groupID,
+				GroupReferenceName:                 groupName,
+				ProductID:                          stringAttr(resource.Attributes, "productId"),
+				Name:                               stringAttr(resource.Attributes, "name"),
+				State:                              stringAttr(resource.Attributes, "state"),
+				IsAppStoreReviewInProgress:         boolAttr(resource.Attributes, "isAppStoreReviewInProgress"),
+				SubmitWithNextAppStoreVersion:      attached,
+				SubmitWithNextAppStoreVersionKnown: attachedKnown,
 			})
 		}
 	}
 	return subscriptions
+}
+
+func boolAttrKnown(attrs map[string]any, key string) (bool, bool) {
+	if attrs == nil {
+		return false, false
+	}
+	value, ok := attrs[key]
+	if !ok {
+		return false, false
+	}
+	result, ok := value.(bool)
+	return result, ok
 }
 
 // ListReviewSubscriptions lists subscriptions and their next-version attach state for an app.

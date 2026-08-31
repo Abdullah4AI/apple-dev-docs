@@ -17,10 +17,30 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/validate"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/validation"
+	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
+
+type validateDeepWebFixture struct {
+	privacy       *webcore.AppDataUsagesPublishState
+	subscriptions []webcore.ReviewSubscription
+	agreements    *asc.WebAgreementsStatusResult
+}
+
+func (f *validateDeepWebFixture) GetAppDataUsagesPublishState(context.Context, string) (*webcore.AppDataUsagesPublishState, error) {
+	return f.privacy, nil
+}
+
+func (f *validateDeepWebFixture) ListReviewSubscriptions(context.Context, string) ([]webcore.ReviewSubscription, error) {
+	return f.subscriptions, nil
+}
+
+func (f *validateDeepWebFixture) GetAgreementsStatus(context.Context) (*asc.WebAgreementsStatusResult, error) {
+	return f.agreements, nil
+}
 
 type validateFixture struct {
 	app                        string
+	appStatus                  int
 	versions                   string
 	version                    string
 	appInfos                   string
@@ -73,6 +93,9 @@ func newValidateTestClient(t *testing.T, fixture validateFixture) *asc.Client {
 		path := req.URL.Path
 		switch {
 		case path == "/v1/apps/app-1":
+			if fixture.appStatus != 0 {
+				return jsonResponse(fixture.appStatus, fixture.app)
+			}
 			return jsonResponse(http.StatusOK, fixture.app)
 		case path == "/v1/apps/app-1/appStoreVersions":
 			if fixture.versions != "" {
@@ -689,6 +712,186 @@ func TestValidateOutputsJSONAndTable(t *testing.T) {
 
 	if !strings.Contains(stdout, "Severity") {
 		t.Fatalf("expected table output to include headers, got %q", stdout)
+	}
+}
+
+func TestValidateDeepWithoutCachedSessionReturnsStructuredUnverifiedResults(t *testing.T) {
+	t.Setenv("ASC_WEB_SESSION_CACHE_BACKEND", "off")
+	fixture := validValidateFixture()
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--deep", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("unverified deep checks should not block without --strict: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("failed to decode deep report: %v; stdout=%q", err, stdout)
+	}
+	if report.Deep == nil || report.Deep.SessionStatus != validation.DeepSessionUnavailable || len(report.Deep.Checks) != 5 {
+		t.Fatalf("deep report = %#v", report.Deep)
+	}
+	if report.Deep.Summary.Unverified != 3 || report.Deep.Summary.Passed != 2 {
+		t.Fatalf("deep summary = %#v", report.Deep.Summary)
+	}
+	for _, check := range report.Checks {
+		if check.ID == "privacy.publish_state.unverified" {
+			t.Fatalf("public privacy advisory was not replaced: %#v", report.Checks)
+		}
+		if check.Severity != validation.SeverityInfo && check.Resolution == nil {
+			t.Fatalf("deep-mode failure %q has no classification", check.ID)
+		}
+	}
+
+	root = RootCommand("1.2.3")
+	stdout, _ = captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--deep", "--output", "table"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	for _, want := range []string{"Fixability", "Commands", "App Store Connect URL", "privacy.publish_state", "unverified"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("deep table missing %q: %s", want, stdout)
+		}
+	}
+}
+
+func TestValidateDeepCachedSessionRunsAllFiveChecksThroughCommand(t *testing.T) {
+	fixture := validValidateFixture()
+	client := newValidateTestClient(t, fixture)
+	restoreClient := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restoreClient()
+
+	webFixture := &validateDeepWebFixture{
+		privacy:       &webcore.AppDataUsagesPublishState{ID: "publish-1", Published: true, PublishedKnown: true},
+		subscriptions: []webcore.ReviewSubscription{{ID: "sub-1", State: "APPROVED", SubmitWithNextAppStoreVersionKnown: true}},
+		agreements:    &asc.WebAgreementsStatusResult{Agreements: []asc.WebAgreement{{Status: "active", IsProgramLicenseAgreement: true}}},
+	}
+	restoreDeep := validate.SetDeepValidationTestHooks(
+		func(context.Context, string) (*webcore.AuthSession, bool, error) {
+			return &webcore.AuthSession{Client: &http.Client{}, UserEmail: "user@example.com"}, true, nil
+		},
+		webFixture,
+	)
+	defer restoreDeep()
+
+	root := RootCommand("1.2.3")
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--deep", "--apple-id", "user@example.com", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("run error: %v", runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("decode deep report: %v; stdout=%q", err, stdout)
+	}
+	if report.Deep == nil || report.Deep.SessionStatus != validation.DeepSessionCached || len(report.Deep.Checks) != 5 {
+		t.Fatalf("deep report = %#v", report.Deep)
+	}
+	if report.Deep.Summary.Passed != 4 || report.Deep.Summary.NotApplicable != 1 {
+		t.Fatalf("deep summary = %#v", report.Deep.Summary)
+	}
+	for _, check := range report.Deep.Checks {
+		if check.Status == validation.DeepStatusUnverified || check.Status == validation.DeepStatusBlocked {
+			t.Fatalf("unexpected deep check = %#v", check)
+		}
+	}
+}
+
+func TestValidateDeepStrictBlocksUnverifiedSessionAfterPrintingReport(t *testing.T) {
+	t.Setenv("ASC_WEB_SESSION_CACHE_BACKEND", "off")
+	fixture := validValidateFixture()
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--deep", "--strict", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if runErr == nil {
+		t.Fatal("--strict should block an unverified requested web session")
+	}
+	if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitError {
+		t.Fatalf("exit code = %d, want validation exit %d", got, rootcmd.ExitError)
+	}
+	if stderr != "" || !strings.Contains(stdout, `"deep"`) {
+		t.Fatalf("expected report on stdout before strict failure; stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestValidateDeepReturnsStructuredFallbackWhenRequiredAgreementBlocksPublicAPI(t *testing.T) {
+	t.Setenv("ASC_WEB_SESSION_CACHE_BACKEND", "off")
+	fixture := validValidateFixture()
+	fixture.appStatus = http.StatusForbidden
+	fixture.app = `{"errors":[{"status":"403","code":"FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED","title":"A required agreement is missing or has expired","detail":"This request requires an in-effect agreement."}]}`
+	client := newValidateTestClient(t, fixture)
+	restore := validate.SetClientFactory(func() (*asc.Client, error) {
+		return client, nil
+	})
+	defer restore()
+
+	root := RootCommand("1.2.3")
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"validate", "--app", "app-1", "--version-id", "ver-1", "--deep", "--output", "json"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+	if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitError {
+		t.Fatalf("exit code = %d, want validation exit %d; err=%v", got, rootcmd.ExitError, runErr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	var report validation.Report
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("decode fallback report: %v; stdout=%q", err, stdout)
+	}
+	if report.Deep == nil || report.Deep.SessionStatus != validation.DeepSessionUnavailable || len(report.Deep.Checks) != 5 {
+		t.Fatalf("deep fallback = %#v", report.Deep)
+	}
+	for _, id := range []string{"agreements.public_api.blocked", "availability.unverified", "review_details.unverified", "deep.web_session.unavailable"} {
+		if !hasCheckWithID(report.Checks, id) {
+			t.Fatalf("fallback missing %q: %#v", id, report.Checks)
+		}
 	}
 }
 

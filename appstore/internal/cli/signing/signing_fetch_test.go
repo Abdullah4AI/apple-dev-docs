@@ -855,6 +855,8 @@ func TestResolveSigningCertificateTypesIncludesCompatibleCertificatesForMacProfi
 		{profileType: "MAC_CATALYST_APP_DEVELOPMENT", want: "MAC_APP_DEVELOPMENT,DEVELOPMENT"},
 		{profileType: "MAC_APP_STORE", want: "MAC_APP_DISTRIBUTION,DISTRIBUTION"},
 		{profileType: "MAC_CATALYST_APP_STORE", want: "MAC_APP_DISTRIBUTION,DISTRIBUTION"},
+		{profileType: "MAC_APP_DIRECT", want: "DEVELOPER_ID_APPLICATION,DEVELOPER_ID_APPLICATION_G2"},
+		{profileType: "MAC_CATALYST_APP_DIRECT", want: "DEVELOPER_ID_APPLICATION,DEVELOPER_ID_APPLICATION_G2"},
 	}
 
 	for _, tt := range tests {

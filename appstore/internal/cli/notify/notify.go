@@ -135,7 +135,7 @@ Examples:
 			}
 			if err := validateSlackWebhookURL(webhookURL); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
-				return flag.ErrHelp
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, err.Error())
 			}
 
 			msg := strings.TrimSpace(*message)
@@ -147,20 +147,29 @@ Examples:
 			blocks, err := parseSlackBlocks(*blocksJSON, *blocksFile)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
-				return flag.ErrHelp
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, err.Error())
 			}
 			releasePayload, err := parseSlackPayload(*payloadJSON, *payloadFile)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())
-				return flag.ErrHelp
+				return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, err.Error())
 			}
 			visited := map[string]bool{}
 			fs.Visit(func(f *flag.Flag) {
 				visited[f.Name] = true
 			})
 			if releasePayload == nil && (visited["pretext"] || visited["success"]) {
-				fmt.Fprintln(os.Stderr, "Error: --pretext and --success require --payload-json or --payload-file")
-				return flag.ErrHelp
+				const message = "--pretext and --success require --payload-json or --payload-file"
+				fmt.Fprintln(os.Stderr, "Error:", message)
+				parameter := "--pretext"
+				if !visited["pretext"] {
+					parameter = "--success"
+				}
+				return shared.WithDiagnostic(
+					shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message),
+					shared.DiagnosticInvalidInput,
+					parameter,
+				)
 			}
 
 			payload := map[string]any{}
@@ -171,8 +180,9 @@ Examples:
 			}
 			if ts := strings.TrimSpace(*threadTS); ts != "" {
 				if !slackThreadTSPattern.MatchString(ts) {
-					fmt.Fprintln(os.Stderr, "Error: --thread-ts must be in Slack ts format (e.g. 1733977745.12345)")
-					return flag.ErrHelp
+					const message = "--thread-ts must be in Slack ts format (e.g. 1733977745.12345)"
+					fmt.Fprintln(os.Stderr, "Error:", message)
+					return shared.NewReportedUsageError(shared.UsageErrorInvalidValue, message)
 				}
 				payload["thread_ts"] = ts
 			}

@@ -247,12 +247,16 @@ type signingAssetsOptions struct {
 	BundleIDResourceID string
 	BundleIdentifier   string
 	ProfileType        string
-	CertificateType    string
-	DeviceIDs          []string
-	CreateMissing      bool
-	BeforeCreate       func(profileCreatePlan) error
-	CreateContext      func() (context.Context, context.CancelFunc)
-	CertificateFilter  func(asc.Resource[asc.CertificateAttributes]) bool
+	// ProfileName overrides the default name for a profile created by this
+	// resolution. Batch callers use a deterministic target-scoped name while
+	// single-target callers retain the historical profile type/date name.
+	ProfileName       string
+	CertificateType   string
+	DeviceIDs         []string
+	CreateMissing     bool
+	BeforeCreate      func(profileCreatePlan) error
+	CreateContext     func() (context.Context, context.CancelFunc)
+	CertificateFilter func(asc.Resource[asc.CertificateAttributes]) bool
 }
 
 // profileCreatePlan describes the profile that is about to be created so callers
@@ -340,7 +344,10 @@ func resolveSigningAssets(ctx context.Context, client *asc.Client, options signi
 			options.ProfileType,
 		)
 	}
-	profileName := profileCreateName(options.ProfileType, time.Now())
+	profileName := strings.TrimSpace(options.ProfileName)
+	if profileName == "" {
+		profileName = profileCreateName(options.ProfileType, time.Now())
+	}
 	if options.BeforeCreate != nil {
 		plan := profileCreatePlan{ProfileName: profileName, Certificates: certificates.Data}
 		if err := options.BeforeCreate(plan); err != nil {
@@ -587,6 +594,15 @@ func profileCreateName(profileType string, now time.Time) string {
 	return fmt.Sprintf("%s-%s", profileType, now.Format("20060102"))
 }
 
+// profileCreateNameForTarget preserves the historical type/date prefix while
+// making names created during one batch unambiguous to App Store Connect.
+// Bundle IDs have already passed the manifest validation boundary, but use the
+// same filename-safe component as repository paths so direct callers cannot
+// introduce separators into the API name either.
+func profileCreateNameForTarget(profileType, bundleIdentifier string, now time.Time) string {
+	return fmt.Sprintf("%s-%s", profileCreateName(profileType, now), safeFileName(bundleIdentifier, "target"))
+}
+
 func isDevelopmentProfile(profileType string) bool {
 	normalized := strings.ToUpper(strings.TrimSpace(profileType))
 	return strings.Contains(normalized, "DEVELOPMENT") ||
@@ -615,13 +631,13 @@ func inferCertificateType(profileType string) (string, error) {
 	case strings.Contains(normalized, "MAC_CATALYST_APP_STORE"):
 		return "MAC_APP_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "MAC_CATALYST_APP_DIRECT"):
-		return "DEVELOPER_ID_APPLICATION", nil
+		return "DEVELOPER_ID_APPLICATION,DEVELOPER_ID_APPLICATION_G2", nil
 	case strings.Contains(normalized, "MAC_APP_DEVELOPMENT"):
 		return "MAC_APP_DEVELOPMENT,DEVELOPMENT", nil
 	case strings.Contains(normalized, "MAC_APP_STORE"):
 		return "MAC_APP_DISTRIBUTION,DISTRIBUTION", nil
 	case strings.Contains(normalized, "MAC_APP_DIRECT"):
-		return "DEVELOPER_ID_APPLICATION", nil
+		return "DEVELOPER_ID_APPLICATION,DEVELOPER_ID_APPLICATION_G2", nil
 	default:
 		return "", fmt.Errorf("unable to infer certificate type for profile type %s; use --certificate-type", profileType)
 	}

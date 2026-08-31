@@ -64,6 +64,11 @@ func TestBuildReadinessReport_UsesCompoundReadsWithoutFallbacks(t *testing.T) {
 			}`)
 		case "/v1/apps/app-1/appPriceSchedule":
 			return buildsJSONResponse(http.StatusOK, `{"data":{"type":"appPriceSchedules","id":"schedule-1"}}`)
+		case "/v1/appPriceSchedules/schedule-1/manualPrices":
+			return buildsJSONResponse(http.StatusOK, `{
+				"data":[{"type":"appPrices","id":"price-1","attributes":{"startDate":"2026-01-01","manual":true},"relationships":{"appPricePoint":{"data":{"type":"appPricePoints","id":"point-1"}}}}],
+				"included":[{"type":"appPricePoints","id":"point-1","attributes":{"customerPrice":"4.99"}}]
+			}`)
 		case "/v1/apps/app-1":
 			return buildsJSONResponse(http.StatusOK, `{"data":{"type":"apps","id":"app-1","attributes":{"primaryLocale":"en-US","contentRightsDeclaration":"DOES_NOT_USE_THIRD_PARTY_CONTENT"}}}`)
 		case "/v1/appStoreVersions/ver-1/appStoreVersionLocalizations":
@@ -108,8 +113,12 @@ func TestBuildReadinessReport_UsesCompoundReadsWithoutFallbacks(t *testing.T) {
 	})
 	t.Cleanup(restoreIAPs)
 
-	if _, err := BuildReadinessReport(context.Background(), ReadinessOptions{AppID: "app-1", VersionID: "ver-1"}); err != nil {
+	report, err := BuildReadinessReport(context.Background(), ReadinessOptions{AppID: "app-1", VersionID: "ver-1", Deep: true})
+	if err != nil {
 		t.Fatalf("BuildReadinessReport() error = %v", err)
+	}
+	if !report.AppPricingKnown || !report.HasPaidAppPrice {
+		t.Fatalf("app pricing evidence = known %t paid %t, want known paid pricing", report.AppPricingKnown, report.HasPaidAppPrice)
 	}
 
 	if got := queries["/v1/appStoreVersions/ver-1"]; got != "include=appStoreVersionLocalizations%2Cbuild%2CappStoreReviewDetail&limit%5BappStoreVersionLocalizations%5D=50" {
@@ -122,8 +131,11 @@ func TestBuildReadinessReport_UsesCompoundReadsWithoutFallbacks(t *testing.T) {
 	for _, count := range requests {
 		totalRequests += count
 	}
-	if totalRequests != 3 {
-		t.Fatalf("compound readiness request count = %d, want 3 (version, app infos, price schedule)", totalRequests)
+	if totalRequests != 4 {
+		t.Fatalf("compound readiness request count = %d, want 4 (version, app infos, price schedule, current price)", totalRequests)
+	}
+	if got := queries["/v1/appPriceSchedules/schedule-1/manualPrices"]; got != "fields%5BappPricePoints%5D=customerPrice&fields%5BappPrices%5D=manual%2CstartDate%2CendDate%2CappPricePoint&include=appPricePoint&limit=200" {
+		t.Fatalf("unexpected current pricing query: %q", got)
 	}
 	if pricingTerritoryFetches != 1 {
 		t.Fatalf("pricing territory fetches = %d, want 1", pricingTerritoryFetches)

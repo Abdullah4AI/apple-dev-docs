@@ -91,6 +91,9 @@ func analyzeInvocation(root *ffcli.Command, args []string) invocationAnalysis {
 			}
 		}
 		if len(current.Subcommands) > 0 {
+			if current.Name == "snitch" {
+				return invocationAnalysis{command: current, shape: telemetry.InvocationShapeLeaf}
+			}
 			return invocationAnalysis{
 				command:      current,
 				shape:        telemetry.InvocationShapeUnknownChild,
@@ -115,9 +118,6 @@ func shapeForCommand(command *ffcli.Command, sawFlag bool) telemetry.InvocationS
 
 func shouldRenderConciseUnknownChild(root *ffcli.Command, analysis invocationAnalysis, commandName string) bool {
 	if analysis.shape != telemetry.InvocationShapeUnknownChild || analysis.command == nil {
-		return false
-	}
-	if analysis.command != root && commandName == "asc snitch" {
 		return false
 	}
 	return analysis.command == root || !preservesLegacyChild(analysis, commandName)

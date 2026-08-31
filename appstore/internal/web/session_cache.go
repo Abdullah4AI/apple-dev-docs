@@ -35,7 +35,10 @@ const (
 	webSessionLastKeyItem    = "asc:web-session:last"
 )
 
-var ErrCachedSessionExpired = errors.New("cached web session expired")
+var (
+	ErrCachedSessionExpired          = errors.New("cached web session expired")
+	ErrCachedSessionValidationFailed = errors.New("cached web session could not be validated")
+)
 
 type sessionBackend int
 
@@ -609,6 +612,14 @@ func readLastKeyFromFile() (string, bool, error) {
 }
 
 func readLegacyIrisSessionFromFile(key string) (persistedSession, bool, error) {
+	return readLegacyIrisSessionFromFileWithCleanup(key, true)
+}
+
+func readLegacyIrisSessionFromFileReadOnly(key string) (persistedSession, bool, error) {
+	return readLegacyIrisSessionFromFileWithCleanup(key, false)
+}
+
+func readLegacyIrisSessionFromFileWithCleanup(key string, cleanupMalformed bool) (persistedSession, bool, error) {
 	if !legacyIrisSessionCacheEnabled() {
 		return persistedSession{}, false, nil
 	}
@@ -625,7 +636,9 @@ func readLegacyIrisSessionFromFile(key string) (persistedSession, bool, error) {
 	}
 	var sess persistedSession
 	if err := json.Unmarshal(raw, &sess); err != nil {
-		_ = deleteLegacyIrisSessionFromFile(key)
+		if cleanupMalformed {
+			_ = deleteLegacyIrisSessionFromFile(key)
+		}
 		return persistedSession{}, false, nil
 	}
 	if sess.Version != webSessionCacheVersion {
@@ -635,6 +648,14 @@ func readLegacyIrisSessionFromFile(key string) (persistedSession, bool, error) {
 }
 
 func readLegacyIrisLastKeyFromFile() (string, bool, error) {
+	return readLegacyIrisLastKeyFromFileWithCleanup(true)
+}
+
+func readLegacyIrisLastKeyFromFileReadOnly() (string, bool, error) {
+	return readLegacyIrisLastKeyFromFileWithCleanup(false)
+}
+
+func readLegacyIrisLastKeyFromFileWithCleanup(cleanupMalformed bool) (string, bool, error) {
 	if !legacyIrisSessionCacheEnabled() {
 		return "", false, nil
 	}
@@ -651,7 +672,9 @@ func readLegacyIrisLastKeyFromFile() (string, bool, error) {
 	}
 	var last persistedLastSession
 	if err := json.Unmarshal(raw, &last); err != nil {
-		_ = deleteLegacyIrisLastKeyFromFile()
+		if cleanupMalformed {
+			_ = deleteLegacyIrisLastKeyFromFile()
+		}
 		return "", false, nil
 	}
 	if last.Version != webSessionCacheVersion || strings.TrimSpace(last.Key) == "" {
@@ -1053,6 +1076,43 @@ func resumeFromPersistedSession(ctx context.Context, sess persistedSession) (*Au
 	return session, true, nil
 }
 
+func resumeFromPersistedSessionReadOnly(ctx context.Context, sess persistedSession) (*AuthSession, bool, error) {
+	identity := &AuthSession{UserEmail: strings.TrimSpace(sess.UserEmail)}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return identity, false, err
+	}
+	loaded := hydrateCookieJar(jar, sess)
+	if loaded == 0 {
+		return identity, false, nil
+	}
+	client := newWebHTTPClient(jar)
+	info, err := sessionInfoFetcher(ctx, client)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return identity, false, ctxErr
+		}
+		if isSessionInfoAuthExpired(err) {
+			return identity, false, ErrCachedSessionExpired
+		}
+		return identity, false, ErrCachedSessionValidationFailed
+	}
+	session := &AuthSession{Client: client, UserEmail: strings.TrimSpace(sess.UserEmail)}
+	applySessionInfo(session, info)
+	return session, true, nil
+}
+
+func readOnlyFileBackendSelection() backendSelection {
+	selection := resolveBackendSelection()
+	if selection.backend == sessionBackendOff {
+		return selection
+	}
+	// Deep validation is non-interactive. Read only file-backed caches so an
+	// automatic or explicitly selected Keychain backend cannot open a native
+	// authorization prompt.
+	return backendSelection{backend: sessionBackendFile}
+}
+
 func loadSessionFromPersistedSession(sess persistedSession) (*AuthSession, bool, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -1110,6 +1170,36 @@ func LoadCachedSession(username string) (*AuthSession, bool, error) {
 	return loadSessionFromPersistedSession(sess)
 }
 
+// ResumeCachedSessionWithoutPersist validates a cached session for one Apple
+// ID without prompting or writing/migrating cached state.
+func ResumeCachedSessionWithoutPersist(ctx context.Context, username string) (*AuthSession, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, false, nil
+	}
+
+	selection := readOnlyFileBackendSelection()
+	if selection.backend == sessionBackendOff {
+		return nil, false, nil
+	}
+
+	key := webSessionCacheKey(username)
+	sess, ok, err := readSessionBySelection(selection, key)
+	if err == nil && !ok {
+		sess, ok, err = readLegacyIrisSessionFromFileReadOnly(key)
+	}
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	if strings.TrimSpace(sess.UserEmail) == "" {
+		sess.UserEmail = username
+	}
+	return resumeFromPersistedSessionReadOnly(ctx, sess)
+}
+
 // TryResumeSession attempts to resume a session for a specific Apple ID.
 func TryResumeSession(ctx context.Context, username string) (*AuthSession, bool, error) {
 	if ctx == nil {
@@ -1155,6 +1245,34 @@ func LoadLastCachedSession() (*AuthSession, bool, error) {
 		return nil, false, err
 	}
 	return loadSessionFromPersistedSession(sess)
+}
+
+// ResumeLastCachedSessionWithoutPersist validates the last cached session
+// without prompting or writing/migrating cached state.
+func ResumeLastCachedSessionWithoutPersist(ctx context.Context) (*AuthSession, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	selection := readOnlyFileBackendSelection()
+	if selection.backend == sessionBackendOff {
+		return nil, false, nil
+	}
+
+	sess, ok, err := readLastSessionBySelection(selection)
+	if err == nil && !ok {
+		key, legacyOK, legacyErr := readLegacyIrisLastKeyFromFileReadOnly()
+		if legacyErr != nil {
+			return nil, false, legacyErr
+		}
+		if legacyOK {
+			sess, ok, err = readLegacyIrisSessionFromFileReadOnly(key)
+		}
+	}
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return resumeFromPersistedSessionReadOnly(ctx, sess)
 }
 
 // TryResumeLastSession attempts to resume the last successful web session.

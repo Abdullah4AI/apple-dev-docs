@@ -1959,11 +1959,13 @@ func overrideTestEnvironment(t *testing.T) func() {
 
 	originalGOOS := runtimeGOOS
 	originalLookPath := lookPathFn
+	originalStatPath := statPathFn
 	originalCommandContext := commandContextFn
 	originalActiveDeveloperDir := activeDeveloperDirFn
 	return func() {
 		runtimeGOOS = originalGOOS
 		lookPathFn = originalLookPath
+		statPathFn = originalStatPath
 		commandContextFn = originalCommandContext
 		activeDeveloperDirFn = originalActiveDeveloperDir
 	}
@@ -2086,6 +2088,21 @@ func TestXcodeHelperProcess(t *testing.T) {
 			fmt.Fprint(os.Stderr, output)
 		}
 		if code := os.Getenv("ASC_XCODE_HELPER_VALIDATE_EXIT_CODE"); code != "" {
+			parsed, err := strconv.Atoi(code)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			os.Exit(parsed)
+		}
+		os.Exit(0)
+	}
+
+	if len(commandArgs) >= 2 && commandArgs[0] == "xcrun" && commandArgs[1] == "xcresulttool" {
+		if output := os.Getenv("ASC_XCODE_HELPER_XCRESULT_STDERR"); output != "" {
+			fmt.Fprint(os.Stderr, output)
+		}
+		if code := os.Getenv("ASC_XCODE_HELPER_XCRESULT_EXIT_CODE"); code != "" {
 			parsed, err := strconv.Atoi(code)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)

@@ -1467,7 +1467,7 @@ func TestWebReviewSubscriptionsRemoveGroupCommandOnlyCountsRefreshedDetachedSubs
 
 func TestCollectReviewSubscriptionGroupChangesMarksNotFoundAfterRefresh(t *testing.T) {
 	refreshedGroup := []webcore.ReviewSubscription{
-		{ID: "sub-1", SubmitWithNextAppStoreVersion: true},
+		{ID: "sub-1", SubmitWithNextAppStoreVersion: true, SubmitWithNextAppStoreVersionKnown: true},
 	}
 
 	changed, skipped := collectReviewSubscriptionGroupChanges(
@@ -1488,6 +1488,44 @@ func TestCollectReviewSubscriptionGroupChangesMarksNotFoundAfterRefresh(t *testi
 	}
 	if skipped[0].Reason != "subscription was not found after refresh" {
 		t.Fatalf("unexpected skip reason: %#v", skipped[0])
+	}
+}
+
+func TestReviewSubscriptionChangedAfterRefreshRequiresKnownState(t *testing.T) {
+	tests := []struct {
+		name         string
+		subscription webcore.ReviewSubscription
+		wantAttached bool
+		wantChanged  bool
+	}{
+		{name: "known attached", subscription: webcore.ReviewSubscription{SubmitWithNextAppStoreVersionKnown: true, SubmitWithNextAppStoreVersion: true}, wantAttached: true, wantChanged: true},
+		{name: "known detached", subscription: webcore.ReviewSubscription{SubmitWithNextAppStoreVersionKnown: true}, wantAttached: false, wantChanged: true},
+		{name: "unknown cannot prove attach", subscription: webcore.ReviewSubscription{}, wantAttached: true},
+		{name: "unknown cannot prove remove", subscription: webcore.ReviewSubscription{}, wantAttached: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := reviewSubscriptionChangedAfterRefresh(test.subscription, test.wantAttached); got != test.wantChanged {
+				t.Fatalf("changed = %t, want %t", got, test.wantChanged)
+			}
+		})
+	}
+}
+
+func TestCollectReviewSubscriptionGroupChangesClassifiesUnknownRefreshedState(t *testing.T) {
+	changed, skipped := collectReviewSubscriptionGroupChanges(
+		[]webcore.ReviewSubscription{{ID: "sub-1"}},
+		[]string{"sub-1"},
+		false,
+		reviewSubscriptionRemoveUnchangedAfterRefreshReason(),
+	)
+
+	if len(changed) != 0 || len(skipped) != 1 {
+		t.Fatalf("changed = %#v, skipped = %#v", changed, skipped)
+	}
+	if skipped[0].Reason != "next-version attachment state is unknown after refresh" {
+		t.Fatalf("skip reason = %q", skipped[0].Reason)
 	}
 }
 
@@ -1535,13 +1573,14 @@ func TestBuildReviewSubscriptionMutationRowsFallbacks(t *testing.T) {
 		Changed:      false,
 		SubmissionID: "   ",
 		Subscription: webcore.ReviewSubscription{
-			ID:                            "sub-1",
-			ProductID:                     "   ",
-			Name:                          "",
-			GroupReferenceName:            "",
-			State:                         "",
-			SubmitWithNextAppStoreVersion: false,
-			IsAppStoreReviewInProgress:    false,
+			ID:                                 "sub-1",
+			ProductID:                          "   ",
+			Name:                               "",
+			GroupReferenceName:                 "",
+			State:                              "",
+			SubmitWithNextAppStoreVersion:      false,
+			SubmitWithNextAppStoreVersionKnown: true,
+			IsAppStoreReviewInProgress:         false,
 		},
 	})
 

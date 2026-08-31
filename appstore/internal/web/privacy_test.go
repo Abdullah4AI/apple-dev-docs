@@ -389,6 +389,9 @@ func TestGetAppDataUsagesPublishStateParsesResponse(t *testing.T) {
 		t.Fatal("expected non-nil publish state")
 		return
 	}
+	if !state.PublishedKnown {
+		t.Fatalf("expected requested published attribute to be marked known: %#v", state)
+	}
 	if state.ID != "publish-state-1" || state.Published {
 		t.Fatalf("unexpected publish state: %#v", state)
 	}

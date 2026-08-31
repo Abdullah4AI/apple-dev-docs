@@ -153,6 +153,30 @@ func TestGetAgreementsStatusNotPendingWhenAccepted(t *testing.T) {
 	}
 }
 
+func TestGetAgreementsStatusPreservesContractMessagesWhenPortalUnavailable(t *testing.T) {
+	requestCount := 0
+	client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			return developerPortalTestResponse(http.StatusOK, contractMessagesFixture(), nil), nil
+		case 2:
+			return developerPortalTestResponse(http.StatusInternalServerError, `{}`, nil), nil
+		default:
+			t.Fatalf("unexpected extra request %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	})
+
+	result, err := client.GetAgreementsStatus(context.Background())
+	if err == nil {
+		t.Fatal("GetAgreementsStatus() error = nil, want Developer Portal error")
+	}
+	if result == nil || !result.Pending || len(result.ContractMessages) != 1 {
+		t.Fatalf("GetAgreementsStatus() result = %#v, want preserved pending contract message", result)
+	}
+}
+
 func TestGetAgreementsStatusSurfacesResultCodeError(t *testing.T) {
 	requestCount := 0
 	client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {

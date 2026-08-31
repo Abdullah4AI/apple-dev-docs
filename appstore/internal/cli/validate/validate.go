@@ -21,13 +21,17 @@ type validateOptions struct {
 	VersionID string
 	Platform  string
 	Strict    bool
+	Deep      bool
+	CheckURLs bool
+	AppleID   string
 	Output    string
 	Pretty    bool
 }
 
 var (
-	clientFactory         = shared.GetASCClient
-	fetchScreenshotSetsFn = fetchScreenshotSets
+	clientFactory          = shared.GetASCClient
+	fetchScreenshotSetsFn  = fetchScreenshotSets
+	buildReadinessReportFn = BuildReadinessReport
 )
 
 // ValidateCommand returns the asc validate command.
@@ -39,6 +43,9 @@ func ValidateCommand() *ffcli.Command {
 	versionID := fs.String("version-id", "", "App Store version ID")
 	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	strict := fs.Bool("strict", false, "Treat warnings as errors (exit non-zero)")
+	deep := fs.Bool("deep", false, "[experimental] Verify blockers that require a cached Apple web session")
+	checkURLs := fs.Bool("check-urls", false, "[experimental] Check metadata URL destinations with bounded public HTTP requests")
+	appleID := fs.String("apple-id", "", "[experimental] Cached Apple web session to use with --deep")
 	output := shared.BindOutputFlags(fs)
 
 	testFlight := wrapValidateSubcommand(ValidateTestFlightCommand(), fs)
@@ -63,6 +70,8 @@ reported.
 Checks:
   - Metadata length limits
   - Placeholder copy in localized listing fields (warning; --strict to block)
+  - Deterministic metadata content and keyword hygiene warnings
+  - Optional bounded checks for public metadata URL destinations (--check-urls)
   - Required fields and localizations
   - App Store review details completeness
   - Primary category configured
@@ -74,11 +83,21 @@ Checks:
   - Subscription review readiness and promotional image guidance
   - Age rating completeness
 
+Experimental deep validation:
+  --deep adds read-only checks from an existing cached Apple web session for
+  App Privacy publication, required agreements, and first-of-type subscription
+  attachment. It also classifies every actionable finding as api-fixable,
+  web-fixable, or manual and returns exact available commands and App Store
+  Connect links. Deep validation never starts an interactive login.
+
 Examples:
   asc validate --app "APP_ID" --version-id "VERSION_ID"
   asc validate --app "APP_ID" --version "1.0.0" --platform IOS
   asc validate --app "APP_ID" --version-id "VERSION_ID" --platform IOS --output table
   asc validate --app "APP_ID" --version-id "VERSION_ID" --strict
+  asc validate --app "APP_ID" --version-id "VERSION_ID" --deep
+  asc validate --app "APP_ID" --version-id "VERSION_ID" --check-urls
+  asc validate --app "APP_ID" --version "1.0.0" --deep --apple-id "user@example.com"
 
 TestFlight:
   asc validate testflight --app "APP_ID" --build-id "BUILD_ID"
@@ -108,6 +127,10 @@ Subscriptions:
 			if trimmedVersion != "" && trimmedVersionID != "" {
 				return shared.WithDiagnostic(shared.UsageError("--version and --version-id are mutually exclusive"), shared.DiagnosticConflictingInput, "--version-id")
 			}
+			trimmedAppleID := strings.TrimSpace(*appleID)
+			if trimmedAppleID != "" && !*deep {
+				return shared.WithDiagnostic(shared.UsageError("--apple-id requires --deep"), shared.DiagnosticInvalidInput, "--apple-id")
+			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
@@ -129,6 +152,9 @@ Subscriptions:
 				VersionID: trimmedVersionID,
 				Platform:  normalizedPlatform,
 				Strict:    *strict,
+				Deep:      *deep,
+				CheckURLs: *checkURLs,
+				AppleID:   trimmedAppleID,
 				Output:    *output.Output,
 				Pretty:    *output.Pretty,
 			})
@@ -157,12 +183,12 @@ func validateParentFlagUsageMessage(parentFlags *flag.FlagSet) string {
 	}
 
 	moveAfterSubcommand := make([]string, 0, 4)
-	topLevelOnly := make([]string, 0, 5)
+	topLevelOnly := make([]string, 0, 8)
 	parentFlags.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "app", "output", "pretty", "strict":
 			moveAfterSubcommand = append(moveAfterSubcommand, "--"+f.Name)
-		case "version", "version-id", "platform":
+		case "version", "version-id", "platform", "deep", "check-urls", "apple-id":
 			topLevelOnly = append(topLevelOnly, "--"+f.Name)
 		}
 	})
@@ -203,15 +229,27 @@ func validateFlagVerb(flags []string) string {
 }
 
 func runValidate(ctx context.Context, opts validateOptions) error {
-	report, err := BuildReadinessReport(ctx, ReadinessOptions{
+	report, err := buildReadinessReportFn(ctx, ReadinessOptions{
 		AppID:     opts.AppID,
 		Version:   opts.Version,
 		VersionID: opts.VersionID,
 		Platform:  opts.Platform,
 		Strict:    opts.Strict,
+		Deep:      opts.Deep,
+		CheckURLs: opts.CheckURLs,
 	})
 	if err != nil {
-		return fmt.Errorf("validate: %w", err)
+		if !opts.Deep || !asc.IsRequiredAgreementError(err) {
+			return fmt.Errorf("validate: %w", err)
+		}
+		report = requiredAgreementFallbackReport(opts)
+	}
+	if opts.Deep {
+		deep, findings, deepErr := collectDeepValidation(ctx, report, opts.AppleID)
+		if deepErr != nil {
+			return fmt.Errorf("validate: deep validation: %w", deepErr)
+		}
+		report = validation.ApplyDeepValidation(report, deep, findings)
 	}
 
 	if err := shared.PrintOutput(&report, opts.Output, opts.Pretty); err != nil {
@@ -223,6 +261,50 @@ func runValidate(ctx context.Context, opts validateOptions) error {
 	}
 
 	return nil
+}
+
+func requiredAgreementFallbackReport(opts validateOptions) validation.Report {
+	message := "App Store Connect API access is blocked by a missing or expired required agreement"
+	publicUnavailable := "Retry after the Account Holder resolves the required agreement and App Store Connect API access returns"
+	checks := []validation.CheckResult{
+		{
+			ID:           "agreements.public_api.blocked",
+			Severity:     validation.SeverityError,
+			Message:      message,
+			Remediation:  "Have the Account Holder resolve the required agreement in App Store Connect",
+			ResourceType: "agreement",
+			Resolution: &validation.Resolution{
+				Fixability:         validation.FixabilityManual,
+				AppStoreConnectURL: agreementsAppStoreConnectURL,
+			},
+		},
+		{
+			ID:           "availability.unverified",
+			Severity:     validation.SeverityWarning,
+			Message:      "App availability could not be verified because required agreements block public API access",
+			Remediation:  publicUnavailable,
+			ResourceType: "app",
+			ResourceID:   strings.TrimSpace(opts.AppID),
+		},
+		{
+			ID:           "review_details.unverified",
+			Severity:     validation.SeverityWarning,
+			Message:      "Required App Review fields could not be verified because required agreements block public API access",
+			Remediation:  publicUnavailable,
+			ResourceType: "appStoreVersion",
+			ResourceID:   strings.TrimSpace(opts.VersionID),
+		},
+	}
+	return validation.Report{
+		AppID:         strings.TrimSpace(opts.AppID),
+		VersionID:     strings.TrimSpace(opts.VersionID),
+		VersionString: strings.TrimSpace(opts.Version),
+		Platform:      strings.TrimSpace(opts.Platform),
+		Summary:       validation.SummarizeChecks(checks, opts.Strict),
+		Remediation:   validation.BuildRemediation(checks, opts.Strict),
+		Checks:        checks,
+		Strict:        opts.Strict,
+	}
 }
 
 func resolveVersionID(ctx context.Context, client *asc.Client, appID, version, platform string) (string, error) {

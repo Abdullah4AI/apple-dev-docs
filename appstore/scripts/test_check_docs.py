@@ -325,6 +325,197 @@ class WebsiteCommandChecksTest(unittest.TestCase):
             errors = check_website_commands.collect_errors(website, index)
             self.assertEqual(errors, [])
 
+    def test_website_command_checks_accept_command_passthrough(self) -> None:
+        index = {
+            (): check_website_commands.CommandSpec(
+                path=(),
+                usage="asc <subcommand> [flags]",
+                flags={},
+                subcommands={"signing"},
+            ),
+            ("signing",): check_website_commands.CommandSpec(
+                path=("signing",),
+                usage="asc signing <subcommand> [flags]",
+                flags={},
+                subcommands={"run"},
+            ),
+            ("signing", "run"): check_website_commands.CommandSpec(
+                path=("signing", "run"),
+                usage=(
+                    "asc signing run --identity PATH --profile PATH [flags] "
+                    "-- <command> [args...]"
+                ),
+                flags={"--identity": False, "--profile": False},
+                subcommands=set(),
+            ),
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            website = Path(tmpdir)
+            (website / "index.mdx").write_text(
+                "```bash\n"
+                "asc signing run --identity signing.p12 --profile app.mobileprovision "
+                "-- xcodebuild -exportArchive --archivePath App.xcarchive\n"
+                "```\n"
+            )
+            errors = check_website_commands.collect_errors(website, index)
+            self.assertEqual(errors, [])
+
+    def test_website_command_checks_reject_empty_command_passthrough(self) -> None:
+        index = {
+            (): check_website_commands.CommandSpec(
+                path=(),
+                usage="asc <subcommand> [flags]",
+                flags={},
+                subcommands={"signing"},
+            ),
+            ("signing",): check_website_commands.CommandSpec(
+                path=("signing",),
+                usage="asc signing <subcommand> [flags]",
+                flags={},
+                subcommands={"run"},
+            ),
+            ("signing", "run"): check_website_commands.CommandSpec(
+                path=("signing", "run"),
+                usage=(
+                    "asc signing run --identity PATH --profile PATH [flags] "
+                    "-- <command> [args...]"
+                ),
+                flags={"--identity": False, "--profile": False},
+                subcommands=set(),
+            ),
+        }
+        examples = ('""', '"   "')
+
+        for command in examples:
+            with self.subTest(command=command):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    website = Path(tmpdir)
+                    (website / "index.mdx").write_text(
+                        "```bash\n"
+                        "asc signing run --identity signing.p12 "
+                        f"--profile app.mobileprovision -- {command}\n"
+                        "```\n"
+                    )
+                    errors = check_website_commands.collect_errors(website, index)
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn("non-empty command", errors[0])
+
+    def test_website_command_checks_require_flags_before_command_passthrough(self) -> None:
+        index = {
+            (): check_website_commands.CommandSpec(
+                path=(),
+                usage="asc <subcommand> [flags]",
+                flags={},
+                subcommands={"signing"},
+            ),
+            ("signing",): check_website_commands.CommandSpec(
+                path=("signing",),
+                usage="asc signing <subcommand> [flags]",
+                flags={},
+                subcommands={"run"},
+            ),
+            ("signing", "run"): check_website_commands.CommandSpec(
+                path=("signing", "run"),
+                usage=(
+                    "asc signing run --identity PATH --profile PATH [flags] "
+                    "-- <command> [args...]"
+                ),
+                flags={"--identity": False, "--profile": False},
+                subcommands=set(),
+            ),
+        }
+        examples = {
+            "--identity signing.p12": "--profile",
+            "--profile app.mobileprovision": "--identity",
+        }
+
+        for flags, missing_flag in examples.items():
+            with self.subTest(missing_flag=missing_flag):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    website = Path(tmpdir)
+                    (website / "index.mdx").write_text(
+                        f"```bash\nasc signing run {flags} -- xcodebuild -exportArchive\n```\n"
+                    )
+                    errors = check_website_commands.collect_errors(website, index)
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn("missing required flag", errors[0])
+                    self.assertIn(missing_flag, errors[0])
+
+    def test_website_command_checks_reject_empty_flags_before_command_passthrough(self) -> None:
+        index = {
+            (): check_website_commands.CommandSpec(
+                path=(),
+                usage="asc <subcommand> [flags]",
+                flags={},
+                subcommands={"signing"},
+            ),
+            ("signing",): check_website_commands.CommandSpec(
+                path=("signing",),
+                usage="asc signing <subcommand> [flags]",
+                flags={},
+                subcommands={"run"},
+            ),
+            ("signing", "run"): check_website_commands.CommandSpec(
+                path=("signing", "run"),
+                usage=(
+                    "asc signing run --identity PATH --profile PATH [flags] "
+                    "-- <command> [args...]"
+                ),
+                flags={"--identity": False, "--profile": False},
+                subcommands=set(),
+            ),
+        }
+        examples = {
+            "--identity= --profile app.mobileprovision": "--identity",
+            '--identity "" --profile app.mobileprovision': "--identity",
+            "--identity signing.p12 --identity= --profile app.mobileprovision": "--identity",
+            "--identity signing.p12 --profile=": "--profile",
+            '--identity signing.p12 --profile ""': "--profile",
+            '--identity signing.p12 --profile app.mobileprovision --profile ""': "--profile",
+        }
+
+        for flags, missing_flag in examples.items():
+            with self.subTest(flags=flags):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    website = Path(tmpdir)
+                    (website / "index.mdx").write_text(
+                        f"```bash\nasc signing run {flags} -- xcodebuild -exportArchive\n```\n"
+                    )
+                    errors = check_website_commands.collect_errors(website, index)
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn("missing required flag", errors[0])
+                    self.assertIn(missing_flag, errors[0])
+
+    def test_website_command_checks_reject_unsupported_command_passthrough(self) -> None:
+        index = {
+            (): check_website_commands.CommandSpec(
+                path=(),
+                usage="asc <subcommand> [flags]",
+                flags={},
+                subcommands={"apps"},
+            ),
+            ("apps",): check_website_commands.CommandSpec(
+                path=("apps",),
+                usage="asc apps list [flags]",
+                flags={},
+                subcommands={"list"},
+            ),
+            ("apps", "list"): check_website_commands.CommandSpec(
+                path=("apps", "list"),
+                usage="asc apps list [flags]",
+                flags={},
+                subcommands=set(),
+            ),
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            website = Path(tmpdir)
+            (website / "index.mdx").write_text(
+                "```bash\nasc apps list -- echo unexpected\n```\n"
+            )
+            errors = check_website_commands.collect_errors(website, index)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("does not accept command passthrough", errors[0])
+
     def test_website_command_checks_reject_unknown_subcommand(self) -> None:
         index = {
             (): check_website_commands.CommandSpec(

@@ -41,6 +41,18 @@ func TestXcodeCommandExists(t *testing.T) {
 	if findSubcommand(root, "xcode", "archive") == nil {
 		t.Fatal("expected xcode archive command")
 	}
+	if findSubcommand(root, "xcode", "test") == nil {
+		t.Fatal("expected xcode test command")
+	}
+	testCmd := findSubcommand(root, "xcode", "test")
+	if !strings.HasPrefix(testCmd.ShortHelp, "[experimental]") {
+		t.Fatalf("expected xcode test to be introduced as experimental, got %q", testCmd.ShortHelp)
+	}
+	for _, name := range []string{"project", "workspace", "scheme", "action", "configuration", "destination", "test-plan", "xctestrun", "only-testing", "skip-testing", "derived-data-path", "result-bundle-path", "clean", "no-code-signing", "xcodebuild-flag", "output"} {
+		if testCmd.FlagSet.Lookup(name) == nil {
+			t.Fatalf("expected xcode test to expose --%s", name)
+		}
+	}
 	if findSubcommand(root, "xcode", "export") == nil {
 		t.Fatal("expected xcode export command")
 	}

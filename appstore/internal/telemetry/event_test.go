@@ -356,6 +356,47 @@ func TestBuildEventWithContextStripsKnownFailureParameterValue(t *testing.T) {
 	}
 }
 
+func TestBuildEventWithContextStripsToolchainSelectorValues(t *testing.T) {
+	clearContextEnv(t)
+	setTelemetryTestHome(t)
+
+	for _, test := range []struct {
+		parameter string
+		want      string
+	}{
+		{parameter: "--developer-dir=/Users/example/PrivateXcode.app", want: "--developer-dir"},
+		{parameter: "--sdk=iphonesimulator", want: "--sdk"},
+	} {
+		t.Run(test.want, func(t *testing.T) {
+			ev, ok := BuildEventWithContext(
+				"asc xcode doctor",
+				"1.2.3",
+				0,
+				1,
+				EventContext{
+					InvocationShape:  InvocationShapeLeaf,
+					ErrorKind:        ErrorKindOther,
+					FailureStage:     FailureStageExecution,
+					FailureParameter: test.parameter,
+				},
+			)
+			if !ok {
+				t.Fatal("expected event")
+			}
+			if ev.FailureParameter == nil || *ev.FailureParameter != test.want {
+				t.Fatalf("FailureParameter = %v, want %q", ev.FailureParameter, test.want)
+			}
+			data, err := json.Marshal(ev)
+			if err != nil {
+				t.Fatalf("json.Marshal() error: %v", err)
+			}
+			if strings.Contains(string(data), strings.SplitN(test.parameter, "=", 2)[1]) {
+				t.Fatalf("payload leaked selector value: %s", data)
+			}
+		})
+	}
+}
+
 func TestBuildEventWithContextAllowsDirWithoutItsValue(t *testing.T) {
 	clearContextEnv(t)
 	setTelemetryTestHome(t)

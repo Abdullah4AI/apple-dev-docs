@@ -27,8 +27,12 @@ META_TOKEN_RE = re.compile(r"^<[^>]+>$|^\[[^\]]+\]$")
 GENERIC_TOKENS = {"command", "subcommand", "subcmd"}
 SHELL_OPERATORS = {"|", ";", ">", "<"}
 ELLIPSIS_TOKENS = {"...", "…"}
+COMMAND_PASSTHROUGH_RE = re.compile(r"(?:^|\s)--\s+<[^>]+>")
 REQUIRED_FLAGS_BY_COMMAND: dict[tuple[str, ...], set[str]] = {
     ("submit", "create"): {"--build", "--confirm"},
+}
+REQUIRED_FLAGS_BEFORE_PASSTHROUGH_BY_COMMAND: dict[tuple[str, ...], set[str]] = {
+    ("signing", "run"): {"--identity", "--profile"},
 }
 # Presence-aware booleans intentionally omit a displayed default because unset
 # and explicit false have different behavior. Scope these overrides by command
@@ -626,6 +630,7 @@ def validate_example(
     pending_flag: str | None = None
     saw_positional = False
     seen_flags: set[str] = set()
+    satisfied_flags: set[str] = set()
 
     while i < len(tokens):
         token = tokens[i]
@@ -636,14 +641,44 @@ def validate_example(
                     f"missing value for flag {pending_flag!r} in {example.raw!r}"
                 )
                 return errors
+            if token.strip():
+                satisfied_flags.add(pending_flag)
+            else:
+                satisfied_flags.discard(pending_flag)
             pending_flag = None
             i += 1
             continue
         if token == "--help":
             i += 1
             continue
+        if token == "--":
+            if not COMMAND_PASSTHROUGH_RE.search(current.usage):
+                errors.append(
+                    f"{example.path.relative_to(example.path.parents[1])}:{example.line_number}: "
+                    f"{' '.join(current.path)!r} does not accept command passthrough in {example.raw!r}"
+                )
+                return errors
+            if i + 1 >= len(tokens) or not tokens[i + 1].strip():
+                errors.append(
+                    f"{example.path.relative_to(example.path.parents[1])}:{example.line_number}: "
+                    f"command passthrough separator must be followed by a non-empty command "
+                    f"in {example.raw!r}"
+                )
+                return errors
+            missing_flags = sorted(
+                REQUIRED_FLAGS_BEFORE_PASSTHROUGH_BY_COMMAND.get(current.path, set())
+                - satisfied_flags
+            )
+            if missing_flags:
+                errors.append(
+                    f"{example.path.relative_to(example.path.parents[1])}:{example.line_number}: "
+                    f"missing required flag(s) {', '.join(missing_flags)!r} before command passthrough "
+                    f"for {' '.join(current.path)!r} in {example.raw!r}"
+                )
+                return errors
+            break
         if token.startswith("--"):
-            flag = token.split("=", 1)[0]
+            flag, separator, inline_value = token.partition("=")
             if flag in current.flags:
                 if saw_positional and style == "flags_before_positionals":
                     errors.append(
@@ -651,7 +686,13 @@ def validate_example(
                         f"flag {flag!r} appears after positional arguments in {example.raw!r}"
                     )
                 seen_flags.add(flag)
-                pending_flag = flag if "=" not in token and not current.flags.get(flag, False) else None
+                if current.flags.get(flag, False):
+                    satisfied_flags.add(flag)
+                elif separator and inline_value.strip():
+                    satisfied_flags.add(flag)
+                else:
+                    satisfied_flags.discard(flag)
+                pending_flag = flag if not separator and not current.flags.get(flag, False) else None
                 i += 1
                 continue
             if flag in root.flags:

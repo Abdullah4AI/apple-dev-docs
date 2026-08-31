@@ -62,33 +62,33 @@ func (c *Client) GetAgreementsStatus(ctx context.Context) (*asc.WebAgreementsSta
 	if err != nil {
 		return nil, err
 	}
+	result := &asc.WebAgreementsStatusResult{
+		Pending:          len(messages) > 0,
+		ContractMessages: messages,
+	}
 	if err := c.ensureDeveloperPortalSession(ctx); err != nil {
-		return nil, err
+		return result, err
 	}
 	teamID := c.developerPortalTeamID()
 	if teamID == "" {
-		return nil, fmt.Errorf("developer portal team is not selected; %s", developerPortalAuthHint)
+		return result, fmt.Errorf("developer portal team is not selected; %s", developerPortalAuthHint)
 	}
+	result.TeamID = teamID
 	envelope, err := c.doDeveloperPortalAgreementsRequest(ctx, developerPortalAgreementHistoryPath, map[string]string{"teamId": teamID})
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
 	agreements := make([]asc.WebAgreement, 0, len(envelope.Agreements))
-	pending := len(messages) > 0
 	for _, record := range envelope.Agreements {
 		agreement := c.newAgreement(record)
 		if agreement.Pending {
-			pending = true
+			result.Pending = true
 		}
 		agreements = append(agreements, agreement)
 	}
-	return &asc.WebAgreementsStatusResult{
-		TeamID:           teamID,
-		Pending:          pending,
-		ContractMessages: messages,
-		Agreements:       agreements,
-	}, nil
+	result.Agreements = agreements
+	return result, nil
 }
 
 // AcceptAgreements accepts the given Developer Portal agreements for the web

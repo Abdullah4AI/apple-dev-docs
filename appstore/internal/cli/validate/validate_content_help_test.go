@@ -18,3 +18,25 @@ func TestValidateHelpDocumentsPlaceholderWarningScope(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCommandAcceptsOptInURLChecks(t *testing.T) {
+	cmd := ValidateCommand()
+	if err := cmd.Parse([]string{"--app", "app-1", "--version-id", "version-1", "--check-urls"}); err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	flagDef := cmd.FlagSet.Lookup("check-urls")
+	if flagDef == nil {
+		t.Fatal("--check-urls flag is not registered")
+	}
+	if !strings.HasPrefix(flagDef.Usage, "[experimental] ") {
+		t.Fatalf("--check-urls usage = %q, want [experimental] prefix", flagDef.Usage)
+	}
+}
+
+func TestValidateURLChecksAreTopLevelOnly(t *testing.T) {
+	cmd := ValidateCommand()
+	err := cmd.ParseAndRun(t.Context(), []string{"--check-urls", "testflight", "--app", "app-1", "--build", "build-1"})
+	if err == nil || !strings.Contains(err.Error(), "--check-urls is only valid for asc validate") {
+		t.Fatalf("error = %v, want top-level-only URL-check diagnostic", err)
+	}
+}

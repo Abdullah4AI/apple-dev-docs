@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
-	notifycli "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/notify"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
 func TestNotifySlackValidationErrors(t *testing.T) {
@@ -76,8 +76,8 @@ func TestNotifySlackInvalidThreadTSReturnsUsageError(t *testing.T) {
 			t.Fatalf("parse error: %v", err)
 		}
 		err := root.Run(context.Background())
-		if !errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("expected ErrHelp, got %v", err)
+		if errors.Is(err, flag.ErrHelp) || !shared.IsReportedUsageError(err) {
+			t.Fatalf("expected reported usage error without help, got %v", err)
 		}
 	})
 
@@ -117,8 +117,8 @@ func TestNotifySlackAttachmentFlagsRequirePayload(t *testing.T) {
 					t.Fatalf("parse error: %v", err)
 				}
 				err := root.Run(context.Background())
-				if !errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("expected ErrHelp, got %v", err)
+				if errors.Is(err, flag.ErrHelp) || !shared.IsReportedUsageError(err) {
+					t.Fatalf("expected reported usage error without help, got %v", err)
 				}
 			})
 
@@ -246,9 +246,6 @@ func TestNotifySlackRejectsNullBlocksBeforeRequest(t *testing.T) {
 			wantDiagnostic: "Error: --blocks-file must contain a JSON array\n",
 		},
 	}
-	slackCommand := notifycli.SlackCommand()
-	usage := slackCommand.UsageFunc(slackCommand) + "\n"
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("ASC_SLACK_WEBHOOK", "")
@@ -268,9 +265,8 @@ func TestNotifySlackRejectsNullBlocksBeforeRequest(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			wantStderr := test.wantDiagnostic + usage
-			if stderr != wantStderr {
-				t.Fatalf("expected stderr %q, got %q", wantStderr, stderr)
+			if stderr != test.wantDiagnostic {
+				t.Fatalf("expected stderr %q, got %q", test.wantDiagnostic, stderr)
 			}
 			if got := requestCount.Load(); got != 0 {
 				t.Fatalf("expected no webhook requests, got %d", got)

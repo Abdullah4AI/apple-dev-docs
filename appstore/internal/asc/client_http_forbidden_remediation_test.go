@@ -3,6 +3,7 @@ package asc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -118,6 +119,19 @@ func TestRemediationForAPIError(t *testing.T) {
 				t.Fatalf("expected no remediation for code %q, got %q", tt.code, remediation)
 			}
 		})
+	}
+}
+
+func TestIsRequiredAgreementErrorRecognizesWrappedAPIError(t *testing.T) {
+	err := fmt.Errorf("validate request: %w", &APIError{
+		Code:       "FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED",
+		StatusCode: http.StatusForbidden,
+	})
+	if !IsRequiredAgreementError(err) {
+		t.Fatalf("IsRequiredAgreementError(%v) = false", err)
+	}
+	if IsRequiredAgreementError(&APIError{Code: "FORBIDDEN.MISSING_ROLE", StatusCode: http.StatusForbidden}) {
+		t.Fatal("unrelated forbidden error was classified as required agreement")
 	}
 }
 

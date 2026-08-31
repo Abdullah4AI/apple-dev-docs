@@ -34,8 +34,9 @@ type AppDataUsage struct {
 
 // AppDataUsagesPublishState captures publication state for app privacy data usages.
 type AppDataUsagesPublishState struct {
-	ID        string `json:"id"`
-	Published bool   `json:"published"`
+	ID             string `json:"id"`
+	Published      bool   `json:"published"`
+	PublishedKnown bool   `json:"-"`
 }
 
 // AppDataUsageCategory models one appDataUsageCategories resource.
@@ -92,9 +93,11 @@ func decodeAppDataUsages(resources []jsonAPIResource) []AppDataUsage {
 }
 
 func decodeAppDataUsagesPublishStateResource(resource jsonAPIResource) AppDataUsagesPublishState {
+	published, publishedKnown := boolAttrKnown(resource.Attributes, "published")
 	return AppDataUsagesPublishState{
-		ID:        strings.TrimSpace(resource.ID),
-		Published: boolAttr(resource.Attributes, "published"),
+		ID:             strings.TrimSpace(resource.ID),
+		Published:      published,
+		PublishedKnown: publishedKnown,
 	}
 }
 

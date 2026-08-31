@@ -299,6 +299,7 @@ func identityCertificateFilter(identity *signingIdentity) func(asc.Resource[asc.
 type identityMobileProvision struct {
 	TeamIdentifier              []string       `plist:"TeamIdentifier"`
 	ApplicationIdentifierPrefix []string       `plist:"ApplicationIdentifierPrefix"`
+	Platform                    []string       `plist:"Platform"`
 	ExpirationDate              time.Time      `plist:"ExpirationDate"`
 	DeveloperCertificates       [][]byte       `plist:"DeveloperCertificates"`
 	Entitlements                map[string]any `plist:"Entitlements"`

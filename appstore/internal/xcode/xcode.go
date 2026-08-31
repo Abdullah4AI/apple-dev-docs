@@ -28,6 +28,7 @@ import (
 var (
 	runtimeGOOS          = runtime.GOOS
 	lookPathFn           = exec.LookPath
+	statPathFn           = os.Stat
 	commandContextFn     = exec.CommandContext
 	activeDeveloperDirFn = activeDeveloperDir
 	altoolHelpOutputFn   = readAltoolHelpOutput

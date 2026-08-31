@@ -13,16 +13,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/metadataurl"
 )
 
 type fakeMetadataURLChecker struct {
 	mu      sync.Mutex
-	results map[string]metadataURLCheckResult
+	results map[string]metadataurl.Result
 	errors  map[string]error
 	calls   map[string]int
 }
 
-func (f *fakeMetadataURLChecker) Check(_ context.Context, rawURL string) (metadataURLCheckResult, error) {
+func (f *fakeMetadataURLChecker) Check(_ context.Context, rawURL string) (metadataurl.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -31,7 +33,7 @@ func (f *fakeMetadataURLChecker) Check(_ context.Context, rawURL string) (metada
 	}
 	f.calls[rawURL]++
 	if err := f.errors[rawURL]; err != nil {
-		return metadataURLCheckResult{}, err
+		return metadataurl.Result{}, err
 	}
 	return f.results[rawURL], nil
 }
@@ -59,7 +61,7 @@ func TestValidateDirCheckURLsWarnsForRedirectedHostAndSiteRoot(t *testing.T) {
 		filepath.Join(appInfoDirName, "en-US.json"):          `{"name":"Example App","privacyPolicyUrl":"https://app.example.com/privacy"}`,
 		filepath.Join(versionDirName, "1.2.3", "en-US.json"): `{"description":"English app description","supportUrl":"https://support.example.com/help"}`,
 	})
-	checker := &fakeMetadataURLChecker{results: map[string]metadataURLCheckResult{
+	checker := &fakeMetadataURLChecker{results: map[string]metadataurl.Result{
 		"https://app.example.com/privacy": {
 			FinalURL:   mustParseMetadataURL(t, "https://app.example.com/"),
 			StatusCode: 200,
@@ -96,13 +98,34 @@ func TestValidateDirCheckURLsWarnsForRedirectedHostAndSiteRoot(t *testing.T) {
 	}
 }
 
+func TestMetadataURLCheckMessagesDescribesReturningHostWithoutAtoA(t *testing.T) {
+	message := metadataURLCheckMessages(metadataURLTarget{
+		rawURL: "https://support.example/help",
+		label:  "support URL",
+	}, metadataURLCheckOutcome{result: metadataurl.Result{
+		FinalURL:       mustParseMetadataURL(t, "https://support.example/final"),
+		StatusCode:     http.StatusOK,
+		RedirectedHost: true,
+	}})
+	if len(message) != 1 {
+		t.Fatalf("messages = %v, want one redirect warning", message)
+	}
+	want := "support URL redirects through a different host before returning to support.example"
+	if message[0] != want {
+		t.Fatalf("message = %q, want %q", message[0], want)
+	}
+	if strings.Contains(message[0], "support.example -> support.example") {
+		t.Fatalf("message contains contradictory A -> A transition: %q", message[0])
+	}
+}
+
 func TestValidateDirCheckURLsWarnsForStatusAndRequestFailure(t *testing.T) {
 	dir := writeMetadataURLFixtures(t, map[string]string{
 		filepath.Join(appInfoDirName, "en-US.json"):          `{"name":"Example App","privacyPolicyUrl":"https://app.example.com/privacy"}`,
 		filepath.Join(versionDirName, "1.2.3", "en-US.json"): `{"description":"English app description","supportUrl":"https://support.example.com/help"}`,
 	})
 	checker := &fakeMetadataURLChecker{
-		results: map[string]metadataURLCheckResult{
+		results: map[string]metadataurl.Result{
 			"https://support.example.com/help": {
 				FinalURL:   mustParseMetadataURL(t, "https://parked.example.com/missing"),
 				StatusCode: 404,
@@ -145,7 +168,7 @@ func TestValidateDirCheckURLsCachesDuplicateURLs(t *testing.T) {
 		filepath.Join(versionDirName, "1.2.3", "en-US.json"): `{"description":"English app description","supportUrl":"` + supportURL + `"}`,
 		filepath.Join(versionDirName, "1.2.3", "fr-FR.json"): `{"description":"Description francaise complete","supportUrl":"` + supportURL + `"}`,
 	})
-	checker := &fakeMetadataURLChecker{results: map[string]metadataURLCheckResult{
+	checker := &fakeMetadataURLChecker{results: map[string]metadataurl.Result{
 		supportURL: {
 			FinalURL:   mustParseMetadataURL(t, "https://support.example.com/"),
 			StatusCode: 200,
@@ -172,7 +195,7 @@ func TestValidateDirRemainsOfflineWithoutCheckURLs(t *testing.T) {
 	dir := writeMetadataURLFixtures(t, map[string]string{
 		filepath.Join(versionDirName, "1.2.3", "en-US.json"): `{"description":"English app description","supportUrl":"` + supportURL + `"}`,
 	})
-	checker := &fakeMetadataURLChecker{results: map[string]metadataURLCheckResult{
+	checker := &fakeMetadataURLChecker{results: map[string]metadataurl.Result{
 		supportURL: {
 			FinalURL:   mustParseMetadataURL(t, "https://support.example.com/"),
 			StatusCode: 200,
@@ -218,14 +241,14 @@ func TestMetadataValidateCommandPrintsWarningsAndExitsSuccessfully(t *testing.T)
 	dir := writeMetadataURLFixtures(t, map[string]string{
 		filepath.Join(versionDirName, "1.2.3", "en-US.json"): `{"description":"English app description","supportUrl":"` + supportURL + `"}`,
 	})
-	checker := &fakeMetadataURLChecker{results: map[string]metadataURLCheckResult{
+	checker := &fakeMetadataURLChecker{results: map[string]metadataurl.Result{
 		supportURL: {
 			FinalURL:   mustParseMetadataURL(t, "https://support.example.com/"),
 			StatusCode: 200,
 		},
 	}}
 	originalFactory := newMetadataURLChecker
-	newMetadataURLChecker = func() metadataURLChecker { return checker }
+	newMetadataURLChecker = func() metadataurl.Checker { return checker }
 	t.Cleanup(func() { newMetadataURLChecker = originalFactory })
 
 	var runErr error
@@ -281,7 +304,7 @@ func TestMetadataURLCheckMessagesAllowsQueryAndFragmentRoutes(t *testing.T) {
 		"https://example.com/#/support",
 	} {
 		t.Run(finalURL, func(t *testing.T) {
-			messages := metadataURLCheckMessages(target, metadataURLCheckOutcome{result: metadataURLCheckResult{
+			messages := metadataURLCheckMessages(target, metadataURLCheckOutcome{result: metadataurl.Result{
 				FinalURL:   mustParseMetadataURL(t, finalURL),
 				StatusCode: http.StatusOK,
 			}})
@@ -297,7 +320,7 @@ func TestMetadataURLRedirectPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest() error: %v", err)
 	}
-	if err := metadataURLRedirectPolicy(publicRequest, nil); err != nil {
+	if err := metadataurl.RedirectPolicy(publicRequest, nil); err != nil {
 		t.Fatalf("expected public HTTP redirect target to pass, got %v", err)
 	}
 
@@ -305,21 +328,21 @@ func TestMetadataURLRedirectPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest() error: %v", err)
 	}
-	if err := metadataURLRedirectPolicy(privateRequest, nil); !errors.Is(err, errUnsafeMetadataURLTarget) {
+	if err := metadataurl.RedirectPolicy(privateRequest, nil); !errors.Is(err, metadataurl.ErrUnsafeTarget) {
 		t.Fatalf("expected private redirect target rejection, got %v", err)
 	}
 
-	via := make([]*http.Request, metadataURLMaxRedirects)
-	if err := metadataURLRedirectPolicy(publicRequest, via); err == nil || !strings.Contains(err.Error(), "exceeded") {
+	via := make([]*http.Request, metadataurl.MaxRedirects)
+	if err := metadataurl.RedirectPolicy(publicRequest, via); err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("expected redirect limit error, got %v", err)
 	}
 }
 
 func TestPublicMetadataURLDialControlRejectsPrivateAddresses(t *testing.T) {
-	if err := publicMetadataURLDialControl(context.Background(), "tcp4", "127.0.0.1:443", nil); !errors.Is(err, errUnsafeMetadataURLTarget) {
+	if err := metadataurl.PublicDialControl(context.Background(), "tcp4", "127.0.0.1:443", nil); !errors.Is(err, metadataurl.ErrUnsafeTarget) {
 		t.Fatalf("expected private address rejection, got %v", err)
 	}
-	if err := publicMetadataURLDialControl(context.Background(), "tcp4", "8.8.8.8:443", nil); err != nil {
+	if err := metadataurl.PublicDialControl(context.Background(), "tcp4", "8.8.8.8:443", nil); err != nil {
 		t.Fatalf("expected public address to pass, got %v", err)
 	}
 }
@@ -367,8 +390,8 @@ func TestIsPublicMetadataIP(t *testing.T) {
 	for rawIP, want := range tests {
 		t.Run(rawIP, func(t *testing.T) {
 			address := netip.MustParseAddr(rawIP)
-			if got := isPublicMetadataIP(address); got != want {
-				t.Fatalf("isPublicMetadataIP(%s) = %t, want %t", rawIP, got, want)
+			if got := metadataurl.IsPublicIP(address); got != want {
+				t.Fatalf("metadataurl.IsPublicIP(%s) = %t, want %t", rawIP, got, want)
 			}
 		})
 	}

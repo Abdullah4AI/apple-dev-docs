@@ -103,6 +103,16 @@ func remediationForAPIError(code string) string {
 	}
 }
 
+// IsRequiredAgreementError reports whether App Store Connect rejected API
+// access because the team's required agreements are missing or expired.
+func IsRequiredAgreementError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return false
+	}
+	return remediationForAPIError(apiErr.Code) != ""
+}
+
 // APIAssociatedError represents an additional actionable error returned
 // under errors[].meta.associatedErrors in App Store Connect responses.
 type APIAssociatedError struct {

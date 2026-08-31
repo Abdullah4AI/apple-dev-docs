@@ -192,6 +192,45 @@ func TestValidateIdentityForResolvedAssetsChecksProfileCertificateTeamAndBundle(
 	}
 }
 
+func TestValidateIdentityForResolvedAssetsAcceptsDirectDistributionProfiles(t *testing.T) {
+	key := mustECKey(t)
+	certificate := mustSigningCertificate(t, key, 41)
+	profilePlist, err := plist.Marshal(map[string]any{
+		"TeamIdentifier":              []string{"TEAM123"},
+		"ApplicationIdentifierPrefix": []string{"TEAM123"},
+		"ExpirationDate":              time.Now().Add(time.Hour),
+		"DeveloperCertificates":       [][]byte{certificate.Raw},
+		"Platform":                    []string{"OSX"},
+		"ProvisionsAllDevices":        true,
+		"Entitlements": map[string]any{
+			"application-identifier": "TEAM123.com.example.mac",
+			"get-task-allow":         false,
+		},
+	}, plist.XMLFormat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificates := &asc.CertificatesResponse{Data: []asc.Resource[asc.CertificateAttributes]{
+		identityCertificateResource(certificate),
+	}}
+	for _, profileType := range []string{"MAC_APP_DIRECT", "MAC_CATALYST_APP_DIRECT"} {
+		t.Run(profileType, func(t *testing.T) {
+			profile := &asc.ProfileResponse{Data: asc.Resource[asc.ProfileAttributes]{
+				ID: "profile-direct",
+				Attributes: asc.ProfileAttributes{
+					ProfileContent: base64.StdEncoding.EncodeToString(mustSignedCMS(t, profilePlist, certificate, key)),
+					ProfileType:    profileType,
+					ProfileState:   asc.ProfileStateActive,
+				},
+			}}
+			identity := &signingIdentity{PrivateKey: key}
+			if err := validateIdentityForResolvedAssets(identity, profile, certificates, "com.example.mac", profileType, time.Now()); err != nil {
+				t.Fatalf("validate direct-distribution identity: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateIdentityForResolvedAssetsRequiresExactBundleAndProfileType(t *testing.T) {
 	key := mustECKey(t)
 	certificate := mustSigningCertificate(t, key, 9)
@@ -647,8 +686,8 @@ func bindTestSigningIdentityArtifactsWithSigner(t *testing.T, artifacts *signing
 	profilePlist, err := plist.Marshal(map[string]any{
 		"UUID": profileUUID, "TeamIdentifier": []string{"TEAM123"}, "ApplicationIdentifierPrefix": []string{"TEAM123"},
 		"ExpirationDate": time.Now().Add(time.Hour), "DeveloperCertificates": [][]byte{embeddedCertificate.Raw},
-		"ProvisionedDevices": []string{"DEVICE1"},
-		"Entitlements":       map[string]any{"application-identifier": "TEAM123." + bundleID, "get-task-allow": false},
+		"Platform": []string{"iOS"}, "ProvisionedDevices": []string{"DEVICE1"},
+		"Entitlements": map[string]any{"application-identifier": "TEAM123." + bundleID, "get-task-allow": false},
 	}, plist.XMLFormat)
 	if err != nil {
 		t.Fatal(err)
@@ -668,6 +707,7 @@ func mustProfilePlist(t *testing.T, certificate *x509.Certificate, teamID, appli
 		"UUID":                        "profile-1",
 		"TeamIdentifier":              []string{teamID},
 		"ApplicationIdentifierPrefix": []string{teamID},
+		"Platform":                    []string{"iOS"},
 		"ExpirationDate":              expiration,
 		"DeveloperCertificates":       [][]byte{certificate.Raw},
 		"Entitlements": map[string]any{

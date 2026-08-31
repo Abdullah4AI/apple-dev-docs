@@ -35,7 +35,9 @@ def run_help_text() -> str:
         capture_output=True,
         text=True,
     )
-    return proc.stderr or proc.stdout
+    # ffcli writes successful help output to stdout. A cold Go module cache can
+    # add download diagnostics to stderr, which must not replace that output.
+    return proc.stdout or proc.stderr
 
 
 def parse_help(help_text: str) -> tuple[str, list[tuple[str, str]], list[tuple[str, list[tuple[str, str]]]]]:
@@ -170,6 +172,15 @@ def render(usage: str, flags: list[tuple[str, str]], groups: list[tuple[str, lis
             "# Generate local Xcode metadata before archiving",
             "asc xcode inject --manifest .asc/deployment.json --set version=1.2.3 --set build_number=42 --dry-run --output json",
             "",
+            "# Inspect the selected local Xcode toolchain without changing host state",
+            "asc xcode doctor --output json",
+            "",
+            "# Install and verify one signed IPA on an exact connected device",
+            "asc xcode install --ipa .asc/artifacts/App.ipa --device-id COREDEVICE_IDENTIFIER --timeout 5m --output json",
+            "",
+            "# Run local Xcode tests with structured results",
+            "asc xcode test --project App.xcodeproj --scheme App --destination 'platform=iOS Simulator,name=iPhone 17 Pro' --output json",
+            "",
             "# Plan, confirm, resume, check status, and live-verify a private ad hoc distribution run",
             "asc distribute plan --archive-path ./App.xcarchive --config .asc/distribution.json --plan .asc/distribution/plan.json --state-dir .asc/distribution/runs --output json",
             "asc distribute apply --plan .asc/distribution/plan.json --confirm PLAN_HASH --output json",
@@ -187,6 +198,7 @@ def render(usage: str, flags: list[tuple[str, str]], groups: list[tuple[str, lis
             "",
             "# Canonical readiness and lower-level submission lifecycle flow",
             "asc validate --app \"123456789\" --version \"1.2.3\"",
+            "asc validate --app \"123456789\" --version \"1.2.3\" --check-urls",
             "asc submit status --version-id \"VERSION_ID\"",
             "asc submit cancel --version-id \"VERSION_ID\" --confirm",
             "",

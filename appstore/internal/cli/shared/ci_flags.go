@@ -13,6 +13,7 @@ const (
 var (
 	reportFormat string
 	reportFile   string
+	junitReport  *JUnitReport
 )
 
 // BindCIFlags registers CI-related flags for report output.
@@ -54,4 +55,18 @@ func SetReportFormat(format string) {
 // SetReportFile sets the report file path (for testing).
 func SetReportFile(path string) {
 	reportFile = path
+}
+
+// SetJUnitReport registers a command-produced JUnit report for the current
+// invocation. The root runner consumes it after the command returns so
+// command-specific reports can coexist with the generic command report.
+func SetJUnitReport(report *JUnitReport) {
+	junitReport = report
+}
+
+// ConsumeJUnitReport returns and clears the command-produced JUnit report.
+func ConsumeJUnitReport() *JUnitReport {
+	report := junitReport
+	junitReport = nil
+	return report
 }

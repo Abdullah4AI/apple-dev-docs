@@ -14,6 +14,7 @@ type JUnitTestCase struct {
 	Name      string        // Test name (e.g., build-123)
 	Classname string        // Test class/category (e.g., builds)
 	Time      time.Duration // Test duration
+	Skipped   bool          // Whether the test was skipped
 	Failure   string        // Failure type (empty if passed)
 	Message   string        // Failure message
 	SystemOut string        // Standard output
@@ -25,6 +26,11 @@ type JUnitReport struct {
 	Tests     []JUnitTestCase // Test cases in this report
 	Timestamp time.Time       // Report generation time
 	Name      string          // Test suite name (default: "asc")
+	// Duration optionally reports wall time for the whole suite. Leaf case
+	// durations often exclude setup, teardown, and repeated or multi-destination
+	// work, so their sum can understate the run. When Duration exceeds that sum
+	// it is used for the suite time attribute; zero keeps the summed behavior.
+	Duration time.Duration
 }
 
 // Write writes the JUnit report to the specified file path.
@@ -71,9 +77,13 @@ func (r *JUnitReport) Marshal() ([]byte, error) {
 
 	tests := len(r.Tests)
 	failures := 0
+	skipped := 0
 	for _, tc := range r.Tests {
 		if tc.Failure != "" {
 			failures++
+		}
+		if tc.Skipped {
+			skipped++
 		}
 	}
 
@@ -86,8 +96,9 @@ func (r *JUnitReport) Marshal() ([]byte, error) {
 		Name:      name,
 		Tests:     tests,
 		Failures:  failures,
+		Skipped:   skipped,
 		Errors:    0,
-		Time:      formatDuration(totalDuration(r.Tests)),
+		Time:      formatDuration(r.suiteDuration()),
 		Timestamp: r.Timestamp.Format(time.RFC3339),
 		TestCases: testCases,
 	}
@@ -115,6 +126,7 @@ type testCaseXML struct {
 	Name      string      `xml:"name,attr"`
 	Classname string      `xml:"classname,attr"`
 	Time      string      `xml:"time,attr"`
+	Skipped   *struct{}   `xml:"skipped,omitempty"`
 	Failure   *failureXML `xml:"failure,omitempty"`
 	SystemOut string      `xml:"system-out,omitempty"`
 	SystemErr string      `xml:"system-err,omitempty"`
@@ -131,6 +143,10 @@ func (tc JUnitTestCase) toXML() testCaseXML {
 		Name:      tc.Name,
 		Classname: tc.Classname,
 		Time:      formatDuration(tc.Time),
+	}
+
+	if tc.Skipped {
+		xml.Skipped = &struct{}{}
 	}
 
 	if tc.Failure != "" {
@@ -157,6 +173,7 @@ type testsuiteXML struct {
 	Name      string        `xml:"name,attr"`
 	Tests     int           `xml:"tests,attr"`
 	Failures  int           `xml:"failures,attr"`
+	Skipped   int           `xml:"skipped,attr"`
 	Errors    int           `xml:"errors,attr"`
 	Time      string        `xml:"time,attr"`
 	Timestamp string        `xml:"timestamp,attr,omitempty"`
@@ -165,6 +182,16 @@ type testsuiteXML struct {
 
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.3f", d.Seconds())
+}
+
+// suiteDuration reports the suite time attribute, never understating the run:
+// the summed case durations unless an explicit aggregate exceeds them.
+func (r *JUnitReport) suiteDuration() time.Duration {
+	summed := totalDuration(r.Tests)
+	if r.Duration > summed {
+		return r.Duration
+	}
+	return summed
 }
 
 func totalDuration(tests []JUnitTestCase) time.Duration {

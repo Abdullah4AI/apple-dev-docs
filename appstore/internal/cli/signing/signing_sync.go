@@ -16,6 +16,7 @@ import (
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	signingpkg "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/signing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
@@ -31,16 +32,13 @@ const (
 )
 
 // SyncResult is the structured output for sync operations.
-type SyncResult struct {
-	Operation       string   `json:"operation"`
-	RepoURL         string   `json:"repoUrl"`
-	BundleID        string   `json:"bundleId"`
-	ProfileType     string   `json:"profileType"`
-	Files           []string `json:"files"`
-	IdentityPresent bool     `json:"identityPresent"`
-	IdentitySHA256  string   `json:"identitySha256,omitempty"`
-	SensitiveFiles  []string `json:"sensitiveFiles,omitempty"`
-}
+//
+// The concrete output contract lives in internal/asc so the command's JSON
+// and non-JSON renderers share one registered, exported result type.
+type SyncResult = asc.SigningSyncResult
+
+// SyncTargetResult describes one target in a multi-target signing sync push.
+type SyncTargetResult = asc.SigningSyncTargetResult
 
 type decryptedSigningFile struct {
 	RelativePath string
@@ -60,21 +58,28 @@ func SigningSyncCommand() *ffcli.Command {
 		ShortHelp:  "Sync signing assets with an encrypted git repo.",
 		LongHelp: `Sync signing certificates and provisioning profiles with an encrypted git repository.
 
-Lightweight alternative to fastlane match. Fetches signing assets from
-App Store Connect, encrypts them, and stores in a shared git repo.
-Team members pull and decrypt to get signing files.
+Fetches signing assets from App Store Connect, encrypts them, and stores them
+in a shared git repository. Team members and CI workers can pull and decrypt
+the same verified signing files.
 
 Examples:
   asc signing sync push --bundle-id com.example.app --profile-type IOS_APP_STORE \
     --repo git@github.com:team/certs.git --password-file ~/.config/asc/signing-sync-password
 
+  asc signing sync push --targets-file ./signing-targets.json --profile-type IOS_APP_STORE \
+    --repo git@github.com:team/certs.git --password-file ~/.config/asc/signing-sync-password
+
   asc signing sync pull --repo git@github.com:team/certs.git --password-file ~/.config/asc/signing-sync-password \
-    --output-dir ./signing`,
+    --output-dir ./signing
+
+  asc signing sync pull --repo git@github.com:team/certs.git --bundle-id com.example.app \
+    --profile-type IOS_APP_STORE --password-file ~/.config/asc/signing-sync-password --output-dir ./signing`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			syncPushCommand(),
 			syncPullCommand(),
+			syncRotatePasswordCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -148,10 +153,16 @@ func onceAfterSuccess(operation func() error) func() error {
 	}
 }
 
+// Kept as a narrow seam so command tests can verify that the command context is
+// handed to the whole batch operation, including Git publication, and that the
+// batch is not capped by a single outbound-request timeout.
+var runSigningSyncBatchForCommand = runSigningSyncBatch
+
 func syncPushCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("push", flag.ExitOnError)
 
-	bundleID := fs.String("bundle-id", "", "Bundle identifier (required)")
+	bundleID := fs.String("bundle-id", "", "Bundle identifier (required unless --targets-file is used)")
+	targetsFile := fs.String("targets-file", "", "[experimental] Command-root-relative JSON file containing 1-32 bundle targets (mutually exclusive with --bundle-id)")
 	profileType := fs.String("profile-type", "", "Profile type: IOS_APP_STORE, IOS_APP_DEVELOPMENT, etc. (required)")
 	repoURL := fs.String("repo", "", "Git repo URL for encrypted storage (required)")
 	password := fs.String("password", "", "Deprecated: encryption password (or ASC_MATCH_PASSWORD env); use --password-file")
@@ -168,7 +179,7 @@ func syncPushCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "push",
-		ShortUsage: "asc signing sync push --bundle-id ID --profile-type TYPE --repo URL [--password-file PATH]",
+		ShortUsage: "asc signing sync push (--bundle-id ID | --targets-file PATH) --profile-type TYPE --repo URL [--password-file PATH]",
 		ShortHelp:  "Fetch signing assets from ASC, encrypt, and push to git.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
@@ -176,10 +187,30 @@ func syncPushCommand() *ffcli.Command {
 			if len(args) > 0 {
 				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
 			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return shared.UsageError(err.Error())
+			}
 
 			bundle := strings.TrimSpace(*bundleID)
-			if bundle == "" {
+			targetsPath := *targetsFile
+			hasTargetsPath := strings.TrimSpace(targetsPath) != ""
+			if targetsPath != "" && !hasTargetsPath {
+				return shared.UsageError("--targets-file must not be empty")
+			}
+			if bundle != "" && hasTargetsPath {
+				return shared.UsageError("--bundle-id and --targets-file are mutually exclusive")
+			}
+			var targetBundles []string
+			if hasTargetsPath {
+				var readErr error
+				targetBundles, readErr = readSigningSyncTargetsFile(targetsPath)
+				if readErr != nil {
+					return shared.UsageError(readErr.Error())
+				}
+			} else if bundle == "" {
 				return shared.UsageError("--bundle-id is required")
+			} else {
+				targetBundles = []string{bundle}
 			}
 			profType := strings.ToUpper(strings.TrimSpace(*profileType))
 			if profType == "" {
@@ -206,9 +237,6 @@ func syncPushCommand() *ffcli.Command {
 			}
 			if privateKeyInput != "" && strings.TrimSpace(*identitySHA256) == "" {
 				return shared.UsageError("--identity-sha256 is required with --private-key to select one App Store Connect certificate")
-			}
-			if (identityInput != "" || privateKeyInput != "") && isDirectDistributionProfile(profType) {
-				return shared.UsageErrorf("private identity sync does not support --profile-type %s yet; omit --identity/--private-key", profType)
 			}
 			requestedFingerprint, fingerprintErr := normalizeCertificateFingerprint(*identitySHA256)
 			if fingerprintErr != nil {
@@ -251,6 +279,30 @@ func syncPushCommand() *ffcli.Command {
 			client, err := shared.GetASCClient()
 			if err != nil {
 				return fmt.Errorf("signing sync push: %w", err)
+			}
+
+			if hasTargetsPath {
+				// The batch spans one lookup, asset resolution, and optional
+				// profile creation per target plus the Git clone and push, so it
+				// receives the command context and applies its own per-request
+				// timeouts. Capping the whole run with a single request budget
+				// would fail valid multi-target runs and, with --create-missing,
+				// could abandon created profiles before publication.
+				result, batchErr := runSigningSyncBatchForCommand(ctx, client, signingSyncBatchOptions{
+					RepoURL:         repo,
+					Branch:          *branch,
+					Password:        pass,
+					ProfileType:     profType,
+					CertificateType: *certType,
+					DeviceIDs:       shared.SplitCSV(*deviceIDs),
+					CreateMissing:   *createMissing,
+					Identity:        identity,
+					BundleIDs:       targetBundles,
+				})
+				if batchErr != nil {
+					return fmt.Errorf("signing sync push: %w", batchErr)
+				}
+				return shared.PrintOutput(&result, *output.Output, *output.Pretty)
 			}
 
 			requestCtx, cancel := shared.ContextWithTimeout(ctx)
@@ -350,6 +402,10 @@ func syncPushCommand() *ffcli.Command {
 			}
 			profileDir := profileDirectoryName(profType)
 			profileRelPath := filepath.Join("profiles", profileDir, safeFileName(profile.Data.Attributes.Name, profile.Data.ID)+".mobileprovision")
+			profileMetadata, err := signingProfileArtifactMetadata(profile, bundle, profType)
+			if err != nil {
+				return fmt.Errorf("signing sync push: prepare profile metadata: %w", err)
+			}
 			if identity != nil {
 				if identityArtifacts == nil {
 					identityArtifacts, err = prepareSigningIdentityArtifacts(identity, pass, bundle, profType)
@@ -370,6 +426,9 @@ func syncPushCommand() *ffcli.Command {
 					return fmt.Errorf("signing sync push: preflight signing identity: %w", err)
 				}
 			}
+			if _, err := preflightSigningProfileArtifact(store, profileRelPath, profileContent, pass, profileMetadata); err != nil {
+				return fmt.Errorf("signing sync push: preflight profile: %w", err)
+			}
 
 			// Write encrypted files.
 			var files []string
@@ -388,7 +447,7 @@ func syncPushCommand() *ffcli.Command {
 				fmt.Fprintf(os.Stderr, "  Encrypted %s\n", relPath)
 			}
 
-			if err := store.WriteEncryptedFile(profileRelPath, profileContent, pass); err != nil {
+			if err := writeOrReuseSigningProfileArtifact(store, profileRelPath, profileContent, pass, profileMetadata); err != nil {
 				return fmt.Errorf("signing sync push: encrypt profile: %w", err)
 			}
 			files = append(files, profileRelPath)
@@ -426,7 +485,7 @@ func syncPushCommand() *ffcli.Command {
 			if identity != nil {
 				result.IdentitySHA256 = identity.CertificateSHA256
 			}
-			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+			return shared.PrintOutput(&result, *output.Output, *output.Pretty)
 		},
 	}
 }
@@ -435,6 +494,9 @@ func syncPullCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("pull", flag.ExitOnError)
 
 	repoURL := fs.String("repo", "", "Git repo URL (required)")
+	bundleID := fs.String("bundle-id", "", "[experimental] Decrypt only one bundle target (requires --profile-type; mutually exclusive with --targets-file)")
+	targetsFile := fs.String("targets-file", "", "[experimental] Decrypt only the 1-32 bundle targets in a root-relative JSON file (requires --profile-type; mutually exclusive with --bundle-id)")
+	profileType := fs.String("profile-type", "", "[experimental] Profile type for --bundle-id or --targets-file")
 	password := fs.String("password", "", "Deprecated: decryption password (or ASC_MATCH_PASSWORD env); use --password-file")
 	passwordFile := fs.String("password-file", "", "[experimental] Protected file containing the repository encryption password")
 	branch := fs.String("branch", "main", "Git branch")
@@ -443,7 +505,7 @@ func syncPullCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "pull",
-		ShortUsage: "asc signing sync pull --repo URL [--password-file PATH] [--output-dir DIR]",
+		ShortUsage: "asc signing sync pull --repo URL [--bundle-id ID | --targets-file PATH] [--profile-type TYPE] [--password-file PATH] [--output-dir DIR]",
 		ShortHelp:  "Pull and decrypt signing assets from git.",
 		FlagSet:    fs,
 		UsageFunc:  shared.DefaultUsageFunc,
@@ -455,6 +517,52 @@ func syncPullCommand() *ffcli.Command {
 			repo := strings.TrimSpace(*repoURL)
 			if repo == "" {
 				return shared.UsageError("--repo is required")
+			}
+			provided := make(map[string]bool)
+			fs.Visit(func(flag *flag.Flag) {
+				provided[flag.Name] = true
+			})
+			bundle := strings.TrimSpace(*bundleID)
+			profile := strings.ToUpper(strings.TrimSpace(*profileType))
+			bundleProvided := provided["bundle-id"]
+			targetsProvided := provided["targets-file"]
+			profileProvided := provided["profile-type"]
+			if bundleProvided && bundle == "" {
+				return shared.UsageError("--bundle-id must not be empty")
+			}
+			if targetsProvided && strings.TrimSpace(*targetsFile) == "" {
+				return shared.UsageError("--targets-file must not be empty")
+			}
+			if profileProvided && profile == "" {
+				return shared.UsageError("--profile-type must not be empty")
+			}
+			if bundleProvided && targetsProvided {
+				return shared.UsageError("--bundle-id and --targets-file are mutually exclusive")
+			}
+			selectionRequested := bundleProvided || targetsProvided
+			if selectionRequested && profile == "" {
+				return shared.UsageError("--profile-type is required with --bundle-id or --targets-file")
+			}
+			if !selectionRequested && profileProvided {
+				return shared.UsageError("--profile-type requires --bundle-id or --targets-file")
+			}
+			if selectionRequested {
+				var normalizeErr error
+				profile, normalizeErr = normalizeSigningPullProfileType(profile)
+				if normalizeErr != nil {
+					return shared.UsageError(normalizeErr.Error())
+				}
+			}
+			var selectedBundleIDs []string
+			switch {
+			case bundleProvided:
+				selectedBundleIDs = []string{bundle}
+			case targetsProvided:
+				var readErr error
+				selectedBundleIDs, readErr = readSigningSyncTargetsFile(*targetsFile)
+				if readErr != nil {
+					return shared.UsageError(readErr.Error())
+				}
 			}
 			if strings.TrimSpace(*passwordFile) != "" && *password != "" {
 				return shared.UsageError("--password-file and --password are mutually exclusive")
@@ -497,13 +605,28 @@ func syncPullCommand() *ffcli.Command {
 			}
 
 			if len(encryptedFiles) == 0 {
+				if selectionRequested {
+					return fmt.Errorf("signing sync pull: no active %s profile found in encrypted repository for bundle ID(s): %s", profile, strings.Join(selectedBundleIDs, ", "))
+				}
 				fmt.Fprintln(os.Stderr, "No encrypted signing files found in repo")
 				result := SyncResult{
 					Operation: "pull",
 					RepoURL:   sanitizeRepoURLForOutput(repo),
 					Files:     []string{},
 				}
-				return shared.PrintOutput(result, *output.Output, *output.Pretty)
+				return shared.PrintOutput(&result, *output.Output, *output.Pretty)
+			}
+
+			decrypted, err := decryptAndValidateSigningFiles(store, encryptedFiles, pass)
+			if err != nil {
+				return fmt.Errorf("signing sync pull: %w", err)
+			}
+			var targets []SyncTargetResult
+			if selectionRequested {
+				decrypted, targets, err = selectSigningPullFiles(decrypted, selectedBundleIDs, profile)
+				if err != nil {
+					return fmt.Errorf("signing sync pull: %w", err)
+				}
 			}
 
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -514,9 +637,7 @@ func syncPullCommand() *ffcli.Command {
 				return fmt.Errorf("signing sync pull: create output root: %w", err)
 			}
 			defer outputRoot.Close()
-
-			decrypted, err := prepareDecryptedSigningFilesInRoot(store, encryptedFiles, pass, outputRoot)
-			if err != nil {
+			if err := preflightSigningPullFilesInRoot(outputRoot, decrypted); err != nil {
 				return fmt.Errorf("signing sync pull: %w", err)
 			}
 
@@ -547,8 +668,27 @@ func syncPullCommand() *ffcli.Command {
 				IdentityPresent: identityPresent,
 				SensitiveFiles:  sensitiveFiles,
 			}
-			return shared.PrintOutput(result, *output.Output, *output.Pretty)
+			if selectionRequested {
+				applySigningPullSelectionResult(&result, profile, selectedBundleIDs, targets, targetsProvided)
+			}
+			return shared.PrintOutput(&result, *output.Output, *output.Pretty)
 		},
+	}
+}
+
+func applySigningPullSelectionResult(result *SyncResult, profileType string, bundleIDs []string, targets []SyncTargetResult, batch bool) {
+	if result == nil {
+		return
+	}
+	result.ProfileType = profileType
+	if batch {
+		result.BundleIDs = bundleIDs
+		result.Targets = targets
+		result.MarkBatch()
+		return
+	}
+	if len(bundleIDs) == 1 {
+		result.BundleID = bundleIDs[0]
 	}
 }
 
@@ -562,20 +702,51 @@ func prepareDecryptedSigningFiles(store *signingpkg.GitStore, encryptedFiles []s
 }
 
 func prepareDecryptedSigningFilesInRoot(store *signingpkg.GitStore, encryptedFiles []string, password string, root rootfs.Root) ([]decryptedSigningFile, error) {
+	decrypted, err := decryptAndValidateSigningFiles(store, encryptedFiles, password)
+	if err != nil {
+		return nil, err
+	}
+	if err := preflightSigningPullFilesInRoot(root, decrypted); err != nil {
+		return nil, err
+	}
+	return decrypted, nil
+}
+
+func decryptAndValidateSigningFiles(store *signingpkg.GitStore, encryptedFiles []string, password string) ([]decryptedSigningFile, error) {
+	decrypted, activeIdentityPaths, err := loadAndValidateSigningFiles(store, encryptedFiles, password)
+	if err != nil {
+		return nil, err
+	}
+	filtered := decrypted[:0]
+	for _, file := range decrypted {
+		if file.Metadata.Kind == "pkcs12-identity" {
+			canonicalPath := strings.ReplaceAll(filepath.ToSlash(file.RelativePath), `\`, "/")
+			if _, active := activeIdentityPaths[canonicalPath]; !active {
+				continue
+			}
+		}
+		filtered = append(filtered, file)
+	}
+	decrypted = filtered
+
+	return decrypted, nil
+}
+
+func loadAndValidateSigningFiles(store *signingpkg.GitStore, encryptedFiles []string, password string) ([]decryptedSigningFile, map[string]struct{}, error) {
 	if len(encryptedFiles) > maxEncryptedSigningFiles {
-		return nil, fmt.Errorf("encrypted signing repository contains %d files; limit is %d", len(encryptedFiles), maxEncryptedSigningFiles)
+		return nil, nil, fmt.Errorf("encrypted signing repository contains %d files; limit is %d", len(encryptedFiles), maxEncryptedSigningFiles)
 	}
 	if err := signingpkg.ValidateEncryptedRepositoryPaths(encryptedFiles); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var cumulativeSize int64
 	for _, relPath := range encryptedFiles {
 		size, err := store.EncryptedFileSize(relPath)
 		if err != nil {
-			return nil, fmt.Errorf("inspect encrypted artifact %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("inspect encrypted artifact %s: %w", relPath, err)
 		}
 		if size < 0 || size > maxEncryptedSigningBytes-cumulativeSize {
-			return nil, fmt.Errorf("encrypted signing repository exceeds the %d-byte cumulative size limit", maxEncryptedSigningBytes)
+			return nil, nil, fmt.Errorf("encrypted signing repository exceeds the %d-byte cumulative size limit", maxEncryptedSigningBytes)
 		}
 		cumulativeSize += size
 	}
@@ -583,11 +754,11 @@ func prepareDecryptedSigningFilesInRoot(store *signingpkg.GitStore, encryptedFil
 	for _, relPath := range encryptedFiles {
 		plaintext, metadata, err := store.ReadEncryptedFileWithMetadata(relPath, password)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("decrypt %s: %w", relPath, err)
 		}
 		sensitive, identity, err := classifySigningFile(relPath, plaintext, metadata, password)
 		if err != nil {
-			return nil, fmt.Errorf("validate %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("validate %s: %w", relPath, err)
 		}
 		decrypted = append(decrypted, decryptedSigningFile{
 			RelativePath: relPath,
@@ -599,38 +770,25 @@ func prepareDecryptedSigningFilesInRoot(store *signingpkg.GitStore, encryptedFil
 	}
 	activeIdentityPaths, err := validateIdentityArtifactGraph(decrypted)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	filtered := decrypted[:0]
 	for _, file := range decrypted {
-		if file.Metadata.Kind == "pkcs12-identity" {
-			canonicalPath := strings.ReplaceAll(filepath.ToSlash(file.RelativePath), `\`, "/")
-			if _, active := activeIdentityPaths[canonicalPath]; !active {
-				continue
-			}
-			_, certificate, err := modernpkcs12.Decode(file.Plaintext, password)
-			if err != nil || certificate == nil {
-				return nil, fmt.Errorf("active identity core is not a decodable PKCS#12 identity")
-			}
-			if now := time.Now(); now.Before(certificate.NotBefore) || !now.Before(certificate.NotAfter) {
-				return nil, fmt.Errorf("active identity certificate is not currently valid")
-			}
+		if file.Metadata.Kind != "pkcs12-identity" {
+			continue
 		}
-		filtered = append(filtered, file)
-	}
-	decrypted = filtered
-
-	for _, file := range decrypted {
-		if file.Sensitive {
-			err = root.CheckCreateNewFile(file.RelativePath)
-		} else {
-			err = root.CheckWriteFilePreservingMode(file.RelativePath)
+		canonicalPath := strings.ReplaceAll(filepath.ToSlash(file.RelativePath), `\`, "/")
+		if _, active := activeIdentityPaths[canonicalPath]; !active {
+			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("preflight output %s: %w", file.RelativePath, err)
+		_, certificate, err := modernpkcs12.Decode(file.Plaintext, password)
+		if err != nil || certificate == nil {
+			return nil, nil, fmt.Errorf("active identity core is not a decodable PKCS#12 identity")
+		}
+		if now := time.Now(); now.Before(certificate.NotBefore) || !now.Before(certificate.NotAfter) {
+			return nil, nil, fmt.Errorf("active identity certificate is not currently valid")
 		}
 	}
-	return decrypted, nil
+	return decrypted, activeIdentityPaths, nil
 }
 
 func validateIdentityArtifactGraph(files []decryptedSigningFile) (map[string]struct{}, error) {
@@ -651,9 +809,14 @@ func validateIdentityArtifactGraph(files []decryptedSigningFile) (map[string]str
 	activeCores := make(map[string]struct{})
 	contexts := make(map[string]string)
 	profiles := make(map[string][]byte)
+	profileMetadata := make(map[string]signingpkg.EncryptedFileMetadata)
+	contextProfileTypes := make(map[string]string)
 	for _, file := range files {
 		canonicalPath := strings.ReplaceAll(filepath.ToSlash(file.RelativePath), `\`, "/")
 		profiles[canonicalPath] = file.Plaintext
+		if file.Metadata.Kind == signingProfileArtifactKind {
+			profileMetadata[canonicalPath] = file.Metadata
+		}
 		if file.Metadata.Kind == "pkcs12-identity" {
 			if _, exists := cores[canonicalPath]; exists {
 				return nil, fmt.Errorf("duplicate signing identity core %s", canonicalPath)
@@ -669,6 +832,12 @@ func validateIdentityArtifactGraph(files []decryptedSigningFile) (map[string]str
 		if err := json.Unmarshal(file.Plaintext, &binding); err != nil {
 			return nil, fmt.Errorf("decode identity context graph: %w", err)
 		}
+		profilePath := canonicalSigningPullPath(binding.ProfilePath)
+		profileType := strings.ToUpper(strings.TrimSpace(binding.ProfileType))
+		if prior, exists := contextProfileTypes[profilePath]; exists && prior != profileType {
+			return nil, fmt.Errorf("conflicting identity context profile-type provenance")
+		}
+		contextProfileTypes[profilePath] = profileType
 		scope := strings.Join([]string{binding.TeamID, binding.BundleID, binding.ProfileType}, "\x00")
 		if prior, exists := contexts[scope]; exists {
 			if prior == binding.CertificateSHA256 {
@@ -694,9 +863,15 @@ func validateIdentityArtifactGraph(files []decryptedSigningFile) (map[string]str
 		if core.teamID != binding.TeamID {
 			return nil, fmt.Errorf("identity context team does not match its core identity")
 		}
-		profileContent, exists := profiles[binding.ProfilePath]
+		profilePath := canonicalSigningPullPath(binding.ProfilePath)
+		profileContent, exists := profiles[profilePath]
 		if !exists {
 			return nil, fmt.Errorf("identity context has no matching profile artifact")
+		}
+		if metadata, authenticated := profileMetadata[profilePath]; authenticated &&
+			(metadata.BundleID != binding.BundleID || metadata.ProfileType != binding.ProfileType ||
+				metadata.ProfileResourceID != binding.ProfileResourceID || (metadata.ProfileUUID != "" && metadata.ProfileUUID != binding.ProfileUUID)) {
+			return nil, fmt.Errorf("identity context does not match authenticated profile metadata")
 		}
 		profileDigest := sha256.Sum256(profileContent)
 		if !strings.EqualFold(hex.EncodeToString(profileDigest[:]), binding.ProfileSHA256) {
@@ -717,7 +892,7 @@ func validateIdentityArtifactGraph(files []decryptedSigningFile) (map[string]str
 		if !profile.ExpirationDate.After(time.Now()) || !containsFold(profile.TeamIdentifier, binding.TeamID) {
 			return nil, fmt.Errorf("identity context profile is expired or belongs to another team")
 		}
-		if !identityProfileTypeMatches(profile, binding.ProfileType) {
+		if !identityProfileTypeMatches(profile, binding.ProfileType) || !signingPullProfilePlatformMatches(profile, binding.ProfileType) {
 			return nil, fmt.Errorf("identity context profile distribution type does not match authenticated scope")
 		}
 		applicationIdentifier, _ := profile.Entitlements["application-identifier"].(string)
@@ -763,6 +938,12 @@ func identityProfileTypeMatches(profile *identityMobileProvision, profileType st
 		return getTaskAllow && len(profile.ProvisionedDevices) > 0 && !profile.ProvisionsAllDevices
 	case strings.Contains(normalized, "ADHOC"), strings.Contains(normalized, "AD_HOC"):
 		return !getTaskAllow && len(profile.ProvisionedDevices) > 0 && !profile.ProvisionsAllDevices
+	case isDirectDistributionProfile(normalized):
+		// Direct profiles use the all-device claim. Exact native Mac versus Mac
+		// Catalyst provenance still comes from the API profile type, and the
+		// resolved Developer ID certificate is matched byte-for-byte.
+		return !getTaskAllow && len(profile.ProvisionedDevices) == 0 && profile.ProvisionsAllDevices &&
+			len(profile.Platform) == 1 && strings.EqualFold(strings.TrimSpace(profile.Platform[0]), "OSX")
 	case strings.Contains(normalized, "INHOUSE"), strings.Contains(normalized, "IN_HOUSE"):
 		return !getTaskAllow && profile.ProvisionsAllDevices
 	case strings.Contains(normalized, "STORE"):
@@ -783,6 +964,12 @@ func isDirectDistributionProfile(profileType string) bool {
 
 func classifySigningFile(relPath string, plaintext []byte, metadata signingpkg.EncryptedFileMetadata, password string) (sensitive, identity bool, err error) {
 	canonicalPath := strings.ReplaceAll(filepath.ToSlash(relPath), `\`, "/")
+	if metadata.Kind == signingProfileArtifactKind {
+		if err := validateSigningProfileArtifactMetadata(canonicalPath, metadata); err != nil {
+			return false, false, err
+		}
+		return false, false, nil
+	}
 	parts := strings.Split(canonicalPath, "/")
 	identityPath := len(parts) == 3 && parts[0] == "identities" &&
 		(parts[1] == "distribution" || parts[1] == "development") && strings.HasSuffix(parts[2], ".p12")

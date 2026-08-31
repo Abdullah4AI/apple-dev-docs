@@ -85,8 +85,43 @@ func TestListReviewSubscriptionsParsesIncludedSubscriptions(t *testing.T) {
 	if !got[0].SubmitWithNextAppStoreVersion {
 		t.Fatalf("expected first subscription to be attached, got %#v", got[0])
 	}
+	if !got[0].SubmitWithNextAppStoreVersionKnown || !got[1].SubmitWithNextAppStoreVersionKnown {
+		t.Fatalf("expected requested attachment attributes to be marked known, got %#v", got)
+	}
 	if !got[1].IsAppStoreReviewInProgress {
 		t.Fatalf("expected second subscription review progress flag, got %#v", got[1])
+	}
+}
+
+func TestDecodeReviewSubscriptionsDistinguishesMissingAttachmentAttribute(t *testing.T) {
+	resources := []jsonAPIResource{{
+		ID:   "group-1",
+		Type: "subscriptionGroups",
+		Relationships: map[string]jsonAPIRelationship{
+			"subscriptions": {Data: json.RawMessage(`[{"type":"subscriptions","id":"sub-1"}]`)},
+		},
+	}}
+	included := []jsonAPIResource{{
+		ID:   "sub-1",
+		Type: "subscriptions",
+		Attributes: map[string]any{
+			"state": "READY_TO_SUBMIT",
+		},
+	}}
+
+	got := decodeReviewSubscriptions(resources, included)
+	if len(got) != 1 {
+		t.Fatalf("decodeReviewSubscriptions() len = %d, want 1", len(got))
+	}
+	if got[0].SubmitWithNextAppStoreVersionKnown {
+		t.Fatalf("missing attachment attribute must remain unknown, got %#v", got[0])
+	}
+	encoded, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(encoded), `"submitWithNextAppStoreVersionKnown":false`) {
+		t.Fatalf("unknown attachment presence is missing from JSON: %s", encoded)
 	}
 }
 
@@ -242,6 +277,9 @@ func TestReviewSubscriptionJSONPreservesFalseBooleans(t *testing.T) {
 	}
 	if !strings.Contains(text, `"submitWithNextAppStoreVersion":false`) {
 		t.Fatalf("expected false attach flag in JSON, got %s", text)
+	}
+	if !strings.Contains(text, `"submitWithNextAppStoreVersionKnown":false`) {
+		t.Fatalf("expected false attach presence flag in JSON, got %s", text)
 	}
 }
 

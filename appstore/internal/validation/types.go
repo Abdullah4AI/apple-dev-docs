@@ -9,16 +9,94 @@ const (
 	SeverityInfo    Severity = "info"
 )
 
+// Fixability identifies the channel that can resolve a validation finding.
+type Fixability string
+
+const (
+	FixabilityAPIFixable Fixability = "api-fixable"
+	FixabilityWebFixable Fixability = "web-fixable"
+	FixabilityManual     Fixability = "manual"
+)
+
+// Resolution describes how to resolve an actionable validation finding.
+type Resolution struct {
+	Fixability         Fixability `json:"fixability"`
+	Commands           []string   `json:"commands,omitempty"`
+	AppStoreConnectURL string     `json:"appStoreConnectUrl,omitempty"`
+}
+
+// DeepStatus is the terminal state of one deep validation check.
+type DeepStatus string
+
+const (
+	DeepStatusPassed        DeepStatus = "passed"
+	DeepStatusBlocked       DeepStatus = "blocked"
+	DeepStatusUnverified    DeepStatus = "unverified"
+	DeepStatusNotApplicable DeepStatus = "notApplicable"
+)
+
+// DeepSource identifies where a deep validation result came from.
+type DeepSource string
+
+const (
+	DeepSourcePublicAPI  DeepSource = "publicApi"
+	DeepSourceWebSession DeepSource = "webSession"
+	DeepSourceManual     DeepSource = "manual"
+)
+
+// DeepSessionStatus records whether a cached Apple web session was available.
+type DeepSessionStatus string
+
+const (
+	DeepSessionCached           DeepSessionStatus = "cached"
+	DeepSessionExpired          DeepSessionStatus = "expired"
+	DeepSessionUnavailable      DeepSessionStatus = "unavailable"
+	DeepSessionValidationFailed DeepSessionStatus = "validationFailed"
+)
+
+const (
+	DeepCheckPrivacyPublishState       = "privacy.publish_state"
+	DeepCheckSubscriptionAttachment    = "subscriptions.first_type_app_version_attachment"
+	DeepCheckAgreementsActive          = "agreements.active"
+	DeepCheckAvailabilityConfigured    = "availability.configured"
+	DeepCheckReviewInformationComplete = "review_information.required_fields"
+)
+
+// DeepCheck is one deterministic result collected by deep validation.
+type DeepCheck struct {
+	ID         string      `json:"id"`
+	Status     DeepStatus  `json:"status"`
+	Source     DeepSource  `json:"source"`
+	Message    string      `json:"message"`
+	Resolution *Resolution `json:"resolution,omitempty"`
+}
+
+// DeepSummary aggregates deep checks by terminal status.
+type DeepSummary struct {
+	Passed        int `json:"passed"`
+	Blocked       int `json:"blocked"`
+	Unverified    int `json:"unverified"`
+	NotApplicable int `json:"notApplicable"`
+}
+
+// DeepReport contains the additive results collected by --deep.
+type DeepReport struct {
+	SessionStatus DeepSessionStatus `json:"sessionStatus"`
+	Summary       DeepSummary       `json:"summary"`
+	Checks        []DeepCheck       `json:"checks"`
+}
+
 // CheckResult represents a single validation check result.
 type CheckResult struct {
-	ID           string   `json:"id"`
-	Severity     Severity `json:"severity"`
-	Message      string   `json:"message"`
-	Remediation  string   `json:"remediation,omitempty"`
-	Locale       string   `json:"locale,omitempty"`
-	Field        string   `json:"field,omitempty"`
-	ResourceType string   `json:"resourceType,omitempty"`
-	ResourceID   string   `json:"resourceId,omitempty"`
+	ID           string      `json:"id"`
+	Severity     Severity    `json:"severity"`
+	Message      string      `json:"message"`
+	Remediation  string      `json:"remediation,omitempty"`
+	Locale       string      `json:"locale,omitempty"`
+	Field        string      `json:"field,omitempty"`
+	ResourceType string      `json:"resourceType,omitempty"`
+	ResourceID   string      `json:"resourceId,omitempty"`
+	Resolution   *Resolution `json:"resolution,omitempty"`
 }
 
 // Summary aggregates check counts by severity.
@@ -37,14 +115,20 @@ type Remediation struct {
 
 // Report is the top-level validation output.
 type Report struct {
-	AppID         string        `json:"appId"`
-	VersionID     string        `json:"versionId"`
-	VersionString string        `json:"versionString,omitempty"`
-	Platform      string        `json:"platform,omitempty"`
-	Summary       Summary       `json:"summary"`
-	Remediation   Remediation   `json:"remediation"`
-	Checks        []CheckResult `json:"checks"`
-	Strict        bool          `json:"strict,omitempty"`
+	AppID                 string        `json:"appId"`
+	VersionID             string        `json:"versionId"`
+	VersionString         string        `json:"versionString,omitempty"`
+	VersionState          string        `json:"-"`
+	Platform              string        `json:"platform,omitempty"`
+	Summary               Summary       `json:"summary"`
+	Remediation           Remediation   `json:"remediation"`
+	Checks                []CheckResult `json:"checks"`
+	Strict                bool          `json:"strict,omitempty"`
+	Deep                  *DeepReport   `json:"deep,omitempty"`
+	HasActiveMonetization bool          `json:"-"`
+	MonetizationKnown     bool          `json:"-"`
+	HasPaidAppPrice       bool          `json:"-"`
+	AppPricingKnown       bool          `json:"-"`
 }
 
 // Input collects the validation inputs.
@@ -80,6 +164,8 @@ type Input struct {
 	ReleaseType                 string
 	EarliestReleaseDate         string
 	Copyright                   string
+	HasPaidAppPrice             bool
+	AppPricingKnown             bool
 }
 
 // VersionLocalization represents version-level metadata.

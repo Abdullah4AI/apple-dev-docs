@@ -32,6 +32,9 @@ var (
 // It returns the intended process exit code.
 func Run(args []string, versionInfo string) int {
 	defer shared.CleanupTempPrivateKeys()
+	// A command may register a structured report for the root runner. Clear
+	// any report left by a direct command test or an interrupted prior run.
+	shared.ConsumeJUnitReport()
 
 	// Fast path for the most common version check invocation. This avoids
 	// building/parsing the entire command tree just to print the version.
@@ -157,12 +160,18 @@ func Run(args []string, versionInfo string) int {
 	}
 
 	// Write JUnit report if requested
+	commandJUnitReport := shared.ConsumeJUnitReport()
 	if shared.ReportFormat() == shared.ReportFormatJUnit && shared.ReportFile() != "" {
 		reportRunErr := runErr
 		if renderGroupHelp {
 			reportRunErr = nil
 		}
-		reportErr := writeJUnitReport(commandName, reportRunErr, elapsed)
+		var reportErr error
+		if commandJUnitReport != nil {
+			reportErr = commandJUnitReport.Write(shared.ReportFile())
+		} else {
+			reportErr = writeJUnitReport(commandName, reportRunErr, elapsed)
+		}
 		if reportErr != nil {
 			// Report write failure is a hard error - CI depends on it
 			fmt.Fprintf(os.Stderr, "Error: failed to write JUnit report: %v\n", reportErr)

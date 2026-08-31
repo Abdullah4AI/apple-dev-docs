@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
 MODULE_PATH = Path(__file__).with_name("generate-command-docs.py")
@@ -11,6 +12,12 @@ SPEC = importlib.util.spec_from_file_location("generate_command_docs", MODULE_PA
 assert SPEC and SPEC.loader
 generate_command_docs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generate_command_docs)
+
+CHECK_MODULE_PATH = Path(__file__).with_name("check-commands-docs.py")
+CHECK_SPEC = importlib.util.spec_from_file_location("check_commands_docs", CHECK_MODULE_PATH)
+assert CHECK_SPEC and CHECK_SPEC.loader
+check_commands_docs = importlib.util.module_from_spec(CHECK_SPEC)
+CHECK_SPEC.loader.exec_module(check_commands_docs)
 
 
 HELP_WITH_SAMPLES = """DESCRIPTION
@@ -32,6 +39,18 @@ FLAGS
 
 
 class ParseHelpTests(unittest.TestCase):
+    @patch.object(generate_command_docs.subprocess, "run")
+    def test_help_stdout_wins_over_go_download_diagnostics(self, run: Mock) -> None:
+        run.return_value = Mock(stdout=HELP_WITH_SAMPLES, stderr="go: downloading example.com/module\n")
+
+        self.assertEqual(generate_command_docs.run_help_text(), HELP_WITH_SAMPLES)
+
+    @patch.object(check_commands_docs.subprocess, "run")
+    def test_command_check_stdout_wins_over_go_download_diagnostics(self, run: Mock) -> None:
+        run.return_value = Mock(stdout=HELP_WITH_SAMPLES, stderr="go: downloading example.com/module\n")
+
+        self.assertEqual(check_commands_docs.run_help_text(), HELP_WITH_SAMPLES)
+
     def test_usage_comes_from_the_usage_section(self) -> None:
         usage, _, _ = generate_command_docs.parse_help(HELP_WITH_SAMPLES)
         self.assertEqual(usage, "asc <subcommand> [flags]")
@@ -50,6 +69,18 @@ class ParseHelpTests(unittest.TestCase):
         self.assertEqual(
             groups,
             [("UTILITY COMMANDS", [("search", "Search asc commands and examples.")])],
+        )
+
+
+class RenderTests(unittest.TestCase):
+    def test_validate_url_check_is_present_in_high_signal_examples(self) -> None:
+        rendered = generate_command_docs.render(
+            "asc <subcommand> [flags]", [], []
+        )
+
+        self.assertIn(
+            'asc validate --app "123456789" --version "1.2.3" --check-urls',
+            rendered,
         )
 
 

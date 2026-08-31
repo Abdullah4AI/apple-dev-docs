@@ -2031,6 +2031,225 @@ func TestClearLastSessionMarkerDefaultBackendIgnoresUnavailableKeychainFallback(
 	}
 }
 
+func TestResumeCachedSessionWithoutPersistNeverOpensKeychain(t *testing.T) {
+	withSessionInfoStub(t)
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "keychain")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	opened := 0
+	previousOpen := sessionKeyringOpen
+	sessionKeyringOpen = func() (keyring.Keyring, error) {
+		opened++
+		return nil, errors.New("keychain should not be opened")
+	}
+	t.Cleanup(func() { sessionKeyringOpen = previousOpen })
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{{Name: "myacinfo", Value: "file-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)}})
+	key := webSessionCacheKey("user@example.com")
+	if err := writeSessionToFile(key, serializeCookieJar(jar, "user@example.com")); err != nil {
+		t.Fatalf("writeSessionToFile error: %v", err)
+	}
+
+	resumed, ok, err := ResumeCachedSessionWithoutPersist(context.Background(), "user@example.com")
+	if err != nil || !ok || resumed == nil {
+		t.Fatalf("resume = (%+v, %t, %v), want cached file session", resumed, ok, err)
+	}
+	if opened != 0 {
+		t.Fatalf("keychain opened %d times", opened)
+	}
+}
+
+func TestResumeCachedSessionWithoutPersistReadsLegacyWithoutMigrating(t *testing.T) {
+	withSessionInfoStub(t)
+	webDir := filepath.Join(t.TempDir(), "web-cache")
+	legacyDir := filepath.Join(t.TempDir(), "iris-cache")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "file")
+	t.Setenv(webSessionCacheDirEnv, webDir)
+	t.Setenv(legacyIrisSessionCacheEnabledEnv, "1")
+	t.Setenv(legacyIrisSessionCacheDirEnv, legacyDir)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+
+	key := webSessionCacheKey("user@example.com")
+	legacy := persistedSession{
+		Version:   webSessionCacheVersion,
+		UpdatedAt: time.Now().UTC(),
+		UserEmail: "user@example.com",
+		Cookies: map[string][]pCookie{
+			"https://appstoreconnect.apple.com/": {{Name: "myacinfo", Value: "legacy-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)}},
+		},
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy session: %v", err)
+	}
+	legacyPath := filepath.Join(legacyDir, "session-"+key+".json")
+	if err := os.WriteFile(legacyPath, raw, 0o600); err != nil {
+		t.Fatalf("write legacy session: %v", err)
+	}
+
+	resumed, ok, err := ResumeCachedSessionWithoutPersist(context.Background(), "user@example.com")
+	if err != nil || !ok || resumed == nil {
+		t.Fatalf("resume = (%+v, %t, %v), want legacy session", resumed, ok, err)
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy session was changed or removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(webDir, "session-"+key+".json")); !os.IsNotExist(err) {
+		t.Fatalf("read-only resume migrated the legacy session, stat err=%v", err)
+	}
+}
+
+func TestResumeCachedSessionWithoutPersistPreservesMalformedLegacyCache(t *testing.T) {
+	legacyDir := filepath.Join(t.TempDir(), "iris-cache")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "file")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+	t.Setenv(legacyIrisSessionCacheEnabledEnv, "1")
+	t.Setenv(legacyIrisSessionCacheDirEnv, legacyDir)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+
+	key := webSessionCacheKey("user@example.com")
+	legacyPath, err := legacyIrisSessionFilePath(key)
+	if err != nil {
+		t.Fatalf("legacy session path: %v", err)
+	}
+	raw := []byte("{malformed")
+	if err := os.WriteFile(legacyPath, raw, 0o600); err != nil {
+		t.Fatalf("write malformed legacy session: %v", err)
+	}
+
+	resumed, ok, err := ResumeCachedSessionWithoutPersist(context.Background(), "user@example.com")
+	if err != nil || ok || resumed != nil {
+		t.Fatalf("resume = (%+v, %t, %v), want ignored malformed cache", resumed, ok, err)
+	}
+	after, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("read preserved legacy session: %v", err)
+	}
+	if string(after) != string(raw) {
+		t.Fatalf("legacy session changed: %q", after)
+	}
+}
+
+func TestResumeLastCachedSessionWithoutPersistPreservesMalformedLegacyMarker(t *testing.T) {
+	legacyDir := filepath.Join(t.TempDir(), "iris-cache")
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "file")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+	t.Setenv(legacyIrisSessionCacheEnabledEnv, "1")
+	t.Setenv(legacyIrisSessionCacheDirEnv, legacyDir)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+
+	legacyPath, err := legacyIrisLastFilePath()
+	if err != nil {
+		t.Fatalf("legacy marker path: %v", err)
+	}
+	raw := []byte("{malformed")
+	if err := os.WriteFile(legacyPath, raw, 0o600); err != nil {
+		t.Fatalf("write malformed legacy marker: %v", err)
+	}
+
+	resumed, ok, err := ResumeLastCachedSessionWithoutPersist(context.Background())
+	if err != nil || ok || resumed != nil {
+		t.Fatalf("resume last = (%+v, %t, %v), want ignored malformed marker", resumed, ok, err)
+	}
+	after, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("read preserved legacy marker: %v", err)
+	}
+	if string(after) != string(raw) {
+		t.Fatalf("legacy marker changed: %q", after)
+	}
+}
+
+func TestResumeCachedSessionWithoutPersistPreservesExpiredCache(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Setenv(webSessionCacheEnabledEnv, "1")
+			t.Setenv(webSessionBackendEnv, "file")
+			t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+			previousFetcher := sessionInfoFetcher
+			sessionInfoFetcher = func(context.Context, *http.Client) (*sessionInfo, error) {
+				return nil, &sessionInfoStatusError{Status: status}
+			}
+			t.Cleanup(func() { sessionInfoFetcher = previousFetcher })
+
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatalf("cookiejar.New error: %v", err)
+			}
+			targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+			jar.SetCookies(targetURL, []*http.Cookie{{Name: "myacinfo", Value: "expired-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)}})
+			key := webSessionCacheKey("user@example.com")
+			if err := writeSessionToFile(key, serializeCookieJar(jar, "user@example.com")); err != nil {
+				t.Fatalf("writeSessionToFile error: %v", err)
+			}
+			path, err := webSessionFilePath(key)
+			if err != nil {
+				t.Fatalf("session path: %v", err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read cache before resume: %v", err)
+			}
+
+			resumed, ok, err := ResumeCachedSessionWithoutPersist(context.Background(), "user@example.com")
+			if !errors.Is(err, ErrCachedSessionExpired) || ok || resumed == nil {
+				t.Fatalf("resume = (%+v, %t, %v), want identity plus expired sentinel", resumed, ok, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read cache after resume: %v", err)
+			}
+			if string(after) != string(before) {
+				t.Fatal("read-only expired-session validation changed the cache")
+			}
+		})
+	}
+}
+
+func TestResumeCachedSessionWithoutPersistClassifiesTransientValidationFailure(t *testing.T) {
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "file")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	previousFetcher := sessionInfoFetcher
+	sessionInfoFetcher = func(context.Context, *http.Client) (*sessionInfo, error) {
+		return nil, errors.New("temporary network failure")
+	}
+	t.Cleanup(func() { sessionInfoFetcher = previousFetcher })
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New error: %v", err)
+	}
+	targetURL, _ := url.Parse("https://appstoreconnect.apple.com/")
+	jar.SetCookies(targetURL, []*http.Cookie{{Name: "myacinfo", Value: "file-token", Path: "/", Expires: time.Now().Add(24 * time.Hour)}})
+	key := webSessionCacheKey("user@example.com")
+	if err := writeSessionToFile(key, serializeCookieJar(jar, "user@example.com")); err != nil {
+		t.Fatalf("writeSessionToFile error: %v", err)
+	}
+
+	resumed, ok, err := ResumeCachedSessionWithoutPersist(context.Background(), "user@example.com")
+	if !errors.Is(err, ErrCachedSessionValidationFailed) || ok || resumed == nil || resumed.UserEmail != "user@example.com" {
+		t.Fatalf("resume = (%+v, %t, %v), want identity plus validation sentinel", resumed, ok, err)
+	}
+}
+
 func persistedMyacinfoCookieValue(sess persistedSession, baseURL string) string {
 	list := sess.Cookies[baseURL]
 	for _, cookie := range list {

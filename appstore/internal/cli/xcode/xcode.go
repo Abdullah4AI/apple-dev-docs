@@ -66,7 +66,9 @@ Examples:
   asc xcode build --project App.xcodeproj --scheme App --destination 'platform=iOS Simulator,name=iPhone 17 Pro Max,OS=27.0' --no-code-signing --output json
   asc xcode archive --workspace App.xcworkspace --scheme App --archive-path .asc/artifacts/App.xcarchive --output json
   asc xcode export --archive-path .asc/artifacts/App.xcarchive --ipa-path .asc/artifacts/App.ipa --output json
+  asc xcode install --ipa .asc/artifacts/App.ipa --device-id COREDEVICE_IDENTIFIER --output json
   asc xcode export-options generate --archive-path .asc/artifacts/App.xcarchive
+  asc xcode doctor --output json
   asc xcode version view
   asc xcode version bump --type patch
   asc xcode version edit --version "1.3.0" --build-number "42"`,
@@ -75,9 +77,12 @@ Examples:
 		Subcommands: []*ffcli.Command{
 			XcodeInjectCommand(),
 			XcodeBuildCommand(),
+			XcodeTestCommand(),
 			XcodeArchiveCommand(),
 			XcodeExportCommand(),
+			XcodeInstallCommand(),
 			XcodeExportOptionsGroupCommand(),
+			XcodeDoctorCommand(),
 			XcodeValidateCommand(),
 			XcodeVersionCommand(),
 		},

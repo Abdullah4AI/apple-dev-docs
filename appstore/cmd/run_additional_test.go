@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -2101,6 +2102,15 @@ func TestRun_SnitchPreservesPositionalDescription(t *testing.T) {
 	resetReportFlags(t)
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
+	originalEmitTelemetry := emitTelemetry
+	t.Cleanup(func() { emitTelemetry = originalEmitTelemetry })
+
+	var gotExitCode int
+	var gotContext telemetry.EventContext
+	emitTelemetry = func(_ string, _ string, _ time.Duration, exitCode int, eventContext telemetry.EventContext) {
+		gotExitCode = exitCode
+		gotContext = eventContext
+	}
 
 	_, stderr := captureCommandOutput(t, func() {
 		if code := Run([]string{"snitch", "--dry-run", "status command needs bundle ID support"}, "1.0.0"); code != ExitSuccess {
@@ -2110,6 +2120,9 @@ func TestRun_SnitchPreservesPositionalDescription(t *testing.T) {
 
 	if !strings.Contains(stderr, "status command needs bundle ID support") {
 		t.Fatalf("expected snitch preview to preserve description, got %q", stderr)
+	}
+	if gotExitCode != ExitSuccess || gotContext.InvocationShape != telemetry.InvocationShapeLeaf {
+		t.Fatalf("unexpected telemetry for successful positional snitch: exit=%d context=%+v", gotExitCode, gotContext)
 	}
 }
 
@@ -3385,6 +3398,95 @@ func TestWriteJUnitReportPreservesMissingRequiredParameter(t *testing.T) {
 	}
 	if got := suite.TestCases[0].Failure.Message; got != "--app" {
 		t.Fatalf("failure message = %q, want %q", got, "--app")
+	}
+}
+
+func TestRunXcodeTestWritesStructuredJUnitReport(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("local Xcode commands are macOS-only")
+	}
+	resetReportFlags(t)
+	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
+	binDir := t.TempDir()
+	xcodebuildPath := filepath.Join(binDir, "xcodebuild")
+	xcodebuildScript := `#!/bin/sh
+if [ "$1" = "-version" ]; then
+  printf 'Xcode 26.0\nBuild version 26A1\n'
+  exit 0
+fi
+result=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-resultBundlePath" ] && [ "$#" -gt 1 ]; then
+    result="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+if [ -n "$result" ]; then
+  mkdir -p "$result"
+fi
+printf 'structured xcode test diagnostic\n' >&2
+exit 0
+`
+	if err := os.WriteFile(xcodebuildPath, []byte(xcodebuildScript), 0o755); err != nil {
+		t.Fatalf("WriteFile() xcodebuild error: %v", err)
+	}
+	xcrunPath := filepath.Join(binDir, "xcrun")
+	xcrunScript := `#!/bin/sh
+if [ "$4" = "summary" ]; then
+  printf '%s\n' '{"totalTestCount":1,"passedTests":1,"failedTests":0,"skippedTests":0,"testFailures":[]}'
+else
+  printf '%s\n' '{"testNodes":[{"nodeType":"Test Plan","children":[{"nodeType":"Unit test bundle","children":[{"nodeType":"Test Suite","children":[{"nodeType":"Test Case","nodeIdentifier":"DemoTests/Smoke/testPass","name":"testPass","result":"Passed","duration":"0.25"}]}]}]}]}'
+fi
+`
+	if err := os.WriteFile(xcrunPath, []byte(xcrunScript), 0o755); err != nil {
+		t.Fatalf("WriteFile() xcrun error: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	projectPath := filepath.Join(t.TempDir(), "Demo.xcodeproj")
+	if err := os.Mkdir(projectPath, 0o755); err != nil {
+		t.Fatalf("Mkdir() project error: %v", err)
+	}
+	resultPath := filepath.Join(t.TempDir(), "Demo-tests.xcresult")
+	reportPath := filepath.Join(t.TempDir(), "test-results.xml")
+	originalEmitTelemetry := emitTelemetry
+	emitTelemetry = func(_ string, _ string, _ time.Duration, _ int, _ telemetry.EventContext) {}
+	t.Cleanup(func() {
+		emitTelemetry = originalEmitTelemetry
+	})
+
+	stdout, stderr := captureCommandOutput(t, func() {
+		code := Run([]string{
+			"--report", "junit", "--report-file", reportPath,
+			"xcode", "test", "--project", projectPath, "--scheme", "Demo",
+			"--destination", "generic/platform=iOS", "--result-bundle-path", resultPath,
+			"--output", "json",
+		}, "4.12.0")
+		if code != ExitSuccess {
+			t.Fatalf("Run() exit code = %d, want %d", code, ExitSuccess)
+		}
+	})
+	if !strings.Contains(stdout, `"tests"`) || !strings.Contains(stdout, `"testPass"`) {
+		t.Fatalf("stdout = %q, want structured test result", stdout)
+	}
+	if !strings.Contains(stderr, "structured xcode test diagnostic") {
+		t.Fatalf("stderr = %q, want streamed Xcode diagnostic", stderr)
+	}
+	reportData, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("ReadFile() report error: %v", err)
+	}
+	var suite struct {
+		TestCases []struct {
+			Name string `xml:"name,attr"`
+		} `xml:"testcase"`
+	}
+	if err := xml.Unmarshal(reportData, &suite); err != nil {
+		t.Fatalf("xml.Unmarshal() report error: %v", err)
+	}
+	if len(suite.TestCases) != 1 || suite.TestCases[0].Name != "testPass" {
+		t.Fatalf("JUnit report = %s, want one structured test case", reportData)
 	}
 }
 
