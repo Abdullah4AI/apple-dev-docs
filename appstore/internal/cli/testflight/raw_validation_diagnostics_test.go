@@ -19,102 +19,119 @@ func TestTestFlightRawValidationDiagnosticsPreserveContracts(t *testing.T) {
 		wantError string
 		wantCode  shared.DiagnosticCode
 		wantParam string
+		// usageError marks a pre-request flag check that reports its own
+		// diagnostic and exits with usage semantics (#518). The raw command
+		// renders the command path it was written with; the re-parented tree
+		// rewrites it through the context, which the cmdtest tables cover.
+		usageError bool
 	}{
 		{
-			name:      "beta groups list limit",
-			command:   BetaGroupsListCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "beta-groups list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta groups list limit",
+			command:    BetaGroupsListCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "beta-groups list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta groups relationships limit",
-			command:   BetaGroupsRelationshipsGetCommand,
-			args:      []string{"--group-id", "group-1", "--type", "betaTesters", "--limit", "201"},
-			wantError: "testflight beta-groups relationships view: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta groups relationships limit",
+			command:    BetaGroupsRelationshipsGetCommand,
+			args:       []string{"--group-id", "group-1", "--type", "betaTesters", "--limit", "201"},
+			wantError:  "testflight beta-groups relationships view: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta license agreements list limit",
-			command:   BetaLicenseAgreementsListCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "beta-license-agreements list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta license agreements list limit",
+			command:    BetaLicenseAgreementsListCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "beta-license-agreements list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta testers list limit",
-			command:   BetaTestersListCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "beta-testers list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta testers list limit",
+			command:    BetaTestersListCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "beta-testers list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta tester apps limit",
-			command:   BetaTestersAppsListCommand,
-			args:      []string{"--tester-id", "tester-1", "--limit", "201"},
-			wantError: "testflight beta-testers apps list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta tester apps limit",
+			command:    BetaTestersAppsListCommand,
+			args:       []string{"--tester-id", "tester-1", "--limit", "201"},
+			wantError:  "testflight beta-testers apps list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta tester beta groups limit",
-			command:   BetaTestersBetaGroupsListCommand,
-			args:      []string{"--tester-id", "tester-1", "--limit", "201"},
-			wantError: "testflight beta-testers beta-groups list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta tester beta groups limit",
+			command:    BetaTestersBetaGroupsListCommand,
+			args:       []string{"--tester-id", "tester-1", "--limit", "201"},
+			wantError:  "testflight beta-testers beta-groups list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta tester builds limit",
-			command:   BetaTestersBuildsListCommand,
-			args:      []string{"--tester-id", "tester-1", "--limit", "201"},
-			wantError: "testflight beta-testers builds list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta tester builds limit",
+			command:    BetaTestersBuildsListCommand,
+			args:       []string{"--tester-id", "tester-1", "--limit", "201"},
+			wantError:  "testflight beta-testers builds list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta tester relationships limit",
-			command:   BetaTestersRelationshipsGetCommand,
-			args:      []string{"--tester-id", "tester-1", "--type", "apps", "--limit", "201"},
-			wantError: "testflight beta-testers relationships view: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta tester relationships limit",
+			command:    BetaTestersRelationshipsGetCommand,
+			args:       []string{"--tester-id", "tester-1", "--type", "apps", "--limit", "201"},
+			wantError:  "testflight beta-testers relationships view: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "review view limit",
-			command:   TestFlightReviewGetCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "testflight review view: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "review view limit",
+			command:    TestFlightReviewGetCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "testflight review view: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "review submissions limit",
-			command:   TestFlightReviewSubmissionsListCommand,
-			args:      []string{"--build-id", "build-1", "--limit", "201"},
-			wantError: "testflight review submissions list: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "review submissions limit",
+			command:    TestFlightReviewSubmissionsListCommand,
+			args:       []string{"--build-id", "build-1", "--limit", "201"},
+			wantError:  "testflight review submissions list: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "beta details limit",
-			command:   TestFlightBetaDetailsGetCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "testflight beta-details view: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "beta details limit",
+			command:    TestFlightBetaDetailsGetCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "testflight beta-details view: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
-			name:      "recruitment options limit",
-			command:   TestFlightRecruitmentOptionsCommand,
-			args:      []string{"--limit", "201"},
-			wantError: "testflight recruitment options: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "recruitment options limit",
+			command:    TestFlightRecruitmentOptionsCommand,
+			args:       []string{"--limit", "201"},
+			wantError:  "testflight recruitment options: --limit must be between 1 and 200",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
+			usageError: true,
 		},
 		{
 			name:      "beta groups relationship aliases conflict",
@@ -180,28 +197,31 @@ func TestTestFlightRawValidationDiagnosticsPreserveContracts(t *testing.T) {
 			wantCode:  shared.DiagnosticConflictingInput,
 		},
 		{
-			name:      "beta tester metrics period",
-			command:   BetaTestersMetricsCommand,
-			args:      []string{"--period", "P10D"},
-			wantError: "--period must be one of: P7D, P30D, P90D, P365D",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--period",
+			name:       "beta tester metrics period",
+			command:    BetaTestersMetricsCommand,
+			args:       []string{"--period", "P10D"},
+			wantError:  "--period must be one of: P7D, P30D, P90D, P365D",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--period",
+			usageError: true,
 		},
 		{
-			name:      "recruitment options fields",
-			command:   TestFlightRecruitmentOptionsCommand,
-			args:      []string{"--fields", "invalid"},
-			wantError: "testflight recruitment options: --fields must be one of: deviceFamilyOsVersions",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--fields",
+			name:       "recruitment options fields",
+			command:    TestFlightRecruitmentOptionsCommand,
+			args:       []string{"--fields", "invalid"},
+			wantError:  "testflight recruitment options: --fields must be one of: deviceFamilyOsVersions",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--fields",
+			usageError: true,
 		},
 		{
-			name:      "recruitment set filter syntax",
-			command:   TestFlightRecruitmentSetCommand,
-			args:      []string{"--group", "group-1", "--os-version-filter", "IPHONE26"},
-			wantError: "testflight recruitment set: --os-version-filter must use DEVICE_FAMILY=MIN_OS (e.g., IPHONE=26)",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--os-version-filter",
+			name:       "recruitment set filter syntax",
+			command:    TestFlightRecruitmentSetCommand,
+			args:       []string{"--group", "group-1", "--os-version-filter", "IPHONE26"},
+			wantError:  "testflight recruitment set: --os-version-filter must use DEVICE_FAMILY=MIN_OS (e.g., IPHONE=26)",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--os-version-filter",
+			usageError: true,
 		},
 	}
 
@@ -222,17 +242,30 @@ func TestTestFlightRawValidationDiagnosticsPreserveContracts(t *testing.T) {
 			if got := runErr.Error(); got != test.wantError {
 				t.Fatalf("error = %q, want %q", got, test.wantError)
 			}
-			if stderr != "" {
-				t.Fatalf("stderr = %q, want empty output for an unreported validation error", stderr)
-			}
-			if errors.Is(runErr, flag.ErrHelp) {
-				t.Fatalf("errors.Is(flag.ErrHelp) = true, want generic exit semantics: %v", runErr)
-			}
-			if shared.ClassifyUsageError(runErr) != "" {
-				t.Fatalf("usage classification = %q, want generic error classification", shared.ClassifyUsageError(runErr))
-			}
-			if !shared.IsValidationError(runErr) {
-				t.Fatal("expected validation classification")
+			if test.usageError {
+				wantStderr := "Error: " + test.wantError + "\n"
+				if stderr != wantStderr {
+					t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+				}
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("errors.Is(flag.ErrHelp) = false, want usage exit semantics: %v", runErr)
+				}
+				if shared.ClassifyUsageError(runErr) == "" {
+					t.Fatal("expected usage classification")
+				}
+			} else {
+				if stderr != "" {
+					t.Fatalf("stderr = %q, want empty output for an unreported validation error", stderr)
+				}
+				if errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("errors.Is(flag.ErrHelp) = true, want generic exit semantics: %v", runErr)
+				}
+				if shared.ClassifyUsageError(runErr) != "" {
+					t.Fatalf("usage classification = %q, want generic error classification", shared.ClassifyUsageError(runErr))
+				}
+				if !shared.IsValidationError(runErr) {
+					t.Fatal("expected validation classification")
+				}
 			}
 
 			diagnostic, ok := shared.DiagnosticFromError(runErr)

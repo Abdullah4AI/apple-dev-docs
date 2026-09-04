@@ -120,14 +120,14 @@ Examples:
 				return flag.ErrHelp
 			}
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
-				return fmt.Errorf("analytics requests: --limit must be between 1 and 200")
+				return shared.UsageError("analytics requests: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("analytics requests: %w", err)
+				return shared.UsageErrorf("analytics requests: %v", err)
 			}
 			if strings.TrimSpace(*requestID) != "" {
 				if err := validateAnalyticsRequestID(*requestID); err != nil {
-					return fmt.Errorf("analytics requests: %w", err)
+					return shared.UsageErrorf("analytics requests: %v", err)
 				}
 			}
 
@@ -322,7 +322,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--request-id")
 			}
 			if err := validateAnalyticsRequestID(id); err != nil {
-				return fmt.Errorf("analytics requests delete: %w", err)
+				return shared.UsageErrorf("analytics requests delete: %v", err)
 			}
 			if !*confirm {
 				fmt.Fprintln(os.Stderr, "Error: --confirm is required")
@@ -402,19 +402,19 @@ Examples:
 			}
 			if strings.TrimSpace(*requestID) != "" {
 				if err := validateAnalyticsRequestID(*requestID); err != nil {
-					return fmt.Errorf("analytics view: %w", err)
+					return shared.UsageErrorf("analytics view: %v", err)
 				}
 			}
 			if strings.TrimSpace(*instanceID) != "" {
 				if _, err := asc.ValidateResourcePathSegment(*instanceID); err != nil {
-					return fmt.Errorf("analytics view: --instance-id: %w", err)
+					return shared.UsageErrorf("analytics view: --instance-id: %v", err)
 				}
 			}
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
-				return fmt.Errorf("analytics view: --limit must be between 1 and 200")
+				return shared.UsageError("analytics view: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("analytics view: %w", err)
+				return shared.UsageErrorf("analytics view: %v", err)
 			}
 
 			var processingDateFilter string
@@ -566,14 +566,14 @@ Examples:
 				return shared.MissingRequiredUsageError("--instance-id")
 			}
 			if err := validateAnalyticsRequestID(*requestID); err != nil {
-				return fmt.Errorf("analytics download: %w", err)
+				return shared.UsageErrorf("analytics download: %v", err)
 			}
 			if _, err := asc.ValidateResourcePathSegment(*instanceID); err != nil {
-				return fmt.Errorf("analytics download: --instance-id: %w", err)
+				return shared.UsageErrorf("analytics download: --instance-id: %v", err)
 			}
 			if strings.TrimSpace(*segmentID) != "" {
 				if _, err := asc.ValidateResourcePathSegment(*segmentID); err != nil {
-					return fmt.Errorf("analytics download: --segment-id: %w", err)
+					return shared.UsageErrorf("analytics download: --segment-id: %v", err)
 				}
 			}
 

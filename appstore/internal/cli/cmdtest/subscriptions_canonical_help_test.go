@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -357,6 +359,11 @@ func TestCanonicalWrapperErrorsUseCanonicalPaths(t *testing.T) {
 		name    string
 		args    []string
 		wantErr string
+		// usageError marks a pre-request flag check converted to a usage
+		// error (#518). Such a check reports itself while the command is
+		// still running, so the canonical path must already be in the
+		// printed diagnostic rather than only in the returned error.
+		usageError bool
 	}{
 		{
 			name:    "subscriptions offers win-back next validation",
@@ -364,14 +371,16 @@ func TestCanonicalWrapperErrorsUseCanonicalPaths(t *testing.T) {
 			wantErr: "subscriptions offers win-back list: --next must be an App Store Connect URL",
 		},
 		{
-			name:    "subscriptions promoted-purchases next validation",
-			args:    []string{"subscriptions", "promoted-purchases", "list", "--next", "http://api.appstoreconnect.apple.com/v1/apps/app-1/promotedPurchases?cursor=AQ"},
-			wantErr: "subscriptions promoted-purchases list: --next must be an App Store Connect URL",
+			name:       "subscriptions promoted-purchases next validation",
+			args:       []string{"subscriptions", "promoted-purchases", "list", "--next", "http://api.appstoreconnect.apple.com/v1/apps/app-1/promotedPurchases?cursor=AQ"},
+			wantErr:    "subscriptions promoted-purchases list: --next must be an App Store Connect URL",
+			usageError: true,
 		},
 		{
-			name:    "iap promoted-purchases next validation",
-			args:    []string{"iap", "promoted-purchases", "list", "--next", "http://api.appstoreconnect.apple.com/v1/apps/app-1/promotedPurchases?cursor=AQ"},
-			wantErr: "iap promoted-purchases list: --next must be an App Store Connect URL",
+			name:       "iap promoted-purchases next validation",
+			args:       []string{"iap", "promoted-purchases", "list", "--next", "http://api.appstoreconnect.apple.com/v1/apps/app-1/promotedPurchases?cursor=AQ"},
+			wantErr:    "iap promoted-purchases list: --next must be an App Store Connect URL",
+			usageError: true,
 		},
 		{
 			name:    "subscriptions offers offer-codes values auth error",
@@ -379,9 +388,10 @@ func TestCanonicalWrapperErrorsUseCanonicalPaths(t *testing.T) {
 			wantErr: "subscriptions offers offer-codes values:",
 		},
 		{
-			name:    "subscriptions pricing prices next validation",
-			args:    []string{"subscriptions", "pricing", "prices", "list", "--next", "http://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/prices?cursor=AQ"},
-			wantErr: "subscriptions pricing prices list: --next must be an App Store Connect URL",
+			name:       "subscriptions pricing prices next validation",
+			args:       []string{"subscriptions", "pricing", "prices", "list", "--next", "http://api.appstoreconnect.apple.com/v1/subscriptions/sub-1/prices?cursor=AQ"},
+			wantErr:    "subscriptions pricing prices list: --next must be an App Store Connect URL",
+			usageError: true,
 		},
 	}
 
@@ -406,6 +416,15 @@ func TestCanonicalWrapperErrorsUseCanonicalPaths(t *testing.T) {
 			}
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if test.usageError {
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+				}
+				if !strings.Contains(stderr, "Error: "+test.wantErr) {
+					t.Fatalf("expected stderr to contain %q, got %q", "Error: "+test.wantErr, stderr)
+				}
+				return
 			}
 			if stderr != "" {
 				t.Fatalf("expected empty stderr, got %q", stderr)

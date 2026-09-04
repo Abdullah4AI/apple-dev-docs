@@ -74,10 +74,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--event-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("app-events localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events localizations list: %w", err)
+				return shared.UsageErrorf("app-events localizations list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

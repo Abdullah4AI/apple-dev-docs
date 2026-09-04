@@ -84,10 +84,8 @@ Examples:
 				return shared.UsageError("web removed-apps list: " + err.Error())
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return withWebAuthHint(err, "web removed-apps list")
 			}

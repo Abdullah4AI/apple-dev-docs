@@ -68,10 +68,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("subscriptions groups localizations list: --limit must be between 1 and 200")
+				return shared.UsageErrorCtx(ctx, "subscriptions groups localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("subscriptions groups localizations list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "subscriptions groups localizations list: %v", err)
 			}
 			if err := validateNextExclusiveFlags(fs, *next, "group-id", "limit", "group-fields"); err != nil {
 				return err

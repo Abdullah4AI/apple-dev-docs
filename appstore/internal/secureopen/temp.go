@@ -48,6 +48,15 @@ func CreateTempNoFollow(dir string, pattern string, perm os.FileMode) (*os.File,
 // returns both the file and its root-relative name. Parent resolution stays
 // anchored to root even if a directory is concurrently replaced by a symlink.
 func CreateTempNoFollowInRoot(root *os.Root, dir string, pattern string, perm os.FileMode) (*os.File, string, error) {
+	return CreateTempNoFollowInRootWithCreator(root, dir, pattern, perm, nil)
+}
+
+// CreateTempNoFollowInRootWithCreator creates a temporary file with a
+// generated name beneath root. The creator may provide platform-specific
+// creation security, but receives only the generated root-relative name and
+// must return a handle for that exact file. The helper still verifies the
+// resulting identity and no-follow contract before returning it.
+func CreateTempNoFollowInRootWithCreator(root *os.Root, dir string, pattern string, perm os.FileMode, creator func(*os.Root, string, os.FileMode) (*os.File, error)) (*os.File, string, error) {
 	prefix := pattern
 	suffix := ""
 	if idx := strings.LastIndex(pattern, "*"); idx != -1 {
@@ -63,8 +72,19 @@ func CreateTempNoFollowInRoot(root *os.Root, dir string, pattern string, perm os
 		}
 
 		name := filepath.Join(dir, prefix+hex.EncodeToString(randBytes[:])+suffix)
-		file, err := OpenNewFileNoFollowInRoot(root, name, perm)
+		create := creator
+		if create == nil {
+			create = OpenNewFileNoFollowInRoot
+		}
+		file, err := create(root, name, perm)
 		if err == nil {
+			if file == nil {
+				return nil, name, fmt.Errorf("temporary creator returned a nil file")
+			}
+			if verifyErr := verifyRootOpenedPath(root, name, file, nil); verifyErr != nil {
+				_ = file.Close()
+				return nil, name, verifyErr
+			}
 			return file, name, nil
 		}
 		if errors.Is(err, os.ErrExist) {

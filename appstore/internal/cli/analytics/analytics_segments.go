@@ -62,7 +62,7 @@ Examples:
 			var err error
 			id, err = asc.ValidateResourcePathSegment(id)
 			if err != nil {
-				return fmt.Errorf("analytics segments view: --segment-id: %w", err)
+				return shared.UsageErrorf("analytics segments view: --segment-id: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

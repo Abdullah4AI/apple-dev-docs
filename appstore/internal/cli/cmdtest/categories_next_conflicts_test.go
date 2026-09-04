@@ -75,18 +75,21 @@ func TestCategoriesSubcategoriesInvalidNextPrecedesLimitConflict(t *testing.T) {
 			"--next", "http://api.appstoreconnect.apple.com/v1/appCategories/GAMES/subcategories?cursor=next",
 			"--limit", "201",
 		}, "1.2.3")
-		if code != rootcmd.ExitError {
-			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitError)
+		if code != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
 		}
 	})
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "categories subcategories: --next must be an App Store Connect URL") {
-		t.Fatalf("stderr = %q, want invalid --next error", stderr)
+	// The usage page ffcli renders after a usage error lists every flag, so the
+	// precedence assertion is scoped to the diagnostic line itself.
+	diagnostic, _, _ := strings.Cut(stderr, "\n")
+	if diagnostic != "Error: categories subcategories: --next must be an App Store Connect URL" {
+		t.Fatalf("stderr diagnostic = %q, want invalid --next error", diagnostic)
 	}
-	if strings.Contains(stderr, "--limit") {
-		t.Fatalf("stderr = %q, want --next validation to take precedence", stderr)
+	if strings.Contains(diagnostic, "--limit") {
+		t.Fatalf("stderr diagnostic = %q, want --next validation to take precedence", diagnostic)
 	}
 }
 

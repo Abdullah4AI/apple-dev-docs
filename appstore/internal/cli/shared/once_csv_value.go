@@ -23,6 +23,12 @@ func BindOnceCSVFlag(fs *flag.FlagSet, name, usage string) *OnceCSVValue {
 
 func (v *OnceCSVValue) String() string { return v.value }
 
+// Provided reports whether the flag was set at least once, including values
+// recovered after a space-separated boolean flag.
+func (v *OnceCSVValue) Provided() bool {
+	return v != nil && v.set
+}
+
 func (v *OnceCSVValue) Set(raw string) error {
 	if v.set {
 		return fmt.Errorf(

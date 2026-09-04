@@ -1716,6 +1716,45 @@ func TestGetAppStoreVersions_WithFilters(t *testing.T) {
 	}
 }
 
+func TestGetAppStoreVersionsDecodesDownloadable(t *testing.T) {
+	response := jsonResponse(http.StatusOK, `{"data":[{"type":"appStoreVersions","id":"version-1","attributes":{"downloadable":false}},{"type":"appStoreVersions","id":"version-2","attributes":{"downloadable":true}},{"type":"appStoreVersions","id":"version-3","attributes":{"downloadable":null}}]}`)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/apps/123/appStoreVersions" {
+			t.Fatalf("expected path /v1/apps/123/appStoreVersions, got %s", req.URL.Path)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	versions, err := client.GetAppStoreVersions(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("GetAppStoreVersions() error: %v", err)
+	}
+	if len(versions.Data) != 3 {
+		t.Fatalf("expected 3 versions, got %d", len(versions.Data))
+	}
+
+	want := []struct {
+		set   bool
+		value bool
+	}{
+		{set: true, value: false},
+		{set: true, value: true},
+		{set: false},
+	}
+	for i, expected := range want {
+		got := versions.Data[i].Attributes.Downloadable
+		if (got != nil) != expected.set {
+			t.Fatalf("version %d downloadable presence = %v, want %v", i, got != nil, expected.set)
+		}
+		if got != nil && *got != expected.value {
+			t.Fatalf("version %d downloadable = %v, want %v", i, *got, expected.value)
+		}
+	}
+}
+
 func TestGetPreReleaseVersions_WithFilters(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":[{"type":"preReleaseVersions","id":"1","attributes":{"version":"1.0.0","platform":"IOS"},"relationships":{"app":{"data":{"type":"apps","id":"app-1"}}},"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions/1"}}],"included":[{"type":"apps","id":"app-1"}],"links":{"self":"https://api.appstoreconnect.apple.com/v1/preReleaseVersions"},"meta":{"paging":{"total":1,"limit":5}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -12671,6 +12710,82 @@ func TestNewRequest_AcceptsSafePath(t *testing.T) {
 		}
 		if req == nil {
 			t.Errorf("newRequest(%q) returned nil request", path)
+		}
+	}
+}
+
+func TestGetCiWorkflowRawPreservesUnknownFields(t *testing.T) {
+	body := `{"data":{"type":"ciWorkflows","id":"wf-1","attributes":{"name":"Deploy","clean":false,"isEnabled":false,"unknownFutureField":{"nested":true}}}}`
+	response := jsonResponse(http.StatusOK, body)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/ciWorkflows/wf-1" {
+			t.Fatalf("expected path /v1/ciWorkflows/wf-1, got %s", req.URL.Path)
+		}
+		if include := req.URL.Query().Get("include"); include != "product,repository" {
+			t.Fatalf("expected include=product,repository, got %q", include)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	got, err := client.GetCiWorkflowRaw(context.Background(), "wf-1", "product", "repository")
+	if err != nil {
+		t.Fatalf("GetCiWorkflowRaw() error: %v", err)
+	}
+
+	var decoded struct {
+		Data struct {
+			Attributes map[string]json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("decode raw workflow: %v", err)
+	}
+	for _, key := range []string{"clean", "isEnabled", "unknownFutureField"} {
+		if _, ok := decoded.Data.Attributes[key]; !ok {
+			t.Fatalf("expected attribute %q to survive the raw read, got %v", key, decoded.Data.Attributes)
+		}
+	}
+}
+
+func TestCreateCiWorkflowRawPreservesDisabledState(t *testing.T) {
+	body := `{"data":{"type":"ciWorkflows","id":"wf-copy","attributes":{"name":"Nightly","isEnabled":false,"unknownFutureField":true}}}`
+	response := jsonResponse(http.StatusCreated, body)
+	client := newTestClient(t, func(req *http.Request) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", req.Method)
+		}
+		if req.URL.Path != "/v1/ciWorkflows" {
+			t.Fatalf("expected path /v1/ciWorkflows, got %s", req.URL.Path)
+		}
+		assertAuthorized(t, req)
+	}, response)
+
+	got, err := client.CreateCiWorkflowRaw(context.Background(), json.RawMessage(`{"data":{"type":"ciWorkflows"}}`))
+	if err != nil {
+		t.Fatalf("CreateCiWorkflowRaw() error: %v", err)
+	}
+
+	var decoded struct {
+		Data struct {
+			Attributes map[string]json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("decode raw create response: %v", err)
+	}
+	var enabled *bool
+	if err := json.Unmarshal(decoded.Data.Attributes["isEnabled"], &enabled); err != nil {
+		t.Fatalf("decode isEnabled: %v", err)
+	}
+	if enabled == nil || *enabled {
+		t.Fatalf("expected isEnabled=false, got %s", decoded.Data.Attributes["isEnabled"])
+	}
+	for _, key := range []string{"isEnabled", "unknownFutureField"} {
+		if _, ok := decoded.Data.Attributes[key]; !ok {
+			t.Fatalf("expected attribute %q to survive the raw create response, got %v", key, decoded.Data.Attributes)
 		}
 	}
 }

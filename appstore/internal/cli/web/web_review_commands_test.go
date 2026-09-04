@@ -36,6 +36,8 @@ func TestWebReviewShowPreservesRawDownloadDirectoryError(t *testing.T) {
 						}`
 					case "/iris/v1/reviewSubmissions/sub-1/items":
 						body = `{"data":[]}`
+					case "/iris/v1/apps/app-1/resolutionCenterThreads":
+						body = `{"data":[]}`
 					case "/iris/v1/resolutionCenterThreads":
 						body = `{
 							"data": [{

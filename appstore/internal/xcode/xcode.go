@@ -32,12 +32,39 @@ var (
 	commandContextFn     = exec.CommandContext
 	activeDeveloperDirFn = activeDeveloperDir
 	altoolHelpOutputFn   = readAltoolHelpOutput
+	// signingCaseInsensitiveVolumeFn is kept as a narrow seam for the
+	// signing xcconfig collector. On Darwin/Windows its platform implementation
+	// can report directory-specific semantics; tests can model either result
+	// without changing the host filesystem.
+	signingCaseInsensitiveVolumeFn = signingCaseInsensitiveVolumeForRuntime
+	// signingPathRelFn is a narrow test seam for modeling filepath.Rel's
+	// case-folded Windows behavior on non-Windows hosts.
+	signingPathRelFn = filepath.Rel
 
 	altoolValidationErrorPrefixes = [...]*regexp.Regexp{
 		regexp.MustCompile(`(?i)^[[:space:]]*\*{3}[[:space:]]*error:[[:space:]]*`),
 		regexp.MustCompile(`(?i)^[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?[[:space:]]+error:[[:space:]]*`),
 	}
 )
+
+func xcconfigUsesIdentityTraversal() bool {
+	switch runtimeGOOS {
+	case "windows", "darwin", "linux":
+		return true
+	default:
+		return false
+	}
+}
+
+func signingCaseInsensitiveVolumeForRuntime(path string) (bool, bool) {
+	// runtimeGOOS is intentionally replaceable in package tests. Do not let a
+	// host filesystem probe decide the semantics of a simulated platform; the
+	// platform-specific test seam can provide the modeled answer instead.
+	if runtimeGOOS != runtime.GOOS {
+		return false, true
+	}
+	return signingCaseInsensitiveVolumeFor(path)
+}
 
 const xcodebuildErrorTailLimit = 64 * 1024
 

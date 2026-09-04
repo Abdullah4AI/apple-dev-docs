@@ -418,3 +418,61 @@ func TestVersionsReleaseTypePayloads(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionsViewPreservesDownloadable(t *testing.T) {
+	tests := []struct {
+		name       string
+		attributes string
+		wantKey    bool
+		wantValue  bool
+	}{
+		{name: "false", attributes: `"downloadable":false`, wantKey: true, wantValue: false},
+		{name: "true", attributes: `"downloadable":true`, wantKey: true, wantValue: true},
+		{name: "null", attributes: `"downloadable":null`},
+		{name: "absent", attributes: `"copyright":"2026 Example"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupAuth(t)
+			t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+			body := fmt.Sprintf(`{"data":{"type":"appStoreVersions","id":"version-1","attributes":{"versionString":"1.2.3","platform":"IOS",%s}}}`, test.attributes)
+			stubTransport(t, func(req *http.Request) (*http.Response, error) {
+				if req.Method != http.MethodGet || req.URL.Path != "/v1/appStoreVersions/version-1" {
+					t.Fatalf("request = %s %s, want GET /v1/appStoreVersions/version-1", req.Method, req.URL.Path)
+				}
+				return jsonResponse(http.StatusOK, body)
+			})
+
+			root := RootCommand("test")
+			root.FlagSet.SetOutput(io.Discard)
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse([]string{"versions", "view", "--version-id", "version-1", "--output", "json"}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				if err := root.Run(context.Background()); err != nil {
+					t.Fatalf("run error: %v", err)
+				}
+			})
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+				t.Fatalf("unmarshal stdout: %v; stdout=%q", err, stdout)
+			}
+			value, ok := payload["downloadable"]
+			if ok != test.wantKey {
+				t.Fatalf("downloadable present = %v, want %v; stdout=%q", ok, test.wantKey, stdout)
+			}
+			if !test.wantKey {
+				return
+			}
+			if value != test.wantValue {
+				t.Fatalf("downloadable = %v, want %v", value, test.wantValue)
+			}
+		})
+	}
+}

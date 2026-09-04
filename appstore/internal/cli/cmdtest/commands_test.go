@@ -1298,25 +1298,14 @@ func TestIAPValidationErrors(t *testing.T) {
 }
 
 func TestIAPImagesListRejectsInvalidNextURL(t *testing.T) {
-	root := RootCommand("1.2.3")
-
-	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"iap", "images", "list", "--iap-id", "IAP_ID", "--next", "not-a-url"}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		err := root.Run(context.Background())
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("unexpected ErrHelp, got %v", err)
-		}
-	})
-
-	if stdout != "" {
-		t.Fatalf("expected empty stdout, got %q", stdout)
-	}
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	// `--next` validation is a usage error: the command prints the diagnostic
+	// itself and exits 2. This previously asserted the opposite (not ErrHelp,
+	// empty stderr) because the check returned a plain fmt.Errorf.
+	assertUsageExitCode(
+		t,
+		[]string{"iap", "images", "list", "--iap-id", "IAP_ID", "--next", "not-a-url"},
+		"iap images list: --next must be an App Store Connect URL",
+	)
 }
 
 func TestUsersValidationErrors(t *testing.T) {

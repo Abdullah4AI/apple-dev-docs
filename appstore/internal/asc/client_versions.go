@@ -17,6 +17,9 @@ type AppStoreVersionAttributes struct {
 	CreatedDate         string   `json:"createdDate,omitempty"`
 	ReleaseType         string   `json:"releaseType,omitempty"`
 	EarliestReleaseDate string   `json:"earliestReleaseDate,omitempty"`
+	// Downloadable is nullable in the App Store Connect API. A pointer keeps
+	// false distinct from an omitted or null attribute in sparse responses.
+	Downloadable *bool `json:"downloadable,omitempty"`
 }
 
 // AppStoreVersionCreateAttributes describes app store version create payload attributes.
@@ -33,6 +36,9 @@ type AppStoreVersionUpdateAttributes struct {
 	ReleaseType         *string `json:"releaseType,omitempty"`
 	EarliestReleaseDate *string `json:"earliestReleaseDate,omitempty"`
 	VersionString       *string `json:"versionString,omitempty"`
+	// Downloadable is nullable on AppStoreVersionUpdateRequest. A pointer keeps
+	// an unset flag out of the request body instead of sending false.
+	Downloadable *bool `json:"downloadable,omitempty"`
 }
 
 // AppStoreVersionUpdateData is the data portion of an app store version update request.

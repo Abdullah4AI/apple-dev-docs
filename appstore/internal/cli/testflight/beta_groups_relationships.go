@@ -68,13 +68,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("testflight beta-groups relationships view: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "testflight beta-groups relationships view: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight beta-groups relationships view: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight beta-groups relationships view: %v", err)
 			}
 
 			relationshipType := strings.TrimSpace(*relType)

@@ -1,9 +1,6 @@
 package asc
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 // WebAgreementContractMessage is an App Store Connect alert banner entry.
 type WebAgreementContractMessage struct {
@@ -35,12 +32,39 @@ type WebAgreementsStatusResult struct {
 	Agreements       []WebAgreement                `json:"agreements"`
 }
 
-// WebAgreementsAcceptResult summarizes an agreement acceptance.
+// WebAgreementsAcceptResult summarizes an agreement acceptance. When Verified
+// is true, Agreements reflects the agreement history re-read after the write
+// rather than the acceptAgreements response.
 type WebAgreementsAcceptResult struct {
 	TeamID       string         `json:"teamId"`
 	AgreementIDs []string       `json:"agreementIds"`
 	Status       string         `json:"status"`
+	Verified     bool           `json:"verified"`
 	Agreements   []WebAgreement `json:"agreements"`
+}
+
+// WebAgreementDownloadResult is the receipt for a saved agreement download. It
+// intentionally omits the (possibly signed) download URL.
+type WebAgreementDownloadResult struct {
+	AgreementID  string `json:"agreementId"`
+	TeamID       string `json:"teamId"`
+	Title        string `json:"title,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Path         string `json:"path"`
+	BytesWritten int64  `json:"bytesWritten"`
+	ContentType  string `json:"contentType,omitempty"`
+}
+
+func webAgreementDownloadRows(result *WebAgreementDownloadResult) ([]string, [][]string) {
+	return []string{"Agreement ID", "Team ID", "Title", "Version", "Path", "Bytes", "Content Type"}, [][]string{{
+		result.AgreementID,
+		result.TeamID,
+		result.Title,
+		result.Version,
+		result.Path,
+		fmt.Sprintf("%d", result.BytesWritten),
+		result.ContentType,
+	}}
 }
 
 func webAgreementsStatusTables(result *WebAgreementsStatusResult, render func([]string, [][]string)) error {
@@ -87,18 +111,28 @@ func webAgreementsRows(agreements []WebAgreement) [][]string {
 	return rows
 }
 
+// webAgreementsAcceptRows renders one row per requested agreement so each
+// acceptance timestamp is attributed to its own agreement.
 func webAgreementsAcceptRows(result *WebAgreementsAcceptResult) ([]string, [][]string) {
-	acceptedAt := ""
+	byID := make(map[string]WebAgreement, len(result.Agreements))
 	for _, agreement := range result.Agreements {
-		if agreement.DateAccepted != "" {
-			acceptedAt = agreement.DateAccepted
-			break
+		byID[agreement.AgreementID] = agreement
+	}
+	ids := result.AgreementIDs
+	if len(ids) == 0 {
+		for _, agreement := range result.Agreements {
+			ids = append(ids, agreement.AgreementID)
 		}
 	}
-	return []string{"Team ID", "Agreement IDs", "Status", "Accepted At"}, [][]string{{
-		result.TeamID,
-		strings.Join(result.AgreementIDs, ", "),
-		result.Status,
-		acceptedAt,
-	}}
+	rows := make([][]string, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, []string{
+			result.TeamID,
+			id,
+			result.Status,
+			fmt.Sprintf("%t", result.Verified),
+			byID[id].DateAccepted,
+		})
+	}
+	return []string{"Team ID", "Agreement ID", "Status", "Verified", "Accepted At"}, rows
 }

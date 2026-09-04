@@ -607,6 +607,38 @@ func TestWebAuthStatusReportsStoredPasswordForExpiredSession(t *testing.T) {
 	}
 }
 
+func TestWebAuthStatusReportsPersistedDeveloperTeamWhenExpired(t *testing.T) {
+	preserveWebPasswordHooks(t)
+	preserveWebLoginHooks(t)
+	origLoadCached := loadCachedSessionFn
+	t.Cleanup(func() { loadCachedSessionFn = origLoadCached })
+	tryResumeSessionFn = func(context.Context, string) (*webcore.AuthSession, bool, error) {
+		return nil, false, webcore.ErrCachedSessionExpired
+	}
+	loadCachedSessionFn = func(appleID string) (*webcore.AuthSession, bool, error) {
+		if appleID != "user@example.com" {
+			t.Fatalf("expected cached lookup for user@example.com, got %q", appleID)
+		}
+		return &webcore.AuthSession{UserEmail: appleID, DeveloperTeamID: "YQZQG7N4WG"}, true, nil
+	}
+	storedWebPasswordExistsFn = func(string) (bool, error) { return false, nil }
+
+	cmd := WebAuthStatusCommand()
+	if err := cmd.FlagSet.Parse([]string{"--apple-id", "user@example.com", "--output", "json"}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	var runErr error
+	stdout, _ := captureWebCommandOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), nil)
+	})
+	if runErr != nil {
+		t.Fatalf("status Exec() error = %v", runErr)
+	}
+	if !strings.Contains(stdout, `"authenticated":false`) || !strings.Contains(stdout, `"developerTeamId":"YQZQG7N4WG"`) {
+		t.Fatalf("status output = %q, want expired status that still reports the persisted Developer Portal team", stdout)
+	}
+}
+
 func TestWebAuthLogoutForgetPasswordRequiresConfirmation(t *testing.T) {
 	preserveWebPasswordHooks(t)
 	deleteWebSessionFn = func(string) error {

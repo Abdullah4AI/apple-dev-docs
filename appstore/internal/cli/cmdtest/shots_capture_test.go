@@ -6,7 +6,9 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -130,5 +132,67 @@ func TestShotsCapture_ResultJSONStructure(t *testing.T) {
 	}
 	if result.Provider != "axe" || result.Width != 390 || result.Height != 844 || result.BundleID != "com.example.app" {
 		t.Fatalf("unexpected parsed result: %+v", result)
+	}
+}
+
+func TestShotsCapturePreservesWhitespaceOutputDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	baseDir := t.TempDir()
+	fixturePath := filepath.Join(baseDir, "fixture.png")
+	writeFramePNG(t, fixturePath, makeRawImage(390, 844))
+	outputDir := filepath.Join(baseDir, "raw ")
+	binDir := t.TempDir()
+	writeShotsMatrixExecutable(t, filepath.Join(binDir, "xcrun"), "#!/bin/sh\nexit 0\n")
+	writeShotsMatrixExecutable(t, filepath.Join(binDir, "axe"), `#!/bin/sh
+set -eu
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then out="$2"; shift 2; continue; fi
+  shift
+done
+cp "$CAPTURE_FIXTURE" "$out"
+`)
+	t.Setenv("CAPTURE_FIXTURE", fixturePath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "capture",
+		"--bundle-id", "com.example.app",
+		"--name", "home",
+		"--output-dir", outputDir,
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var result struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal capture output: %v\nstdout=%q", err, stdout)
+	}
+	wantPath := filepath.Join(outputDir, "home.png")
+	wantPath, err := filepath.Abs(wantPath)
+	if err != nil {
+		t.Fatalf("Abs(capture path) error: %v", err)
+	}
+	if result.Path != wantPath {
+		t.Fatalf("capture path = %q, want literal output directory path %q", result.Path, wantPath)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected captured image at literal path: %v", err)
 	}
 }

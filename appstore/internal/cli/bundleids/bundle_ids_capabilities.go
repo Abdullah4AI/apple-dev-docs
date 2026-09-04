@@ -71,7 +71,7 @@ Examples:
 				return err
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("bundle-ids capabilities list: %w", err)
+				return shared.UsageErrorf("bundle-ids capabilities list: %v", err)
 			}
 			bundleValue := strings.TrimSpace(*bundleID)
 			if bundleValue == "" && strings.TrimSpace(*next) == "" {

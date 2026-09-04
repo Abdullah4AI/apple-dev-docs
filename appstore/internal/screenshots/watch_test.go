@@ -21,13 +21,13 @@ func TestCollectAssetDirs_ParsesKoubouYAML(t *testing.T) {
   home:
     content:
       - type: "image"
-        asset: "` + filepath.Join(rawDir, "home.png") + `"
+        asset: "` + filepath.ToSlash(filepath.Join(rawDir, "home.png")) + `"
       - type: "text"
         content: "Hello"
   settings:
     content:
       - type: "image"
-        asset: "` + filepath.Join(rawDir, "settings.png") + `"
+        asset: "` + filepath.ToSlash(filepath.Join(rawDir, "settings.png")) + `"
 `
 	if err := os.WriteFile(configPath, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)

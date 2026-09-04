@@ -103,10 +103,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
-				return fmt.Errorf("analytics reports links: --limit must be between 1 and 200")
+				return shared.UsageError("analytics reports links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("analytics reports links: %w", err)
+				return shared.UsageErrorf("analytics reports links: %v", err)
 			}
 
 			id := strings.TrimSpace(*reportID)

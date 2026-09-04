@@ -65,7 +65,7 @@ Examples:
 			var err error
 			id, err = asc.ValidateResourcePathSegment(id)
 			if err != nil {
-				return fmt.Errorf("analytics instances view: --instance-id: %w", err)
+				return shared.UsageErrorf("analytics instances view: --instance-id: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -109,10 +109,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > analyticsMaxLimit) {
-				return fmt.Errorf("analytics instances links: --limit must be between 1 and 200")
+				return shared.UsageError("analytics instances links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("analytics instances links: %w", err)
+				return shared.UsageErrorf("analytics instances links: %v", err)
 			}
 
 			id := strings.TrimSpace(*instanceID)
@@ -124,7 +124,7 @@ Examples:
 				var err error
 				id, err = asc.ValidateResourcePathSegment(id)
 				if err != nil {
-					return fmt.Errorf("analytics instances links: --instance-id: %w", err)
+					return shared.UsageErrorf("analytics instances links: --instance-id: %v", err)
 				}
 			}
 

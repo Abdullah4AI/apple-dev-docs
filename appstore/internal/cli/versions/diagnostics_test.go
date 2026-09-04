@@ -38,18 +38,22 @@ func TestVersionsLinksInvalidInputExposesStructuredDiagnostics(t *testing.T) {
 		wantParam  string
 	}{
 		{
-			name:      "limit out of range",
-			args:      []string{"--version-id", "version-1", "--type", "customerReviews", "--limit", "201"},
-			wantError: "versions links: --limit must be between 1 and 200",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--limit",
+			name:       "limit out of range",
+			args:       []string{"--version-id", "version-1", "--type", "customerReviews", "--limit", "201"},
+			wantError:  "versions links: --limit must be between 1 and 200",
+			wantStderr: "Error: versions links: --limit must be between 1 and 200\n",
+			wantUsage:  true,
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--limit",
 		},
 		{
-			name:      "next url is not app store connect",
-			args:      []string{"--type", "customerReviews", "--next", "https://example.com/v1/apps"},
-			wantError: "versions links: --next must be an App Store Connect URL",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--next",
+			name:       "next url is not app store connect",
+			args:       []string{"--type", "customerReviews", "--next", "https://example.com/v1/apps"},
+			wantError:  "versions links: --next must be an App Store Connect URL",
+			wantStderr: "Error: versions links: --next must be an App Store Connect URL\n",
+			wantUsage:  true,
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--next",
 		},
 		{
 			name:       "unknown relationship type",

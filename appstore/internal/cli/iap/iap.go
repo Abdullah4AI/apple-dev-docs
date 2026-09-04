@@ -124,13 +124,13 @@ Examples:
 				return err
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap list: %w", err)
+				return shared.UsageErrorf("iap list: %v", err)
 			}
 			if err := rejectIAPVersionNextFlagConflicts(fs, *next, "iap list", "app", "product-id", "name", "state", "type", "sort", "limit", "include-versions", "versions-limit", "fields", "version-fields"); err != nil {
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap list: --limit must be between 1 and 200")
+				return shared.UsageError("iap list: --limit must be between 1 and 200")
 			}
 			if *versionsLimit != 0 && (*versionsLimit < 1 || *versionsLimit > 50) {
 				return shared.UsageError("iap list: --versions-limit must be between 1 and 50")
@@ -608,10 +608,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--iap-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("iap localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap localizations list: %w", err)
+				return shared.UsageErrorf("iap localizations list: %v", err)
 			}
 			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
 			if err != nil {

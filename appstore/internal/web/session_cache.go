@@ -48,6 +48,17 @@ const (
 	sessionBackendFile
 )
 
+// sessionEntryOrigin records which backend a cached entry was actually read
+// from. A conditional delete needs it: the entry whose stamp matched is the
+// only one proven stale, and the other backend may hold a newer session.
+type sessionEntryOrigin int
+
+const (
+	sessionEntryOriginNone sessionEntryOrigin = iota
+	sessionEntryOriginKeychain
+	sessionEntryOriginFile
+)
+
 type backendSelection struct {
 	backend          sessionBackend
 	fallbackFile     bool
@@ -55,10 +66,11 @@ type backendSelection struct {
 }
 
 type persistedSession struct {
-	Version   int                  `json:"version"`
-	UpdatedAt time.Time            `json:"updated_at"`
-	UserEmail string               `json:"user_email,omitempty"`
-	Cookies   map[string][]pCookie `json:"cookies"`
+	Version         int                  `json:"version"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	UserEmail       string               `json:"user_email,omitempty"`
+	DeveloperTeamID string               `json:"developer_team_id,omitempty"`
+	Cookies         map[string][]pCookie `json:"cookies"`
 }
 
 type persistedSessionStore struct {
@@ -101,6 +113,11 @@ var (
 		})
 	}
 	sessionInfoFetcher = getSessionInfo
+
+	// sessionCompareDeleteBarrier runs between the stamp comparison and the
+	// delete in DeleteSessionIfMatches. Tests set it to schedule a concurrent
+	// persist inside that window; it is nil in production.
+	sessionCompareDeleteBarrier func()
 )
 
 func webSessionCacheEnabled() bool {
@@ -788,6 +805,17 @@ func migrateLegacyIrisLastSession(ctx context.Context, selection backendSelectio
 }
 
 func persistSessionBySelection(selection backendSelection, key string, sess persistedSession) error {
+	if selection.backend == sessionBackendOff {
+		return nil
+	}
+	// Hold the entry lock so a concurrent conditional delete cannot compare a
+	// stamp before this write and delete the entry it produces.
+	return withSessionEntryLock(key, func() error {
+		return persistSessionBySelectionLocked(selection, key, sess)
+	})
+}
+
+func persistSessionBySelectionLocked(selection backendSelection, key string, sess persistedSession) error {
 	switch selection.backend {
 	case sessionBackendOff:
 		return nil
@@ -807,25 +835,37 @@ func persistSessionBySelection(selection backendSelection, key string, sess pers
 }
 
 func readSessionFromFileWithKeychainFallback(key string, fallbackKeychain bool) (persistedSession, bool, error) {
+	sess, _, ok, err := readSessionFromFileWithKeychainFallbackOrigin(key, fallbackKeychain)
+	return sess, ok, err
+}
+
+func readSessionFromFileWithKeychainFallbackOrigin(key string, fallbackKeychain bool) (persistedSession, sessionEntryOrigin, bool, error) {
 	sess, ok, err := readSessionFromFile(key)
 	if err == nil && (ok || !fallbackKeychain) {
-		return sess, ok, nil
+		return sess, sessionEntryOriginWhenFound(sessionEntryOriginFile, ok), ok, nil
 	}
 	if err != nil && !fallbackKeychain {
-		return persistedSession{}, false, err
+		return persistedSession{}, sessionEntryOriginNone, false, err
 	}
 
 	sess, ok, keychainErr := readSessionFromKeychain(key)
 	if keychainErr != nil {
 		if err != nil {
-			return persistedSession{}, false, err
+			return persistedSession{}, sessionEntryOriginNone, false, err
 		}
-		return persistedSession{}, false, nil
+		return persistedSession{}, sessionEntryOriginNone, false, nil
 	}
 	if err != nil && !ok {
-		return persistedSession{}, false, err
+		return persistedSession{}, sessionEntryOriginNone, false, err
 	}
-	return sess, ok, nil
+	return sess, sessionEntryOriginWhenFound(sessionEntryOriginKeychain, ok), ok, nil
+}
+
+func sessionEntryOriginWhenFound(origin sessionEntryOrigin, found bool) sessionEntryOrigin {
+	if !found {
+		return sessionEntryOriginNone
+	}
+	return origin
 }
 
 func readSessionFromFileIgnoringErrors(key string) (persistedSession, bool, error) {
@@ -845,26 +885,36 @@ func readLastSessionFromFileIgnoringErrors() (persistedSession, bool, error) {
 }
 
 func readSessionBySelection(selection backendSelection, key string) (persistedSession, bool, error) {
+	sess, _, ok, err := readSessionBySelectionWithOrigin(selection, key)
+	return sess, ok, err
+}
+
+func readSessionBySelectionWithOrigin(selection backendSelection, key string) (persistedSession, sessionEntryOrigin, bool, error) {
 	switch selection.backend {
 	case sessionBackendOff:
-		return persistedSession{}, false, nil
+		return persistedSession{}, sessionEntryOriginNone, false, nil
 	case sessionBackendKeychain:
 		sess, ok, err := readSessionFromKeychain(key)
 		if err != nil {
 			if selection.fallbackFile && isKeyringUnavailable(err) {
-				return readSessionFromFileIgnoringErrors(key)
+				return readSessionFromFileIgnoringErrorsWithOrigin(key)
 			}
-			return persistedSession{}, false, err
+			return persistedSession{}, sessionEntryOriginNone, false, err
 		}
 		if !ok && selection.fallbackFile {
-			return readSessionFromFileIgnoringErrors(key)
+			return readSessionFromFileIgnoringErrorsWithOrigin(key)
 		}
-		return sess, ok, nil
+		return sess, sessionEntryOriginWhenFound(sessionEntryOriginKeychain, ok), ok, nil
 	case sessionBackendFile:
-		return readSessionFromFileWithKeychainFallback(key, selection.fallbackKeychain)
+		return readSessionFromFileWithKeychainFallbackOrigin(key, selection.fallbackKeychain)
 	default:
-		return persistedSession{}, false, nil
+		return persistedSession{}, sessionEntryOriginNone, false, nil
 	}
+}
+
+func readSessionFromFileIgnoringErrorsWithOrigin(key string) (persistedSession, sessionEntryOrigin, bool, error) {
+	sess, ok, err := readSessionFromFileIgnoringErrors(key)
+	return sess, sessionEntryOriginWhenFound(sessionEntryOriginFile, ok), ok, err
 }
 
 func readLastSessionFromKeychain() (persistedSession, bool, error) {
@@ -1073,6 +1123,7 @@ func resumeFromPersistedSession(ctx context.Context, sess persistedSession) (*Au
 	}
 	session := &AuthSession{Client: client}
 	applySessionInfo(session, info)
+	session.DeveloperTeamID = strings.TrimSpace(sess.DeveloperTeamID)
 	return session, true, nil
 }
 
@@ -1099,6 +1150,7 @@ func resumeFromPersistedSessionReadOnly(ctx context.Context, sess persistedSessi
 	}
 	session := &AuthSession{Client: client, UserEmail: strings.TrimSpace(sess.UserEmail)}
 	applySessionInfo(session, info)
+	session.DeveloperTeamID = strings.TrimSpace(sess.DeveloperTeamID)
 	return session, true, nil
 }
 
@@ -1123,8 +1175,10 @@ func loadSessionFromPersistedSession(sess persistedSession) (*AuthSession, bool,
 		return nil, false, nil
 	}
 	return &AuthSession{
-		Client:    newWebHTTPClient(jar),
-		UserEmail: strings.TrimSpace(sess.UserEmail),
+		Client:          newWebHTTPClient(jar),
+		UserEmail:       strings.TrimSpace(sess.UserEmail),
+		DeveloperTeamID: strings.TrimSpace(sess.DeveloperTeamID),
+		cachedUpdatedAt: sess.UpdatedAt,
 	}, true, nil
 }
 
@@ -1145,6 +1199,7 @@ func PersistSession(session *AuthSession) error {
 
 	key := webSessionCacheKey(username)
 	serialized := serializeCookieJar(session.Client.Jar, username)
+	serialized.DeveloperTeamID = strings.TrimSpace(session.DeveloperTeamID)
 	return persistSessionBySelection(selection, key, serialized)
 }
 
@@ -1310,6 +1365,18 @@ func DeleteSession(username string) error {
 	}
 	key := webSessionCacheKey(username)
 	selection := resolveBackendSelection()
+	if selection.backend == sessionBackendOff {
+		return deleteSessionEntryLocked(selection, key)
+	}
+	return withSessionEntryLock(key, func() error {
+		return deleteSessionEntryLocked(selection, key)
+	})
+}
+
+// deleteSessionEntryLocked removes every cached entry for key. Callers already
+// holding the entry lock use it directly so a nested acquisition cannot stall
+// behind the lock they hold.
+func deleteSessionEntryLocked(selection backendSelection, key string) error {
 	var err error
 	switch selection.backend {
 	case sessionBackendOff:
@@ -1337,6 +1404,126 @@ func DeleteSession(username string) error {
 		err = nil
 	}
 	return joinDeleteErrors(err, deleteLegacyIrisSessionArtifacts(key))
+}
+
+// DeleteSessionIfMatches removes the cached web session for username only while
+// the stored entry is still the one loaded carries. A caller that proves its
+// loaded cookie jar unusable would otherwise delete by Apple ID alone and take
+// out a valid replacement that a concurrent process persisted while it was
+// working through 2FA, leaving no cached session at all. Reporting whether the
+// delete happened lets the caller stay quiet when a newer entry was preserved.
+//
+// The comparison and the delete it authorizes run under the entry lock that
+// persistence also takes, so a replacement written between them is no longer
+// deleted by a decision made before it existed. Only the entry whose stamp
+// matched is removed: the other backend can hold a newer session persisted by
+// a process configured with a different ASC_WEB_SESSION_CACHE_BACKEND, and it
+// is removed only when it carries the same stamp.
+//
+// When the current entry cannot be read, or the caller has no stamp to
+// compare, the unconditional delete stands: a proven-stale jar left on disk is
+// reloaded by the next invocation and burns another 2FA code against the same
+// failure.
+func DeleteSessionIfMatches(username string, loaded *AuthSession) (bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return false, nil
+	}
+	if loaded == nil || loaded.cachedUpdatedAt.IsZero() {
+		return true, DeleteSession(username)
+	}
+
+	selection := resolveBackendSelection()
+	if selection.backend == sessionBackendOff {
+		return false, nil
+	}
+	key := webSessionCacheKey(username)
+	deleted := false
+	err := withSessionEntryLock(key, func() error {
+		current, origin, ok, err := readSessionBySelectionWithOrigin(selection, key)
+		if err != nil {
+			deleted = true
+			return deleteSessionEntryLocked(selection, key)
+		}
+		if !ok {
+			return nil
+		}
+		if !current.UpdatedAt.Equal(loaded.cachedUpdatedAt) {
+			return nil
+		}
+		if sessionCompareDeleteBarrier != nil {
+			sessionCompareDeleteBarrier()
+		}
+		deleted = true
+		return deleteMatchedSessionEntryLocked(selection, key, origin, current.UpdatedAt)
+	})
+	return deleted, err
+}
+
+// deleteMatchedSessionEntryLocked removes the cache entry whose stamp matched
+// the loaded session, plus the mirrored entry in the other backend only when
+// that one carries the same stamp and is therefore the same proven-stale
+// session. Legacy artifacts are always cleared: nothing writes them any more,
+// so they can only hold a session at least as stale as the matched one.
+func deleteMatchedSessionEntryLocked(selection backendSelection, key string, origin sessionEntryOrigin, stamp time.Time) error {
+	var err error
+	switch origin {
+	case sessionEntryOriginFile:
+		if deleteErr := deleteSessionFromFile(key); deleteErr != nil {
+			err = deleteErr
+		} else {
+			err = clearLastKeyInFileIfMatches(key)
+		}
+		if sessionMirrorEnabled(selection) && keychainSessionCarriesStamp(key, stamp) {
+			err = joinDeleteErrors(err, ignoreUnavailableKeyringError(deleteSessionFromKeychain(key)))
+		}
+	case sessionEntryOriginKeychain:
+		if deleteErr := deleteSessionFromKeychain(key); deleteErr != nil && (!selection.fallbackFile || !isKeyringUnavailable(deleteErr)) {
+			err = deleteErr
+		}
+		if sessionMirrorEnabled(selection) && fileSessionCarriesStamp(key, stamp) {
+			err = joinDeleteErrors(err, deleteMirroredSessionFromFile(key))
+		}
+	default:
+		return nil
+	}
+	return joinDeleteErrors(err, deleteLegacyIrisSessionArtifacts(key))
+}
+
+// sessionMirrorEnabled reports whether the selection keeps entries in both
+// backends, which is what makes a mirrored entry possible at all.
+func sessionMirrorEnabled(selection backendSelection) bool {
+	switch selection.backend {
+	case sessionBackendFile:
+		return selection.fallbackKeychain
+	case sessionBackendKeychain:
+		return selection.fallbackFile
+	default:
+		return false
+	}
+}
+
+// fileSessionCarriesStamp reports whether the file entry is the same session as
+// the matched one. An unreadable entry counts: it cannot be the valid
+// replacement this guard exists to protect, and leaving a corrupt file behind
+// only makes the next invocation fall back to a staler backend.
+func fileSessionCarriesStamp(key string, stamp time.Time) bool {
+	sess, ok, err := readSessionFromFile(key)
+	if err != nil {
+		return true
+	}
+	return ok && sess.UpdatedAt.Equal(stamp)
+}
+
+// keychainSessionCarriesStamp reports whether the keychain entry is the same
+// session as the matched one. A keychain that cannot be read is left alone
+// rather than cleared blindly: unavailability says nothing about the entry.
+func keychainSessionCarriesStamp(key string, stamp time.Time) bool {
+	sess, ok, err := readSessionFromKeychain(key)
+	if err != nil {
+		return false
+	}
+	return ok && sess.UpdatedAt.Equal(stamp)
 }
 
 // DeleteAllSessions removes all cached web sessions.

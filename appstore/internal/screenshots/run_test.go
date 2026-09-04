@@ -4,11 +4,27 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+func skipWindowsUnixExecutableFixtures(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell executable fixtures require a Unix PATH")
+	}
+}
+
+func skipWindowsUnixFileModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not preserve Unix permission bits")
+	}
+}
+
 func TestAxeMatchesTarget_ParsesJSONWhenStderrHasWarnings(t *testing.T) {
+	skipWindowsUnixExecutableFixtures(t)
 	binDir := t.TempDir()
 	axePath := filepath.Join(binDir, "axe")
 	script := `#!/bin/sh
@@ -35,6 +51,7 @@ exit 1
 }
 
 func TestRunExternalOutput_IncludesStderrOnFailure(t *testing.T) {
+	skipWindowsUnixExecutableFixtures(t)
 	binDir := t.TempDir()
 	cmdPath := filepath.Join(binDir, "tool")
 	script := `#!/bin/sh
@@ -66,7 +83,49 @@ func TestRunPlan_RejectsNilPlan(t *testing.T) {
 	}
 }
 
+func TestRunPlanPreservesLiteralOutputDirectorySpelling(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "run ")
+	waitMS := 1
+	plan := &Plan{
+		Version: 1,
+		App:     PlanApp{BundleID: "com.example.app", OutputDir: outputDir},
+		Steps:   []PlanStep{{Action: ActionWait, DurationMS: &waitMS}},
+	}
+	result, err := RunPlan(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("RunPlan() error = %v", err)
+	}
+	want, err := filepath.Abs(outputDir)
+	if err != nil {
+		t.Fatalf("resolve output directory: %v", err)
+	}
+	if result.OutputDir != want {
+		t.Fatalf("RunPlan() OutputDir = %q, want %q", result.OutputDir, want)
+	}
+}
+
+func TestRunPlanUsesDefaultOutputDirForWhitespaceOnly(t *testing.T) {
+	waitMS := 1
+	plan := &Plan{
+		Version: 1,
+		App:     PlanApp{BundleID: "com.example.app", OutputDir: "   "},
+		Steps:   []PlanStep{{Action: ActionWait, DurationMS: &waitMS}},
+	}
+	result, err := RunPlan(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("RunPlan() error = %v", err)
+	}
+	want, err := filepath.Abs("./screenshots/raw")
+	if err != nil {
+		t.Fatalf("resolve default output directory: %v", err)
+	}
+	if result.OutputDir != want {
+		t.Fatalf("RunPlan() OutputDir = %q, want default %q", result.OutputDir, want)
+	}
+}
+
 func TestRunPlan_ScreenshotStepsDoNotRelaunchApp(t *testing.T) {
+	skipWindowsUnixExecutableFixtures(t)
 	binDir := t.TempDir()
 	logDir := t.TempDir()
 	xcrunLog := filepath.Join(logDir, "xcrun.log")
@@ -105,9 +164,10 @@ cp "$AXE_TEMPLATE_PNG" "$out"
 	plan := &Plan{
 		Version: 1,
 		App: PlanApp{
-			BundleID:  "com.example.app",
-			UDID:      "SIM-UDID-123",
-			OutputDir: t.TempDir(),
+			BundleID:        "com.example.app",
+			UDID:            "SIM-UDID-123",
+			OutputDir:       t.TempDir(),
+			LaunchArguments: []string{"--fixture", "empty"},
 		},
 		Steps: []PlanStep{
 			{Action: ActionLaunch},
@@ -132,7 +192,7 @@ cp "$AXE_TEMPLATE_PNG" "$out"
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly one app launch, got %d (%q)", len(lines), string(xcrunArgs))
 	}
-	if !strings.Contains(lines[0], "simctl launch SIM-UDID-123 com.example.app") {
+	if !strings.Contains(lines[0], "simctl launch SIM-UDID-123 com.example.app --fixture empty") {
 		t.Fatalf("unexpected launch args %q", lines[0])
 	}
 
@@ -142,5 +202,44 @@ cp "$AXE_TEMPLATE_PNG" "$out"
 	}
 	if strings.Count(string(axeArgs), "screenshot") != 2 {
 		t.Fatalf("expected two screenshot captures, got %q", string(axeArgs))
+	}
+}
+
+func TestRunPlan_TerminatesOnlyTheInitialMatrixLaunch(t *testing.T) {
+	skipWindowsUnixExecutableFixtures(t)
+	binDir := t.TempDir()
+	xcrunLog := filepath.Join(t.TempDir(), "xcrun.log")
+	writeExecutable(t, filepath.Join(binDir, "xcrun"), `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$XCRUN_LOG"
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XCRUN_LOG", xcrunLog)
+
+	plan := &Plan{
+		Version: 1,
+		App: PlanApp{
+			BundleID:                "com.example.app",
+			UDID:                    "SIM-UDID-123",
+			OutputDir:               t.TempDir(),
+			LaunchArguments:         []string{"--fixture", "empty"},
+			terminateRunningProcess: true,
+		},
+		Steps: []PlanStep{{Action: ActionLaunch}, {Action: ActionLaunch}},
+	}
+	if _, err := RunPlan(context.Background(), plan); err != nil {
+		t.Fatalf("RunPlan() error = %v", err)
+	}
+	data, err := os.ReadFile(xcrunLog)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", xcrunLog, err)
+	}
+	launches := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := []string{
+		"simctl launch --terminate-running-process SIM-UDID-123 com.example.app --fixture empty",
+		"simctl launch SIM-UDID-123 com.example.app --fixture empty",
+	}
+	if len(launches) != len(want) || launches[0] != want[0] || launches[1] != want[1] {
+		t.Fatalf("launches = %q, want %q", launches, want)
 	}
 }

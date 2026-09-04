@@ -78,7 +78,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("webhooks list: %w", err)
+				return shared.UsageErrorf("webhooks list: %v", err)
 			}
 			if err := rejectWebhooksListNextFlagConflicts(fs, *next, "app", "limit"); err != nil {
 				return err
@@ -89,7 +89,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--app")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > webhooksMaxLimit) {
-				return fmt.Errorf("webhooks list: --limit must be between 1 and %d", webhooksMaxLimit)
+				return shared.UsageErrorf("webhooks list: --limit must be between 1 and %d", webhooksMaxLimit)
 			}
 
 			client, err := shared.GetASCClient()
@@ -443,10 +443,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--webhook-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > webhooksMaxLimit) {
-				return fmt.Errorf("webhooks deliveries: --limit must be between 1 and %d", webhooksMaxLimit)
+				return shared.UsageErrorf("webhooks deliveries: --limit must be between 1 and %d", webhooksMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("webhooks deliveries: %w", err)
+				return shared.UsageErrorf("webhooks deliveries: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -536,10 +536,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--webhook-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > webhooksMaxLimit) {
-				return fmt.Errorf("webhooks deliveries links: --limit must be between 1 and %d", webhooksMaxLimit)
+				return shared.UsageErrorf("webhooks deliveries links: --limit must be between 1 and %d", webhooksMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("webhooks deliveries links: %w", err)
+				return shared.UsageErrorf("webhooks deliveries links: %v", err)
 			}
 			if trimmedID == "" && trimmedNext != "" {
 				derivedID, err := extractWebhookIDFromNextURL(trimmedNext)

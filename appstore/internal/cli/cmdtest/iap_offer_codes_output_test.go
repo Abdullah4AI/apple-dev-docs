@@ -441,34 +441,20 @@ func TestIAPOfferCodesCreateFallsBackToNumericIDAfterLookupTimeout(t *testing.T)
 }
 
 func TestIAPOfferCodesListRejectsInvalidNextURL(t *testing.T) {
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
-
-	var runErr error
-	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{
+	assertUsageExitCode(
+		t,
+		[]string{
 			"iap", "offer-codes", "list",
 			"--next", "https://example.com/v2/inAppPurchases/9000000001/offerCodes?cursor=AQ",
-		}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		runErr = root.Run(context.Background())
-	})
-
-	if runErr == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(runErr.Error(), "iap offer-codes list: --next must be an App Store Connect URL") {
-		t.Fatalf("expected invalid --next error, got %v", runErr)
-	}
-	if stdout != "" {
-		t.Fatalf("expected empty stdout, got %q", stdout)
-	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
+		},
+		"iap offer-codes list: --next must be an App Store Connect URL",
+	)
 }
 
+// TestIAPOfferCodesListRejectsMalformedNextURL asserts the usage contract for
+// the two rejection shapes shared.ValidateNextURL produces. Both print the
+// diagnostic and exit 2; they previously returned a plain fmt.Errorf and left
+// stderr empty.
 func TestIAPOfferCodesListRejectsMalformedNextURL(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -482,39 +468,18 @@ func TestIAPOfferCodesListRejectsMalformedNextURL(t *testing.T) {
 		},
 		{
 			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "iap offer-codes list: --next must be a valid URL:",
+			next:    malformedNextURL,
+			wantErr: "iap offer-codes list: --next must be a valid URL: " + malformedNextURLParseError,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{
-					"iap", "offer-codes", "list",
-					"--next", test.next,
-				}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
+			assertUsageExitCode(
+				t,
+				[]string{"iap", "offer-codes", "list", "--next", test.next},
+				test.wantErr,
+			)
 		})
 	}
 }

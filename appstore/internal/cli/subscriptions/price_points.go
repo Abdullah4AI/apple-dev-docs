@@ -102,7 +102,7 @@ Examples:
 				return err
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("subscriptions price-points list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "subscriptions price-points list: %v", err)
 			}
 			if strings.TrimSpace(*next) != "" && flagWasProvided(
 				fs,
@@ -112,7 +112,7 @@ Examples:
 				return shared.UsageError("--next cannot be combined with owner flags, --limit, API filters, sparse fields, includes, or client-side price filters")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("subscriptions price-points list: --limit must be between 1 and 200")
+				return shared.UsageErrorCtx(ctx, "subscriptions price-points list: --limit must be between 1 and 200")
 			}
 			if *stream && !*paginate {
 				return shared.UsageError("--stream requires --paginate")

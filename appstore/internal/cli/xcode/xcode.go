@@ -52,11 +52,16 @@ func XcodeCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "xcode",
 		ShortUsage: "asc xcode <subcommand> [flags]",
-		ShortHelp:  "Local Xcode build/archive/export helpers (macOS only).",
+		ShortHelp:  "Local Xcode build/archive/export and [experimental] signing-settings helpers.",
 		LongHelp: `Local Xcode build/archive/export helpers.
 
-These commands wrap local xcodebuild flows and are visible on every platform so
-docs and workflows stay consistent, but execution is supported on macOS only.
+The xcode signing plan/apply helpers are experimental and only modify local
+project build settings; they do not contact App Store Connect.
+
+The build/archive/export commands wrap local xcodebuild flows and are supported
+on macOS only. Signing-plan generation is cross-platform. Signing apply
+requires native identity-coupled file mutation support and currently fails
+closed on Windows before modifying project or receipt files.
 
 Use these commands to compile projects and produce deterministic .xcarchive and
 .ipa paths that can be passed directly into asc upload and publish commands.
@@ -71,7 +76,8 @@ Examples:
   asc xcode doctor --output json
   asc xcode version view
   asc xcode version bump --type patch
-  asc xcode version edit --version "1.3.0" --build-number "42"`,
+  asc xcode version edit --version "1.3.0" --build-number "42"
+  asc xcode signing plan --project App.xcodeproj --settings-file .asc/xcode-signing.json`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -85,6 +91,7 @@ Examples:
 			XcodeDoctorCommand(),
 			XcodeValidateCommand(),
 			XcodeVersionCommand(),
+			XcodeSigningCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp

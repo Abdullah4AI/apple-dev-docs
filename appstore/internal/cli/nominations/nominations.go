@@ -78,22 +78,22 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("nominations list: --limit must be between 1 and 200")
+				return shared.UsageError("nominations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("nominations list: %w", err)
+				return shared.UsageErrorf("nominations list: %v", err)
 			}
 			if err := shared.ValidateSort(*sort, nominationSortList()...); err != nil {
-				return fmt.Errorf("nominations list: %w", err)
+				return shared.UsageErrorf("nominations list: %v", err)
 			}
 			if *inAppEventsLimit != 0 && (*inAppEventsLimit < 1 || *inAppEventsLimit > 50) {
-				return fmt.Errorf("nominations list: --in-app-events-limit must be between 1 and 50")
+				return shared.UsageError("nominations list: --in-app-events-limit must be between 1 and 50")
 			}
 			if *relatedAppsLimit != 0 && (*relatedAppsLimit < 1 || *relatedAppsLimit > 50) {
-				return fmt.Errorf("nominations list: --related-apps-limit must be between 1 and 50")
+				return shared.UsageError("nominations list: --related-apps-limit must be between 1 and 50")
 			}
 			if *supportedTerritoriesLimit != 0 && (*supportedTerritoriesLimit < 1 || *supportedTerritoriesLimit > 200) {
-				return fmt.Errorf("nominations list: --supported-territories-limit must be between 1 and 200")
+				return shared.UsageError("nominations list: --supported-territories-limit must be between 1 and 200")
 			}
 
 			statusValues, err := normalizeNominationStates(shared.SplitCSVUpper(*status))
@@ -224,13 +224,13 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *inAppEventsLimit != 0 && (*inAppEventsLimit < 1 || *inAppEventsLimit > 50) {
-				return fmt.Errorf("nominations view: --in-app-events-limit must be between 1 and 50")
+				return shared.UsageError("nominations view: --in-app-events-limit must be between 1 and 50")
 			}
 			if *relatedAppsLimit != 0 && (*relatedAppsLimit < 1 || *relatedAppsLimit > 50) {
-				return fmt.Errorf("nominations view: --related-apps-limit must be between 1 and 50")
+				return shared.UsageError("nominations view: --related-apps-limit must be between 1 and 50")
 			}
 			if *supportedTerritoriesLimit != 0 && (*supportedTerritoriesLimit < 1 || *supportedTerritoriesLimit > 200) {
-				return fmt.Errorf("nominations view: --supported-territories-limit must be between 1 and 200")
+				return shared.UsageError("nominations view: --supported-territories-limit must be between 1 and 200")
 			}
 
 			fieldsValue, err := normalizeNominationFields(*fields)

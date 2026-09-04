@@ -72,10 +72,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap price-points list: --limit must be between 1 and 200")
+				return shared.UsageError("iap price-points list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap price-points list: %w", err)
+				return shared.UsageErrorf("iap price-points list: %v", err)
 			}
 
 			priceFilter := shared.PriceFilter{

@@ -105,10 +105,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("pricing territories list: --limit must be between 1 and 200")
+				return shared.UsageError("pricing territories list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("pricing territories list: %w", err)
+				return shared.UsageErrorf("pricing territories list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -182,10 +182,10 @@ Examples:
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("pricing price-points: --limit must be between 1 and 200")
+				return shared.UsageError("pricing price-points: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("pricing price-points: %w", err)
+				return shared.UsageErrorf("pricing price-points: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -439,7 +439,7 @@ Examples:
 				return flag.ErrHelp
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("pricing schedule manual-prices: %w", err)
+				return shared.UsageErrorf("pricing schedule manual-prices: %v", err)
 			}
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")
@@ -529,7 +529,7 @@ Examples:
 				return flag.ErrHelp
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("pricing schedule automatic-prices: %w", err)
+				return shared.UsageErrorf("pricing schedule automatic-prices: %v", err)
 			}
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")

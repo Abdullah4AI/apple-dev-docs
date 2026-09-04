@@ -2487,6 +2487,35 @@ func TestRun_WebBundleIDSyncAppClipInvalidSettingsJSONReturnsUsage(t *testing.T)
 	}
 }
 
+func TestRun_WebBundleIDSyncAppClipMissingConfirmReturnsUsage(t *testing.T) {
+	resetReportFlags(t)
+
+	stdout, stderr := captureCommandOutput(t, func() {
+		code := Run([]string{
+			"web", "bundle-ids", "capabilities", "sync-app-clip",
+			"--bundle-id", "clip-1",
+			"--parent-bundle-id", "parent-1",
+			"--capability", "PUSH_NOTIFICATIONS",
+		}, "1.0.0")
+		if code != ExitUsage {
+			t.Fatalf("Run() exit code = %d, want %d", code, ExitUsage)
+		}
+	})
+
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "Warning: web bundle-ids capabilities sync-app-clip now requires --confirm") {
+		t.Fatalf("expected --confirm migration warning, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "Error: --confirm is required") {
+		t.Fatalf("expected --confirm usage error, got %q", stderr)
+	}
+	if strings.Contains(stderr, "--apple-id is required") {
+		t.Fatalf("expected --confirm validation before auth resolution, got %q", stderr)
+	}
+}
+
 func TestRun_NoArgsShowsHelpReturnsSuccess(t *testing.T) {
 	resetReportFlags(t)
 

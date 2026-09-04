@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,32 @@ func TestGenerateReview_WritesManifestAndHTML(t *testing.T) {
 	}
 	if !strings.Contains(html, "home") {
 		t.Fatalf("expected screenshot ID in HTML, got: %q", html)
+	}
+}
+
+func TestGenerateReviewPreservesExplicitWhitespaceApprovalPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	baseDir := t.TempDir()
+	framedDir := filepath.Join(baseDir, "framed")
+	outputDir := filepath.Join(baseDir, "review")
+	approvalPath := filepath.Join(baseDir, "approved.json ")
+	writeReviewImage(t, filepath.Join(framedDir, "en", "iPhone_Air", "home.png"), 1320, 2868)
+	if err := os.WriteFile(approvalPath, []byte("[]\n"), 0o600); err != nil {
+		t.Fatalf("write whitespace approval file: %v", err)
+	}
+
+	result, err := GenerateReview(context.Background(), ReviewRequest{
+		FramedDir:    framedDir,
+		OutputDir:    outputDir,
+		ApprovalPath: approvalPath,
+	})
+	if err != nil {
+		t.Fatalf("GenerateReview() error = %v", err)
+	}
+	if result == nil || result.ApprovalPath != approvalPath {
+		t.Fatalf("GenerateReview() result = %+v, want explicit approval path %q", result, approvalPath)
 	}
 }
 

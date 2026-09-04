@@ -163,6 +163,46 @@ var betaGroupRecruitmentCriteriaFieldsValues = []string{
 	"deviceFamilyOsVersionFilters",
 }
 
+// Flag sets for `testflight groups list --build-id` conflicts. Help, validation,
+// and tests share these slices so a newly rejected flag cannot land undocumented.
+var (
+	betaGroupsListMembershipPageControlFlags = []string{"global", "limit", "next", "paginate"}
+	betaGroupsListNameSortFlags              = []string{"name", "sort"}
+	betaGroupsListQuerySurfaceFlags          = []string{
+		"id",
+		"public-link-enabled",
+		"public-link-limit-enabled",
+		"public-link",
+		"fields",
+		"app-fields",
+		"build-fields",
+		"tester-fields",
+		"recruitment-criteria-fields",
+		"include",
+		"testers-limit",
+		"builds-limit",
+	}
+	betaGroupsListBuildIDCompatibleFlags = []string{"app", "internal", "external"}
+)
+
+func joinDashedFlagNames(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	flags := make([]string, len(names))
+	for i, name := range names {
+		flags[i] = "--" + name
+	}
+	switch len(flags) {
+	case 1:
+		return flags[0]
+	case 2:
+		return flags[0] + " and " + flags[1]
+	default:
+		return strings.Join(flags[:len(flags)-1], ", ") + ", and " + flags[len(flags)-1]
+	}
+}
+
 // BetaGroupsCommand returns the beta groups command with subcommands.
 func BetaGroupsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("beta-groups", flag.ExitOnError)
@@ -256,9 +296,10 @@ A complete lookup with no memberships prints an empty groups array and exits 0.
 If an inverse relationship cannot be read, available matches and failures are
 printed with complete=false and the command exits nonzero.
 
-GET /v1/apps/{id}/betaGroups accepts only a page limit, so --internal,
---external, --name, and --sort are served by GET /v1/betaGroups with
-filter[app]. Those filters are applied by App Store Connect. For ordinary
+GET /v1/apps/{id}/betaGroups accepts only limit and fields[betaGroups], so
+--fields alone stays on that app-scoped endpoint. --internal, --external,
+--name, --sort, and the other query flags are served by GET /v1/betaGroups
+with filter[app]. Those filters are applied by App Store Connect. For ordinary
 one-page filtered and global listings, --limit is the page size. The stable
 app-scoped --internal/--external aggregate fetches with the maximum page size
 of 200 before applying --limit as the final cap. The --name and --sort flags
@@ -268,7 +309,12 @@ The top-level endpoint also supports --id, --public-link-enabled,
 --fields, --app-fields, --build-fields, --tester-fields, or
 --recruitment-criteria-fields to shape related resources. --testers-limit and
 --builds-limit cap included beta testers and builds respectively.
---build-id membership lookup accepts neither --name nor --sort.
+--build-id membership lookup is compatible only with --app, --internal, and --external
+among query flags. Output flags still apply. It rejects page controls
+(--global, --limit, --next, --paginate), --name, --sort,
+and query-surface flags (--id, --public-link-enabled, --public-link-limit-enabled,
+--public-link, --fields, --app-fields, --build-fields, --tester-fields,
+--recruitment-criteria-fields, --include, --testers-limit, and --builds-limit).
 
 App-scoped --internal and --external continue to collect every matching page
 automatically for compatibility when --name and --sort are absent. Combined
@@ -306,13 +352,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("beta-groups list: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "beta-groups list: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("beta-groups list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "beta-groups list: %v", err)
 			}
 
 			appIDSet := false
@@ -332,6 +378,8 @@ Examples:
 			testersLimitSet := false
 			buildsLimitSet := false
 			membershipPageControlSet := false
+			nameSortSet := false
+			querySurfaceSet := false
 			fs.Visit(func(value *flag.Flag) {
 				switch value.Name {
 				case "app":
@@ -366,8 +414,15 @@ Examples:
 					testersLimitSet = true
 				case "builds-limit":
 					buildsLimitSet = true
-				case "global", "limit", "next", "paginate":
+				}
+				if slices.Contains(betaGroupsListMembershipPageControlFlags, value.Name) {
 					membershipPageControlSet = true
+				}
+				if slices.Contains(betaGroupsListNameSortFlags, value.Name) {
+					nameSortSet = true
+				}
+				if slices.Contains(betaGroupsListQuerySurfaceFlags, value.Name) {
+					querySurfaceSet = true
 				}
 			})
 
@@ -494,9 +549,6 @@ Examples:
 			resolvedAppID := shared.ResolveAppID(*appID)
 			resolvedBuildID := strings.TrimSpace(*buildID)
 			queryFilterSet := idSet || publicLinkEnabledSet || publicLinkLimitEnabledSet || publicLinkSet
-			querySurfaceSet := queryFilterSet ||
-				fieldsSet || appFieldsSet || buildFieldsSet || testerFieldsSet || recruitmentCriteriaFieldsSet ||
-				includeSet || testersLimitSet || buildsLimitSet
 
 			if *internal && *external {
 				fmt.Fprintln(os.Stderr, "Error: --internal and --external are mutually exclusive")
@@ -511,15 +563,15 @@ Examples:
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--app")
 			}
 			if resolvedBuildID != "" && membershipPageControlSet {
-				fmt.Fprintln(os.Stderr, "Error: --global, --limit, --next, and --paginate cannot be used with --build-id; membership lookup always fetches all required pages")
+				fmt.Fprintf(os.Stderr, "Error: %s cannot be used with --build-id; membership lookup always fetches all required pages\n", joinDashedFlagNames(betaGroupsListMembershipPageControlFlags))
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
-			if resolvedBuildID != "" && (nameSet || sortSet) {
-				fmt.Fprintln(os.Stderr, "Error: --name and --sort cannot be used with --build-id; membership lookup queries the build's app relationships directly")
+			if resolvedBuildID != "" && nameSortSet {
+				fmt.Fprintf(os.Stderr, "Error: %s cannot be used with --build-id; membership lookup queries the build's app relationships directly\n", joinDashedFlagNames(betaGroupsListNameSortFlags))
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 			if resolvedBuildID != "" && querySurfaceSet {
-				fmt.Fprintln(os.Stderr, "Error: beta-group query filters, sparse fields, includes, and relationship limits cannot be used with --build-id; membership lookup queries the build's app relationships directly")
+				fmt.Fprintln(os.Stderr, "Error: testflight groups query filters, sparse fields, includes, and relationship limits cannot be used with --build-id; membership lookup queries the build's app relationships directly")
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "")
 			}
 

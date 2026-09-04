@@ -82,7 +82,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events list: %w", err)
+				return shared.UsageErrorf("app-events list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,

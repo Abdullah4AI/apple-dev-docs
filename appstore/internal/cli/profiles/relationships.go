@@ -111,15 +111,15 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("profiles links certificates: --limit must be between 1 and 200")
+				return shared.UsageError("profiles links certificates: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("profiles links certificates: %w", err)
+				return shared.UsageErrorf("profiles links certificates: %v", err)
 			}
 			if idValue == "" && strings.TrimSpace(*next) != "" {
 				derivedID, err := extractProfileIDFromNextURL(*next, "certificates")
 				if err != nil {
-					return fmt.Errorf("profiles links certificates: %w", err)
+					return shared.UsageErrorf("profiles links certificates: %v", err)
 				}
 				idValue = derivedID
 			}
@@ -196,15 +196,15 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("profiles links devices: --limit must be between 1 and 200")
+				return shared.UsageError("profiles links devices: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("profiles links devices: %w", err)
+				return shared.UsageErrorf("profiles links devices: %v", err)
 			}
 			if idValue == "" && strings.TrimSpace(*next) != "" {
 				derivedID, err := extractProfileIDFromNextURL(*next, "devices")
 				if err != nil {
-					return fmt.Errorf("profiles links devices: %w", err)
+					return shared.UsageErrorf("profiles links devices: %v", err)
 				}
 				idValue = derivedID
 			}

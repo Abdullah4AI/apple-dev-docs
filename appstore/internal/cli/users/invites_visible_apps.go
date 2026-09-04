@@ -65,15 +65,15 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("users invites visible-apps list: --limit must be between 1 and 200")
+				return shared.UsageError("users invites visible-apps list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("users invites visible-apps list: %w", err)
+				return shared.UsageErrorf("users invites visible-apps list: %v", err)
 			}
 			if idValue == "" && strings.TrimSpace(*next) != "" {
 				derivedID, err := extractUserInvitationIDFromNextURL(*next)
 				if err != nil {
-					return fmt.Errorf("users invites visible-apps list: %w", err)
+					return shared.UsageErrorf("users invites visible-apps list: %v", err)
 				}
 				idValue = derivedID
 			}

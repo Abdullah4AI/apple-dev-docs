@@ -43,6 +43,20 @@ func TestExperimentalCommandsHaveStabilityLabel(t *testing.T) {
 	}
 }
 
+func TestScreenshotsParentHelpRetainsLocalExperimentalScope(t *testing.T) {
+	root := RootCommand("1.2.3")
+	cmd := findSubcommand(root, "screenshots")
+	if cmd == nil {
+		t.Fatal("command [screenshots] not found")
+	}
+	if !strings.Contains(cmd.ShortHelp, "local capture/frame/matrix workflow is [experimental]") {
+		t.Fatalf("screenshots ShortHelp = %q, want broad local experimental marker", cmd.ShortHelp)
+	}
+	if !strings.Contains(cmd.LongHelp, "Local screenshot automation commands are experimental.") {
+		t.Fatalf("screenshots LongHelp = %q, want broad local experimental warning", cmd.LongHelp)
+	}
+}
+
 func TestWebCommandsDoNotHaveExperimentalStabilityLabel(t *testing.T) {
 	root := RootCommand("1.2.3")
 

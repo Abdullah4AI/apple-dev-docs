@@ -63,10 +63,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap offer-codes custom-codes list: --limit must be between 1 and 200")
+				return shared.UsageError("iap offer-codes custom-codes list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap offer-codes custom-codes list: %w", err)
+				return shared.UsageErrorf("iap offer-codes custom-codes list: %v", err)
 			}
 
 			id := strings.TrimSpace(*offerCodeID)
@@ -295,10 +295,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap offer-codes one-time-codes list: --limit must be between 1 and 200")
+				return shared.UsageError("iap offer-codes one-time-codes list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap offer-codes one-time-codes list: %w", err)
+				return shared.UsageErrorf("iap offer-codes one-time-codes list: %v", err)
 			}
 
 			id := strings.TrimSpace(*offerCodeID)

@@ -63,13 +63,13 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("actors list: %w", err)
+				return shared.UsageErrorf("actors list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(fs, *next, "actors list", "id", "fields", "limit"); err != nil {
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("actors list: --limit must be between 1 and 200")
+				return shared.UsageError("actors list: --limit must be between 1 and 200")
 			}
 			if strings.TrimSpace(*ids) == "" && strings.TrimSpace(*next) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -185,6 +186,228 @@ func TestShotsFrame_DefaultDeviceIsIPhoneAir(t *testing.T) {
 	}
 	if !result.Normalized {
 		t.Fatal("expected normalization to be applied")
+	}
+}
+
+func TestShotsFramePassesLiteralWhitespaceInputPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	inputPath := filepath.Join(t.TempDir(), "raw.png ")
+	outputPath := filepath.Join(t.TempDir(), "framed.png")
+	writeFramePNG(t, inputPath, makeRawImage(100, 220))
+	var got screenshots.FrameRequest
+	installMockFrame(t, func(_ context.Context, req screenshots.FrameRequest) (*screenshots.FrameResult, error) {
+		got = req
+		return &screenshots.FrameResult{Path: req.OutputPath, Device: req.Device}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "frame", "--input", inputPath, "--output-path", outputPath, "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	wantInput, err := filepath.Abs(inputPath)
+	if err != nil {
+		t.Fatalf("Abs(inputPath) error: %v", err)
+	}
+	wantOutput, err := filepath.Abs(outputPath)
+	if err != nil {
+		t.Fatalf("Abs(outputPath) error: %v", err)
+	}
+	if got.InputPath != wantInput {
+		t.Fatalf("request input path = %q, want literal %q", got.InputPath, wantInput)
+	}
+	if got.OutputPath != wantOutput {
+		t.Fatalf("request output path = %q, want %q", got.OutputPath, wantOutput)
+	}
+	if stdout == "" {
+		t.Fatal("expected structured frame output")
+	}
+}
+
+func TestShotsFramePassesLiteralWhitespaceOutputPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	inputPath := filepath.Join(t.TempDir(), "raw.png")
+	outputPath := filepath.Join(t.TempDir(), "framed.png ")
+	writeFramePNG(t, inputPath, makeRawImage(100, 220))
+	var got screenshots.FrameRequest
+	installMockFrame(t, func(_ context.Context, req screenshots.FrameRequest) (*screenshots.FrameResult, error) {
+		got = req
+		return &screenshots.FrameResult{Path: req.OutputPath, Device: req.Device}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "frame", "--input", inputPath, "--output-path", outputPath, "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	wantOutput, err := filepath.Abs(outputPath)
+	if err != nil {
+		t.Fatalf("Abs(outputPath) error: %v", err)
+	}
+	if got.OutputPath != wantOutput {
+		t.Fatalf("request output path = %q, want literal %q", got.OutputPath, wantOutput)
+	}
+	if stdout == "" {
+		t.Fatal("expected structured frame output")
+	}
+}
+
+func TestShotsFramePassesLiteralWhitespaceOutputDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	inputPath := filepath.Join(t.TempDir(), "raw.png")
+	outputDir := filepath.Join(t.TempDir(), "framed ")
+	writeFramePNG(t, inputPath, makeRawImage(100, 220))
+	var got screenshots.FrameRequest
+	installMockFrame(t, func(_ context.Context, req screenshots.FrameRequest) (*screenshots.FrameResult, error) {
+		got = req
+		return &screenshots.FrameResult{Path: req.OutputPath, Device: req.Device}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "frame", "--input", inputPath, "--output-dir", outputDir, "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	wantOutput := filepath.Join(outputDir, "raw-iphone-air.png")
+	wantOutput, err := filepath.Abs(wantOutput)
+	if err != nil {
+		t.Fatalf("Abs(outputPath) error: %v", err)
+	}
+	if got.OutputPath != wantOutput {
+		t.Fatalf("request output path = %q, want literal output directory path %q", got.OutputPath, wantOutput)
+	}
+	if stdout == "" {
+		t.Fatal("expected structured frame output")
+	}
+}
+
+func TestShotsFramePassesLiteralWhitespaceConfigPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	configPath := filepath.Join(t.TempDir(), "frame.yaml ")
+	writeFile(t, configPath, "project: {}\n")
+	var got screenshots.FrameRequest
+	installMockFrame(t, func(_ context.Context, req screenshots.FrameRequest) (*screenshots.FrameResult, error) {
+		got = req
+		return &screenshots.FrameResult{Path: req.OutputPath, Device: req.Device}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "frame", "--config", configPath, "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	wantConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatalf("Abs(configPath) error: %v", err)
+	}
+	if got.ConfigPath != wantConfig {
+		t.Fatalf("request config path = %q, want literal %q", got.ConfigPath, wantConfig)
+	}
+	if stdout == "" {
+		t.Fatal("expected structured frame output")
+	}
+}
+
+func TestShotsFrameConfigWhitespacePathUsesConfiguredDevice(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	configPath := filepath.Join(t.TempDir(), "frame.yaml ")
+	writeFile(t, configPath, `project:
+  device: "iPhone 17 Pro - Silver - Portrait"
+`)
+
+	var got screenshots.FrameRequest
+	installMockFrame(t, func(_ context.Context, req screenshots.FrameRequest) (*screenshots.FrameResult, error) {
+		got = req
+		return &screenshots.FrameResult{Path: req.OutputPath, Device: req.Device}, nil
+	})
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "frame", "--config", configPath, "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	wantConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatalf("Abs(configPath) error: %v", err)
+	}
+	if got.ConfigPath != wantConfig {
+		t.Fatalf("request config path = %q, want literal %q", got.ConfigPath, wantConfig)
+	}
+	if !strings.HasSuffix(got.OutputPath, "screenshot-iphone-17-pro.png") {
+		t.Fatalf("request output path = %q, want configured-device suffix", got.OutputPath)
+	}
+	if stdout == "" {
+		t.Fatal("expected structured frame output")
 	}
 }
 

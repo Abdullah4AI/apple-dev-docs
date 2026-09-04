@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -24,6 +25,9 @@ var (
 	setWebSubscriptionPlanPricesFn = func(ctx context.Context, client *webcore.Client, subscriptionID string, prices []webcore.SubscriptionPlanPrice) (*webcore.SubscriptionPlanPricesResult, error) {
 		return client.SetSubscriptionPlanPrices(ctx, subscriptionID, prices)
 	}
+	listWebSubscriptionPricesFn = func(ctx context.Context, client *webcore.Client, subscriptionID, territory string) ([]webcore.SubscriptionPrice, error) {
+		return client.ListSubscriptionPrices(ctx, subscriptionID, territory)
+	}
 	resolveWebSubscriptionPricePointFn = func(ctx context.Context, client *webcore.Client, subscriptionID, territory, customerPrice string) (*webcore.SubscriptionPricePoint, error) {
 		return client.ResolveSubscriptionPricePoint(ctx, subscriptionID, territory, customerPrice)
 	}
@@ -31,20 +35,6 @@ var (
 		return client.GetSubscriptionAdjustedEqualizations(ctx, pricePointID, planType)
 	}
 )
-
-type webSubscriptionMonthlyCommitmentBootstrapResult struct {
-	SubscriptionID              string `json:"subscriptionId"`
-	Territory                   string `json:"territory"`
-	PlanAvailabilityID          string `json:"planAvailabilityId"`
-	PlanAvailabilityNew         bool   `json:"planAvailabilityCreated"`
-	PlanAvailabilityWouldCreate bool   `json:"planAvailabilityWouldCreate,omitempty"`
-	UpfrontPricePointID         string `json:"upfrontPricePointId"`
-	MonthlyPricePointID         string `json:"monthlyPricePointId"`
-	PricesCreated               bool   `json:"pricesCreated"`
-	DryRun                      bool   `json:"dryRun"`
-	StartDate                   string `json:"startDate,omitempty"`
-	PreserveCurrentPrice        bool   `json:"preserveCurrentPrice,omitempty"`
-}
 
 // WebSubscriptionsPricingCommand returns the web subscription pricing command group.
 func WebSubscriptionsPricingCommand() *ffcli.Command {
@@ -166,9 +156,8 @@ resolution but does not mutate App Store Connect.
 				}
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}
@@ -195,10 +184,16 @@ resolution but does not mutate App Store Connect.
 			monthlyAvailability, found := findPlanAvailabilityByType(availabilities, "MONTHLY")
 			created := false
 			if found && availabilityExcludesTerritory(monthlyAvailability, territoryID) {
-				return fmt.Errorf("MONTHLY plan availability %q exists but does not include %s; update its territories before bootstrapping prices", monthlyAvailability.ID, territoryID)
+				return fmt.Errorf(
+					"MONTHLY plan availability %q exists but does not include %s; add it with 'asc subscriptions pricing plan-availability set --subscription-id %s --plan-type MONTHLY --territories <complete list including %s> --confirm' before bootstrapping prices",
+					monthlyAvailability.ID,
+					territoryID,
+					id,
+					territoryID,
+				)
 			}
 			if *dryRun {
-				result := webSubscriptionMonthlyCommitmentBootstrapResult{
+				result := asc.WebSubscriptionMonthlyCommitmentBootstrapResult{
 					SubscriptionID: id, Territory: territoryID,
 					PlanAvailabilityID:          monthlyAvailability.ID,
 					PlanAvailabilityWouldCreate: !found,
@@ -206,7 +201,7 @@ resolution but does not mutate App Store Connect.
 					DryRun: true, StartDate: scheduledDate,
 					PreserveCurrentPrice: *preserveCurrentPrice,
 				}
-				return shared.PrintOutput(result, *output.Output, *output.Pretty)
+				return shared.PrintOutput(&result, *output.Output, *output.Pretty)
 			}
 			if !found {
 				monthlyAvailability, err = dereferencePlanAvailability(createWebSubscriptionPlanAvailabilityFn(requestCtx, client, id, "MONTHLY", []string{territoryID}, false))
@@ -216,36 +211,41 @@ resolution but does not mutate App Store Connect.
 				created = true
 			}
 
-			var prices *webcore.SubscriptionPlanPricesResult
+			result := asc.WebSubscriptionMonthlyCommitmentBootstrapResult{
+				SubscriptionID:       id,
+				Territory:            territoryID,
+				PlanAvailabilityID:   monthlyAvailability.ID,
+				PlanAvailabilityNew:  created,
+				UpfrontPricePointID:  upfrontID,
+				MonthlyPricePointID:  monthlyID,
+				CompletedStage:       asc.WebMonthlyCommitmentStagePlanAvailability,
+				StartDate:            scheduledDate,
+				PreserveCurrentPrice: *preserveCurrentPrice,
+			}
 			if scheduledDate == "" {
-				prices, err = createWebSubscriptionPlanPricesFn(requestCtx, client, id, upfrontID, monthlyID)
+				_, err = createWebSubscriptionPlanPricesFn(requestCtx, client, id, upfrontID, monthlyID)
 			} else {
-				prices, err = setWebSubscriptionPlanPricesFn(requestCtx, client, id, []webcore.SubscriptionPlanPrice{
+				_, err = setWebSubscriptionPlanPricesFn(requestCtx, client, id, []webcore.SubscriptionPlanPrice{
 					{PlanType: "UPFRONT", PricePointID: upfrontID, StartDate: scheduledDate, PreserveCurrentPrice: *preserveCurrentPrice},
 					{PlanType: "MONTHLY", PricePointID: monthlyID, StartDate: scheduledDate, PreserveCurrentPrice: *preserveCurrentPrice},
 				})
 			}
 			if err != nil {
-				return fmt.Errorf("monthly availability ready, but paired price creation failed: %w", err)
+				runErr := fmt.Errorf("monthly availability ready, but paired price creation failed: %w", err)
+				result.Failure = runErr.Error()
+				return printMonthlyCommitmentBootstrapReceipt(result, *output.Output, *output.Pretty, runErr)
 			}
-			result := webSubscriptionMonthlyCommitmentBootstrapResult{
-				SubscriptionID:       id,
-				Territory:            territoryID,
-				PlanAvailabilityID:   monthlyAvailability.ID,
-				PlanAvailabilityNew:  created,
-				UpfrontPricePointID:  prices.UpfrontPricePointID,
-				MonthlyPricePointID:  prices.MonthlyPricePointID,
-				PricesCreated:        true,
-				StartDate:            scheduledDate,
-				PreserveCurrentPrice: *preserveCurrentPrice,
+			result.PricesCreated = true
+			result.CompletedStage = asc.WebMonthlyCommitmentStagePrices
+			verifyCtx, verifyCancel := shared.ContextWithTimeout(ctx)
+			defer verifyCancel()
+			if verifyErr := verifyMonthlyCommitmentBootstrap(verifyCtx, client, result); verifyErr != nil {
+				result.Failure = verifyErr.Error()
+				return printMonthlyCommitmentBootstrapReceipt(result, *output.Output, *output.Pretty, verifyErr)
 			}
-			return shared.PrintOutputWithRenderers(
-				result,
-				*output.Output,
-				*output.Pretty,
-				func() error { return renderWebMonthlyCommitmentBootstrapTable(result) },
-				func() error { return renderWebMonthlyCommitmentBootstrapMarkdown(result) },
-			)
+			result.Verified = true
+			result.CompletedStage = asc.WebMonthlyCommitmentStageVerified
+			return printMonthlyCommitmentBootstrapReceipt(result, *output.Output, *output.Pretty, nil)
 		},
 	}
 }
@@ -286,9 +286,8 @@ func WebSubscriptionsPricingAdjustedEqualizationsViewCommand() *ffcli.Command {
 			if normalizedPlanType != "MONTHLY" {
 				return shared.UsageError(`--plan-type only supports "MONTHLY"; Apple's endpoint rejects UPFRONT`)
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}
@@ -335,23 +334,46 @@ func dereferencePlanAvailability(availability *webcore.SubscriptionPlanAvailabil
 	return *availability, nil
 }
 
-func renderWebMonthlyCommitmentBootstrapTable(result webSubscriptionMonthlyCommitmentBootstrapResult) error {
-	asc.RenderTable(
-		[]string{"Subscription ID", "Territory", "Plan Availability ID", "Availability Created", "Prices Created"},
-		[][]string{{
-			result.SubscriptionID,
-			result.Territory,
-			result.PlanAvailabilityID,
-			fmt.Sprintf("%t", result.PlanAvailabilityNew),
-			fmt.Sprintf("%t", result.PricesCreated),
-		}},
-	)
+func printMonthlyCommitmentBootstrapReceipt(result asc.WebSubscriptionMonthlyCommitmentBootstrapResult, format string, pretty bool, runErr error) error {
+	if err := shared.PrintOutput(&result, format, pretty); err != nil {
+		if runErr != nil {
+			return errors.Join(err, runErr)
+		}
+		return err
+	}
+	if runErr != nil {
+		return shared.NewReportedError(runErr)
+	}
 	return nil
 }
 
-func renderWebMonthlyCommitmentBootstrapMarkdown(result webSubscriptionMonthlyCommitmentBootstrapResult) error {
-	fmt.Println("| Subscription ID | Territory | Plan Availability ID | Availability Created | Prices Created |")
-	fmt.Println("|---|---|---|---|---|")
-	fmt.Printf("| %s | %s | %s | %t | %t |\n", result.SubscriptionID, result.Territory, result.PlanAvailabilityID, result.PlanAvailabilityNew, result.PricesCreated)
+func verifyMonthlyCommitmentBootstrap(ctx context.Context, client *webcore.Client, result asc.WebSubscriptionMonthlyCommitmentBootstrapResult) error {
+	availabilities, err := listWebSubscriptionPlanAvailabilitiesFn(ctx, client, result.SubscriptionID)
+	if err != nil {
+		return fmt.Errorf("read back MONTHLY plan availability: %w", err)
+	}
+	monthlyAvailability, found := findPlanAvailabilityByType(availabilities, "MONTHLY")
+	if !found {
+		return fmt.Errorf("MONTHLY plan availability was missing after write")
+	}
+	if strings.TrimSpace(result.PlanAvailabilityID) != "" && !strings.EqualFold(strings.TrimSpace(monthlyAvailability.ID), strings.TrimSpace(result.PlanAvailabilityID)) {
+		return fmt.Errorf("MONTHLY plan availability %q does not match written id %q", monthlyAvailability.ID, result.PlanAvailabilityID)
+	}
+	if availabilityExcludesTerritory(monthlyAvailability, result.Territory) {
+		return fmt.Errorf("MONTHLY plan availability %q does not include %s after write", monthlyAvailability.ID, result.Territory)
+	}
+
+	prices, err := listWebSubscriptionPricesFn(ctx, client, result.SubscriptionID, result.Territory)
+	if err != nil {
+		return fmt.Errorf("read back subscription prices: %w", err)
+	}
+	startDate := webcore.NormalizeSubscriptionPriceStartDate(result.StartDate)
+	now := time.Now().UTC()
+	if _, ok := webcore.FindSubscriptionPrice(prices, "UPFRONT", result.Territory, result.UpfrontPricePointID, startDate, now); !ok {
+		return fmt.Errorf("UPFRONT price record for %s did not match price point %s", result.Territory, result.UpfrontPricePointID)
+	}
+	if _, ok := webcore.FindSubscriptionPrice(prices, "MONTHLY", result.Territory, result.MonthlyPricePointID, startDate, now); !ok {
+		return fmt.Errorf("MONTHLY price record for %s did not match price point %s", result.Territory, result.MonthlyPricePointID)
+	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -117,6 +118,51 @@ func TestShotsReviewGenerate_MissingFramedDir(t *testing.T) {
 	})
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestShotsReviewGeneratePreservesWhitespaceApprovalPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	baseDir := t.TempDir()
+	framedDir := filepath.Join(baseDir, "framed")
+	outputDir := filepath.Join(baseDir, "review")
+	approvalPath := filepath.Join(baseDir, "approved.json ")
+	writeReviewPNG(t, filepath.Join(framedDir, "en", "iPhone_Air", "home.png"), 1320, 2868)
+	if err := os.WriteFile(approvalPath, []byte("[]\n"), 0o600); err != nil {
+		t.Fatalf("write whitespace approval file: %v", err)
+	}
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "review-generate",
+		"--framed-dir", framedDir,
+		"--output-dir", outputDir,
+		"--approval-path", approvalPath,
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var result struct {
+		ApprovalPath string `json:"approval_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal review output: %v\nstdout=%q", err, stdout)
+	}
+	if result.ApprovalPath != approvalPath {
+		t.Fatalf("approval_path = %q, want literal %q", result.ApprovalPath, approvalPath)
 	}
 }
 

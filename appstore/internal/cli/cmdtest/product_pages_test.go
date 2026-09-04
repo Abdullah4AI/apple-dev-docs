@@ -6,6 +6,8 @@ import (
 	"flag"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestProductPagesCustomPagesListRequiresApp(t *testing.T) {
@@ -142,17 +144,15 @@ func TestProductPagesCustomPagesListRejectsInvalidLimit(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("unexpected ErrHelp, got %v", err)
+				if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+					t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 				}
 			})
 
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
+			assertUsageDiagnosticFirstLine(t, stderr, "custom-pages list: --limit must be between 1 and 200")
 		})
 	}
 }
@@ -168,17 +168,15 @@ func TestProductPagesCustomPagesListRejectsInvalidNextURL(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("unexpected ErrHelp, got %v", err)
+		if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 		}
 	})
 
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
+	assertUsageDiagnosticFirstLine(t, stderr, "custom-pages list: --next must be an App Store Connect URL")
 }
 
 func TestProductPagesExperimentTreatmentLocalizationMediaSetsValidationErrors(t *testing.T) {
@@ -348,17 +346,15 @@ func TestProductPagesCustomPagesLocalizationsPreviewSetsListRejectsInvalidLimit(
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("unexpected ErrHelp, got %v", err)
+				if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+					t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 				}
 			})
 
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
+			assertUsageDiagnosticFirstLine(t, stderr, "custom-pages localizations preview-sets list: --limit must be between 1 and 200")
 		})
 	}
 }
@@ -374,17 +370,15 @@ func TestProductPagesCustomPagesLocalizationsPreviewSetsListRejectsInvalidNextUR
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("unexpected ErrHelp, got %v", err)
+		if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 		}
 	})
 
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
+	assertUsageDiagnosticFirstLine(t, stderr, "custom-pages localizations preview-sets list: --next must be an App Store Connect URL")
 }
 
 func TestProductPagesCustomPagesLocalizationsScreenshotSetsListRejectsInvalidLimit(t *testing.T) {
@@ -414,17 +408,15 @@ func TestProductPagesCustomPagesLocalizationsScreenshotSetsListRejectsInvalidLim
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("unexpected ErrHelp, got %v", err)
+				if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+					t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 				}
 			})
 
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
+			assertUsageDiagnosticFirstLine(t, stderr, "custom-pages localizations screenshot-sets list: --limit must be between 1 and 200")
 		})
 	}
 }
@@ -440,17 +432,15 @@ func TestProductPagesCustomPagesLocalizationsScreenshotSetsListRejectsInvalidNex
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("unexpected ErrHelp, got %v", err)
+		if got := rootcmd.ExitCodeFromError(err); got != rootcmd.ExitUsage {
+			t.Fatalf("exit code = %d, want %d (err=%v)", got, rootcmd.ExitUsage, err)
 		}
 	})
 
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
+	assertUsageDiagnosticFirstLine(t, stderr, "custom-pages localizations screenshot-sets list: --next must be an App Store Connect URL")
 }
 
 func TestProductPagesCustomPagesLocalizationsSearchKeywordsListRequiresLocalizationID(t *testing.T) {

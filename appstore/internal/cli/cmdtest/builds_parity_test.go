@@ -275,20 +275,24 @@ func TestTestFlightMetricsInvalidPeriodReturnsValidationError(t *testing.T) {
 		runErr = root.Run(context.Background())
 	})
 
+	const wantMessage = "--period must be one of: P7D, P30D, P90D, P365D"
+
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr from direct command execution, got %q", stderr)
+	// The check runs before any request, so it reports itself and exits with
+	// usage semantics (#518); ffcli renders the usage page after it.
+	if !strings.Contains(stderr, "Error: "+wantMessage+"\n") {
+		t.Fatalf("stderr = %q, want it to contain %q", stderr, "Error: "+wantMessage+"\n")
 	}
 	if runErr == nil {
 		t.Fatal("expected validation error")
 	}
-	if errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("errors.Is(flag.ErrHelp) = true, error = %v", runErr)
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("errors.Is(flag.ErrHelp) = false, want usage exit semantics: %v", runErr)
 	}
-	if got, want := runErr.Error(), "--period must be one of: P7D, P30D, P90D, P365D"; got != want {
-		t.Fatalf("error = %q, want %q", got, want)
+	if got := runErr.Error(); got != wantMessage {
+		t.Fatalf("error = %q, want %q", got, wantMessage)
 	}
 }
 

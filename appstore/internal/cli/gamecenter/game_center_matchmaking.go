@@ -101,10 +101,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center matchmaking queues list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center matchmaking queues list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center matchmaking queues list: %w", err)
+				return shared.UsageErrorf("game-center matchmaking queues list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -410,10 +410,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center matchmaking rule-sets list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center matchmaking rule-sets list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center matchmaking rule-sets list: %w", err)
+				return shared.UsageErrorf("game-center matchmaking rule-sets list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -720,10 +720,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center matchmaking rule-sets queues list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center matchmaking rule-sets queues list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center matchmaking rule-sets queues list: %w", err)
+				return shared.UsageErrorf("game-center matchmaking rule-sets queues list: %v", err)
 			}
 
 			id := strings.TrimSpace(*ruleSetID)
@@ -825,10 +825,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center matchmaking rules list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center matchmaking rules list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center matchmaking rules list: %w", err)
+				return shared.UsageErrorf("game-center matchmaking rules list: %v", err)
 			}
 
 			id := strings.TrimSpace(*ruleSetID)
@@ -1147,10 +1147,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center matchmaking teams list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center matchmaking teams list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center matchmaking teams list: %w", err)
+				return shared.UsageErrorf("game-center matchmaking teams list: %v", err)
 			}
 
 			id := strings.TrimSpace(*ruleSetID)
@@ -1655,10 +1655,10 @@ func canonicalRuleMetricsGroupBy(supported []string, value string) (string, bool
 
 func runMetricsQueue(ctx context.Context, name string, queueID *string, granularity *string, sort *string, limit *int, next *string, paginate *bool, output *string, pretty *bool, fetchSizes func(client *asc.Client, ctx context.Context, id string, opts ...asc.GCMatchmakingMetricsOption) (*asc.GameCenterMatchmakingQueueSizesResponse, error), fetchRequests func(client *asc.Client, ctx context.Context, id string, opts ...asc.GCMatchmakingMetricsOption) (*asc.GameCenterMatchmakingQueueRequestsResponse, error), groupBy string, filterResult string, filterDetail string) error {
 	if *limit != 0 && (*limit < 1 || *limit > 200) {
-		return fmt.Errorf("game-center matchmaking metrics %s: --limit must be between 1 and 200", name)
+		return shared.UsageErrorf("game-center matchmaking metrics %s: --limit must be between 1 and 200", name)
 	}
 	if err := shared.ValidateNextURL(*next); err != nil {
-		return fmt.Errorf("game-center matchmaking metrics %s: %w", name, err)
+		return shared.UsageErrorf("game-center matchmaking metrics %s: %v", name, err)
 	}
 
 	id := strings.TrimSpace(*queueID)
@@ -1737,10 +1737,10 @@ func runMetricsQueue(ctx context.Context, name string, queueID *string, granular
 
 func runMetricsRule(ctx context.Context, name string, support ruleMetricsSupport, ruleID *string, granularity *string, groupBy *string, filterResult *string, filterQueue *string, sort *string, limit *int, next *string, paginate *bool, output *string, pretty *bool, fetch func(client *asc.Client, ctx context.Context, id string, opts ...asc.GCMatchmakingMetricsOption) (*asc.GameCenterMatchmakingBooleanRuleResultsResponse, error)) error {
 	if *limit != 0 && (*limit < 1 || *limit > 200) {
-		return fmt.Errorf("game-center matchmaking metrics %s: --limit must be between 1 and 200", name)
+		return shared.UsageErrorf("game-center matchmaking metrics %s: --limit must be between 1 and 200", name)
 	}
 	if err := shared.ValidateNextURL(*next); err != nil {
-		return fmt.Errorf("game-center matchmaking metrics %s: %w", name, err)
+		return shared.UsageErrorf("game-center matchmaking metrics %s: %v", name, err)
 	}
 
 	id := strings.TrimSpace(*ruleID)

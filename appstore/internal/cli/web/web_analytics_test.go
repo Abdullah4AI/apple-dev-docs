@@ -47,7 +47,7 @@ func TestWebAnalyticsCommandHierarchy(t *testing.T) {
 	}
 }
 
-func TestWebAnalyticsSubcommandsResolveSessionWithinTimeoutContext(t *testing.T) {
+func TestWebAnalyticsSubcommandsResolveSessionBeforeTimeoutContext(t *testing.T) {
 	origResolveSession := resolveSessionFn
 	t.Cleanup(func() {
 		resolveSessionFn = origResolveSession
@@ -203,8 +203,8 @@ func TestWebAnalyticsSubcommandsResolveSessionWithinTimeoutContext(t *testing.T)
 			if !errors.Is(err, resolveErr) {
 				t.Fatalf("expected resolveErr, got %v", err)
 			}
-			if !hadDeadline {
-				t.Fatal("expected resolveSessionFn to receive a timeout context")
+			if hadDeadline {
+				t.Fatal("expected resolveSession to run before the request timeout context is created")
 			}
 		})
 	}

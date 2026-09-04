@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -21,17 +22,20 @@ func TestWorkflowsCommandHierarchy(t *testing.T) {
 		t.Fatal("expected 'workflows' subcommand")
 		return
 	}
-	if len(workflowsCmd.Subcommands) != 6 {
-		t.Fatalf("expected 6 subcommands (describe, create, options, edit, enable, disable), got %d", len(workflowsCmd.Subcommands))
+	if len(workflowsCmd.Subcommands) != 7 {
+		t.Fatalf("expected 7 subcommands (list, describe, create, options, edit, enable, disable), got %d", len(workflowsCmd.Subcommands))
 	}
 	names := map[string]bool{}
 	for _, sub := range workflowsCmd.Subcommands {
 		names[sub.Name] = true
 	}
-	for _, name := range []string{"describe", "create", "options", "edit", "enable", "disable"} {
+	for _, name := range []string{"list", "describe", "create", "options", "edit", "enable", "disable"} {
 		if !names[name] {
 			t.Fatalf("expected %q subcommand", name)
 		}
+	}
+	if workflowsCmd.Subcommands[0].Name != "list" {
+		t.Fatalf("expected list to be the first workflows subcommand, got %q", workflowsCmd.Subcommands[0].Name)
 	}
 }
 
@@ -40,6 +44,271 @@ func TestWorkflowsGroupReturnsErrHelp(t *testing.T) {
 	err := cmd.Exec(context.Background(), nil)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected flag.ErrHelp, got %v", err)
+	}
+}
+
+func TestWorkflowsListMissingProductIDFailsBeforeHTTP(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		t.Fatal("resolveSessionFn should not be called when --product-id is missing")
+		return nil, "", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{"--apple-id", "user@example.com"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	_, stderr := captureOutput(t, func() {
+		err := cmd.Exec(context.Background(), nil)
+		if !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("expected flag.ErrHelp, got %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "Error: --product-id is required") {
+		t.Fatalf("expected missing --product-id error, got %q", stderr)
+	}
+}
+
+func TestWorkflowsListRejectsPositionalArguments(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		t.Fatal("resolveSessionFn should not be called for positional arguments")
+		return nil, "", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{"--product-id", "prod-1", "extra", "--bogus"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	_, stderr := captureOutput(t, func() {
+		err := cmd.Exec(context.Background(), cmd.FlagSet.Args())
+		if !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("expected flag.ErrHelp, got %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "web xcode-cloud workflows list does not accept positional arguments") {
+		t.Fatalf("expected positional-args error, got %q", stderr)
+	}
+}
+
+func TestWorkflowsListSuccess(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	var gotPath, gotQuery, gotMethod string
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			PublicProviderID: "team-uuid",
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					gotMethod = req.Method
+					gotPath = req.URL.Path
+					gotQuery = req.URL.RawQuery
+					body := `{
+						"items": [
+							{"id":"wf-1","content":{"name":"TestFlight Deploy","description":"Build on main"}},
+							{"id":"wf-2","content":{"name":"PR Check"}}
+						]
+					}`
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(body)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--apple-id", "user@example.com",
+		"--product-id", "prod-1",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("exec error: %v", err)
+		}
+	})
+
+	if gotMethod != http.MethodGet {
+		t.Fatalf("expected GET, got %s", gotMethod)
+	}
+	if gotPath != "/ci/api/teams/team-uuid/products/prod-1/workflows-v15" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if !strings.Contains(gotQuery, "limit=100") || !strings.Contains(gotQuery, "include_deleted=false") {
+		t.Fatalf("unexpected query: %s", gotQuery)
+	}
+
+	var result asc.WebXcodeCloudWorkflowsListResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("expected valid JSON output, got parse error: %v\noutput: %q", err, stdout)
+	}
+	if result.ProductID != "prod-1" {
+		t.Fatalf("unexpected productId: %+v", result)
+	}
+	if len(result.Workflows) != 2 {
+		t.Fatalf("expected 2 workflows, got %d", len(result.Workflows))
+	}
+	if result.Workflows[0].ID != "wf-1" || result.Workflows[0].Name != "TestFlight Deploy" || result.Workflows[0].Description != "Build on main" {
+		t.Fatalf("unexpected first workflow: %+v", result.Workflows[0])
+	}
+	if result.Workflows[1].ID != "wf-2" || result.Workflows[1].Name != "PR Check" || result.Workflows[1].Description != "" {
+		t.Fatalf("unexpected second workflow: %+v", result.Workflows[1])
+	}
+}
+
+func TestWorkflowsListEmptyItems(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			PublicProviderID: "team-uuid",
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(`{"items":[]}`)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--apple-id", "user@example.com",
+		"--product-id", "prod-1",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("exec error: %v", err)
+		}
+	})
+
+	var result asc.WebXcodeCloudWorkflowsListResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("expected valid JSON output, got parse error: %v\noutput: %q", err, stdout)
+	}
+	if result.ProductID != "prod-1" {
+		t.Fatalf("unexpected productId: %+v", result)
+	}
+	if result.Workflows == nil || len(result.Workflows) != 0 {
+		t.Fatalf("expected empty workflows array, got %+v", result.Workflows)
+	}
+}
+
+func TestWorkflowsListTableHeaders(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			PublicProviderID: "team-uuid",
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					body := `{"items":[{"id":"wf-1","content":{"name":"Nightly"}}]}`
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(body)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--apple-id", "user@example.com",
+		"--product-id", "prod-1",
+		"--output", "table",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("exec error: %v", err)
+		}
+	})
+	for _, want := range []string{"Workflow ID", "Name", "Description", "wf-1", "Nightly"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("table output missing %q: %q", want, stdout)
+		}
+	}
+}
+
+func TestWorkflowsListHTTPError(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveSessionFn = func(
+		ctx context.Context,
+		appleID, password, twoFactorCode string,
+	) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{
+			PublicProviderID: "team-uuid",
+			Client: &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(`{"error":"boom"}`)),
+						Request:    req,
+					}, nil
+				}),
+			},
+		}, "cache", nil
+	}
+
+	cmd := webXcodeCloudWorkflowListCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--apple-id", "user@example.com",
+		"--product-id", "prod-1",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected HTTP error")
 	}
 }
 

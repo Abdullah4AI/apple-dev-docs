@@ -1,5 +1,7 @@
 package asc
 
+import "strings"
+
 // AppRenameResult represents a localized app-name change.
 type AppRenameResult struct {
 	AppID          string `json:"appId"`
@@ -10,6 +12,15 @@ type AppRenameResult struct {
 	LocalizationID string `json:"localizationId"`
 }
 
+// WebAppCreateResult is the mutation receipt for `asc web apps create` when
+// --access is set. Access is observed from a post-create users re-read, not
+// copied from the request flags.
+type WebAppCreateResult struct {
+	ID     string   `json:"id"`
+	Access string   `json:"access"`
+	Users  []string `json:"users"`
+}
+
 func appRenameResultRows(result *AppRenameResult) ([]string, [][]string) {
 	return []string{"App ID", "App Info ID", "Locale", "Name", "Action", "Localization ID"}, [][]string{{
 		result.AppID,
@@ -18,6 +29,18 @@ func appRenameResultRows(result *AppRenameResult) ([]string, [][]string) {
 		compactWhitespace(result.Name),
 		result.Action,
 		result.LocalizationID,
+	}}
+}
+
+func webAppCreateResultRows(result *WebAppCreateResult) ([]string, [][]string) {
+	users := result.Users
+	if users == nil {
+		users = []string{}
+	}
+	return []string{"ID", "Access", "Users"}, [][]string{{
+		result.ID,
+		compactWhitespace(result.Access),
+		compactWhitespace(strings.Join(users, ",")),
 	}}
 }
 

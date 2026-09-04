@@ -26,8 +26,8 @@ func TestCrashesCommand_InvalidLimit(t *testing.T) {
 		t.Fatalf("failed to parse flags: %v", err)
 	}
 	err := cmd.Exec(context.Background(), nil)
-	if err == nil || errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected validation error for --limit, got %v", err)
+	if err == nil || !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected usage error for --limit, got %v", err)
 	}
 }
 
@@ -38,7 +38,7 @@ func TestCrashesCommand_InvalidSort(t *testing.T) {
 		t.Fatalf("failed to parse flags: %v", err)
 	}
 	err := cmd.Exec(context.Background(), nil)
-	if err == nil || errors.Is(err, flag.ErrHelp) {
+	if err == nil || !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected sort validation error, got %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -1124,6 +1125,8 @@ func TestShouldFallbackToIndividualKeys(t *testing.T) {
 		{name: "not found", err: &APIError{Status: http.StatusNotFound}, want: true},
 		{name: "bad request", err: &APIError{Status: http.StatusBadRequest}, want: false},
 		{name: "non api error", err: errors.New("boom"), want: false},
+		{name: "pagination forbidden", err: fmt.Errorf("%w: %w", errAPIKeyListPagination, &APIError{Status: http.StatusForbidden}), want: false},
+		{name: "pagination not found", err: fmt.Errorf("%w: %w", errAPIKeyListPagination, &APIError{Status: http.StatusNotFound}), want: false},
 	}
 
 	for _, tt := range tests {

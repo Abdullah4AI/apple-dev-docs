@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
@@ -56,6 +57,30 @@ func SetSyncAppClipBundleIDCapability(fn func(context.Context, *webcore.Client, 
 	syncAppClipBundleIDCapabilityFn = fn
 	return func() {
 		syncAppClipBundleIDCapabilityFn = prev
+	}
+}
+
+func SetUnassignDeveloperAppGroup(fn func(context.Context, *webcore.Client, webcore.DeveloperAppGroupUnassignRequest) (*asc.WebAppGroupUnassignResult, error)) func() {
+	prev := unassignDeveloperAppGroupFn
+	unassignDeveloperAppGroupFn = fn
+	return func() {
+		unassignDeveloperAppGroupFn = prev
+	}
+}
+
+func SetSetDeveloperAppGroups(fn func(context.Context, *webcore.Client, webcore.DeveloperAppGroupSetRequest) (*asc.WebAppGroupSetResult, error)) func() {
+	prev := setDeveloperAppGroupsFn
+	setDeveloperAppGroupsFn = fn
+	return func() {
+		setDeveloperAppGroupsFn = prev
+	}
+}
+
+func SetDeleteDeveloperAppGroup(fn func(context.Context, *webcore.Client, webcore.DeveloperAppGroupDeleteRequest) (*asc.WebAppGroupDeleteResult, error)) func() {
+	prev := deleteDeveloperAppGroupFn
+	deleteDeveloperAppGroupFn = fn
+	return func() {
+		deleteDeveloperAppGroupFn = prev
 	}
 }
 

@@ -66,6 +66,13 @@ type canonicalIntentRule struct {
 	reason   string
 }
 
+type authActionScope struct {
+	queryToken    string
+	commandPrefix string
+	reasonPrefix  string
+	actions       []string
+}
+
 var canonicalIntentRules = []canonicalIntentRule{
 	{
 		command:  "asc publish appstore",
@@ -78,6 +85,50 @@ var canonicalIntentRules = []canonicalIntentRule{
 		actions:  []string{"ship", "shipping", "publish", "release", "distribute", "distribution", "upload"},
 		subjects: []string{"beta", "testflight"},
 		reason:   "canonical:testflight-publish",
+	},
+}
+
+// metadataStatusSiblingLeaves names the metadata commands that must win over
+// the generic metadata status fallback when a query asks for them by name.
+// Nested leaves are spelled with their full path so that a query naming the
+// keyword subtree resolves to the executable child instead of the flat sibling
+// that happens to share the action word.
+var metadataStatusSiblingLeaves = []string{
+	"approve", "validate", "plan", "apply", "pull", "push", "keywords", "init",
+	"keywords import", "keywords audit", "keywords plan", "keywords diff",
+	"keywords localize", "keywords apply", "keywords push", "keywords sync",
+}
+
+// analyticsDashboardLeaves names the analytics pages that must win over the
+// generic overview dashboard when a query asks for one of them by name.
+var analyticsDashboardLeaves = []string{
+	"subscriptions", "sources", "product-pages", "in-app-events", "app-clips",
+	"campaigns", "sales", "offers", "benchmarks", "metrics", "retention", "cohorts",
+}
+
+var authActionScopes = []authActionScope{
+	{
+		queryToken:    "storekit",
+		commandPrefix: "asc storekit auth",
+		reasonPrefix:  "canonical:storekit-auth",
+		actions:       []string{"login", "switch", "doctor", "logout"},
+	},
+	{
+		queryToken:    "ads",
+		commandPrefix: "asc ads auth",
+		reasonPrefix:  "canonical:ads-auth",
+		actions:       []string{"login", "discover", "switch", "token", "doctor", "logout"},
+	},
+	{
+		queryToken:    "web",
+		commandPrefix: "asc web auth",
+		reasonPrefix:  "canonical:web-auth",
+		actions:       []string{"login", "capabilities", "logout"},
+	},
+	{
+		commandPrefix: "asc auth",
+		reasonPrefix:  "canonical:auth",
+		actions:       []string{"init", "login", "export-to-config", "export", "switch", "logout", "doctor", "issuer-id", "token"},
 	},
 }
 
@@ -505,6 +556,31 @@ func hasSupportingQueryToken(doc commandDoc, queryTokens []string, leafToken str
 }
 
 func canonicalBoostFor(command string, queryTokens []string) (int, string) {
+	if target, reason, ok := scopedCanonicalIntent(queryTokens); ok {
+		if command == target {
+			return canonicalIntentBoost, reason
+		}
+		return 0, ""
+	}
+
+	if releaseDashboardIntent(queryTokens) {
+		if command == "asc status" {
+			return canonicalIntentBoost, "canonical:release-status"
+		}
+		return 0, ""
+	}
+
+	if statusQueryIntent(queryTokens) && !mutationQueryIntent(queryTokens) {
+		if command == "asc versions phased-release view" &&
+			tokenContains(queryTokens, "phased") && tokenContains(queryTokens, "release") {
+			return canonicalIntentBoost, "canonical:phased-release-status"
+		}
+		if command == "asc builds beta-app-review-submission view" &&
+			tokenContains(queryTokens, "beta") && tokenContains(queryTokens, "review") {
+			return canonicalIntentBoost, "canonical:beta-review-status"
+		}
+	}
+
 	if tokenContains(queryTokens, "upload") && tokenContains(queryTokens, "build") {
 		return 0, ""
 	}
@@ -518,6 +594,335 @@ func canonicalBoostFor(command string, queryTokens []string) (int, string) {
 		}
 	}
 	return 0, ""
+}
+
+func scopedCanonicalIntent(queryTokens []string) (string, string, bool) {
+	if tokenContains(queryTokens, "review") && tokenContains(queryTokens, "attachment") {
+		if tokenContainsAny(queryTokens, []string{"delete", "remove"}) {
+			return "asc review attachments-delete", "canonical:review-attachment-delete", true
+		}
+		if tokenContains(queryTokens, "list") {
+			return "asc review attachments-list", "canonical:review-attachment-list", true
+		}
+		if tokenContains(queryTokens, "get") {
+			return "asc review attachments-get", "canonical:review-attachment-get", true
+		}
+		if tokenContains(queryTokens, "upload") {
+			return "asc review attachments-upload", "canonical:review-attachment-upload", true
+		}
+	}
+	if tokenContains(queryTokens, "cancel") && tokenContainsAny(queryTokens, []string{"submission", "submit"}) {
+		if !testFlightScopedQuery(queryTokens) {
+			return "asc submit cancel", "canonical:submission-cancel", true
+		}
+		// App Store Connect exposes no TestFlight review submission
+		// cancellation, so a beta-scoped request must stay on the TestFlight
+		// review submission surface instead of the App Store submit lifecycle.
+		if target, reason, ok := testFlightReviewSubmissionIntent(queryTokens); ok {
+			return target, reason, true
+		}
+	}
+	if tokenContains(queryTokens, "telemetry") {
+		if compoundTokenContains(queryTokens, "reset-id") {
+			return "asc telemetry reset-id", "canonical:telemetry-reset-id", true
+		}
+		if tokenContains(queryTokens, "disable") {
+			return "asc telemetry disable", "canonical:telemetry-disable", true
+		}
+		if tokenContains(queryTokens, "enable") {
+			return "asc telemetry enable", "canonical:telemetry-enable", true
+		}
+	}
+	if tokenContains(queryTokens, "notarization") {
+		if tokenContains(queryTokens, "submit") {
+			return "asc notarization submit", "canonical:notarization-submit", true
+		}
+		if tokenContains(queryTokens, "log") {
+			return "asc notarization log", "canonical:notarization-log", true
+		}
+		if tokenContains(queryTokens, "list") {
+			return "asc notarization list", "canonical:notarization-list", true
+		}
+	}
+	if tokenContains(queryTokens, "agreement") {
+		if tokenContains(queryTokens, "accept") {
+			return "asc web agreements accept", "canonical:agreement-accept", true
+		}
+		// TestFlight beta license agreements live under
+		// "asc testflight agreements", so a TestFlight-scoped download must
+		// not claim the Developer Program agreement leaf.
+		if tokenContains(queryTokens, "download") && !testFlightContext(queryTokens) {
+			return "asc web agreements download", "canonical:agreement-download", true
+		}
+	}
+	if target, reason, ok := scopedAuthActionIntent(queryTokens); ok {
+		return target, reason, true
+	}
+	if tokenContains(queryTokens, "xcode") && tokenContains(queryTokens, "cloud") {
+		if tokenContains(queryTokens, "duplicate") && tokenContains(queryTokens, "workflow") {
+			return "asc xcode-cloud workflows duplicate", "canonical:xcode-cloud-workflow-duplicate", true
+		}
+		// "run" doubles as the build-run resource noun, so an explicit read
+		// action must win over the trigger verb.
+		if tokenContainsAny(queryTokens, []string{"list", "view", "download"}) {
+			return "", "", false
+		}
+		if tokenContains(queryTokens, "doctor") {
+			return "asc xcode-cloud doctor", "canonical:xcode-cloud-doctor", true
+		}
+		if tokenContainsAny(queryTokens, []string{"run", "trigger"}) {
+			return "asc xcode-cloud run", "canonical:xcode-cloud-run", true
+		}
+	}
+	if !statusQueryIntent(queryTokens) || mutationQueryIntent(queryTokens) {
+		return "", "", false
+	}
+	if tokenContains(queryTokens, "notarization") {
+		return "asc notarization status", "canonical:notarization-status", true
+	}
+	if tokenContains(queryTokens, "telemetry") {
+		return "asc telemetry status", "canonical:telemetry-status", true
+	}
+	if tokenContains(queryTokens, "auth") {
+		if tokenContains(queryTokens, "storekit") {
+			return "asc storekit auth status", "canonical:storekit-auth-status", true
+		}
+		if tokenContains(queryTokens, "ads") {
+			return "asc ads auth status", "canonical:ads-auth-status", true
+		}
+		if tokenContains(queryTokens, "web") {
+			return "asc web auth status", "canonical:web-auth-status", true
+		}
+		return "asc auth status", "canonical:auth-status", true
+	}
+	if tokenContains(queryTokens, "account") {
+		return "asc account status", "canonical:account-status", true
+	}
+	if tokenContains(queryTokens, "agreement") {
+		return "asc web agreements status", "canonical:agreement-status", true
+	}
+	if tokenContains(queryTokens, "system") {
+		return "asc system-status", "canonical:system-status", true
+	}
+	if tokenContains(queryTokens, "metadata") {
+		if leaf, ok := mostSpecificNamedLeaf(queryTokens, metadataStatusSiblingLeaves); ok {
+			return "asc metadata " + leaf, "canonical:metadata-" + namedLeafReason(leaf), true
+		}
+		return "asc metadata status", "canonical:metadata-status", true
+	}
+	if tokenContains(queryTokens, "analytics") && tokenContainsAny(queryTokens, []string{"overview", "dashboard"}) {
+		if leaf, ok := mostSpecificNamedLeaf(queryTokens, analyticsDashboardLeaves); ok {
+			return "asc web analytics " + leaf, "canonical:analytics-" + namedLeafReason(leaf), true
+		}
+		return "asc web analytics overview", "canonical:analytics-overview", true
+	}
+	if tokenContains(queryTokens, "xcode") && tokenContains(queryTokens, "cloud") {
+		return "asc xcode-cloud status", "canonical:xcode-cloud-status", true
+	}
+	if tokenContains(queryTokens, "app") && tokenContains(queryTokens, "clip") && tokenContains(queryTokens, "domain") {
+		if tokenContains(queryTokens, "cache") {
+			return "asc app-clips domain-status cache", "canonical:app-clip-domain-cache-status", true
+		}
+		if tokenContains(queryTokens, "debug") {
+			return "asc app-clips domain-status debug", "canonical:app-clip-domain-debug-status", true
+		}
+		return "asc app-clips domain-status", "canonical:app-clip-domain-status", true
+	}
+	if target, reason, ok := testFlightReviewSubmissionIntent(queryTokens); ok {
+		return target, reason, true
+	}
+	if tokenContainsAny(queryTokens, []string{"testflight", "beta"}) && tokenContains(queryTokens, "review") &&
+		tokenContains(queryTokens, "app") && tokenContains(queryTokens, "view") {
+		return "asc testflight review app view", "canonical:testflight-review-app-view", true
+	}
+	if tokenContains(queryTokens, "testflight") && tokenContains(queryTokens, "review") {
+		if !tokenContains(queryTokens, "build") && !explicitReleaseDashboardIntent(queryTokens) {
+			return "asc testflight review view", "canonical:testflight-review-status", true
+		}
+	}
+	return "", "", false
+}
+
+func scopedAuthActionIntent(queryTokens []string) (string, string, bool) {
+	if !tokenContains(queryTokens, "auth") {
+		return "", "", false
+	}
+
+	for _, scope := range authActionScopes {
+		if scope.queryToken != "" && !tokenContains(queryTokens, scope.queryToken) {
+			continue
+		}
+		for _, action := range scope.actions {
+			if !compoundTokenContains(queryTokens, action) {
+				continue
+			}
+			leaf := action
+			if action == "export" {
+				leaf = "export-to-config"
+			}
+			return scope.commandPrefix + " " + leaf, scope.reasonPrefix + "-" + leaf, true
+		}
+		return "", "", false
+	}
+
+	return "", "", false
+}
+
+// testFlightReviewSubmissionIntent resolves a TestFlight review submission
+// query to its executable leaf. It is shared by the status route and by the
+// cancellation route, which has no TestFlight counterpart of its own.
+func testFlightReviewSubmissionIntent(queryTokens []string) (string, string, bool) {
+	if !testFlightContext(queryTokens) ||
+		!tokenContains(queryTokens, "review") || !tokenContains(queryTokens, "submission") {
+		return "", "", false
+	}
+	if tokenContains(queryTokens, "list") {
+		return "asc testflight review submissions list", "canonical:testflight-review-submissions-list", true
+	}
+	if tokenContains(queryTokens, "build") {
+		return "asc testflight review submissions build", "canonical:testflight-review-submission-build", true
+	}
+	return "asc testflight review submissions view", "canonical:testflight-review-submission-status", true
+}
+
+// testFlightScopedQuery reports whether the query names the TestFlight surface
+// without also naming the App Store review surface, so a cross-surface query
+// keeps its App Store route.
+func testFlightScopedQuery(queryTokens []string) bool {
+	return testFlightContext(queryTokens) &&
+		!appStoreContext(queryTokens) &&
+		!crossSurfaceAppReviewQuery(queryTokens)
+}
+
+// crossSurfaceAppReviewQuery reports whether App Review wording unambiguously
+// names the App Store review surface as a second surface. A bare "TestFlight
+// App Review" query is TestFlight terminology and stays scoped; conjunction
+// wording such as "TestFlight and App Review" explicitly names both surfaces.
+func crossSurfaceAppReviewQuery(queryTokens []string) bool {
+	for i, token := range queryTokens {
+		if token != "and" {
+			continue
+		}
+		left, right := queryTokens[:i], queryTokens[i+1:]
+		if (testFlightContext(left) && appReviewContext(right)) ||
+			(testFlightContext(right) && appReviewContext(left)) {
+			return true
+		}
+	}
+	return false
+}
+
+func testFlightContext(queryTokens []string) bool {
+	return tokenContainsAny(queryTokens, []string{"testflight", "beta"})
+}
+
+func appStoreContext(queryTokens []string) bool {
+	return tokenContainsAny(queryTokens, []string{"appstore", "store"})
+}
+
+// appReviewContext recognizes App Review wording for aggregate cross-surface
+// status queries. It stays separate from appStoreContext because "beta app
+// review" is TestFlight terminology and must not change cancellation routing.
+func appReviewContext(queryTokens []string) bool {
+	return tokenContains(queryTokens, "app") && tokenContainsAny(queryTokens, []string{"review", "submission"})
+}
+
+// mostSpecificNamedLeaf returns the named leaf whose every word appears in the
+// query and that names the most words, so a nested leaf such as
+// "keywords plan" wins over the flat sibling "plan" and a compound leaf such as
+// "product-pages" matches the split wording a natural-language query produces.
+func mostSpecificNamedLeaf(queryTokens, leaves []string) (string, bool) {
+	best := ""
+	bestSpecificity := 0
+	for _, leaf := range leaves {
+		if !namedLeafMatches(queryTokens, leaf) {
+			continue
+		}
+		if specificity := namedLeafSpecificity(leaf); specificity > bestSpecificity {
+			best = leaf
+			bestSpecificity = specificity
+		}
+	}
+	return best, best != ""
+}
+
+func namedLeafMatches(queryTokens []string, leaf string) bool {
+	for _, segment := range strings.Fields(leaf) {
+		if !compoundTokenContains(queryTokens, segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func namedLeafSpecificity(leaf string) int {
+	return len(strings.FieldsFunc(leaf, func(r rune) bool {
+		return r == ' ' || r == '-'
+	}))
+}
+
+func namedLeafReason(leaf string) string {
+	return strings.ReplaceAll(leaf, " ", "-")
+}
+
+func releaseDashboardIntent(queryTokens []string) bool {
+	if !statusQueryIntent(queryTokens) || unambiguousMutationQueryIntent(queryTokens) {
+		return false
+	}
+
+	hasCrossSurfaceContext := testFlightContext(queryTokens) &&
+		(appStoreContext(queryTokens) || appReviewContext(queryTokens))
+	hasExplicitDashboardContext := explicitReleaseDashboardIntent(queryTokens)
+	hasScopedReleaseContext := tokenContains(queryTokens, "phased") ||
+		(tokenContains(queryTokens, "beta") && tokenContains(queryTokens, "review"))
+	if hasScopedReleaseContext && (!hasExplicitDashboardContext || !hasCrossSurfaceContext) {
+		return false
+	}
+	if hasExplicitDashboardContext {
+		return true
+	}
+	return hasCrossSurfaceContext
+}
+
+func explicitReleaseDashboardIntent(queryTokens []string) bool {
+	return tokenContainsAny(queryTokens, []string{"pipeline", "dashboard", "overview"}) &&
+		(tokenContains(queryTokens, "release") ||
+			(testFlightContext(queryTokens) &&
+				(appStoreContext(queryTokens) || appReviewContext(queryTokens))))
+}
+
+func statusQueryIntent(queryTokens []string) bool {
+	return tokenContainsAny(queryTokens, []string{"check", "verify", "monitor", "watch", "status", "pipeline", "dashboard", "overview"})
+}
+
+func mutationQueryIntent(queryTokens []string) bool {
+	return tokenContains(queryTokens, "upload") || unambiguousMutationQueryIntent(queryTokens)
+}
+
+func unambiguousMutationQueryIntent(queryTokens []string) bool {
+	return tokenContainsAny(queryTokens, []string{
+		"create", "update", "edit", "delete", "remove", "set", "pause", "resume",
+		"start", "stop", "cancel", "complete", "submit", "publish", "distribute", "enable", "disable",
+	})
+}
+
+// compoundTokenContains reports whether the query names a hyphenated command
+// leaf either as a single compound token, such as "reset-id", or as the
+// separate words a natural-language query produces, such as "reset ... id".
+func compoundTokenContains(queryTokens []string, term string) bool {
+	if tokenContains(queryTokens, term) {
+		return true
+	}
+	parts := strings.Split(term, "-")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !tokenContains(queryTokens, part) {
+			return false
+		}
+	}
+	return true
 }
 
 func tokenContainsAny(tokens, terms []string) bool {

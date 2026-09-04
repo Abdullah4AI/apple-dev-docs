@@ -370,6 +370,19 @@ func TestPrintPrettyJSON_PerfPowerMetricsUsesRawData(t *testing.T) {
 	}
 }
 
+func TestPrintPrettyJSON_RawMessage(t *testing.T) {
+	output := captureStdout(t, func() error {
+		return PrintPrettyJSON(json.RawMessage(`{"data":{"attributes":{"isEnabled":false}}}`))
+	})
+
+	if !strings.Contains(output, "\n  \"data\"") {
+		t.Fatalf("expected pretty-printed raw JSON, got: %s", output)
+	}
+	if !strings.Contains(output, `"isEnabled": false`) {
+		t.Fatalf("expected preserved isEnabled=false, got: %s", output)
+	}
+}
+
 func TestPrintJSON_CustomProductPageUploadResultUsesCustomLocalizationID(t *testing.T) {
 	tests := []struct {
 		name string

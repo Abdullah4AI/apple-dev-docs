@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -42,7 +43,23 @@ func warnDeprecatedTwoFactorCodeFlag(twoFactorCode string) {
 	fmt.Fprintf(os.Stderr, "Warning: `--%s` is deprecated. Use `--two-factor-code-command` or `%s` for automation.\n", deprecatedTwoFactorCodeFlagName, webTwoFactorCodeCommandEnv)
 }
 
-func resolveWebSessionForCommand(ctx context.Context, flags webSessionFlags) (*webcore.AuthSession, error) {
+// newWebRequestContext returns the bounded context for work that runs after web
+// authentication finished. It is derived from the untimed parent context, so the
+// timeout budget covers the request instead of the human in front of the prompt,
+// while parent cancellation (Ctrl-C) still propagates.
+func newWebRequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithTimeout(shared.ContextWithoutTimeout(ctx))
+}
+
+// resolveWebSessionForCommand resolves the web session for a command and returns
+// the request context that command must use for its own work.
+//
+// Session resolution can block on an interactive password prompt, an interactive
+// 2FA prompt, or a configured two-factor code command, none of which belong in a
+// request timeout budget. Callers therefore pass their parent context and receive
+// a request context whose timeout starts only once authentication is done; the
+// returned cancel func is never nil, so it is safe to defer before checking err.
+func resolveWebSessionForCommand(ctx context.Context, flags webSessionFlags) (*webcore.AuthSession, context.Context, context.CancelFunc, error) {
 	warnDeprecatedTwoFactorCodeFlag(*flags.twoFactorCode)
 	selection := providerSelectionFromFlags(flags)
 	session, _, err := callResolveSessionForProviderSelection(
@@ -53,13 +70,14 @@ func resolveWebSessionForCommand(ctx context.Context, flags webSessionFlags) (*w
 		*flags.twoFactorCodeCommand,
 		selection,
 	)
+	requestCtx, cancel := newWebRequestContext(ctx)
 	if err != nil {
-		return nil, err
+		return nil, requestCtx, cancel, err
 	}
-	if err := selectResolvedWebSessionProvider(ctx, session, selection); err != nil {
-		return nil, err
+	if err := selectResolvedWebSessionProvider(requestCtx, session, selection); err != nil {
+		return nil, requestCtx, cancel, err
 	}
-	return session, nil
+	return session, requestCtx, cancel, nil
 }
 
 func providerSelectionFromFlags(flags webSessionFlags) webcore.ProviderSelection {

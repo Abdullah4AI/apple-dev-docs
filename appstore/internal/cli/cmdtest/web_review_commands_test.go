@@ -16,6 +16,10 @@ func TestWebReviewCommandsAreRegisteredAndLegacyRemoved(t *testing.T) {
 		{"web", "review"},
 		{"web", "review", "list"},
 		{"web", "review", "show"},
+		// Re-added by issue #775 with an app-scoped contract: it lists every
+		// resolution center thread on an app, not the removed
+		// submission-oriented listing.
+		{"web", "review", "threads"},
 	} {
 		if sub := findSubcommand(root, path...); sub == nil {
 			t.Fatalf("expected command %q to be registered", strings.Join(path, " "))
@@ -24,7 +28,6 @@ func TestWebReviewCommandsAreRegisteredAndLegacyRemoved(t *testing.T) {
 
 	for _, legacyPath := range [][]string{
 		{"web", "submissions"},
-		{"web", "review", "threads"},
 		{"web", "review", "messages"},
 		{"web", "review", "rejections"},
 		{"web", "review", "draft"},
@@ -149,5 +152,65 @@ func TestWebReviewShowRejectsInvalidPattern(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "--pattern is invalid") {
 		t.Fatalf("expected invalid pattern message, got %q", stderr)
+	}
+}
+
+func TestWebReviewThreadsRequiresApp(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	_, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"web", "review", "threads"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "--app is required") {
+		t.Fatalf("expected missing --app message, got %q", stderr)
+	}
+}
+
+func TestWebReviewThreadsRejectsPlainTextWithoutDrafts(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	_, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"web", "review", "threads", "--plain-text", "--app", "123456789"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "--plain-text requires --drafts") {
+		t.Fatalf("expected --plain-text guidance, got %q", stderr)
+	}
+}
+
+func TestWebReviewThreadsRejectsPositionalArguments(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	_, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"web", "review", "threads", "--app", "123456789", "stray"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if !strings.Contains(stderr, "unexpected argument") {
+		t.Fatalf("expected unexpected-argument guidance, got %q", stderr)
 	}
 }

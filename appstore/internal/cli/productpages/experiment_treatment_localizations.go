@@ -66,10 +66,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > productPagesMaxLimit) {
-				return fmt.Errorf("experiments treatments localizations list: --limit must be between 1 and %d", productPagesMaxLimit)
+				return shared.UsageErrorf("experiments treatments localizations list: --limit must be between 1 and %d", productPagesMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("experiments treatments localizations list: %w", err)
+				return shared.UsageErrorf("experiments treatments localizations list: %v", err)
 			}
 
 			trimmedID := strings.TrimSpace(*treatmentID)

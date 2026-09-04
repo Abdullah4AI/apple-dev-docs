@@ -70,7 +70,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("pass-type-ids certificates list: --limit must be between 1 and 200")
+				return shared.UsageError("pass-type-ids certificates list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return shared.UsageErrorf("pass-type-ids certificates list: %v", err)
@@ -92,7 +92,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--pass-type-id")
 			}
 			if err := shared.ValidateSort(*sort, passTypeIDCertificatesSortList()...); err != nil {
-				return fmt.Errorf("pass-type-ids certificates list: %w", err)
+				return shared.UsageErrorf("pass-type-ids certificates list: %v", err)
 			}
 
 			fieldsValue, err := normalizeCertificateFields(*fields, "--fields")
@@ -187,7 +187,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("pass-type-ids certificates view: --limit must be between 1 and 200")
+				return shared.UsageError("pass-type-ids certificates view: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
 				return shared.UsageErrorf("pass-type-ids certificates view: %v", err)

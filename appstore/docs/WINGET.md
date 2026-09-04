@@ -100,6 +100,24 @@ Required release configuration:
 - `vars.WINGET_FORK_OWNER`: optional organization/user that owns the fork. When
   unset, the workflow uses the authenticated token owner.
 
+The submission step logs the token's `gh api rate_limit` quota first, then runs
+every `gh` and `git` network call through a bounded retry helper (five attempts,
+exponential backoff from 10s capped at 120s, with jitter). Only GitHub rate
+limits and transient transport failures are retried; authentication,
+permission, validation, and scope-check failures fail immediately. Clone and PR
+creation are idempotent under retry, so a lost response cannot open a duplicate
+`microsoft/winget-pkgs` PR.
+
+If the `winget` job still fails after the retries, re-run that job (or dispatch
+the release workflow for the same version). If the preflight showed a primary
+quota (`core`, `graphql`, or `search`) at zero, wait for that bucket's logged
+reset time first; for secondary throttles, 5xx responses, or transport
+failures the reset times are unrelated, so re-run after a few minutes. The job
+is safe to re-run: it reuses the published release artifact,
+recognizes an existing `rorkai-asc-<version>` branch, and skips PR creation
+when one is already open. Fall back to a manual submission only when a re-run
+fails for a non-transient reason.
+
 The generated branch name is:
 
 ```text

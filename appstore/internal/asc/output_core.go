@@ -50,6 +50,8 @@ func PrintJSON(data any) error {
 // PrintPrettyJSON prints data as indented JSON (best for debugging).
 func PrintPrettyJSON(data any) error {
 	switch v := data.(type) {
+	case json.RawMessage:
+		return printPrettyRawJSON(v)
 	case *PerfPowerMetricsResponse:
 		return printPrettyRawJSON(v.Data)
 	case *DiagnosticLogsResponse:

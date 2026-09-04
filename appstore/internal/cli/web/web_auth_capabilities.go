@@ -164,10 +164,8 @@ Examples:
 				return shared.UsageError("unable to resolve current API key ID; run 'asc auth login' or provide --key-id")
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}

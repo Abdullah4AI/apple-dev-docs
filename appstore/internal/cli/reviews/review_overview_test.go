@@ -207,7 +207,7 @@ func TestBuildReviewDoctorResultDisclosesWebOnlyCoverageWithoutChangingCheckSema
 	if len(result.WarningChecks) != 0 {
 		t.Fatalf("expected coverage warning not to add app-specific warning checks, got %+v", result.WarningChecks)
 	}
-	if result.NextAction != "No public-API submission blockers detected. Verify App Store Regulations and Permits in App Store Connect before submission." {
+	if result.NextAction != "No public-API submission blockers detected. Run `asc web apps declarations list --app \"123456789\"` before submission." {
 		t.Fatalf("expected next action to disclose the public-API boundary, got %q", result.NextAction)
 	}
 
@@ -239,8 +239,11 @@ func TestBuildReviewDoctorResultDisclosesWebOnlyCoverageWithoutChangingCheckSema
 	if !strings.Contains(warning.Message, "personal-service declaration") {
 		t.Fatalf("expected personal-service declaration disclosure, got %q", warning.Message)
 	}
-	if !strings.Contains(warning.Remediation, "App Store Connect") {
-		t.Fatalf("expected App Store Connect remediation, got %q", warning.Remediation)
+	if !strings.Contains(warning.Remediation, `asc web apps declarations list --app "123456789"`) {
+		t.Fatalf("expected declarations list remediation with app selector, got %q", warning.Remediation)
+	}
+	if !strings.Contains(warning.Remediation, `asc web apps medical-device set --app "123456789" --declared false`) {
+		t.Fatalf("expected medical-device set remediation with app selector, got %q", warning.Remediation)
 	}
 }
 
@@ -271,7 +274,7 @@ func TestRenderReviewDoctorDisclosesWebOnlyCoverage(t *testing.T) {
 				"review.coverage.app_store_regulations_and_permits",
 				"NOT_CHECKED",
 				"personal-service declaration",
-				"Verify App Store Regulations and Permits in App Store Connect before submission.",
+				"asc web apps declarations list --app \"123456789\"",
 			} {
 				if !strings.Contains(strings.ToLower(output), strings.ToLower(want)) {
 					t.Fatalf("expected %q in output:\n%s", want, output)

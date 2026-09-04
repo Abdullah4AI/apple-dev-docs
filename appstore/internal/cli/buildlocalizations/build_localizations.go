@@ -73,10 +73,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("build-localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("build-localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("build-localizations list: %w", err)
+				return shared.UsageErrorf("build-localizations list: %v", err)
 			}
 
 			build := strings.TrimSpace(*buildID)

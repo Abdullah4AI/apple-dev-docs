@@ -101,8 +101,8 @@ func GenerateReview(ctx context.Context, req ReviewRequest) (*ReviewResult, erro
 		return nil, err
 	}
 
-	framedDir := strings.TrimSpace(req.FramedDir)
-	if framedDir == "" {
+	framedDir := req.FramedDir
+	if strings.TrimSpace(framedDir) == "" {
 		return nil, fmt.Errorf("framed directory is required")
 	}
 	absFramedDir, err := filepath.Abs(framedDir)
@@ -117,8 +117,8 @@ func GenerateReview(ctx context.Context, req ReviewRequest) (*ReviewResult, erro
 		return nil, fmt.Errorf("framed directory must be a directory")
 	}
 
-	outputDir := strings.TrimSpace(req.OutputDir)
-	if outputDir == "" {
+	outputDir := req.OutputDir
+	if strings.TrimSpace(outputDir) == "" {
 		outputDir = defaultReviewOutputDir
 	}
 	absOutputDir, err := filepath.Abs(outputDir)
@@ -129,8 +129,11 @@ func GenerateReview(ctx context.Context, req ReviewRequest) (*ReviewResult, erro
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
 
-	approvalPath := strings.TrimSpace(req.ApprovalPath)
-	if approvalPath == "" {
+	// Validate path emptiness without changing a caller-supplied path. A
+	// trailing space can be a legitimate filename component on supported
+	// filesystems.
+	approvalPath := req.ApprovalPath
+	if strings.TrimSpace(approvalPath) == "" {
 		approvalPath = filepath.Join(absOutputDir, defaultReviewApprovalsName)
 	}
 	if !filepath.IsAbs(approvalPath) {
@@ -143,8 +146,8 @@ func GenerateReview(ctx context.Context, req ReviewRequest) (*ReviewResult, erro
 
 	rawAvailable := false
 	absRawDir := ""
-	rawDir := strings.TrimSpace(req.RawDir)
-	if rawDir != "" {
+	rawDir := req.RawDir
+	if strings.TrimSpace(rawDir) != "" {
 		absRawDir, err = filepath.Abs(rawDir)
 		if err != nil {
 			return nil, fmt.Errorf("resolve raw directory: %w", err)
@@ -211,8 +214,8 @@ func GenerateReview(ctx context.Context, req ReviewRequest) (*ReviewResult, erro
 
 // ResolveReviewOutputDir resolves output dir with defaults and ensures absolute path.
 func ResolveReviewOutputDir(outputDir string) (string, error) {
-	dir := strings.TrimSpace(outputDir)
-	if dir == "" {
+	dir := outputDir
+	if strings.TrimSpace(dir) == "" {
 		dir = defaultReviewOutputDir
 	}
 	absDir, err := filepath.Abs(dir)

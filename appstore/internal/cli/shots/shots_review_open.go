@@ -33,8 +33,8 @@ func ShotsReviewOpenCommand() *ffcli.Command {
 			}
 
 			result, err := screenshots.OpenReview(ctx, screenshots.ReviewOpenRequest{
-				OutputDir: strings.TrimSpace(*outputDir),
-				HTMLPath:  strings.TrimSpace(*htmlPath),
+				OutputDir: *outputDir,
+				HTMLPath:  *htmlPath,
 				DryRun:    *dryRun,
 			})
 			if err != nil {

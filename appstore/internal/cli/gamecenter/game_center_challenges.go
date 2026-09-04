@@ -78,10 +78,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center challenges list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center challenges list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center challenges list: %w", err)
+				return shared.UsageErrorf("game-center challenges list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -473,10 +473,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center challenges versions list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center challenges versions list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center challenges versions list: %w", err)
+				return shared.UsageErrorf("game-center challenges versions list: %v", err)
 			}
 
 			id := strings.TrimSpace(*challengeID)
@@ -665,10 +665,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center challenges localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center challenges localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center challenges localizations list: %w", err)
+				return shared.UsageErrorf("game-center challenges localizations list: %v", err)
 			}
 
 			id := strings.TrimSpace(*versionID)
@@ -1161,10 +1161,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center challenges releases list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center challenges releases list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center challenges releases list: %w", err)
+				return shared.UsageErrorf("game-center challenges releases list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

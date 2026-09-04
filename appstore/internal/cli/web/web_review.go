@@ -51,15 +51,24 @@ type reviewThreadDetails struct {
 }
 
 type reviewShowOutput struct {
-	AppID            string                           `json:"appId"`
-	Selection        string                           `json:"selection"`
-	Submission       *webcore.ReviewSubmission        `json:"submission,omitempty"`
-	SubmissionItems  []webcore.ReviewSubmissionItem   `json:"submissionItems,omitempty"`
-	Threads          []reviewThreadDetails            `json:"threads,omitempty"`
-	Attachments      []webcore.ReviewAttachment       `json:"attachments,omitempty"`
-	OutputDirectory  string                           `json:"outputDirectory,omitempty"`
-	Downloads        []reviewAttachmentDownloadResult `json:"downloads,omitempty"`
-	DownloadFailures []string                         `json:"downloadFailures,omitempty"`
+	AppID             string                           `json:"appId"`
+	Selection         string                           `json:"selection"`
+	Submission        *webcore.ReviewSubmission        `json:"submission,omitempty"`
+	SubmissionItems   []webcore.ReviewSubmissionItem   `json:"submissionItems,omitempty"`
+	Threads           []reviewThreadDetails            `json:"threads,omitempty"`
+	AppThreads        []webcore.ResolutionCenterThread `json:"appThreads,omitempty"`
+	AppThreadsWarning string                           `json:"appThreadsWarning,omitempty"`
+	Attachments       []webcore.ReviewAttachment       `json:"attachments,omitempty"`
+	OutputDirectory   string                           `json:"outputDirectory,omitempty"`
+	Downloads         []reviewAttachmentDownloadResult `json:"downloads,omitempty"`
+	DownloadFailures  []string                         `json:"downloadFailures,omitempty"`
+}
+
+// reviewThreadEntry pairs an app-scoped resolution center thread with the
+// read-only draft message Apple keeps on it, when drafts were requested.
+type reviewThreadEntry struct {
+	Thread       webcore.ResolutionCenterThread        `json:"thread"`
+	DraftMessage *webcore.ResolutionCenterDraftMessage `json:"draftMessage,omitempty"`
 }
 
 func parseSubmissionStates(stateCSV string) ([]string, error) {
@@ -163,6 +172,64 @@ func renderReviewListMarkdown(submissions []webcore.ReviewSubmission) error {
 	return nil
 }
 
+func summarizeThreadVersions(thread webcore.ResolutionCenterThread) string {
+	if len(thread.AppStoreVersionIDs) == 0 {
+		return "n/a"
+	}
+	return strings.Join(thread.AppStoreVersionIDs, ", ")
+}
+
+func summarizeDraftForTable(draft *webcore.ResolutionCenterDraftMessage) string {
+	if draft == nil {
+		return "none"
+	}
+	return fmt.Sprintf(
+		"id=%s created=%s attachments=%d body=%s",
+		normalizeReviewShowValue(draft.ID),
+		normalizeReviewShowValue(draft.CreatedDate),
+		len(draft.Attachments),
+		summarizeHTMLBodyForTable(draft.MessageBodyPlain, draft.MessageBody),
+	)
+}
+
+func buildReviewThreadsTableRows(entries []reviewThreadEntry, drafts bool) [][]string {
+	rows := make([][]string, 0, len(entries))
+	for _, entry := range entries {
+		row := []string{
+			normalizeReviewShowValue(entry.Thread.ID),
+			normalizeReviewShowValue(entry.Thread.ThreadType),
+			normalizeReviewShowValue(entry.Thread.State),
+			normalizeReviewShowValue(entry.Thread.CreatedDate),
+			normalizeReviewShowValue(entry.Thread.LastMessageResponseDate),
+			normalizeReviewShowValue(entry.Thread.ReviewSubmissionID),
+			normalizeReviewShowValue(summarizeThreadVersions(entry.Thread)),
+		}
+		if drafts {
+			row = append(row, normalizeReviewShowValue(summarizeDraftForTable(entry.DraftMessage)))
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func reviewThreadsTableHeaders(drafts bool) []string {
+	headers := []string{"Thread ID", "Type", "State", "Created Date", "Last Message Date", "Submission ID", "Version IDs"}
+	if drafts {
+		headers = append(headers, "Draft")
+	}
+	return headers
+}
+
+func renderReviewThreadsTable(entries []reviewThreadEntry, drafts bool) error {
+	asc.RenderTable(reviewThreadsTableHeaders(drafts), buildReviewThreadsTableRows(entries, drafts))
+	return nil
+}
+
+func renderReviewThreadsMarkdown(entries []reviewThreadEntry, drafts bool) error {
+	asc.RenderMarkdown(reviewThreadsTableHeaders(drafts), buildReviewThreadsTableRows(entries, drafts))
+	return nil
+}
+
 func normalizeReviewShowValue(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
@@ -180,21 +247,25 @@ func summarizeSubmissionItemRelated(related []webcore.ReviewSubmissionItemRelati
 	}
 	parts := make([]string, 0, len(related))
 	for _, relation := range related {
-		parts = append(parts, fmt.Sprintf(
+		part := fmt.Sprintf(
 			"%s:%s:%s",
 			normalizeReviewShowValue(relation.Relationship),
 			normalizeReviewShowValue(relation.Type),
 			normalizeReviewShowValue(relation.ID),
-		))
+		)
+		if label := strings.TrimSpace(relation.Label); label != "" {
+			part += ":" + normalizeReviewShowValue(label)
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ", ")
 }
 
-func summarizeMessageForTable(message webcore.ResolutionCenterMessage) string {
-	body := strings.TrimSpace(message.MessageBodyPlain)
-	if body == "" {
-		body = strings.TrimSpace(message.MessageBody)
+func summarizeHTMLBodyForTable(plain, raw string) string {
+	if plain = strings.TrimSpace(plain); plain != "" {
+		return normalizeReviewShowValue(plain)
 	}
+	body := strings.TrimSpace(raw)
 	body = strings.NewReplacer(
 		"<br>", "\n",
 		"<br/>", "\n",
@@ -209,6 +280,10 @@ func summarizeMessageForTable(message webcore.ResolutionCenterMessage) string {
 	return normalizeReviewShowValue(body)
 }
 
+func summarizeMessageForTable(message webcore.ResolutionCenterMessage) string {
+	return summarizeHTMLBodyForTable(message.MessageBodyPlain, message.MessageBody)
+}
+
 func summarizeReasonForTable(reason webcore.ReviewRejectionReason) string {
 	return fmt.Sprintf(
 		"code=%s section=%s description=%s",
@@ -216,6 +291,37 @@ func summarizeReasonForTable(reason webcore.ReviewRejectionReason) string {
 		normalizeReviewShowValue(reason.ReasonSection),
 		normalizeReviewShowValue(reason.ReasonDescription),
 	)
+}
+
+func summarizeRelatedResource(related webcore.ReviewRelatedResource) string {
+	label := strings.TrimSpace(related.Label)
+	if label == "" {
+		label = related.ID
+	}
+	typeName := strings.TrimSpace(related.Type)
+	if typeName == "" {
+		typeName = related.Relationship
+	}
+	return strings.TrimSpace(typeName + " " + label)
+}
+
+func summarizeRejectionArtifacts(related []webcore.ReviewRelatedResource) string {
+	if len(related) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(related))
+	for _, item := range related {
+		parts = append(parts, summarizeRelatedResource(item))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatRejectionReasonRow(rejection webcore.ReviewRejection, reason webcore.ReviewRejectionReason) string {
+	summary := summarizeReasonForTable(reason)
+	if artifacts := summarizeRejectionArtifacts(rejection.Related); artifacts != "" {
+		return "artifact=" + artifacts + " " + summary
+	}
+	return summary
 }
 
 func countReviewMessages(threads []reviewThreadDetails) int {
@@ -261,6 +367,10 @@ func buildReviewShowTableRows(payload reviewShowOutput) [][]string {
 	addRow("Submission", "Threads Count", fmt.Sprintf("%d", len(payload.Threads)))
 	addRow("Submission", "Messages Count", fmt.Sprintf("%d", countReviewMessages(payload.Threads)))
 	addRow("Submission", "Rejections Count", fmt.Sprintf("%d", countReviewRejections(payload.Threads)))
+	addRow("Submission", "App Threads Count", fmt.Sprintf("%d", len(payload.AppThreads)))
+	if strings.TrimSpace(payload.AppThreadsWarning) != "" {
+		addRow("Submission", "App Threads Warning", payload.AppThreadsWarning)
+	}
 	addRow("Submission", "Screenshots Found", fmt.Sprintf("%d", len(payload.Attachments)))
 	addRow("Submission", "Screenshots Downloaded", fmt.Sprintf("%d", len(payload.Downloads)))
 	if strings.TrimSpace(payload.OutputDirectory) != "" {
@@ -304,7 +414,7 @@ func buildReviewShowTableRows(payload reviewShowOutput) [][]string {
 				addRow(
 					"Rejections",
 					fmt.Sprintf("Reason %d", reasonIndex),
-					summarizeReasonForTable(webcore.ReviewRejectionReason{}),
+					formatRejectionReasonRow(rejection, webcore.ReviewRejectionReason{}),
 				)
 				continue
 			}
@@ -313,10 +423,24 @@ func buildReviewShowTableRows(payload reviewShowOutput) [][]string {
 				addRow(
 					"Rejections",
 					fmt.Sprintf("Reason %d", reasonIndex),
-					summarizeReasonForTable(reason),
+					formatRejectionReasonRow(rejection, reason),
 				)
 			}
 		}
+	}
+
+	for _, thread := range payload.AppThreads {
+		addRow(
+			"App Threads",
+			fmt.Sprintf("Thread %s", normalizeReviewShowValue(thread.ID)),
+			fmt.Sprintf(
+				"type=%s state=%s created=%s lastMessage=%s",
+				thread.ThreadType,
+				thread.State,
+				thread.CreatedDate,
+				thread.LastMessageResponseDate,
+			),
+		)
 	}
 
 	for index, attachment := range payload.Attachments {
@@ -511,6 +635,9 @@ func newDownloadRoot(outDir string) (rootfs.Root, string, error) {
 					return root, relative, nil
 				}
 			}
+			// The output directory lives outside cwd; release this candidate
+			// before anchoring a root there instead.
+			_ = root.Close()
 		}
 	}
 	root, err := rootfs.New(absolute)
@@ -616,6 +743,69 @@ func redactAttachmentURLs(attachments []webcore.ReviewAttachment) []webcore.Revi
 		redacted = append(redacted, copy)
 	}
 	return redacted
+}
+
+// webReviewDraftMessagesTimeout bounds the whole sequential draft-reading
+// phase of "web review threads --drafts". Each draft is one request and the
+// web client paces requests by its minimum request interval, so an app with
+// many threads needs an operation-sized budget instead of the single-request
+// default. An explicit ASC_TIMEOUT still wins.
+const webReviewDraftMessagesTimeout = 10 * time.Minute
+
+// reviewDraftMessagesContext returns the operation-sized context used for the
+// per-thread draft reads.
+func reviewDraftMessagesContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithResolvedTimeout(shared.ContextWithoutTimeout(ctx), webReviewDraftMessagesTimeout)
+}
+
+// reviewAppThreadsContext returns an independently bounded context for the
+// best-effort app-scoped thread lookup, so time spent there cannot expire the
+// budget the essential review requests rely on.
+func reviewAppThreadsContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return shared.ContextWithTimeout(shared.ContextWithoutTimeout(ctx))
+}
+
+// loadAppThreads reads every resolution center thread on an app. The app-scoped
+// relationship is an undocumented web-session surface, so a failure downgrades
+// to a warning instead of failing the whole command: the submission-scoped
+// review context stays useful without it.
+func loadAppThreads(ctx context.Context, client *webcore.Client, appID string) ([]webcore.ResolutionCenterThread, string, error) {
+	threads, err := withWebSpinnerValue("Loading app resolution center threads", func() ([]webcore.ResolutionCenterThread, error) {
+		return client.ListResolutionCenterThreadsByApp(ctx, appID)
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, "", err
+		}
+		warning := fmt.Sprintf("app-scoped resolution center threads unavailable: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
+		return nil, warning, nil
+	}
+	return threads, "", nil
+}
+
+// appThreadsOutsideSubmission returns the app threads that the selected
+// submission's threads do not already cover, so both scopes are reported
+// without duplication.
+func appThreadsOutsideSubmission(appThreads []webcore.ResolutionCenterThread, details []reviewThreadDetails) []webcore.ResolutionCenterThread {
+	if len(appThreads) == 0 {
+		return nil
+	}
+	covered := make(map[string]struct{}, len(details))
+	for _, detail := range details {
+		covered[strings.TrimSpace(detail.Thread.ID)] = struct{}{}
+	}
+	remaining := make([]webcore.ResolutionCenterThread, 0, len(appThreads))
+	for _, thread := range appThreads {
+		if _, exists := covered[strings.TrimSpace(thread.ID)]; exists {
+			continue
+		}
+		remaining = append(remaining, thread)
+	}
+	if len(remaining) == 0 {
+		return nil
+	}
+	return remaining
 }
 
 func buildThreadDetails(ctx context.Context, client *webcore.Client, threads []webcore.ResolutionCenterThread, plainText bool) ([]reviewThreadDetails, []webcore.ReviewAttachment, error) {
@@ -743,6 +933,7 @@ Use --app to scope all operations to one app.
 Subcommands:
   list  List review submissions for an app
   show  Show one submission with threads/messages/rejections and auto-download screenshots
+  threads  List every resolution center thread on an app, with optional draft messages
   subscriptions  Inspect and mutate next-version subscription review selection
   iaps  Attach non-renewing IAPs to the next app version review
 
@@ -752,6 +943,7 @@ Subcommands:
 		Subcommands: []*ffcli.Command{
 			WebReviewListCommand(),
 			WebReviewShowCommand(),
+			WebReviewThreadsCommand(),
 			WebReviewSubscriptionsCommand(),
 			WebReviewIAPsCommand(),
 		},
@@ -786,10 +978,8 @@ func WebReviewListCommand() *ffcli.Command {
 				return err
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}
@@ -811,6 +1001,108 @@ func WebReviewListCommand() *ffcli.Command {
 				*output.Pretty,
 				func() error { return renderReviewListTable(filtered) },
 				func() error { return renderReviewListMarkdown(filtered) },
+			)
+		},
+	}
+}
+
+// WebReviewThreadsCommand lists app-scoped resolution center threads.
+func WebReviewThreadsCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("web review threads", flag.ExitOnError)
+
+	appID := fs.String("app", "", "App ID")
+	drafts := fs.Bool("drafts", false, "Also read each thread's unsent draft message (one extra request per thread)")
+	plainText := fs.Bool("plain-text", false, "Project draft messageBody HTML into plain text (requires --drafts)")
+	authFlags := bindWebSessionFlags(fs)
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "threads",
+		ShortUsage: "asc web review threads --app APP_ID [--drafts] [--plain-text] [flags]",
+		ShortHelp:  "List every resolution center thread on an app.",
+		LongHelp: `WEB SESSION WORKFLOWS
+
+List every resolution center thread App Store Connect keeps for an app,
+including binary, metadata, and informational threads that are not attached to
+the review submission "asc web review show" selects.
+
+Threads are read from the app-scoped /iris relationship and every page of
+links.next is followed. With --drafts, each thread's unsent draft message is
+read as well; draft bodies keep Apple's raw HTML, and attachment download URLs
+are never returned because this surface is read-only.
+
+`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.WithDiagnostic(
+					shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " ")),
+					shared.DiagnosticInvalidInput,
+					"args",
+				)
+			}
+			trimmedAppID := strings.TrimSpace(*appID)
+			if trimmedAppID == "" {
+				return shared.WithDiagnostic(
+					shared.UsageError("--app is required"),
+					shared.DiagnosticRequiredInputMissing,
+					"--app",
+				)
+			}
+			if *plainText && !*drafts {
+				return shared.WithDiagnostic(
+					shared.UsageError("--plain-text requires --drafts"),
+					shared.DiagnosticInvalidInput,
+					"--plain-text",
+				)
+			}
+
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
+			if err != nil {
+				return err
+			}
+			client := webcore.NewClient(session)
+
+			var threads []webcore.ResolutionCenterThread
+			err = withWebSpinner("Loading app resolution center threads", func() error {
+				var err error
+				threads, err = client.ListResolutionCenterThreadsByApp(requestCtx, trimmedAppID)
+				return err
+			})
+			if err != nil {
+				return withWebAuthHint(err, "web review threads")
+			}
+
+			entries := make([]reviewThreadEntry, 0, len(threads))
+			for _, thread := range threads {
+				entries = append(entries, reviewThreadEntry{Thread: thread})
+			}
+			if *drafts {
+				draftCtx, cancelDrafts := reviewDraftMessagesContext(ctx)
+				err = withWebSpinner("Loading resolution center draft messages", func() error {
+					for index := range entries {
+						draft, err := client.GetResolutionCenterDraftMessage(draftCtx, entries[index].Thread.ID, *plainText)
+						if err != nil {
+							return err
+						}
+						entries[index].DraftMessage = draft
+					}
+					return nil
+				})
+				cancelDrafts()
+				if err != nil {
+					return withWebAuthHint(err, "web review threads")
+				}
+			}
+
+			return shared.PrintOutputWithRenderers(
+				entries,
+				*output.Output,
+				*output.Pretty,
+				func() error { return renderReviewThreadsTable(entries, *drafts) },
+				func() error { return renderReviewThreadsMarkdown(entries, *drafts) },
 			)
 		},
 	}
@@ -865,10 +1157,8 @@ Selection:
 				}
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}
@@ -888,11 +1178,25 @@ Selection:
 				return err
 			}
 			if selectedSubmission == nil {
-				payload := reviewShowOutput{
-					AppID:     trimmedAppID,
-					Selection: selection,
+				appThreadsCtx, cancelAppThreads := reviewAppThreadsContext(ctx)
+				appThreads, appThreadsWarning, err := loadAppThreads(appThreadsCtx, client, trimmedAppID)
+				cancelAppThreads()
+				if err != nil {
+					return withWebAuthHint(err, "web review show")
 				}
-				return shared.PrintOutput(payload, *output.Output, *output.Pretty)
+				payload := reviewShowOutput{
+					AppID:             trimmedAppID,
+					Selection:         selection,
+					AppThreads:        appThreads,
+					AppThreadsWarning: appThreadsWarning,
+				}
+				return shared.PrintOutputWithRenderers(
+					payload,
+					*output.Output,
+					*output.Pretty,
+					func() error { return renderReviewShowTable(payload) },
+					func() error { return renderReviewShowMarkdown(payload) },
+				)
 			}
 
 			var (
@@ -939,16 +1243,25 @@ Selection:
 				return err
 			}
 
+			appThreadsCtx, cancelAppThreads := reviewAppThreadsContext(ctx)
+			appThreads, appThreadsWarning, err := loadAppThreads(appThreadsCtx, client, trimmedAppID)
+			cancelAppThreads()
+			if err != nil {
+				return withWebAuthHint(err, "web review show")
+			}
+
 			payload := reviewShowOutput{
-				AppID:            trimmedAppID,
-				Selection:        selection,
-				Submission:       selectedSubmission,
-				SubmissionItems:  items,
-				Threads:          threadDetails,
-				Attachments:      redactAttachmentURLs(attachmentsWithURL),
-				OutputDirectory:  outDirResolved,
-				Downloads:        downloads,
-				DownloadFailures: downloadFailures,
+				AppID:             trimmedAppID,
+				Selection:         selection,
+				Submission:        selectedSubmission,
+				SubmissionItems:   items,
+				Threads:           threadDetails,
+				AppThreads:        appThreadsOutsideSubmission(appThreads, threadDetails),
+				AppThreadsWarning: appThreadsWarning,
+				Attachments:       redactAttachmentURLs(attachmentsWithURL),
+				OutputDirectory:   outDirResolved,
+				Downloads:         downloads,
+				DownloadFailures:  downloadFailures,
 			}
 			if len(payload.Downloads) == 0 {
 				payload.OutputDirectory = ""

@@ -76,10 +76,8 @@ func WebAnalyticsSourcesCommand() *ffcli.Command {
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -159,10 +157,8 @@ func WebAnalyticsInAppEventsCommand() *ffcli.Command {
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -238,10 +234,8 @@ func WebAnalyticsCampaignsCommand() *ffcli.Command {
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -289,10 +283,8 @@ func WebAnalyticsSalesCommand() *ffcli.Command {
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -366,10 +358,8 @@ func WebAnalyticsBenchmarksCommand() *ffcli.Command {
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -420,10 +410,8 @@ relevant analytics features or dimensions we observed while mapping the sidebar.
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}

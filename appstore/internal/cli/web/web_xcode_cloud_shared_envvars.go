@@ -99,10 +99,8 @@ Examples:
 				return shared.MissingRequiredUsageError("--product-id")
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -188,10 +186,8 @@ Examples:
 				return shared.MissingRequiredUsageError("--value")
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -322,10 +318,8 @@ Examples:
 				return shared.MissingRequiredUsageError("--confirm")
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}

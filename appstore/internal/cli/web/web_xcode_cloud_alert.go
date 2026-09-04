@@ -208,10 +208,8 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}

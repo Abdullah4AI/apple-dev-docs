@@ -120,7 +120,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("categories subcategories: %w", err)
+				return shared.UsageErrorf("categories subcategories: %v", err)
 			}
 			if err := rejectCategorySubcategoriesNextFlagConflicts(fs, *next, "category-id", "limit"); err != nil {
 				return err

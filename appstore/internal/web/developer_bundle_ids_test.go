@@ -339,12 +339,16 @@ func TestSelectDeveloperPortalTeam(t *testing.T) {
 		}
 	})
 
-	t.Run("provider name suffix", func(t *testing.T) {
-		team, err := selectDeveloperPortalTeam(teams, "", "Example Company (App Store Connect)")
+	t.Run("unique provider name prefix", func(t *testing.T) {
+		unique := []developerPortalTeam{
+			{TeamID: "ACME123", Name: "Acme"},
+			{TeamID: "OTHER456", Name: "Other"},
+		}
+		team, err := selectDeveloperPortalTeam(unique, "", "Acme Inc")
 		if err != nil {
 			t.Fatalf("selectDeveloperPortalTeam() error: %v", err)
 		}
-		if team.TeamID != "TEAMTWO456" {
+		if team.TeamID != "ACME123" {
 			t.Fatalf("team = %+v", team)
 		}
 	})
@@ -360,8 +364,12 @@ func TestSelectDeveloperPortalTeam(t *testing.T) {
 	})
 
 	t.Run("ambiguous teams", func(t *testing.T) {
-		if _, err := selectDeveloperPortalTeam(teams, "", "Different Provider"); err == nil {
+		_, err := selectDeveloperPortalTeam(teams, "", "Different Provider")
+		if err == nil {
 			t.Fatal("expected provider matching error")
+		}
+		if !strings.Contains(err.Error(), "--developer-team") || !strings.Contains(err.Error(), "TEAMONE123") {
+			t.Fatalf("error %q does not mention --developer-team or available teams", err)
 		}
 	})
 }

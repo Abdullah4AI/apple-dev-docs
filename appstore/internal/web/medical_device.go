@@ -10,7 +10,11 @@ import (
 	"strings"
 )
 
-const medicalDeviceRequirementName = "MEDICAL_DEVICE"
+const (
+	medicalDeviceRequirementName = "MEDICAL_DEVICE"
+	medicalDeviceDeclarationNo   = "no"
+	medicalDeviceCollectedStatus = "COLLECTED"
+)
 
 // MedicalDeviceDeclarationResult reports the resulting app-level declaration.
 type MedicalDeviceDeclarationResult struct {
@@ -20,6 +24,7 @@ type MedicalDeviceDeclarationResult struct {
 	Status             string   `json:"status,omitempty"`
 	FormID             string   `json:"formId,omitempty"`
 	Declared           bool     `json:"declared"`
+	Changed            bool     `json:"changed"`
 	CountriesOrRegions []string `json:"countriesOrRegions,omitempty"`
 }
 
@@ -52,7 +57,12 @@ type complianceConstraint struct {
 }
 
 type medicalDeviceFormResponse struct {
-	Constraints map[string]complianceConstraint `json:"constraints"`
+	Constraints        map[string]complianceConstraint `json:"constraints"`
+	Data               json.RawMessage                 `json:"data"`
+	CountriesOrRegions []string                        `json:"countriesOrRegions"`
+	MedicalDeviceData  struct {
+		Declaration string `json:"declaration"`
+	} `json:"medicalDeviceData"`
 }
 
 func trimComplianceRequirement(req complianceRequirement) complianceRequirement {
@@ -226,19 +236,24 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 		return nil, fmt.Errorf("only false is currently supported for the regulated medical device declaration")
 	}
 
-	requirements, err := c.listComplianceRequirements(ctx, accountID, appID)
+	requirement, form, err := c.medicalDeviceRequirementAndForm(ctx, accountID, appID)
 	if err != nil {
 		return nil, err
-	}
-	requirement := findComplianceRequirement(requirements, medicalDeviceRequirementName)
-	if requirement == nil {
-		return nil, fmt.Errorf("regulated medical device requirement was not found for app %q", strings.TrimSpace(appID))
 	}
 
-	form, err := c.getMedicalDeviceForm(ctx, accountID, appID, requirement.ID)
-	if err != nil {
-		return nil, err
+	if form.declaration() == medicalDeviceDeclarationNo && requirement.Status == medicalDeviceCollectedStatus {
+		return &MedicalDeviceDeclarationResult{
+			AppID:              strings.TrimSpace(appID),
+			RequirementID:      requirement.ID,
+			RequirementName:    requirement.Name,
+			Status:             requirement.Status,
+			FormID:             requirement.FormID,
+			Declared:           false,
+			Changed:            false,
+			CountriesOrRegions: form.countriesOrRegions(),
+		}, nil
 	}
+
 	countriesOrRegions, err := medicalDeviceRegionsFromConstraints(form.Constraints)
 	if err != nil {
 		return nil, err
@@ -251,7 +266,7 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 		"requirementName":    requirement.Name,
 		"countriesOrRegions": countriesOrRegions,
 		"medicalDeviceData": map[string]string{
-			"declaration": "no",
+			"declaration": medicalDeviceDeclarationNo,
 		},
 	}
 	path := "/ppm/complianceform/v1/accounts/" + url.PathEscape(strings.TrimSpace(accountID)) +
@@ -276,6 +291,7 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 		Status:             updatedRequirement.Status,
 		FormID:             updatedRequirement.FormID,
 		Declared:           false,
+		Changed:            true,
 		CountriesOrRegions: countriesOrRegions,
 	}, nil
 }

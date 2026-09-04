@@ -41,6 +41,15 @@ func RewriteCommandTreePath(cmd *ffcli.Command, currentPrefix, replacementPrefix
 			if currentErrorPrefix != "" && replacementErrorPrefix != "" && currentErrorPrefix != replacementErrorPrefix {
 				originalExec := node.Exec
 				node.Exec = func(ctx context.Context, args []string) error {
+					// A usage error prints itself and wraps flag.ErrHelp, so it
+					// never reaches rewriteCommandErrorPrefix below. Carry the
+					// same rename on the context so UsageErrorCtx can apply it
+					// before the diagnostic is written.
+					ctx = ContextWithUsageMessageRewrites(ctx, UsageMessageRewrite{
+						Old:            currentErrorPrefix,
+						New:            replacementErrorPrefix,
+						AnchoredPrefix: true,
+					})
 					err := originalExec(ctx, args)
 					if err == nil || errors.Is(err, flag.ErrHelp) {
 						return err

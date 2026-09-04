@@ -185,30 +185,9 @@ func TestPricingScheduleManualPricesRejectsInvalidLimit(t *testing.T) {
 }
 
 func TestPricingScheduleAutomaticPricesRejectsInvalidNextURL(t *testing.T) {
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
-
-	var runErr error
-	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{
-			"pricing", "schedule", "automatic-prices",
-			"--next", "http://api.appstoreconnect.apple.com/v1/appPriceSchedules/schedule-1/automaticPrices?cursor=AQ",
-		}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		runErr = root.Run(context.Background())
-	})
-
-	if runErr == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if stdout != "" {
-		t.Fatalf("expected empty stdout, got %q", stdout)
-	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
-	if !strings.Contains(runErr.Error(), "pricing schedule automatic-prices: --next must be an App Store Connect URL") {
-		t.Fatalf("expected invalid next error, got %v", runErr)
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"pricing", "schedule", "automatic-prices"},
+		"pricing schedule automatic-prices: --next",
+	)
 }

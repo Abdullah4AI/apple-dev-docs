@@ -1399,17 +1399,20 @@ func TestWebAppsDeleteByBundleID(t *testing.T) {
 	})
 	origNewWebClient := newWebClientFn
 	origFindWebApp := findWebAppFn
-	origGetWebApp := getWebAppFn
+	origGetRemovalState := getWebAppRemovalStateFn
+	origGetAvailability := getWebAppAvailabilityFn
 	origDeleteWebApp := deleteWebAppFn
 	t.Cleanup(func() {
 		restoreSession()
 		newWebClientFn = origNewWebClient
 		findWebAppFn = origFindWebApp
-		getWebAppFn = origGetWebApp
+		getWebAppRemovalStateFn = origGetRemovalState
+		getWebAppAvailabilityFn = origGetAvailability
 		deleteWebAppFn = origDeleteWebApp
 	})
 
 	var deletedID string
+	var removalReads int
 	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client {
 		return &webcore.Client{}
 	}
@@ -1426,20 +1429,27 @@ func TestWebAppsDeleteByBundleID(t *testing.T) {
 		}
 		return resp, nil
 	}
-	getWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
-		t.Fatal("did not expect app get when bundle lookup already loaded attributes")
-		return nil, nil
+	getWebAppAvailabilityFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppAvailability, error) {
+		return &webcore.AppAvailability{ID: "avail-1", AvailableTerritories: []string{}, AvailableTerritoriesLoaded: true, AvailableInNewTerritoriesKnown: true}, nil
+	}
+	getWebAppRemovalStateFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppRemovalState, error) {
+		removalReads++
+		return &webcore.AppRemovalState{
+			ID:                        appID,
+			Name:                      "Throwaway",
+			BundleID:                  "com.example.throwaway",
+			Removed:                   deletedID != "",
+			RemovedKnown:              true,
+			AppStoreLegacyStatus:      "PREPARE_FOR_SUBMISSION",
+			Marketplace:               "APP_STORE",
+			DisplayableVersionsLoaded: true,
+		}, nil
 	}
 	deleteWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
 		deletedID = appID
 		resp := &webcore.AppResponse{}
 		resp.Data.ID = appID
 		resp.Data.Type = "apps"
-		resp.Data.Attributes = map[string]any{
-			"name":     "Throwaway",
-			"bundleId": "com.example.throwaway",
-			"removed":  true,
-		}
 		return resp, nil
 	}
 
@@ -1464,6 +1474,9 @@ func TestWebAppsDeleteByBundleID(t *testing.T) {
 	if deletedID != "1234567890" {
 		t.Fatalf("expected deleted app ID, got %q", deletedID)
 	}
+	if removalReads < 2 {
+		t.Fatalf("expected preflight and post-PATCH re-read, got %d", removalReads)
+	}
 	for _, want := range []string{`"appId":"1234567890"`, `"bundleId":"com.example.throwaway"`, `"removed":true`} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected stdout to contain %s, got %q", want, stdout)
@@ -1471,32 +1484,30 @@ func TestWebAppsDeleteByBundleID(t *testing.T) {
 	}
 }
 
-func TestWebAppsDeleteResultKeepsRemovedTrueWhenDeleteResponseOmitsAttributes(t *testing.T) {
-	deleted := &webcore.AppResponse{}
-	deleted.Data.ID = "1234567890"
-	deleted.Data.Type = "apps"
-
-	fallback := &webcore.AppResponse{}
-	fallback.Data.ID = "1234567890"
-	fallback.Data.Type = "apps"
-	fallback.Data.Attributes = map[string]any{
-		"name":     "Throwaway",
-		"bundleId": "com.example.throwaway",
-		"removed":  false,
+func TestWebAppDeleteResultFromStateUsesServerRemovedFlag(t *testing.T) {
+	state := &webcore.AppRemovalState{
+		ID:           "1234567890",
+		Name:         "Throwaway",
+		BundleID:     "com.example.throwaway",
+		Removed:      false,
+		RemovedKnown: true,
 	}
 
-	result := webAppDeleteResultFromResponse("1234567890", deleted, fallback)
+	result := webAppDeleteResultFromState(state, false)
 	if result.AppID != "1234567890" {
-		t.Fatalf("expected app ID from delete response, got %q", result.AppID)
+		t.Fatalf("expected app ID from server state, got %q", result.AppID)
 	}
 	if result.Name != "Throwaway" {
-		t.Fatalf("expected fallback name, got %q", result.Name)
+		t.Fatalf("expected name from server state, got %q", result.Name)
 	}
 	if result.BundleID != "com.example.throwaway" {
-		t.Fatalf("expected fallback bundle ID, got %q", result.BundleID)
+		t.Fatalf("expected bundle ID from server state, got %q", result.BundleID)
 	}
-	if !result.Removed {
-		t.Fatal("expected removed to stay true when delete response omits attributes")
+	if result.Removed {
+		t.Fatal("expected removed to follow server state, not the request")
+	}
+	if result.DryRun {
+		t.Fatal("did not expect dry-run on a mutation receipt")
 	}
 }
 
@@ -1563,27 +1574,24 @@ func TestWebAppsDeleteExpectedBundleIDMismatchStopsBeforeDelete(t *testing.T) {
 		return &webcore.AuthSession{}, "cache", nil
 	})
 	origNewWebClient := newWebClientFn
-	origGetWebApp := getWebAppFn
+	origGetRemovalState := getWebAppRemovalStateFn
 	origDeleteWebApp := deleteWebAppFn
 	t.Cleanup(func() {
 		restoreSession()
 		newWebClientFn = origNewWebClient
-		getWebAppFn = origGetWebApp
+		getWebAppRemovalStateFn = origGetRemovalState
 		deleteWebAppFn = origDeleteWebApp
 	})
 
 	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client {
 		return &webcore.Client{}
 	}
-	getWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
-		resp := &webcore.AppResponse{}
-		resp.Data.ID = appID
-		resp.Data.Type = "apps"
-		resp.Data.Attributes = map[string]any{
-			"name":     "Throwaway",
-			"bundleId": "com.example.actual",
-		}
-		return resp, nil
+	getWebAppRemovalStateFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppRemovalState, error) {
+		return &webcore.AppRemovalState{
+			ID:       appID,
+			Name:     "Throwaway",
+			BundleID: "com.example.actual",
+		}, nil
 	}
 	deleteWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) (*webcore.AppResponse, error) {
 		t.Fatal("did not expect delete after identity guard mismatch")
@@ -1637,13 +1645,13 @@ func TestWebAppsDeleteRequiresConfirmBeforeResolvingSession(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "--confirm is required") {
+	if !strings.Contains(stderr, "--confirm is required unless --dry-run is set") {
 		t.Fatalf("expected confirm stderr, got %q", stderr)
 	}
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("expected usage error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "--confirm is required") {
+	if !strings.Contains(err.Error(), "--confirm is required unless --dry-run is set") {
 		t.Fatalf("expected confirm error, got %v", err)
 	}
 	if resolveCalled {

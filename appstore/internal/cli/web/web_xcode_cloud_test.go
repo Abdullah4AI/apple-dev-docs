@@ -108,7 +108,7 @@ func TestWebXcodeCloudUsageSubcommands(t *testing.T) {
 	}
 }
 
-func TestWebXcodeCloudSubcommandsResolveSessionWithinTimeoutContext(t *testing.T) {
+func TestWebXcodeCloudSubcommandsResolveSessionBeforeTimeoutContext(t *testing.T) {
 	origResolveSession := resolveSessionFn
 	t.Cleanup(func() {
 		resolveSessionFn = origResolveSession
@@ -191,6 +191,11 @@ func TestWebXcodeCloudSubcommandsResolveSessionWithinTimeoutContext(t *testing.T
 			args:  []string{"--apple-id", "user@example.com"},
 		},
 		{
+			name:  "workflows list",
+			build: webXcodeCloudWorkflowListCommand,
+			args:  []string{"--apple-id", "user@example.com", "--product-id", "prod-123"},
+		},
+		{
 			name:  "workflows describe",
 			build: webXcodeCloudWorkflowDescribeCommand,
 			args:  []string{"--apple-id", "user@example.com", "--product-id", "prod-123", "--workflow-id", "wf-123"},
@@ -227,8 +232,8 @@ func TestWebXcodeCloudSubcommandsResolveSessionWithinTimeoutContext(t *testing.T
 			if !errors.Is(err, resolveErr) {
 				t.Fatalf("expected resolveSession error %v, got %v", resolveErr, err)
 			}
-			if !hadDeadline {
-				t.Fatal("expected resolveSession to receive a timeout context")
+			if hadDeadline {
+				t.Fatal("expected resolveSession to run before the request timeout context is created")
 			}
 		})
 	}

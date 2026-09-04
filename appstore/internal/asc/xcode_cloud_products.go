@@ -728,12 +728,38 @@ func (c *Client) GetCiWorkflow(ctx context.Context, workflowID string) (*CiWorkf
 	return &response, nil
 }
 
-// CreateCiWorkflow creates a CI workflow from a JSON payload.
-func (c *Client) CreateCiWorkflow(ctx context.Context, payload json.RawMessage) (*CiWorkflowResponse, error) {
+// GetCiWorkflowRaw retrieves a CI workflow by ID as the unmodified Apple response body.
+// Duplicating a workflow needs fields that the typed CiWorkflowResource omits or
+// drops through omitempty, so the raw envelope is the only lossless source.
+func (c *Client) GetCiWorkflowRaw(ctx context.Context, workflowID string, include ...string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/v1/ciWorkflows/%s", strings.TrimSpace(workflowID))
+	if joined := strings.Join(include, ","); joined != "" {
+		path += "?include=" + url.QueryEscape(joined)
+	}
+	data, err := c.do(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
+// CreateCiWorkflowRaw creates a CI workflow and returns Apple's unmodified response body.
+// The typed CiWorkflowResponse drops false/empty attributes through omitempty, so JSON
+// output for duplicate must print this envelope instead of a reconstructed struct.
+func (c *Client) CreateCiWorkflowRaw(ctx context.Context, payload json.RawMessage) (json.RawMessage, error) {
 	if len(bytes.TrimSpace(payload)) == 0 {
 		return nil, fmt.Errorf("empty workflow payload")
 	}
 	data, err := c.do(ctx, "POST", "/v1/ciWorkflows", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
+// CreateCiWorkflow creates a CI workflow from a JSON payload.
+func (c *Client) CreateCiWorkflow(ctx context.Context, payload json.RawMessage) (*CiWorkflowResponse, error) {
+	data, err := c.CreateCiWorkflowRaw(ctx, payload)
 	if err != nil {
 		return nil, err
 	}

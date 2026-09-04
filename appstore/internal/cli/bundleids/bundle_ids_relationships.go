@@ -130,10 +130,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("bundle-ids profiles list: --limit must be between 1 and 200")
+				return shared.UsageError("bundle-ids profiles list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("bundle-ids profiles list: %w", err)
+				return shared.UsageErrorf("bundle-ids profiles list: %v", err)
 			}
 			if idValue == "" && strings.TrimSpace(*next) != "" {
 				derivedID, err := extractBundleIDFromNextURL(*next)

@@ -28,6 +28,7 @@ func TestAXeProvider_MissingBinary(t *testing.T) {
 }
 
 func TestAXeProvider_CaptureLaunchesRequestedBundleID(t *testing.T) {
+	skipWindowsUnixExecutableFixtures(t)
 	binDir := t.TempDir()
 	logDir := t.TempDir()
 	xcrunLog := filepath.Join(logDir, "xcrun.log")
@@ -85,6 +86,7 @@ done
 
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
+	skipWindowsUnixExecutableFixtures(t)
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		t.Fatalf("write executable %q: %v", path, err)
 	}

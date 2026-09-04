@@ -603,7 +603,10 @@ func TestSubscriptionsReviewScreenshotCreateDoesNotCommitAfterUploadFailure(t *t
 	if err == nil || !strings.Contains(err.Error(), "upload request failed") {
 		t.Fatalf("expected upload failure, got %v", err)
 	}
-	if stdout != "" || stderr != "" || puts.Load() != 2 {
+	// Concurrent chunk workers cancel remaining PUTs after the first 400, so
+	// only one part may land. The contract is "at least one failed upload and
+	// no commit", not "every reserved part was attempted".
+	if stdout != "" || stderr != "" || puts.Load() < 1 {
 		t.Fatalf("unexpected failed upload result: puts=%d stdout=%q stderr=%q", puts.Load(), stdout, stderr)
 	}
 }

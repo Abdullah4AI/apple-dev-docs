@@ -10,50 +10,11 @@ import (
 )
 
 func TestTestFlightBetaLicenseAgreementsListRejectsInvalidNextURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		next    string
-		wantErr string
-	}{
-		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/betaLicenseAgreements?cursor=AQ",
-			wantErr: "agreements list: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "agreements list: --next must be a valid URL:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{"testflight", "agreements", "list", "--next", test.next}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
-		})
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"testflight", "agreements", "list"},
+		"agreements list: --next",
+	)
 }
 
 func TestTestFlightBetaLicenseAgreementsListPaginateFromNext(t *testing.T) {
@@ -119,50 +80,11 @@ func TestTestFlightBetaLicenseAgreementsListPaginateFromNext(t *testing.T) {
 }
 
 func TestTestFlightBetaTestersMetricsRejectsInvalidNextURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		next    string
-		wantErr string
-	}{
-		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/betaTesters/tester-1/metrics/betaTesterUsages?cursor=AQ",
-			wantErr: "testflight testers metrics: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "testflight testers metrics: --next must be a valid URL:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{"testflight", "testers", "metrics", "--next", test.next}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
-		})
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"testflight", "testers", "metrics"},
+		"testflight testers metrics: --next",
+	)
 }
 
 func TestTestFlightBetaTestersMetricsFromNextWithoutTesterOrApp(t *testing.T) {

@@ -67,7 +67,7 @@ func WatchAndRegenerate(ctx context.Context, configPath string, debounce time.Du
 	if opts != nil && opts.ReviewOutputDir != "" {
 		framedDir := resolveKoubouOutputDir(absConfig)
 		rawDir := opts.ReviewRawDir
-		if rawDir == "" {
+		if strings.TrimSpace(rawDir) == "" {
 			// Fall back to the first asset dir collected from the config.
 			if len(assetDirs) > 0 {
 				rawDir = assetDirs[0]
@@ -209,7 +209,8 @@ func isRelevantChange(event fsnotify.Event, configPath string, assetDirs []strin
 	if err != nil {
 		return false
 	}
-	if absEvent == configPath {
+	absConfig, err := filepath.Abs(configPath)
+	if err == nil && absEvent == absConfig {
 		return true
 	}
 	// Image file in an asset dir changed.
@@ -219,7 +220,8 @@ func isRelevantChange(event fsnotify.Event, configPath string, assetDirs []strin
 	}
 	eventDir := filepath.Dir(absEvent)
 	for _, dir := range assetDirs {
-		if eventDir == dir {
+		absDir, dirErr := filepath.Abs(dir)
+		if dirErr == nil && eventDir == absDir {
 			return true
 		}
 	}

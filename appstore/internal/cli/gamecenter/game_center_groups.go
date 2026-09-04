@@ -82,10 +82,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups list: %w", err)
+				return shared.UsageErrorf("game-center groups list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -382,10 +382,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups achievements list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups achievements list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups achievements list: %w", err)
+				return shared.UsageErrorf("game-center groups achievements list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -562,10 +562,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups leaderboards list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups leaderboards list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups leaderboards list: %w", err)
+				return shared.UsageErrorf("game-center groups leaderboards list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -740,10 +740,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups leaderboard-sets list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups leaderboard-sets list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups leaderboard-sets list: %w", err)
+				return shared.UsageErrorf("game-center groups leaderboard-sets list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -854,10 +854,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups activities list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups activities list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups activities list: %w", err)
+				return shared.UsageErrorf("game-center groups activities list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -955,10 +955,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups challenges list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups challenges list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups challenges list: %w", err)
+				return shared.UsageErrorf("game-center groups challenges list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)
@@ -1109,10 +1109,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center groups details list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center groups details list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center groups details list: %w", err)
+				return shared.UsageErrorf("game-center groups details list: %v", err)
 			}
 
 			id := strings.TrimSpace(*groupID)

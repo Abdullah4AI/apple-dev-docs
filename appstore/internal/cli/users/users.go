@@ -88,7 +88,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("users list: %w", err)
+				return shared.UsageErrorf("users list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,
@@ -99,7 +99,7 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("users list: --limit must be between 1 and 200")
+				return shared.UsageError("users list: --limit must be between 1 and 200")
 			}
 			provided := make(map[string]bool)
 			fs.Visit(func(f *flag.Flag) {
@@ -545,10 +545,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("users invites list: --limit must be between 1 and 200")
+				return shared.UsageError("users invites list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("users invites list: %w", err)
+				return shared.UsageErrorf("users invites list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

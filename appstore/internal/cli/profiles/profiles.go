@@ -93,7 +93,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("profiles list: %w", err)
+				return shared.UsageErrorf("profiles list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,

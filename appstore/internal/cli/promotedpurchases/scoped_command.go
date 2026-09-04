@@ -119,7 +119,7 @@ Examples:
 			return flag.ErrHelp
 		}
 		if err := shared.ValidateNextURL(next); err != nil {
-			return fmt.Errorf("%s: %w", errorPrefix, err)
+			return shared.UsageErrorf("%s: %v", errorPrefix, err)
 		}
 		if strings.TrimSpace(next) != "" && (flagWasSet(cmd.FlagSet, "iap-fields") || flagWasSet(cmd.FlagSet, "subscription-fields")) {
 			return shared.UsageErrorf("%s: --next cannot be combined with --iap-fields or --subscription-fields", errorPrefix)

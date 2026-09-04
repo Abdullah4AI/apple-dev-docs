@@ -77,7 +77,7 @@ Examples:
 				return flag.ErrHelp
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("builds uploads list: %w", err)
+				return shared.UsageErrorf("builds uploads list: %v", err)
 			}
 			if err := shared.ValidateSort(*sort, "cfBundleVersion", "-cfBundleVersion", "uploadedDate", "-uploadedDate"); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
@@ -284,10 +284,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("builds uploads files list: --limit must be between 1 and 200")
+				return shared.UsageError("builds uploads files list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("builds uploads files list: %w", err)
+				return shared.UsageErrorf("builds uploads files list: %v", err)
 			}
 
 			uploadValue := strings.TrimSpace(*uploadID)

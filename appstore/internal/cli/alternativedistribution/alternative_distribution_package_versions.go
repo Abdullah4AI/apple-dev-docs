@@ -70,10 +70,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--package-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
-				return fmt.Errorf("alternative-distribution packages versions list: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
+				return shared.UsageErrorf("alternative-distribution packages versions list: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("alternative-distribution packages versions list: %w", err)
+				return shared.UsageErrorf("alternative-distribution packages versions list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -186,10 +186,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
-				return fmt.Errorf("alternative-distribution packages versions deltas: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
+				return shared.UsageErrorf("alternative-distribution packages versions deltas: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("alternative-distribution packages versions deltas: %w", err)
+				return shared.UsageErrorf("alternative-distribution packages versions deltas: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -260,10 +260,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
-				return fmt.Errorf("alternative-distribution packages versions variants: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
+				return shared.UsageErrorf("alternative-distribution packages versions variants: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("alternative-distribution packages versions variants: %w", err)
+				return shared.UsageErrorf("alternative-distribution packages versions variants: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

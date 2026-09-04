@@ -108,26 +108,26 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("encryption declarations list: --limit must be between 1 and 200")
+				return shared.UsageError("encryption declarations list: --limit must be between 1 and 200")
 			}
 			if *buildLimit != 0 && (*buildLimit < 1 || *buildLimit > 50) {
-				return fmt.Errorf("encryption declarations list: --build-limit must be between 1 and 50")
+				return shared.UsageError("encryption declarations list: --build-limit must be between 1 and 50")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("encryption declarations list: %w", err)
+				return shared.UsageErrorf("encryption declarations list: %v", err)
 			}
 
 			fieldsValue, err := normalizeEncryptionDeclarationFields(*fields)
 			if err != nil {
-				return fmt.Errorf("encryption declarations list: %w", err)
+				return shared.UsageErrorf("encryption declarations list: %v", err)
 			}
 			documentFieldsValue, err := normalizeEncryptionDocumentFields(*documentFields, "--document-fields")
 			if err != nil {
-				return fmt.Errorf("encryption declarations list: %w", err)
+				return shared.UsageErrorf("encryption declarations list: %v", err)
 			}
 			includeValue, err := normalizeEncryptionDeclarationInclude(*include)
 			if err != nil {
-				return fmt.Errorf("encryption declarations list: %w", err)
+				return shared.UsageErrorf("encryption declarations list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -212,20 +212,20 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *buildLimit != 0 && (*buildLimit < 1 || *buildLimit > 50) {
-				return fmt.Errorf("encryption declarations view: --build-limit must be between 1 and 50")
+				return shared.UsageError("encryption declarations view: --build-limit must be between 1 and 50")
 			}
 
 			fieldsValue, err := normalizeEncryptionDeclarationFields(*fields)
 			if err != nil {
-				return fmt.Errorf("encryption declarations view: %w", err)
+				return shared.UsageErrorf("encryption declarations view: %v", err)
 			}
 			documentFieldsValue, err := normalizeEncryptionDocumentFields(*documentFields, "--document-fields")
 			if err != nil {
-				return fmt.Errorf("encryption declarations view: %w", err)
+				return shared.UsageErrorf("encryption declarations view: %v", err)
 			}
 			includeValue, err := normalizeEncryptionDeclarationInclude(*include)
 			if err != nil {
-				return fmt.Errorf("encryption declarations view: %w", err)
+				return shared.UsageErrorf("encryption declarations view: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -651,7 +651,7 @@ Examples:
 
 			fieldsValue, err := normalizeEncryptionDocumentFields(*fields, "--fields")
 			if err != nil {
-				return fmt.Errorf("encryption documents view: %w", err)
+				return shared.UsageErrorf("encryption documents view: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

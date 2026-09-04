@@ -18,6 +18,7 @@ var (
 	ErrAPIKeyNotFound        = errors.New("api key not found")
 	ErrAPIKeyNotVisible      = errors.New("api key not visible in accessible key lists")
 	ErrAPIKeyRolesUnresolved = errors.New("api key roles could not be resolved")
+	errAPIKeyListPagination  = errors.New("api key list pagination failed")
 )
 
 func integrationsHeaders(referer string) http.Header {
@@ -169,7 +170,7 @@ func (c *Client) listTeamKeys(ctx context.Context) ([]teamAPIKey, error) {
 
 		body, err := c.doIrisV1Request(ctx, http.MethodGet, nextPath, nil)
 		if err != nil {
-			return nil, err
+			return nil, wrapAPIKeyListPageError(err, len(payloads))
 		}
 
 		var payload teamKeyPayload
@@ -266,7 +267,7 @@ func (c *Client) listIndividualKeys(ctx context.Context) ([]individualAPIKey, er
 
 		body, err := c.doIrisV2Request(ctx, http.MethodGet, nextPath, nil)
 		if err != nil {
-			return nil, err
+			return nil, wrapAPIKeyListPageError(err, len(payloads))
 		}
 
 		var payload individualKeyPayload
@@ -571,7 +572,17 @@ func (c *Client) LookupAPIKeyRoles(ctx context.Context, keyID string) (*APIKeyRo
 	return nil, fmt.Errorf("%w: %s", ErrAPIKeyNotFound, keyID)
 }
 
+func wrapAPIKeyListPageError(err error, pagesFetched int) error {
+	if err == nil || pagesFetched == 0 {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errAPIKeyListPagination, err)
+}
+
 func shouldFallbackToIndividualKeys(err error) bool {
+	if errors.Is(err, errAPIKeyListPagination) {
+		return false
+	}
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		return false

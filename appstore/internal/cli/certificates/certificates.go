@@ -32,6 +32,7 @@ Examples:
   asc certificates list
   asc certificates list --certificate-type IOS_DISTRIBUTION
   asc certificates view --id "CERT_ID" --include passTypeId
+  asc certificates export --certificate "./push/push.cer" --private-key "./push/push.key" --password-file "./secrets/push.p12.password" --p12-out "./push/push.p12"
   asc certificates create --certificate-type IOS_DISTRIBUTION --csr "./cert.csr"
   asc certificates create --certificate-type PASS_TYPE_ID --pass-type-id "PASS_TYPE_ID" --csr "./pass.csr"
   asc certificates update --id "CERT_ID" --activated true
@@ -44,6 +45,7 @@ Examples:
 			CertificatesListCommand(),
 			CertificatesGetCommand(),
 			CertificatesCSRCommand(),
+			CertificatesExportCommand(),
 			CertificatesCreateCommand(),
 			CertificatesUpdateCommand(),
 			CertificatesRevokeCommand(),
@@ -283,7 +285,7 @@ Examples:
 func CertificatesCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 
-	certificateType := fs.String("certificate-type", "", "Certificate type (e.g., IOS_DISTRIBUTION)")
+	certificateType := fs.String("certificate-type", "", "Certificate type: "+strings.Join(shared.CertificateCreateTypeList(), ", "))
 	passTypeID := fs.String("pass-type-id", "", "Pass Type ID resource ID (required for PASS_TYPE_ID and PASS_TYPE_ID_WITH_NFC)")
 	csrPath := fs.String("csr", "", "CSR file path")
 	generateCSR := fs.Bool("generate-csr", false, "Generate a private key and CSR before creating the certificate")
@@ -317,6 +319,14 @@ Examples:
 				fmt.Fprintln(os.Stderr, "Error: --certificate-type is required")
 				return shared.MissingRequiredUsageError("--certificate-type")
 			}
+			// Rejects unknown types and the Apple Pay types this command cannot
+			// create, before --generate-csr writes a private key and CSR for a
+			// request App Store Connect will refuse.
+			canonicalCertificateType, err := shared.ValidateCertificateCreateType("--certificate-type", certificateValue)
+			if err != nil {
+				return err
+			}
+			certificateValue = canonicalCertificateType
 			passTypeIDValue := strings.TrimSpace(*passTypeID)
 			isPassTypeCertificate := certificateValue == "PASS_TYPE_ID" || certificateValue == "PASS_TYPE_ID_WITH_NFC"
 			if isPassTypeCertificate && passTypeIDValue == "" {

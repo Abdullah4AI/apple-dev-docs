@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -57,9 +59,14 @@ func runCategoriesEncryptionInvalidNextURLCases(
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
+			// Both callers now route this check through shared.UsageError, so
+			// the runner requires the usage classification instead of
+			// accepting either shape: a regression to fmt.Errorf on either
+			// command has to fail here.
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("expected a usage-classified error, got %v", runErr)
 			}
+			assertUsageDiagnosticFirstLine(t, stderr, test.wantErr)
 		})
 	}
 }

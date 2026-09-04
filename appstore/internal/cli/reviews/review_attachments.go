@@ -45,7 +45,7 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			nextValue := strings.TrimSpace(*next)
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("review attachments-list: %w", err)), shared.DiagnosticInvalidInput, "--next")
+				return shared.WithDiagnostic(shared.NewValidationError(shared.UsageErrorf("review attachments-list: %v", err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(
 				fs, *next, "review attachments-list",
@@ -54,7 +54,7 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("review attachments-list: --limit must be between 1 and 200")), shared.DiagnosticInvalidInput, "--limit")
+				return shared.WithDiagnostic(shared.NewValidationError(shared.UsageError("review attachments-list: --limit must be between 1 and 200")), shared.DiagnosticInvalidInput, "--limit")
 			}
 
 			fieldsValue, err := normalizeReviewAttachmentFields(*fields)

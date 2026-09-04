@@ -104,7 +104,7 @@ Examples:
 				return fmt.Errorf("%s: %w", errorPrefix, shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, ""))
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("%s: %w", errorPrefix, err)), shared.DiagnosticInvalidInput, "--next")
+				return shared.WithDiagnostic(shared.NewValidationError(shared.UsageErrorf("%s: %v", errorPrefix, err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(
 				fs, *next, errorPrefix,

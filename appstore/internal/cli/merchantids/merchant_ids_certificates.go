@@ -74,13 +74,13 @@ Examples:
 				return shared.MissingRequiredUsageError("--merchant-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("merchant-ids certificates list: --limit must be between 1 and 200")
+				return shared.UsageError("merchant-ids certificates list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("merchant-ids certificates list: %w", err)
+				return shared.UsageErrorf("merchant-ids certificates list: %v", err)
 			}
 			if err := shared.ValidateSort(*sort, certificateSortValues...); err != nil {
-				return fmt.Errorf("merchant-ids certificates list: %w", err)
+				return shared.UsageErrorf("merchant-ids certificates list: %v", err)
 			}
 
 			fieldsValue, err := normalizeCertificateFields(*fields, "--fields")
@@ -176,10 +176,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--merchant-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("merchant-ids certificates view: --limit must be between 1 and 200")
+				return shared.UsageError("merchant-ids certificates view: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("merchant-ids certificates view: %w", err)
+				return shared.UsageErrorf("merchant-ids certificates view: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

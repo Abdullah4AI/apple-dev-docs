@@ -67,7 +67,7 @@ Examples:
 				return flag.ErrHelp
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("builds metrics beta-usages: %w", err)
+				return shared.UsageErrorf("builds metrics beta-usages: %v", err)
 			}
 
 			nextValue := strings.TrimSpace(*next)

@@ -68,10 +68,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > productPagesMaxLimit) {
-				return fmt.Errorf("custom-pages localizations preview-sets list: --limit must be between 1 and %d", productPagesMaxLimit)
+				return shared.UsageErrorf("custom-pages localizations preview-sets list: --limit must be between 1 and %d", productPagesMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("custom-pages localizations preview-sets list: %w", err)
+				return shared.UsageErrorf("custom-pages localizations preview-sets list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -181,10 +181,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--localization-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > productPagesMaxLimit) {
-				return fmt.Errorf("custom-pages localizations screenshot-sets list: --limit must be between 1 and %d", productPagesMaxLimit)
+				return shared.UsageErrorf("custom-pages localizations screenshot-sets list: --limit must be between 1 and %d", productPagesMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("custom-pages localizations screenshot-sets list: %w", err)
+				return shared.UsageErrorf("custom-pages localizations screenshot-sets list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

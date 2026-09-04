@@ -313,12 +313,12 @@ Examples:
 
 func xcodeCloudProductsList(ctx context.Context, flags ciProductsListFlags) error {
 	if *flags.limit != 0 && (*flags.limit < 1 || *flags.limit > 200) {
-		return fmt.Errorf("xcode-cloud products: --limit must be between 1 and 200")
+		return shared.UsageError("xcode-cloud products: --limit must be between 1 and 200")
 	}
 
 	next := strings.TrimSpace(*flags.next)
 	if err := shared.ValidateNextURL(next); err != nil {
-		return fmt.Errorf("xcode-cloud products: %w", err)
+		return shared.UsageErrorf("xcode-cloud products: %v", err)
 	}
 	if err := shared.RejectNextFlagConflicts(
 		flags.flagSet,

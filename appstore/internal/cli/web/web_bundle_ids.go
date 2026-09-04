@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -33,7 +34,7 @@ func WebBundleIDsCommand() *ffcli.Command {
 		ShortHelp:  "Manage Bundle IDs via web-session endpoints.",
 		LongHelp: `WEB SESSION WORKFLOWS
 
-Manage Bundle ID operations that are only available through Apple web-session web-session endpoints.
+Manage Bundle ID operations that are only available through Apple web-session endpoints.
 
 `,
 		FlagSet:   fs,
@@ -82,6 +83,7 @@ func WebBundleIDCapabilitiesEnableCommand() *ffcli.Command {
 	capability := fs.String("capability", "", "Developer Portal capability ID (supported: PRIVATE_CLOUD_COMPUTE)")
 	confirm := fs.Bool("confirm", false, "Confirm enabling this Bundle ID capability")
 	authFlags := bindWebSessionFlags(fs)
+	portalFlags := bindDeveloperPortalFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -131,15 +133,16 @@ Authentication:
 			case resolvedCapability != "PRIVATE_CLOUD_COMPUTE":
 				return shared.UsageErrorf("unsupported Developer Portal capability %q (supported: PRIVATE_CLOUD_COMPUTE)", resolvedCapability)
 			}
+			if err := validateDeveloperPortalFlags(portalFlags); err != nil {
+				return err
+			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, authFlags)
 			if err != nil {
 				return err
 			}
-			client := newWebClientFn(session)
+			client := newDeveloperPortalClient(session, portalFlags)
 
 			var result *webcore.DeveloperBundleIDCapabilityEnableResult
 			err = withWebSpinner("Enabling Developer Portal Bundle ID capability", func() error {
@@ -150,15 +153,16 @@ Authentication:
 				})
 				return enableErr
 			})
+			// Persist after the PATCH attempt so a later retry without
+			// --developer-team still targets the team that may have enabled
+			// the capability even when Apple's response body is unreadable.
+			persistDeveloperPortalSession(session)
 			if err != nil {
 				return withWebAuthHint(err, "web bundle-ids capabilities enable")
 			}
 			if result == nil {
 				return fmt.Errorf("web bundle-ids capabilities enable failed: missing enable result")
 			}
-			// Developer Portal bootstrap can add origin-specific cookies to the
-			// shared jar. Cache them best-effort after the operation succeeds.
-			_ = persistWebSessionFn(session)
 
 			return shared.PrintOutputWithRenderers(
 				result,
@@ -171,6 +175,10 @@ Authentication:
 	}
 }
 
+// webBundleIDSyncAppClipConfirmMigrationWarning explains the --confirm
+// requirement to callers still using the pre-confirm invocation shape.
+const webBundleIDSyncAppClipConfirmMigrationWarning = "Warning: web bundle-ids capabilities sync-app-clip now requires --confirm because syncing rewrites the App Clip Bundle ID capability graph and invalidates existing provisioning profiles; re-run with --confirm to acknowledge. No request was sent."
+
 // WebBundleIDCapabilitiesSyncAppClipCommand syncs one App Clip capability relationship.
 func WebBundleIDCapabilitiesSyncAppClipCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web bundle-ids capabilities sync-app-clip", flag.ExitOnError)
@@ -179,12 +187,13 @@ func WebBundleIDCapabilitiesSyncAppClipCommand() *ffcli.Command {
 	parentBundleID := fs.String("parent-bundle-id", "", "Opaque parent app Bundle ID resource ID")
 	capability := fs.String("capability", "", "Capability ID (for example: PUSH_NOTIFICATIONS)")
 	settingsJSON := fs.String("settings-json", "", "Optional JSON array of capability settings")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm the sync; a changed App ID invalidates existing provisioning profiles")
 	authFlags := bindWebSessionFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "sync-app-clip",
-		ShortUsage: "asc web bundle-ids capabilities sync-app-clip --bundle-id BUNDLE_ID --parent-bundle-id PARENT_BUNDLE_ID --capability CAPABILITY [flags]",
+		ShortUsage: "asc web bundle-ids capabilities sync-app-clip --bundle-id BUNDLE_ID --parent-bundle-id PARENT_BUNDLE_ID --capability CAPABILITY --confirm [flags]",
 		ShortHelp:  "Sync an App Clip capability with parentBundleId.",
 		LongHelp: `WEB SESSION WORKFLOWS
 
@@ -193,9 +202,20 @@ payload and include the parentBundleId relationship required for App Clip
 targets. This mirrors the App Store Connect web-session shape used for App Clip
 Bundle IDs, not the public API-key capability endpoint.
 
+The command reads the complete current Bundle ID capability graph first. If the
+capability is already enabled with the requested parentBundleId (and the
+requested settings, when --settings-json is passed), it returns an
+already-synced receipt with changed=false and sends no PATCH. Otherwise it
+writes the graph back with every unrelated capability and relationship
+preserved and only writable capability attributes included.
+
+--confirm is required. When the command changes the App ID, Apple invalidates
+existing provisioning profiles that contain it. Regenerate affected profiles
+before the next signed build.
+
 Examples:
-  asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS"
-  asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS" --settings-json '[{"key":"PUSH_NOTIFICATION_FEATURES","options":[{"key":"PUSH_NOTIFICATION_FEATURE_BROADCAST","enabled":true}]}]'
+  asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS" --confirm
+  asc web bundle-ids capabilities sync-app-clip --bundle-id "CLIP_BUNDLE_ID" --parent-bundle-id "PARENT_BUNDLE_ID" --capability "PUSH_NOTIFICATIONS" --settings-json '[{"key":"PUSH_NOTIFICATION_FEATURES","options":[{"key":"PUSH_NOTIFICATION_FEATURE_BROADCAST","enabled":true}]}]' --confirm
 
 `,
 		FlagSet:   fs,
@@ -222,13 +242,16 @@ Examples:
 			if err != nil {
 				return shared.UsageErrorf("--settings-json must be a JSON array of capability settings: %v", err)
 			}
+			if !*confirm {
+				fmt.Fprintln(os.Stderr, webBundleIDSyncAppClipConfirmMigrationWarning)
+				return shared.UsageError("--confirm is required")
+			}
 
-			session, err := resolveWebSessionForCommand(ctx, authFlags)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
 			if err != nil {
 				return err
 			}
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
 
 			client := newWebClientFn(session)
 			var result *webcore.AppClipBundleIDCapabilitySyncResult
@@ -249,6 +272,14 @@ Examples:
 			}
 			if result == nil {
 				return fmt.Errorf("web bundle-ids capabilities sync-app-clip failed: missing sync result")
+			}
+			// Apple may rotate session cookies on the read or the write; cache
+			// them so the next command reuses the refreshed session.
+			if err := persistWebSessionFn(session); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to persist refreshed web session: %v\n", err)
+			}
+			if result.Changed {
+				fmt.Fprintf(os.Stderr, "Warning: syncing %s on Bundle ID %s changed the App ID, which invalidates existing provisioning profiles that contain it. Regenerate affected profiles before the next signed build.\n", result.Capability, result.BundleID)
 			}
 
 			return shared.PrintOutputWithRenderers(
@@ -282,29 +313,28 @@ func parseWebBundleIDCapabilitySettings(value string) ([]webcore.BundleIDCapabil
 	return settings, nil
 }
 
+func webBundleIDCapabilitySyncHeaders() []string {
+	return []string{"Bundle ID", "Parent Bundle ID", "Capability", "Enabled", "Changed", "Status"}
+}
+
+func webBundleIDCapabilitySyncRows(result *webcore.AppClipBundleIDCapabilitySyncResult) [][]string {
+	return [][]string{{
+		result.BundleID,
+		result.ParentBundleID,
+		result.Capability,
+		fmt.Sprintf("%t", result.Enabled),
+		fmt.Sprintf("%t", result.Changed),
+		result.Status,
+	}}
+}
+
 func renderWebBundleIDCapabilitySyncTable(result *webcore.AppClipBundleIDCapabilitySyncResult) error {
-	asc.RenderTable(
-		[]string{"Bundle ID", "Parent Bundle ID", "Capability", "Enabled"},
-		[][]string{{
-			result.BundleID,
-			result.ParentBundleID,
-			result.Capability,
-			fmt.Sprintf("%t", result.Enabled),
-		}},
-	)
+	asc.RenderTable(webBundleIDCapabilitySyncHeaders(), webBundleIDCapabilitySyncRows(result))
 	return nil
 }
 
 func renderWebBundleIDCapabilitySyncMarkdown(result *webcore.AppClipBundleIDCapabilitySyncResult) error {
-	asc.RenderMarkdown(
-		[]string{"Bundle ID", "Parent Bundle ID", "Capability", "Enabled"},
-		[][]string{{
-			result.BundleID,
-			result.ParentBundleID,
-			result.Capability,
-			fmt.Sprintf("%t", result.Enabled),
-		}},
-	)
+	asc.RenderMarkdown(webBundleIDCapabilitySyncHeaders(), webBundleIDCapabilitySyncRows(result))
 	return nil
 }
 

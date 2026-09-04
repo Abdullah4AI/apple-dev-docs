@@ -67,7 +67,7 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 50) {
-				return fmt.Errorf("build-bundles list: --limit must be between 1 and 50")
+				return shared.UsageError("build-bundles list: --limit must be between 1 and 50")
 			}
 
 			buildValue := strings.TrimSpace(*buildID)
@@ -147,10 +147,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("build-bundles file-sizes list: --limit must be between 1 and 200")
+				return shared.UsageError("build-bundles file-sizes list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("build-bundles file-sizes list: %w", err)
+				return shared.UsageErrorf("build-bundles file-sizes list: %v", err)
 			}
 
 			buildBundleValue := strings.TrimSpace(*buildBundleID)
@@ -414,10 +414,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("build-bundles app-clip invocations list: --limit must be between 1 and 200")
+				return shared.UsageError("build-bundles app-clip invocations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("build-bundles app-clip invocations list: %w", err)
+				return shared.UsageErrorf("build-bundles app-clip invocations list: %v", err)
 			}
 
 			buildBundleValue := strings.TrimSpace(*buildBundleID)

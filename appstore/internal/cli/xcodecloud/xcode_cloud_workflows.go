@@ -41,6 +41,7 @@ Examples:
   asc xcode-cloud workflows list --app "APP_ID"
   asc xcode-cloud workflows view --id "WORKFLOW_ID"
   asc xcode-cloud workflows repository --id "WORKFLOW_ID"
+  asc xcode-cloud workflows duplicate --id "WORKFLOW_ID" --name "Nightly"
   asc xcode-cloud workflows --app "APP_ID" --limit 50
   asc xcode-cloud workflows --app "APP_ID" --paginate`,
 		FlagSet:   fs,
@@ -51,6 +52,7 @@ Examples:
 			XcodeCloudWorkflowsRepositoryCommand(),
 			XcodeCloudWorkflowsCreateCommand(),
 			XcodeCloudWorkflowsUpdateCommand(),
+			XcodeCloudWorkflowsDuplicateCommand(),
 			XcodeCloudWorkflowsDeleteCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -260,11 +262,11 @@ Examples:
 
 func xcodeCloudWorkflowsList(ctx context.Context, appID string, limit int, next string, paginate bool, output string, pretty bool) error {
 	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("xcode-cloud workflows: --limit must be between 1 and 200")
+		return shared.UsageError("xcode-cloud workflows: --limit must be between 1 and 200")
 	}
 	nextURL := strings.TrimSpace(next)
 	if err := shared.ValidateNextURL(nextURL); err != nil {
-		return fmt.Errorf("xcode-cloud workflows: %w", err)
+		return shared.UsageErrorf("xcode-cloud workflows: %v", err)
 	}
 
 	resolvedAppID := shared.ResolveAppID(appID)

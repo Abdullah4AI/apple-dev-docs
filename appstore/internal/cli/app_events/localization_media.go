@@ -59,10 +59,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events localizations screenshots list: --limit must be between 1 and 200")
+				return shared.UsageError("app-events localizations screenshots list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events localizations screenshots list: %w", err)
+				return shared.UsageErrorf("app-events localizations screenshots list: %v", err)
 			}
 
 			id := strings.TrimSpace(*localizationID)
@@ -157,10 +157,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events localizations video-clips list: --limit must be between 1 and 200")
+				return shared.UsageError("app-events localizations video-clips list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events localizations video-clips list: %w", err)
+				return shared.UsageErrorf("app-events localizations video-clips list: %v", err)
 			}
 
 			id := strings.TrimSpace(*localizationID)
@@ -232,10 +232,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events localizations screenshots-links: --limit must be between 1 and 200")
+				return shared.UsageError("app-events localizations screenshots-links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events localizations screenshots-links: %w", err)
+				return shared.UsageErrorf("app-events localizations screenshots-links: %v", err)
 			}
 
 			id := strings.TrimSpace(*localizationID)
@@ -307,10 +307,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events localizations video-clips-links: --limit must be between 1 and 200")
+				return shared.UsageError("app-events localizations video-clips-links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events localizations video-clips-links: %w", err)
+				return shared.UsageErrorf("app-events localizations video-clips-links: %v", err)
 			}
 
 			id := strings.TrimSpace(*localizationID)

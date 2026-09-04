@@ -87,6 +87,53 @@ func TestParseBetaTesterUsagesPage(t *testing.T) {
 	}
 }
 
+func TestBetaTesterUsageTesterIDsAcceptsBothDimensionShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		want []string
+	}{
+		{
+			name: "string form",
+			row:  `{"dimensions":{"betaTesters":{"data":"tester-1"}}}`,
+			want: []string{"tester-1"},
+		},
+		{
+			name: "object form",
+			row:  `{"dimensions":{"betaTesters":{"data":{"type":"betaTesters","id":"tester-1"}}}}`,
+			want: []string{"tester-1"},
+		},
+		{
+			name: "empty id skipped",
+			row:  `{"dimensions":{"betaTesters":{"data":""}}}`,
+			want: []string{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := betaTesterUsageTesterIDs([]json.RawMessage{json.RawMessage(test.row)})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("got %v, want %v", got, test.want)
+			}
+			for i := range test.want {
+				if got[i] != test.want[i] {
+					t.Fatalf("got %v, want %v", got, test.want)
+				}
+			}
+		})
+	}
+}
+
+func TestBetaTesterUsageTesterIDsRejectsMalformedDimensions(t *testing.T) {
+	_, err := betaTesterUsageTesterIDs([]json.RawMessage{json.RawMessage(`{"dimensions":{"betaTesters":{"data":42}}}`)})
+	if err == nil {
+		t.Fatal("expected error for malformed dimensions")
+	}
+}
+
 func TestRelationshipTypeListSorted(t *testing.T) {
 	got := relationshipTypeList(map[string]relationshipKind{
 		"builds": relationshipList,

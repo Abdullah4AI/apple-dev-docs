@@ -113,13 +113,11 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 
-			session, err := resolveWebSessionForCommand(ctx, authFlags)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
 			if err != nil {
 				return err
 			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
 
 			client := newWebClientFn(session)
 			createAttrs := webcore.SandboxAccountCreateAttributes{

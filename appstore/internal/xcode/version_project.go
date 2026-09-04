@@ -1,6 +1,7 @@
 package xcode
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/bitrise-io/go-xcode/xcodeproject/xcodeproj"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/secureopen"
 )
 
 const (
@@ -48,13 +50,45 @@ type structuredVersionProject struct {
 }
 
 type preparedVersionWrite struct {
-	path     string
-	original []byte
-	updated  []byte
-	mode     os.FileMode
-	root     rootfs.Root
-	name     string
-	ownsRoot bool
+	path             string
+	original         []byte
+	updated          []byte
+	mode             os.FileMode
+	root             rootfs.Root
+	name             string
+	ownsRoot         bool
+	preserveMetadata bool
+	// createOnly marks an artifact that must be published with no-replace
+	// semantics. It is used for receipts, which are part of a multi-file
+	// transaction but must never overwrite an operator or concurrent writer's
+	// file.
+	createOnly bool
+	// createdIdentity identifies a create-only file after successful publication
+	// using the descriptor retained by the rooted publication. Rollback must use
+	// this token rather than reopening the receipt path.
+	createdIdentity *rootfs.FileIdentity
+	// committedIdentity identifies the inode installed by an ordinary write. It
+	// is retained by the same Root and consumed by conditional rollback, so a
+	// same-content replacement cannot be mistaken for our update.
+	committedIdentity *rootfs.FileIdentity
+	// committedInfo is the historical metadata snapshot returned by a stable
+	// compatibility write. Strict signing writes use committedIdentity instead.
+	committedInfo os.FileInfo
+	// originalIdentity pins the source inode and bytes observed while preparing
+	// an ordinary write. The commit path must use this token rather than a
+	// caller-supplied os.FileInfo snapshot.
+	originalIdentity *rootfs.FileIdentity
+	// originalInfo retains the historical metadata snapshot used by stable
+	// structured-version writes. Strict signing writes always use
+	// originalIdentity and its bounded content snapshot instead.
+	originalInfo os.FileInfo
+	// strictIdentity selects the bounded descriptor-backed signing path. Stable
+	// version edit/bump operations preserve their historical unrestricted
+	// os.FileInfo compatibility behavior.
+	strictIdentity bool
+	// portableFallback preserves stable version-command writes on filesystems
+	// without atomic no-replace rename. Signing transactions leave it disabled.
+	portableFallback bool
 }
 
 type xcconfigMutation struct {
@@ -128,9 +162,22 @@ func GetConsistentMarketingVersion(ctx context.Context, opts GetVersionOptions) 
 }
 
 func openStructuredVersionProject(projectInput string) (*structuredVersionProject, error) {
+	return openStructuredVersionProjectWithPolicy(projectInput, false)
+}
+
+func openSigningStructuredVersionProject(projectInput string) (*structuredVersionProject, error) {
+	return openStructuredVersionProjectWithPolicy(projectInput, true)
+}
+
+func openStructuredVersionProjectWithPolicy(projectInput string, signingSafety bool) (*structuredVersionProject, error) {
 	projectPath, err := findXcodeproj(projectInput)
 	if err != nil {
 		return nil, err
+	}
+	if signingSafety {
+		if err := validateStructuredVersionProjectPath(projectPath); err != nil {
+			return nil, err
+		}
 	}
 	parsed, err := xcodeproj.Open(projectPath)
 	if err != nil {
@@ -157,6 +204,33 @@ func openStructuredVersionProject(projectInput string) (*structuredVersionProjec
 		return nil, err
 	}
 	return project, nil
+}
+
+// validateStructuredVersionProjectPath performs the signing-only rooted
+// no-follow checks before the plist parser opens project.pbxproj. The parser
+// accepts ordinary filesystem paths and would otherwise follow an explicitly
+// selected .xcodeproj or project.pbxproj symlink before signing's later
+// mutation preflight had a chance to reject it. Stable version commands retain
+// their historical selected-path symlink behavior through openStructuredVersionProject.
+func validateStructuredVersionProjectPath(projectPath string) error {
+	absolute, err := filepath.Abs(projectPath)
+	if err != nil {
+		return fmt.Errorf("resolve Xcode project path: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	root, err := rootfs.New(filepath.Dir(absolute))
+	if err != nil {
+		return fmt.Errorf("open Xcode project root: %w", err)
+	}
+	defer root.Close()
+	if err := root.CheckContained(absolute); err != nil {
+		return fmt.Errorf("refusing to parse Xcode project %s: %w", absolute, err)
+	}
+	pbxprojPath := filepath.Join(absolute, "project.pbxproj")
+	if err := root.CheckContained(pbxprojPath); err != nil {
+		return fmt.Errorf("refusing to parse Xcode project file %s: %w", pbxprojPath, err)
+	}
+	return nil
 }
 
 func (project *structuredVersionProject) hasStructuredVersionSettingsForView(target, configuration string) (bool, error) {
@@ -238,7 +312,7 @@ func (project *structuredVersionProject) configurationDefinesSetting(configurati
 		if err != nil {
 			return false, err
 		}
-		paths, err := collectXCConfigFiles(root)
+		paths, err := collectStableXCConfigFiles(root)
 		if err != nil {
 			return false, err
 		}
@@ -942,6 +1016,7 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 	configFiles := validation.configFiles
 	uncertainXCConfigConsumers := validation.uncertainXCConfigConsumers
 	xcconfigMutations := make(map[string]map[string]xcconfigMutation)
+	xcconfigPathSpelling := make(map[string]string)
 	changes := make([]VersionChange, 0)
 	pbxprojChanged := false
 
@@ -988,14 +1063,16 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 				if !uncertainXCConfigConsumers && consumersSelected(assignmentFiles, fileConsumers, fileIdentities, selectedIDs) {
 					handled[configuration.id] = true
 					for _, path := range assignmentFiles {
-						if xcconfigMutations[path] == nil {
-							xcconfigMutations[path] = make(map[string]xcconfigMutation)
+						pathKey := signingXCConfigOperationKey(path, fileIdentities)
+						if xcconfigMutations[pathKey] == nil {
+							xcconfigMutations[pathKey] = make(map[string]xcconfigMutation)
+							xcconfigPathSpelling[pathKey] = path
 						}
-						mutation := xcconfigMutations[path][requested.name]
+						mutation := xcconfigMutations[pathKey][requested.name]
 						mutation.setting = requested.name
 						mutation.value = requested.value
 						mutation.configurations = appendVersionConfigurationOnce(mutation.configurations, configuration)
-						xcconfigMutations[path][requested.name] = mutation
+						xcconfigMutations[pathKey][requested.name] = mutation
 					}
 					continue
 				}
@@ -1003,7 +1080,7 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 
 			if !configuration.projectLevel {
 				ancestor := project.projectConfiguration(configuration.name)
-				if ancestor != nil && selectedIDs[ancestor.id] && configurationProvidesScheduledSetting(ancestor, requested.name, configFiles, xcconfigMutations) {
+				if ancestor != nil && selectedIDs[ancestor.id] && configurationProvidesScheduledSetting(ancestor, requested.name, configFiles, fileIdentities, xcconfigMutations) {
 					handled[configuration.id] = true
 					continue
 				}
@@ -1043,7 +1120,7 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 	var writes []preparedVersionWrite
 	defer func() { _ = closeVersionWrites(writes) }()
 	if pbxprojChanged {
-		write, err := project.preparePBXProjWrite(projectRoot)
+		write, err := project.preparePBXProjWrite(projectRoot, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1051,11 +1128,12 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 	}
 
 	var xcconfigPaths []string
-	for path := range xcconfigMutations {
-		xcconfigPaths = append(xcconfigPaths, path)
+	for pathKey := range xcconfigMutations {
+		xcconfigPaths = append(xcconfigPaths, pathKey)
 	}
 	sort.Strings(xcconfigPaths)
-	for _, path := range xcconfigPaths {
+	for _, pathKey := range xcconfigPaths {
+		path := xcconfigPathSpelling[pathKey]
 		if err := project.checkXCConfigWritable(path, opts.AllowExternalXCConfig); err != nil {
 			return nil, err
 		}
@@ -1063,7 +1141,7 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 		if err != nil {
 			return nil, fmt.Errorf("prepare xcconfig %s: %w", path, err)
 		}
-		write, fileChanges, changed, err := prepareXCConfigWrite(target, xcconfigMutations[path])
+		write, fileChanges, changed, err := prepareXCConfigWrite(target, xcconfigMutations[pathKey])
 		if err != nil {
 			_ = target.root.Close()
 			return nil, err
@@ -1076,6 +1154,9 @@ func (project *structuredVersionProject) setVersion(opts SetVersionOptions) (*Se
 		}
 	}
 
+	for index := range writes {
+		writes[index].portableFallback = true
+	}
 	if err := commitVersionWrites(writes); err != nil {
 		return nil, err
 	}
@@ -1151,13 +1232,14 @@ func configurationProvidesScheduledSetting(
 	configuration *versionConfiguration,
 	setting string,
 	configFiles map[string][]string,
+	fileIdentities map[string]string,
 	mutations map[string]map[string]xcconfigMutation,
 ) bool {
 	if len(matchingBuildSettingKeys(configuration.buildSettings, setting)) > 0 {
 		return true
 	}
 	for _, path := range configFiles[configuration.id] {
-		mutation, ok := mutations[path][setting]
+		mutation, ok := mutations[signingXCConfigOperationKey(path, fileIdentities)][setting]
 		if !ok {
 			continue
 		}
@@ -1230,8 +1312,27 @@ type xcconfigFileIdentityIndex struct {
 	entries []xcconfigFileIdentity
 }
 
-func (index *xcconfigFileIdentityIndex) identity(path string) (string, error) {
-	info, err := os.Stat(path)
+// identity records a file identity only after the collector has successfully
+// authorized and read the path. Keeping that invariant explicit prevents a
+// later identity pass from reopening an unselected or unauthorized path.
+func (index *xcconfigFileIdentityIndex) identity(
+	path string,
+	collected map[string]bool,
+	identifiers ...func(string) (os.FileInfo, error),
+) (string, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	absolutePath = filepath.Clean(absolutePath)
+	if !collected[normalizeSigningLexicalPath(absolutePath)] && !collected[signingLexicalPathKey(absolutePath)] {
+		return "", fmt.Errorf("xcconfig path %s was not collected for this signing plan", absolutePath)
+	}
+	identify := signingXCConfigIdentityFn
+	if len(identifiers) > 0 && identifiers[0] != nil {
+		identify = identifiers[0]
+	}
+	info, err := identify(absolutePath)
 	if err != nil {
 		return "", err
 	}
@@ -1240,21 +1341,188 @@ func (index *xcconfigFileIdentityIndex) identity(path string) (string, error) {
 			return entry.key, nil
 		}
 	}
-	absolutePath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	key := filepath.Clean(absolutePath)
+	key := absolutePath
 	index.entries = append(index.entries, xcconfigFileIdentity{key: key, info: info})
 	return key, nil
 }
 
 func (project *structuredVersionProject) xcconfigConsumers(selectedIDs map[string]bool) (map[string]map[string]bool, map[string][]string, map[string]string, bool, error) {
+	return project.xcconfigConsumersWithCollectorAndIdentity(selectedIDs, collectStableXCConfigFiles, os.Stat)
+}
+
+func (project *structuredVersionProject) signingXCConfigConsumers(selectedIDs map[string]bool, allowExternal bool) (map[string]map[string]bool, map[string][]string, map[string]string, bool, []string, []string, map[string][]string, bool, error) {
+	consumers, configFiles, identities, uncertain, protected, blocked, lexical, unauthorized, _, err := project.signingXCConfigConsumersWithOptionalMissing(selectedIDs, allowExternal)
+	return consumers, configFiles, identities, uncertain, protected, blocked, lexical, unauthorized, err
+}
+
+const signingPlanMaxMissingOptionalIncludes = 256
+
+func (project *structuredVersionProject) signingXCConfigConsumersWithOptionalMissing(selectedIDs map[string]bool, allowExternal bool) (map[string]map[string]bool, map[string][]string, map[string]string, bool, []string, []string, map[string][]string, bool, []string, error) {
+	var protectedConfigPaths []string
+	var blockedExternalPaths []string
+	var missingOptionalIncludes []string
+	missingOptionalOverflow := false
+	unauthorizedExternal := false
+	lexicalConfigPaths := make(map[string][]string)
+	observedPathsByRoot := make(map[string][]string)
+	addProtectedPath := func(path string) {
+		absolute := normalizeSigningLexicalPath(path)
+		for _, existing := range protectedConfigPaths {
+			if normalizeSigningLexicalPath(existing) == absolute {
+				return
+			}
+		}
+		protectedConfigPaths = append(protectedConfigPaths, absolute)
+	}
+	addBlockedPath := func(path string) {
+		absolute := normalizeSigningLexicalPath(path)
+		for _, existing := range blockedExternalPaths {
+			if normalizeSigningLexicalPath(existing) == absolute {
+				return
+			}
+		}
+		blockedExternalPaths = append(blockedExternalPaths, absolute)
+	}
+	addMissingOptionalInclude := func(path string) {
+		path = normalizeSigningLexicalPath(path)
+		if len(path) > signingPlanMaxMissingOptionalIncludePathBytes {
+			missingOptionalOverflow = true
+			return
+		}
+		for _, existing := range missingOptionalIncludes {
+			if existing == path {
+				return
+			}
+		}
+		if len(missingOptionalIncludes) >= signingPlanMaxMissingOptionalIncludes {
+			missingOptionalOverflow = true
+			return
+		}
+		missingOptionalIncludes = append(missingOptionalIncludes, path)
+	}
+	collect := func(path string) ([]string, error) {
+		var collectionErrorPath string
+		var collectionErrorExternal bool
+		observedPaths := make([]string, 0)
+		var identify func(string) (os.FileInfo, error)
+		if xcconfigUsesIdentityTraversal() {
+			identify = signingXCConfigIdentityFn
+		}
+		files, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
+			path,
+			func(filePath string) ([]byte, error) {
+				return signingXCConfigReadFileFn(filePath, signingPlanMaxBytes)
+			},
+			func(filePath string) error {
+				if !allowExternal && signingPathDefinitelyExternal(project, filePath) {
+					unauthorizedExternal = true
+					return &signingXCConfigAccessError{path: filePath, err: errors.New("path is outside the project directory"), external: true}
+				}
+				if err := validateSigningXCConfigPath(project, filePath, allowExternal); err != nil {
+					// A rejected symlink is not readable through the signing
+					// root, even when its lexical spelling is inside the project.
+					// Treat it as untrusted external content: its target may hide
+					// an entitlement expression that cannot be inventoried here.
+					// ErrEscapesRoot also covers a case-variant spelling rejected
+					// on a modeled case-sensitive Darwin/Windows directory. That
+					// path was not proven to be an internal source, so it must take
+					// the same no-opt-in fail-closed path as other external inputs.
+					pathRejectedAsExternal := !allowExternal &&
+						(errors.Is(err, rootfs.ErrEscapesRoot) || errors.Is(err, rootfs.ErrSymlink))
+					if pathRejectedAsExternal {
+						unauthorizedExternal = true
+					}
+					return &signingXCConfigAccessError{
+						path:     filePath,
+						err:      err,
+						external: pathRejectedAsExternal || signingPathDefinitelyExternal(project, filePath),
+					}
+				}
+				return nil
+			},
+			func(filePath string) {
+				// This runs before authorization, stat, open, read, and parse.
+				// An external path remains protected from artifact writes even
+				// when the operator opted into reading it.
+				addProtectedPath(filePath)
+				observedPaths = appendUniqueSigningPaths(observedPaths, filePath)
+			},
+			func(filePath string, _ error) {
+				collectionErrorPath = filePath
+			},
+			identify,
+			addMissingOptionalInclude,
+		)
+		observedPathsByRoot[normalizeSigningLexicalPath(path)] = observedPaths
+		if err == nil {
+			return files, nil
+		}
+		if collectionErrorPath != "" {
+			var accessErr *signingXCConfigAccessError
+			if errors.As(err, &accessErr) {
+				collectionErrorExternal = accessErr.external
+			}
+			return nil, &signingXCConfigAccessError{
+				path:     collectionErrorPath,
+				err:      err,
+				external: collectionErrorExternal,
+			}
+		}
+		return nil, err
+	}
+	consumers, configFiles, identities, uncertain, err := project.xcconfigConsumersWithCollectorAndErrorHook(selectedIDs, collect, func(_ *versionConfiguration, err error) {
+		var accessErr *signingXCConfigAccessError
+		if errors.As(err, &accessErr) {
+			addBlockedPath(accessErr.path)
+		}
+	})
+	for _, configuration := range project.configurations {
+		if configuration.baseReferenceID == "" {
+			continue
+		}
+		root, rootErr := project.fileReferencePath(configuration.baseReferenceID)
+		if rootErr != nil {
+			continue
+		}
+		if observed := observedPathsByRoot[normalizeSigningLexicalPath(root)]; len(observed) > 0 {
+			lexicalConfigPaths[configuration.id] = append([]string(nil), observed...)
+		}
+	}
+	if missingOptionalOverflow {
+		err = errors.Join(err, fmt.Errorf("too many missing optional xcconfig includes; refusing to publish a signing plan"))
+	}
+	sort.Strings(missingOptionalIncludes)
+	return consumers, configFiles, identities, uncertain, protectedConfigPaths, blockedExternalPaths, lexicalConfigPaths, unauthorizedExternal, missingOptionalIncludes, err
+}
+
+func (project *structuredVersionProject) xcconfigConsumersWithCollectorAndErrorHook(
+	selectedIDs map[string]bool,
+	collect func(string) ([]string, error),
+	onUnselectedError func(*versionConfiguration, error),
+) (map[string]map[string]bool, map[string][]string, map[string]string, bool, error) {
+	return project.xcconfigConsumersWithCollectorAndIdentityAndErrorHook(selectedIDs, collect, signingXCConfigIdentityFn, onUnselectedError)
+}
+
+func (project *structuredVersionProject) xcconfigConsumersWithCollectorAndIdentity(
+	selectedIDs map[string]bool,
+	collect func(string) ([]string, error),
+	identify func(string) (os.FileInfo, error),
+) (map[string]map[string]bool, map[string][]string, map[string]string, bool, error) {
+	return project.xcconfigConsumersWithCollectorAndIdentityAndErrorHook(selectedIDs, collect, identify, nil)
+}
+
+func (project *structuredVersionProject) xcconfigConsumersWithCollectorAndIdentityAndErrorHook(
+	selectedIDs map[string]bool,
+	collect func(string) ([]string, error),
+	identify func(string) (os.FileInfo, error),
+	onUnselectedError func(*versionConfiguration, error),
+) (map[string]map[string]bool, map[string][]string, map[string]string, bool, error) {
 	consumers := make(map[string]map[string]bool)
 	configFiles := make(map[string][]string)
 	fileIdentities := make(map[string]string)
 	identityIndex := xcconfigFileIdentityIndex{}
 	uncertainConsumers := false
+	var selectedError error
 	for _, configuration := range project.configurations {
 		if configuration.baseReferenceID == "" {
 			continue
@@ -1262,43 +1530,70 @@ func (project *structuredVersionProject) xcconfigConsumers(selectedIDs map[strin
 		root, err := project.fileReferencePath(configuration.baseReferenceID)
 		if err != nil {
 			if selectedIDs[configuration.id] {
-				return nil, nil, nil, false, err
+				selectedError = errors.Join(selectedError, fmt.Errorf("resolve xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err))
+				continue
 			}
 			uncertainConsumers = true
 			continue
 		}
-		files, err := collectXCConfigFiles(root)
+		files, err := collect(root)
 		if err != nil {
+			if onUnselectedError != nil {
+				onUnselectedError(configuration, err)
+			}
 			if selectedIDs[configuration.id] {
-				return nil, nil, nil, false, fmt.Errorf("resolve xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err)
+				selectedError = errors.Join(selectedError, fmt.Errorf("resolve xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err))
+				continue
 			}
 			uncertainConsumers = true
 			continue
 		}
 		configFiles[configuration.id] = files
+		collected := make(map[string]bool, len(files))
 		for _, path := range files {
-			identity, err := identityIndex.identity(path)
+			absolute, err := filepath.Abs(path)
 			if err != nil {
 				if selectedIDs[configuration.id] {
-					return nil, nil, nil, false, fmt.Errorf("identify xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err)
+					selectedError = errors.Join(selectedError, fmt.Errorf("resolve collected xcconfig path %q: %w", path, err))
+					continue
 				}
 				uncertainConsumers = true
 				continue
 			}
-			fileIdentities[path] = identity
+			collected[normalizeSigningLexicalPath(absolute)] = true
+		}
+		for _, path := range files {
+			identity, err := identityIndex.identity(path, collected, identify)
+			if err != nil {
+				if selectedIDs[configuration.id] {
+					selectedError = errors.Join(selectedError, fmt.Errorf("identify xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err))
+					continue
+				}
+				uncertainConsumers = true
+				continue
+			}
+			// Keep the operator spelling as the map key. Windows can enable
+			// case-sensitive semantics per directory, so lowercasing here would
+			// discard a distinct file before operation keys can use its proven
+			// identity.
+			fileIdentities[normalizeSigningLexicalPath(path)] = identity
 			if consumers[identity] == nil {
 				consumers[identity] = make(map[string]bool)
 			}
 			consumers[identity][configuration.id] = true
 		}
 	}
-	return consumers, configFiles, fileIdentities, uncertainConsumers, nil
+	return consumers, configFiles, fileIdentities, uncertainConsumers, selectedError
 }
 
 func xcconfigFilesDefining(paths []string, setting string) ([]string, error) {
+	return xcconfigFilesDefiningWithReader(paths, setting, os.ReadFile)
+}
+
+func xcconfigFilesDefiningWithReader(paths []string, setting string, read func(string) ([]byte, error)) ([]string, error) {
 	var defining []string
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
+		data, err := read(path)
 		if err != nil {
 			return nil, err
 		}
@@ -1318,7 +1613,7 @@ func xcconfigFilesDefining(paths []string, setting string) ([]string, error) {
 
 func consumersSelected(paths []string, consumers map[string]map[string]bool, identities map[string]string, selected map[string]bool) bool {
 	for _, path := range paths {
-		identity, ok := identities[path]
+		identity, ok := signingFileIdentity(path, identities)
 		if !ok {
 			return false
 		}
@@ -1331,17 +1626,44 @@ func consumersSelected(paths []string, consumers map[string]map[string]bool, ide
 	return true
 }
 
-func (project *structuredVersionProject) preparePBXProjWrite(projectRoot rootfs.Root) (result preparedVersionWrite, resultErr error) {
+// consumersAuthorizeSetting reports whether every configuration that consumes
+// one of paths explicitly requested the same setting. A shared xcconfig may
+// only be edited when all of its consumers authorize that specific key; merely
+// selecting a configuration is insufficient because another selected consumer
+// may have requested a different signing setting.
+func consumersAuthorizeSetting(
+	paths []string,
+	consumers map[string]map[string]bool,
+	identities map[string]string,
+	requestedSettings map[string]map[string]bool,
+	setting string,
+) bool {
+	for _, path := range paths {
+		identity, ok := signingFileIdentity(path, identities)
+		if !ok {
+			return false
+		}
+		for configurationID := range consumers[identity] {
+			if !requestedSettings[configurationID][setting] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (project *structuredVersionProject) preparePBXProjWrite(projectRoot rootfs.Root, strictIdentity bool) (result preparedVersionWrite, resultErr error) {
 	target, err := project.containedVersionFileTarget(projectRoot, project.pbxprojPath)
 	if err != nil {
 		return preparedVersionWrite{}, fmt.Errorf("prepare Xcode project file: %w", err)
 	}
+	target.strictIdentity = strictIdentity
 	defer func() {
 		if resultErr != nil {
 			_ = target.root.Close()
 		}
 	}()
-	original, mode, err := readRegularVersionFile(target)
+	original, mode, err := readRegularVersionFile(&target)
 	if err != nil {
 		return preparedVersionWrite{}, err
 	}
@@ -1376,7 +1698,7 @@ func (project *structuredVersionProject) preparePBXProjWrite(projectRoot rootfs.
 }
 
 func prepareXCConfigWrite(target preparedVersionWrite, mutations map[string]xcconfigMutation) (preparedVersionWrite, []VersionChange, bool, error) {
-	original, mode, err := readRegularVersionFile(target)
+	original, mode, err := readRegularVersionFile(&target)
 	if err != nil {
 		return preparedVersionWrite{}, nil, false, err
 	}
@@ -1424,7 +1746,31 @@ func prepareXCConfigWrite(target preparedVersionWrite, mutations map[string]xcco
 	return target, changes, changed, nil
 }
 
-func readRegularVersionFile(target preparedVersionWrite) ([]byte, os.FileMode, error) {
+func readRegularVersionFile(target *preparedVersionWrite) ([]byte, os.FileMode, error) {
+	if target == nil {
+		return nil, 0, fmt.Errorf("prepared version write is nil")
+	}
+	if target.strictIdentity {
+		if target.originalIdentity == nil {
+			identity, err := target.root.CaptureFileLimited(target.name, signingPlanMaxBytes)
+			if err != nil {
+				return nil, 0, err
+			}
+			target.originalIdentity = identity
+			return identity.Data(), identity.Mode(), nil
+		}
+	}
+	if !target.strictIdentity {
+		info, data, err := readRegularVersionFileCompatibility(target)
+		if err != nil {
+			return nil, 0, err
+		}
+		if target.originalInfo == nil {
+			target.originalInfo = info
+		}
+		return data, info.Mode().Perm(), nil
+	}
+
 	file, err := target.root.OpenFile(target.name)
 	if err != nil {
 		return nil, 0, err
@@ -1437,31 +1783,196 @@ func readRegularVersionFile(target preparedVersionWrite) ([]byte, os.FileMode, e
 	if !info.Mode().IsRegular() {
 		return nil, 0, fmt.Errorf("not a regular file: %s", target.path)
 	}
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, signingPlanMaxBytes+1))
 	if err != nil {
 		return nil, 0, err
+	}
+	if len(data) > signingPlanMaxBytes {
+		return nil, 0, fmt.Errorf("%s exceeds the %d-byte version file size limit", target.path, signingPlanMaxBytes)
 	}
 	return data, info.Mode().Perm(), nil
 }
 
+func readRegularVersionFileCompatibility(target *preparedVersionWrite) (os.FileInfo, []byte, error) {
+	file, err := target.root.OpenFile(target.name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("not a regular file: %s", target.path)
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	return info, data, nil
+}
+
 var atomicWriteVersionFileFn = atomicWritePreparedVersionFile
 
+var atomicWriteVersionFileInfoFn = atomicWritePreparedVersionFileInfo
+
+var atomicCreateVersionFileFn = atomicCreatePreparedVersionFile
+
+var removeCreatedVersionFileFn = removeCreatedPreparedVersionFile
+
+// removeCreatedVersionFileBeforeFinalCheckForTest injects a replacement or
+// disappearance between content verification and the final identity check.
+// It is intentionally test-only and nil in production.
+var removeCreatedVersionFileBeforeFinalCheckForTest func()
+
+// rollbackOrdinaryVersionBeforeConditionalWriteForTest injects a replacement
+// after the transaction has captured a committed identity but before the
+// rooted compare-and-publish primitive runs. It is intentionally test-only.
+var rollbackOrdinaryVersionBeforeConditionalWriteForTest func()
+
+// rollbackPublishedVersionBeforeConditionalWriteForTest injects a
+// replacement after a failed write has returned its installed identity, but
+// before the rooted compare-and-publish rollback.
+// It is intentionally test-only and nil in production.
+var rollbackPublishedVersionBeforeConditionalWriteForTest func()
+
+// rollbackPublishedVersionWriteInfoFn is replaceable only so tests can cover
+// the stable-command fallback used on platforms without identity mutation.
+var rollbackPublishedVersionWriteInfoFn = func(write preparedVersionWrite) error {
+	return write.root.WriteFileIfSame(
+		write.name,
+		write.original,
+		write.mode,
+		write.committedInfo,
+		write.updated,
+		write.preserveMetadata,
+	)
+}
+
 func commitVersionWrites(writes []preparedVersionWrite) (resultErr error) {
+	return commitVersionWritesWithCreateCheck(writes, nil)
+}
+
+// commitVersionWritesWithCreateCheck commits ordinary files before
+// create-only artifacts and optionally revalidates the transaction immediately
+// before the create-only phase. Signing apply uses that final check to ensure
+// the receipt cannot certify source bytes that changed after the ordinary
+// writes completed. Existing version-setting callers retain the original
+// behavior by calling commitVersionWrites without a check.
+func commitVersionWritesWithCreateCheck(
+	writes []preparedVersionWrite,
+	beforeCreate func([]preparedVersionWrite) error,
+) (resultErr error) {
+	return commitVersionWritesWithCreateChecks(writes, beforeCreate, nil)
+}
+
+// commitVersionWritesWithCreateChecks adds an optional post-create validation
+// point. Signing apply uses both checks so a source replacement that races the
+// receipt publication causes identity-checked removal of the receipt and
+// rollback of the ordinary writes before the transaction returns.
+func commitVersionWritesWithCreateChecks(
+	writes []preparedVersionWrite,
+	beforeCreate func([]preparedVersionWrite) error,
+	afterCreate func([]preparedVersionWrite) error,
+) (resultErr error) {
+	var retainedIdentities []os.FileInfo
 	defer func() {
-		resultErr = errors.Join(resultErr, closeVersionWrites(writes))
+		closeErr := errors.Join(closeVersionWritesFn(writes), closeVersionIdentities(retainedIdentities))
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+			return
+		}
+		// Publication already succeeded. A later close must not retract a
+		// completed receipt or block apply retry.
+		_ = closeErr
 	}()
-	sort.Slice(writes, func(left, right int) bool { return writes[left].path < writes[right].path })
+	sort.Slice(writes, func(left, right int) bool {
+		// Finalize create-only artifacts after ordinary project files so a
+		// publication failure exercises the rollback path for every mutation.
+		if writes[left].createOnly != writes[right].createOnly {
+			return !writes[left].createOnly
+		}
+		return writes[left].path < writes[right].path
+	})
 	var committed []preparedVersionWrite
 	for _, write := range writes {
-		if string(write.original) == string(write.updated) {
+		if !write.createOnly && string(write.original) == string(write.updated) {
 			continue
 		}
-		if err := atomicWriteVersionFileFn(write, write.updated); err != nil {
-			var rollbackErrors []error
-			for index := len(committed) - 1; index >= 0; index-- {
-				if rollbackErr := atomicWriteVersionFileFn(committed[index], committed[index].original); rollbackErr != nil {
-					rollbackErrors = append(rollbackErrors, fmt.Errorf("restore %s: %w", committed[index].path, rollbackErr))
+		if !write.createOnly {
+			current, _, err := readRegularVersionFile(&write)
+			if err != nil {
+				return commitVersionWriteFailure(
+					write,
+					fmt.Errorf("verify source before commit: %w", err),
+					committed,
+				)
+			}
+			if !bytes.Equal(current, write.original) {
+				return commitVersionWriteFailure(
+					write,
+					errors.New("source changed before commit"),
+					committed,
+				)
+			}
+		}
+		var err error
+		if write.createOnly && beforeCreate != nil {
+			if err := beforeCreate(committed); err != nil {
+				return commitVersionWriteFailure(
+					write,
+					fmt.Errorf("verify sources before receipt: %w", err),
+					committed,
+				)
+			}
+		}
+		if write.createOnly {
+			write.createdIdentity, err = atomicCreateVersionFileFn(write, write.updated)
+		} else if write.strictIdentity {
+			write.committedIdentity, err = atomicWriteVersionFileFn(write, write.updated)
+		} else {
+			write.committedInfo, err = atomicWriteVersionFileInfoFn(write, write.updated)
+			if write.committedInfo == nil && write.portableFallback && identityPublicationUnsupported(err) {
+				if checkErr := verifyPortableVersionWriteSource(write, write.original); checkErr != nil {
+					err = errors.Join(err, fmt.Errorf("verify source before portable fallback: %w", checkErr))
+				} else {
+					write.committedInfo, err = portableWritePreparedVersionFile(write, write.updated)
 				}
+			}
+			if write.committedInfo != nil {
+				retainedIdentities = append(retainedIdentities, write.committedInfo)
+			}
+		}
+		if err != nil {
+			publicationMaySurvive := errors.Is(err, rootfs.ErrFilePublicationUncertain)
+			if !write.createOnly && write.strictIdentity && write.committedIdentity == nil {
+				err = errors.Join(err, errors.New("installed identity unavailable; rollback uncertain"))
+			}
+			rollbackErrors := make([]error, 0)
+			receiptMaySurvive := false
+			if write.createOnly && write.createdIdentity != nil {
+				if rollbackErr := removeCreatedVersionFileFn(write); rollbackErr != nil {
+					rollbackErrors = append(rollbackErrors, fmt.Errorf("restore %s: %w", write.path, rollbackErr))
+					// The target is already gone when the cleanup primitive reports
+					// ErrFileIdentityRemoved. A later durability or handle-close
+					// failure still matters, but it does not justify leaving earlier
+					// project writes in place for a receipt that cannot survive.
+					receiptMaySurvive = !errors.Is(rollbackErr, rootfs.ErrFileIdentityRemoved)
+				}
+			}
+			if !write.createOnly {
+				if rollbackErr := rollbackPublishedVersionWriteAfterError(write); rollbackErr != nil {
+					rollbackErrors = append(rollbackErrors, fmt.Errorf("restore %s: %w", write.path, rollbackErr))
+				}
+			}
+			// A retained create-only identity is the only proof that a receipt can
+			// be removed without touching a concurrent replacement. If any file
+			// remains at the receipt path, it may be a concurrently published
+			// Completed receipt. Keep earlier project writes in place so that file
+			// cannot certify settings that rollback has removed.
+			if !receiptMaySurvive && !publicationMaySurvive {
+				rollbackErrors = append(rollbackErrors, rollbackVersionWrites(committed)...)
 			}
 			writeErr := fmt.Errorf("write %s: %w", write.path, err)
 			if len(rollbackErrors) > 0 {
@@ -1469,10 +1980,185 @@ func commitVersionWrites(writes []preparedVersionWrite) (resultErr error) {
 			}
 			return writeErr
 		}
+		if !write.createOnly && write.strictIdentity && write.committedIdentity == nil {
+			committedWithWrite := append(append([]preparedVersionWrite(nil), committed...), write)
+			return commitVersionWriteFailure(
+				write,
+				fmt.Errorf("verify written file: installed identity unavailable"),
+				committedWithWrite,
+			)
+		}
+		if !write.createOnly && !write.strictIdentity && write.committedInfo == nil {
+			return commitVersionWriteFailure(
+				write,
+				fmt.Errorf("verify written file: installed metadata unavailable"),
+				append(append([]preparedVersionWrite(nil), committed...), write),
+			)
+		}
+		if write.createOnly && write.createdIdentity == nil {
+			return commitVersionWriteFailure(
+				write,
+				errors.New("created identity unavailable; rollback uncertain"),
+				committed,
+			)
+		}
 		committed = append(committed, write)
+		if write.createOnly && afterCreate != nil {
+			if err := afterCreate(committed); err != nil {
+				return commitVersionWriteFailure(
+					write,
+					fmt.Errorf("verify sources after receipt: %w", err),
+					committed,
+				)
+			}
+		}
+		if write.createOnly {
+			if err := write.root.CheckFileIdentity(write.name, write.createdIdentity); err != nil {
+				return commitVersionWriteFailure(
+					write,
+					fmt.Errorf("verify created file: %w", err),
+					committed,
+				)
+			}
+		}
 	}
 	return nil
 }
+
+func commitVersionWriteFailure(write preparedVersionWrite, writeErr error, committed []preparedVersionWrite) error {
+	rollbackErrors := rollbackVersionWrites(committed)
+	wrapped := fmt.Errorf("write %s: %w", write.path, writeErr)
+	if len(rollbackErrors) == 0 {
+		return wrapped
+	}
+	return errors.Join(wrapped, fmt.Errorf("rollback failed: %w", errors.Join(rollbackErrors...)))
+}
+
+func rollbackVersionWrites(committed []preparedVersionWrite) []error {
+	var rollbackErrors []error
+	for index := len(committed) - 1; index >= 0; index-- {
+		var rollbackErr error
+		if committed[index].createOnly {
+			rollbackErr = removeCreatedVersionFileFn(committed[index])
+		} else {
+			rollbackErr = rollbackOrdinaryVersionWrite(committed[index])
+		}
+		if rollbackErr != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore %s: %w", committed[index].path, rollbackErr))
+			if committed[index].createOnly && !errors.Is(rollbackErr, rootfs.ErrFileIdentityRemoved) {
+				// Do not roll back any earlier project writes after a receipt
+				// cleanup failure unless the primitive proves the receipt was
+				// removed before a later durability or close failure. Their state
+				// must remain consistent with a receipt whose removal is uncertain.
+				break
+			}
+		}
+	}
+	return rollbackErrors
+}
+
+// rollbackPublishedVersionWriteAfterError restores a write whose replacement
+// was already published even though the write call reported an error. The
+// writer returns the installed identity from the same rooted publication
+// operation, backed by a held descriptor, so rollback does not reopen the
+// destination by path and mistake a later same-content replacement for the
+// transaction's update. WriteFileIfSame then couples that identity to the
+// expected updated bytes before restoring the original.
+//
+// The concrete case is the Windows replacement path, which moves the original
+// aside, renames the staged file into place, and then fails while removing its
+// backup copy. Publication succeeded, so without this the transaction would
+// abort while leaving the project file modified and no receipt written.
+//
+// The backup file the primitive could not remove is deliberately not deleted
+// here: its name is known only to the primitive and reaches this layer inside
+// the error text. Callers join that error into the returned failure, so the
+// stranded path is reported to the operator rather than silently discarded.
+func rollbackPublishedVersionWriteAfterError(write preparedVersionWrite) error {
+	if rollbackPublishedVersionBeforeConditionalWriteForTest != nil {
+		rollbackPublishedVersionBeforeConditionalWriteForTest()
+	}
+	var err error
+	if write.strictIdentity {
+		if write.committedIdentity == nil {
+			return nil
+		}
+		_, err = write.root.ReplaceFileIfSame(
+			write.name,
+			write.committedIdentity,
+			write.original,
+			write.mode,
+			write.preserveMetadata,
+		)
+	} else {
+		if write.committedInfo == nil {
+			return nil
+		}
+		err = rollbackPublishedVersionWriteInfoFn(write)
+	}
+	if write.portableFallback && identityPublicationUnsupported(err) {
+		if checkErr := verifyPortableVersionWriteSource(write, write.updated); checkErr != nil {
+			err = errors.Join(err, checkErr)
+		} else if info, fallbackErr := portableWritePreparedVersionFile(write, write.original); fallbackErr != nil {
+			err = fallbackErr
+		} else {
+			write.committedInfo = info
+			err = nil
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("preserve current file after failed write: %w", err)
+	}
+	return nil
+}
+
+func rollbackOrdinaryVersionWrite(write preparedVersionWrite) error {
+	if write.strictIdentity && write.committedIdentity == nil {
+		return fmt.Errorf("preserve current file after concurrent change: committed file identity unavailable")
+	}
+	if !write.strictIdentity && write.committedInfo == nil {
+		return fmt.Errorf("preserve current file after concurrent change: committed file metadata unavailable")
+	}
+	if rollbackOrdinaryVersionBeforeConditionalWriteForTest != nil {
+		rollbackOrdinaryVersionBeforeConditionalWriteForTest()
+	}
+	var err error
+	if write.strictIdentity {
+		_, err = write.root.ReplaceFileIfSame(
+			write.name,
+			write.committedIdentity,
+			write.original,
+			write.mode,
+			write.preserveMetadata,
+		)
+	} else {
+		err = write.root.WriteFileIfSame(
+			write.name,
+			write.original,
+			write.mode,
+			write.committedInfo,
+			write.updated,
+			write.preserveMetadata,
+		)
+	}
+	if write.portableFallback && identityPublicationUnsupported(err) {
+		if checkErr := verifyPortableVersionWriteSource(write, write.updated); checkErr != nil {
+			err = errors.Join(err, checkErr)
+		} else {
+			write.committedInfo, err = portableWritePreparedVersionFile(write, write.original)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("preserve current file after concurrent change: %w", err)
+	}
+	return nil
+}
+
+func identityPublicationUnsupported(err error) bool {
+	return errors.Is(err, secureopen.ErrRenameNoReplaceUnsupported) || errors.Is(err, rootfs.ErrFileIdentityMutationUnsupported)
+}
+
+var closeVersionWritesFn = closeVersionWrites
 
 func closeVersionWrites(writes []preparedVersionWrite) error {
 	var closeErrors []error
@@ -1484,8 +2170,109 @@ func closeVersionWrites(writes []preparedVersionWrite) error {
 	return errors.Join(closeErrors...)
 }
 
-func atomicWritePreparedVersionFile(write preparedVersionWrite, data []byte) error {
-	return write.root.WriteFile(write.name, data, write.mode)
+// closeVersionIdentities releases descriptor-retaining os.FileInfo values
+// returned by the compatibility publication path. Strict identity tokens are
+// released by Root.Close instead.
+func closeVersionIdentities(identities []os.FileInfo) error {
+	var closeErrors []error
+	for _, identity := range identities {
+		closer, ok := identity.(interface{ Close() error })
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			closeErrors = append(closeErrors, err)
+		}
+	}
+	return errors.Join(closeErrors...)
+}
+
+func atomicWritePreparedVersionFile(write preparedVersionWrite, data []byte) (*rootfs.FileIdentity, error) {
+	if write.originalIdentity != nil {
+		return write.root.ReplaceFileIfSame(
+			write.name,
+			write.originalIdentity,
+			data,
+			write.mode,
+			write.preserveMetadata,
+		)
+	}
+	return nil, fmt.Errorf("prepared write source identity unavailable")
+}
+
+func atomicWritePreparedVersionFileInfo(write preparedVersionWrite, data []byte) (os.FileInfo, error) {
+	if write.originalInfo != nil {
+		return write.root.WriteFileIfSameWithInfo(
+			write.name,
+			data,
+			write.mode,
+			write.originalInfo,
+			write.original,
+			write.preserveMetadata,
+		)
+	}
+	return nil, fmt.Errorf("prepared write source metadata unavailable")
+}
+
+func portableWritePreparedVersionFile(write preparedVersionWrite, data []byte) (os.FileInfo, error) {
+	var err error
+	if write.preserveMetadata {
+		err = write.root.WriteFilePreservingMode(write.name, data, write.mode)
+	} else {
+		err = write.root.WriteFile(write.name, data, write.mode)
+	}
+	if err != nil {
+		return nil, err
+	}
+	file, err := write.root.OpenFile(write.name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, int64(len(data))+1))
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(contents, data) {
+		return nil, fmt.Errorf("portable version write verification failed")
+	}
+	return info, nil
+}
+
+func verifyPortableVersionWriteSource(write preparedVersionWrite, expected []byte) error {
+	current, _, err := readRegularVersionFile(&write)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, expected) {
+		return fmt.Errorf("source changed before portable fallback")
+	}
+	return nil
+}
+
+func atomicCreatePreparedVersionFile(write preparedVersionWrite, data []byte) (*rootfs.FileIdentity, error) {
+	// CreateNewFileAtomicWithIdentity returns the retained staging identity on
+	// every supported post-publication failure. If retention itself fails, the
+	// rootfs error carries ErrFilePublicationUncertain so callers keep earlier
+	// writes in place instead of attempting path-based rollback.
+	return write.root.CreateNewFileAtomicWithIdentity(write.name, data, write.mode)
+}
+
+func removeCreatedPreparedVersionFile(write preparedVersionWrite) error {
+	if write.createdIdentity == nil {
+		return fmt.Errorf("created file identity is unavailable")
+	}
+	if removeCreatedVersionFileBeforeFinalCheckForTest != nil {
+		removeCreatedVersionFileBeforeFinalCheckForTest()
+	}
+	if err := write.root.RemoveFileIfSameIdentity(write.name, write.createdIdentity); err != nil {
+		return fmt.Errorf("remove created path safely: %w", err)
+	}
+	return nil
 }
 
 // atomicWriteVersionFile is retained for other Xcode outputs that already

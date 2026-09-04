@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/screenshots"
@@ -54,6 +56,36 @@ func TestShotsRun_InvalidPlanJSON(t *testing.T) {
 
 	if stderr != "" {
 		t.Fatalf("expected empty stderr for runtime error, got %q", stderr)
+	}
+}
+
+func TestShotsRunPreservesWhitespacePlanPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	planPath := filepath.Join(t.TempDir(), "screenshots.json ")
+	writeFile(t, planPath, `{
+  "version": 1,
+  "app": {"bundle_id": "com.example.app", "output_dir": "`+filepath.Join(t.TempDir(), "raw")+`"},
+  "steps": [{"action": "wait", "duration_ms": 1}]
+}`)
+
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{"screenshots", "run", "--plan", planPath, "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, `"bundle_id":"com.example.app"`) {
+		t.Fatalf("expected structured run output from literal plan path, got %q", stdout)
 	}
 }
 

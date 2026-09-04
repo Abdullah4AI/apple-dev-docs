@@ -44,7 +44,7 @@ func TestWebAppsMedicalDeviceSetValidationErrors(t *testing.T) {
 	}
 }
 
-func TestWebAppsMedicalDeviceSetResolvesSessionBeforeTimeoutContext(t *testing.T) {
+func TestWebAppsMedicalDeviceSetResolvesSessionWithoutRequestDeadline(t *testing.T) {
 	origResolveSession := resolveSessionFn
 	t.Cleanup(func() {
 		resolveSessionFn = origResolveSession
@@ -71,7 +71,7 @@ func TestWebAppsMedicalDeviceSetResolvesSessionBeforeTimeoutContext(t *testing.T
 		t.Fatalf("expected resolveSession error %v, got %v", resolveErr, err)
 	}
 	if hadDeadline {
-		t.Fatal("expected resolveSession to run before timeout context creation")
+		t.Fatal("expected session resolution to run without the request deadline")
 	}
 }
 

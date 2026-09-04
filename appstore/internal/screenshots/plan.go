@@ -76,9 +76,15 @@ type Plan struct {
 
 // PlanApp contains app/simulator defaults for a run.
 type PlanApp struct {
-	BundleID  string `json:"bundle_id"`
-	UDID      string `json:"udid,omitempty"`
-	OutputDir string `json:"output_dir,omitempty"`
+	BundleID        string   `json:"bundle_id"`
+	UDID            string   `json:"udid,omitempty"`
+	OutputDir       string   `json:"output_dir,omitempty"`
+	LaunchArguments []string `json:"launch_arguments,omitempty"`
+
+	// terminateRunningProcess is enabled by matrix execution so every cell and
+	// retry applies its launch arguments to a fresh app process. It is internal
+	// execution state rather than part of the persisted screenshot-plan format.
+	terminateRunningProcess bool
 }
 
 // PlanDefaults defines default timing behavior.

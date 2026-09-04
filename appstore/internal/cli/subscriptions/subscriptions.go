@@ -133,10 +133,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("subscriptions groups list: --limit must be between 1 and 200")
+				return shared.UsageErrorCtx(ctx, "subscriptions groups list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("subscriptions groups list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "subscriptions groups list: %v", err)
 			}
 			if strings.TrimSpace(*next) != "" && subscriptionGroupAnyFlagSet(fs, "app") {
 				return shared.UsageError("subscriptions groups list: --next cannot be combined with --app")
@@ -474,10 +474,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("subscriptions list: --limit must be between 1 and 200")
+				return shared.UsageErrorCtx(ctx, "subscriptions list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("subscriptions list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "subscriptions list: %v", err)
 			}
 			if err := validateRelationshipLimit("--versions-limit", *versionsLimit); err != nil {
 				return err
@@ -1036,10 +1036,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("subscriptions prices list: --limit must be between 1 and 200")
+				return shared.UsageErrorCtx(ctx, "subscriptions prices list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("subscriptions prices list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "subscriptions prices list: %v", err)
 			}
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")
@@ -1612,6 +1612,7 @@ func SubscriptionsAvailabilityCommand() *ffcli.Command {
 Deprecated: the underlying Subscription availability resource is deprecated in
 App Store Connect API 4.4 in favor of Subscription plan availability. These
 commands keep working for now; for plan-based availability use
+` + "`asc subscriptions pricing plan-availability`" + ` (show/set) or
 ` + "`asc subscriptions pricing monthly-commitment`" + ` (enable/disable/list).
 
 Examples:

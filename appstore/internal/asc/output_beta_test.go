@@ -6,6 +6,50 @@ import (
 	"testing"
 )
 
+func TestBetaTesterUsagesPageTablesRendersBothDimensionShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{
+			name: "string form",
+			row:  `{"dataPoints":[{"start":"2026-08-01T00:00:00Z","end":"2026-08-02T00:00:00Z","values":{"sessionCount":12,"crashCount":1,"feedbackCount":2}}],"dimensions":{"betaTesters":{"data":"tester-1"}}}`,
+		},
+		{
+			name: "object form",
+			row:  `{"dataPoints":[{"start":"2026-08-01T00:00:00Z","end":"2026-08-02T00:00:00Z","values":{"sessionCount":12,"crashCount":1,"feedbackCount":2}}],"dimensions":{"betaTesters":{"data":{"type":"betaTesters","id":"tester-1"}}}}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			page := &BetaTesterUsagesPage{Data: []json.RawMessage{json.RawMessage(test.row)}}
+			var headers []string
+			var rows [][]string
+			if err := betaTesterUsagesPageTables(page, func(h []string, r [][]string) {
+				headers = h
+				rows = r
+			}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			assertSingleRowEquals(
+				t, headers, rows,
+				[]string{"Tester ID", "Start", "End", "Sessions", "Crashes", "Feedback"},
+				[]string{"tester-1", "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z", "12", "1", "2"},
+			)
+		})
+	}
+}
+
+func TestBetaTesterUsagesPageTablesRejectsMalformedDimensions(t *testing.T) {
+	page := &BetaTesterUsagesPage{
+		Data: []json.RawMessage{json.RawMessage(`{"dataPoints":[],"dimensions":{"betaTesters":{"data":42}}}`)},
+	}
+	err := betaTesterUsagesPageTables(page, func([]string, [][]string) {})
+	if err == nil {
+		t.Fatal("expected error for malformed dimensions")
+	}
+}
+
 // TestBetaTestersImportSummaryJSONByteCompat pins the exported
 // BetaTestersImportSummary JSON to the exact bytes previously produced by the
 // unexported testflight.betaTestersImportSummary struct, proving the move to

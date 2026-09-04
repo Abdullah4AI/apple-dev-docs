@@ -280,12 +280,12 @@ func runXcodeCloudActionResourceList(
 		return shared.UsageError("--action-id and --run-id are mutually exclusive")
 	}
 	if limit != 0 && (limit < 1 || limit > 200) {
-		return fmt.Errorf("%s: --limit must be between 1 and 200", errorPrefix)
+		return shared.UsageErrorf("%s: --limit must be between 1 and 200", errorPrefix)
 	}
 
 	nextURL := strings.TrimSpace(next)
 	if err := shared.ValidateNextURL(nextURL); err != nil {
-		return fmt.Errorf("%s: %w", errorPrefix, err)
+		return shared.UsageErrorf("%s: %v", errorPrefix, err)
 	}
 
 	resolvedActionID := strings.TrimSpace(actionID)

@@ -70,10 +70,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center leaderboards localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center leaderboards localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center leaderboards localizations list: %w", err)
+				return shared.UsageErrorf("game-center leaderboards localizations list: %v", err)
 			}
 
 			lbID := strings.TrimSpace(*leaderboardID)

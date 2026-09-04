@@ -251,6 +251,81 @@ func TestProfilesListRelationshipOnlySparseResponsePreservesAttributeAbsence(t *
 	}
 }
 
+func TestProfilesListSparseFieldsPreserveIncludedDevices(t *testing.T) {
+	const includedDevices = `[{"type":"devices","id":"device-1","attributes":{"name":"iPhone","udid":"00000000-0000-0000-0000-000000000001"}}]`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "relationships and included",
+			body: `{"data":[{"type":"profiles","id":"profile-1","attributes":{"name":"Development"},"relationships":{"devices":{"data":[{"type":"devices","id":"device-1"}]}}}],"links":{},"included":` + includedDevices + `}`,
+		},
+		{
+			name: "included without relationships",
+			body: `{"data":[{"type":"profiles","id":"profile-1","attributes":{"name":"Development"}}],"links":{},"included":` + includedDevices + `}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupAuth(t)
+
+			var query url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method != http.MethodGet || req.URL.Path != "/v1/profiles" {
+					t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				query = req.URL.Query()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, test.body)
+			}))
+			t.Cleanup(server.Close)
+			installProfilesQueryTestClient(t, server)
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse([]string{
+					"profiles", "list",
+					"--fields", "name",
+					"--include", "devices",
+					"--device-fields", "name,udid",
+					"--output", "json",
+				}); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				if err := root.Run(context.Background()); err != nil {
+					t.Fatalf("run error: %v", err)
+				}
+			})
+
+			wantQuery := map[string]string{
+				"fields[profiles]":     "name",
+				"fields[devices]":      "name,udid",
+				"include":              "devices",
+				"filter[profileState]": "ACTIVE,INVALID",
+			}
+			for key, want := range wantQuery {
+				if got := query.Get(key); got != want {
+					t.Errorf("%s = %q, want %q", key, got, want)
+				}
+			}
+			if len(query) != len(wantQuery) {
+				t.Errorf("query = %s, want exactly %d parameters", query.Encode(), len(wantQuery))
+			}
+			if stdout != test.body+"\n" {
+				t.Fatalf("stdout = %q, want byte-identical envelope %q", stdout, test.body+"\n")
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+		})
+	}
+}
+
 func TestProfilesListRejectsInvalidQueryValuesBeforeAuth(t *testing.T) {
 	tests := []struct {
 		name    string

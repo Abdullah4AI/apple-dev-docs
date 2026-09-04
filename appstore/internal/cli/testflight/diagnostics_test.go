@@ -25,6 +25,10 @@ func TestTestFlightValidationDiagnosticsPreserveContracts(t *testing.T) {
 		wantError  string
 		wantCode   shared.DiagnosticCode
 		wantParam  string
+		// usageError marks a pre-request flag check that reports its own
+		// diagnostic and exits with usage semantics: the error renders the
+		// message and still wraps flag.ErrHelp.
+		usageError bool
 		noOutput   bool
 		setup      func(*testing.T)
 	}{
@@ -56,6 +60,13 @@ func TestTestFlightValidationDiagnosticsPreserveContracts(t *testing.T) {
 			command:    BetaGroupsListCommand,
 			args:       []string{"--build-id", "build-1", "--limit", "10"},
 			wantStderr: "Error: --global, --limit, --next, and --paginate cannot be used with --build-id; membership lookup always fetches all required pages\n",
+			wantCode:   shared.DiagnosticConflictingInput,
+		},
+		{
+			name:       "beta groups query surface with build id",
+			command:    BetaGroupsListCommand,
+			args:       []string{"--build-id", "build-1", "--fields", "name"},
+			wantStderr: "Error: testflight groups query filters, sparse fields, includes, and relationship limits cannot be used with --build-id; membership lookup queries the build's app relationships directly\n",
 			wantCode:   shared.DiagnosticConflictingInput,
 		},
 		{
@@ -116,13 +127,15 @@ func TestTestFlightValidationDiagnosticsPreserveContracts(t *testing.T) {
 			wantParam:  "--limit",
 		},
 		{
-			name:      "beta tester metrics period enum",
-			command:   BetaTestersMetricsCommand,
-			args:      []string{"--period", "P10D"},
-			wantError: "--period must be one of: P7D, P30D, P90D, P365D",
-			wantCode:  shared.DiagnosticInvalidInput,
-			wantParam: "--period",
-			noOutput:  true,
+			name:       "beta tester metrics period enum",
+			command:    BetaTestersMetricsCommand,
+			args:       []string{"--period", "P10D"},
+			wantStderr: "Error: --period must be one of: P7D, P30D, P90D, P365D\n",
+			wantError:  "--period must be one of: P7D, P30D, P90D, P365D",
+			wantCode:   shared.DiagnosticInvalidInput,
+			wantParam:  "--period",
+			usageError: true,
+			noOutput:   true,
 		},
 		{
 			name:       "beta tester relationship enum",
@@ -198,8 +211,9 @@ func TestTestFlightValidationDiagnosticsPreserveContracts(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 			if test.wantError != "" {
-				if errors.Is(runErr, flag.ErrHelp) {
-					t.Fatalf("errors.Is(flag.ErrHelp) = true, error = %v", runErr)
+				if errors.Is(runErr, flag.ErrHelp) != test.usageError {
+					t.Fatalf("errors.Is(flag.ErrHelp) = %t, want %t, error = %v",
+						!test.usageError, test.usageError, runErr)
 				}
 				if runErr.Error() != test.wantError {
 					t.Fatalf("error = %q, want %q", runErr, test.wantError)

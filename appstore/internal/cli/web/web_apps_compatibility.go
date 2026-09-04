@@ -74,13 +74,11 @@ func WebAppsCompatibilityViewCommand() *ffcli.Command {
 				return shared.MissingRequiredUsageError("--app")
 			}
 
-			session, err := resolveWebSessionForCommand(ctx, authFlags)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
 			if err != nil {
 				return err
 			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
 
 			var result *webcore.AppCompatibility
 			err = withWebSpinner("Fetching App Store compatibility", func() error {
@@ -141,13 +139,11 @@ func WebAppsCompatibilityEditCommand() *ffcli.Command {
 				visionValue = &value
 			}
 
-			session, err := resolveWebSessionForCommand(ctx, authFlags)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
 			if err != nil {
 				return err
 			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
 
 			var result *webcore.AppCompatibility
 			err = withWebSpinner("Updating App Store compatibility", func() error {

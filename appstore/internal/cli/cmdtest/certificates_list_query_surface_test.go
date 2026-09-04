@@ -24,6 +24,11 @@ type certificatesListQuerySurfaceRequest struct {
 
 func certificatesListQuerySurfaceStub(t *testing.T) *certificatesListQuerySurfaceRequest {
 	t.Helper()
+	return certificatesListQuerySurfaceStubBody(t, `{"data":[{"type":"certificates","id":"cert-1","attributes":{"name":"Certificate","certificateType":"IOS_DISTRIBUTION"}}]}`)
+}
+
+func certificatesListQuerySurfaceStubBody(t *testing.T, body string) *certificatesListQuerySurfaceRequest {
+	t.Helper()
 	setupAuth(t)
 
 	captured := &certificatesListQuerySurfaceRequest{}
@@ -32,7 +37,7 @@ func certificatesListQuerySurfaceStub(t *testing.T) *certificatesListQuerySurfac
 		captured.path = req.URL.Path
 		captured.query = req.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"data":[{"type":"certificates","id":"cert-1","attributes":{"name":"Certificate","certificateType":"IOS_DISTRIBUTION"}}]}`)
+		_, _ = io.WriteString(w, body)
 	}))
 	t.Cleanup(server.Close)
 
@@ -119,6 +124,63 @@ func TestCertificatesListQuerySurfaceEmitsDocumentedParameters(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"id":"cert-1"`) {
 		t.Fatalf("stdout = %q, want certificate response", stdout)
+	}
+}
+
+func TestCertificatesListSparseFieldsPreserveIncludedPassTypeID(t *testing.T) {
+	const includedPassTypeIDs = `[{"type":"passTypeIds","id":"ptid-1","attributes":{"name":"Pass Type"}}]`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "relationships and included",
+			body: `{"data":[{"type":"certificates","id":"cert-1","attributes":{"displayName":"Pass Cert"},"relationships":{"passTypeId":{"data":{"type":"passTypeIds","id":"ptid-1"}}}}],"links":{},"included":` + includedPassTypeIDs + `}`,
+		},
+		{
+			name: "included without relationships",
+			body: `{"data":[{"type":"certificates","id":"cert-1","attributes":{"displayName":"Pass Cert"}}],"links":{},"included":` + includedPassTypeIDs + `}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			captured := certificatesListQuerySurfaceStubBody(t, test.body)
+
+			stdout, stderr, err := runCertificatesListQuerySurface(
+				t,
+				"certificates", "list",
+				"--fields", "displayName",
+				"--include", "passTypeId",
+				"--pass-type-id-fields", "name",
+				"--output", "json",
+			)
+			if err != nil {
+				t.Fatalf("run error: %v (stderr=%q)", err, stderr)
+			}
+			if strings.TrimSpace(stderr) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+			if captured.path != "/v1/certificates" {
+				t.Fatalf("path = %q, want /v1/certificates", captured.path)
+			}
+			wantQuery := map[string]string{
+				"fields[certificates]": "displayName",
+				"fields[passTypeIds]":  "name",
+				"include":              "passTypeId",
+			}
+			for key, want := range wantQuery {
+				if got := captured.query.Get(key); got != want {
+					t.Fatalf("query %s = %q, want %q (full query %s)", key, got, want, captured.query.Encode())
+				}
+			}
+			if len(captured.query) != len(wantQuery) {
+				t.Fatalf("query = %s, want exactly %d parameters", captured.query.Encode(), len(wantQuery))
+			}
+			if stdout != test.body+"\n" {
+				t.Fatalf("stdout = %q, want byte-identical envelope %q", stdout, test.body+"\n")
+			}
+		})
 	}
 }
 

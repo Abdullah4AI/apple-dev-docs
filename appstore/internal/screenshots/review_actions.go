@@ -1,14 +1,21 @@
 package screenshots
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 // ReviewOpenRequest configures opening a generated review HTML file.
@@ -22,6 +29,331 @@ type ReviewOpenRequest struct {
 type ReviewOpenResult struct {
 	HTMLPath string `json:"html_path"`
 	Opened   bool   `json:"opened"`
+}
+
+var (
+	// matrixReviewSnapshotValidatedForTest replaces the original pathname after
+	// validation so tests can prove browser consumption uses retained bytes.
+	matrixReviewSnapshotValidatedForTest func(string)
+	// matrixReviewSnapshotBeforeRootForTest swaps the newly-created directory
+	// before its rooted handle is pinned, making construction races deterministic.
+	matrixReviewSnapshotBeforeRootForTest func(string)
+	matrixReviewOpenPathForTest           func(string) error
+	errMatrixReviewSnapshotUnavailable    = errors.New("matrix review snapshot unavailable")
+)
+
+const (
+	matrixReviewSnapshotDirPrefix    = ".asc-matrix-review-open-"
+	matrixReviewSnapshotMaxAge       = 24 * time.Hour
+	matrixReviewSnapshotCleanupLimit = 16
+)
+
+// cleanupStaleMatrixReviewSnapshots bounds the lifetime of successful browser
+// snapshots without touching arbitrary temporary directories. Snapshots live
+// in owner-only directories under the per-user temporary directory and are
+// retained after a successful launch because the browser may consume them
+// asynchronously. Only old, owner-only directories with our exact prefix are
+// eligible for opportunistic cleanup.
+func cleanupStaleMatrixReviewSnapshots() {
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-matrixReviewSnapshotMaxAge)
+	removed := 0
+	for _, entry := range entries {
+		if removed >= matrixReviewSnapshotCleanupLimit {
+			return
+		}
+		if !strings.HasPrefix(entry.Name(), matrixReviewSnapshotDirPrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+		path := filepath.Join(os.TempDir(), entry.Name())
+		if !matrixReviewSnapshotDirIsProtected(info, path) {
+			continue
+		}
+		current, err := os.Lstat(path)
+		if err != nil || current.Mode()&os.ModeSymlink != 0 || !current.IsDir() || !os.SameFile(info, current) || !matrixReviewSnapshotDirIsProtected(current, path) {
+			continue
+		}
+		if err := os.RemoveAll(path); err == nil {
+			removed++
+		}
+	}
+}
+
+func removeMatrixReviewBrowserSnapshot(path string) {
+	dir := filepath.Dir(path)
+	if !strings.HasPrefix(filepath.Base(dir), matrixReviewSnapshotDirPrefix) {
+		return
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !matrixReviewSnapshotDirIsProtected(info, dir) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
+
+func createMatrixReviewBrowserSnapshot(data []byte) (string, error) {
+	return createMatrixReviewBrowserSnapshotWithContext(context.Background(), data, nil)
+}
+
+func openCreatedMatrixReviewSnapshotRoot(path string) (*os.Root, error) {
+	createdInfo, err := os.Lstat(path)
+	if err != nil || !createdInfo.IsDir() || createdInfo.Mode()&os.ModeSymlink != 0 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("snapshot directory is not a real directory")
+	}
+	if matrixReviewSnapshotBeforeRootForTest != nil {
+		matrixReviewSnapshotBeforeRootForTest(path)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	openedInfo, err := root.Stat(".")
+	if err != nil || !os.SameFile(createdInfo, openedInfo) {
+		_ = root.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("snapshot directory changed while opening")
+	}
+	return root, nil
+}
+
+func validMatrixReviewSnapshotLink(link string) bool {
+	if link == "" || filepath.IsAbs(filepath.FromSlash(link)) || strings.Contains(link, `\`) {
+		return false
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(link)))
+	if clean != link || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return false
+	}
+	for _, component := range strings.Split(clean, "/") {
+		if component == "" || component == "." || component == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// rewriteMatrixReviewAssetLinks replaces complete HTML attributes rather than
+// substrings. This prevents a path such as home.png from corrupting a
+// neighboring home.pngx reference and proves every generated link is present
+// in both the href and img src attributes emitted by the renderer.
+func rewriteMatrixReviewAssetLinks(data []byte, assets []matrixReviewBrowserAsset) ([]byte, error) {
+	rewritten := append([]byte(nil), data...)
+	seenDestinations := make(map[string]struct{}, len(assets))
+	for _, asset := range assets {
+		if !validMatrixReviewSnapshotLink(asset.linkPath) || asset.originalLink == "" {
+			return nil, errMatrixReviewSnapshotUnavailable
+		}
+		if _, exists := seenDestinations[asset.linkPath]; exists {
+			return nil, errMatrixReviewSnapshotUnavailable
+		}
+		seenDestinations[asset.linkPath] = struct{}{}
+		hrefNeedle := []byte(`href="` + asset.originalLink + `"`)
+		srcNeedle := []byte(`src="` + asset.originalLink + `"`)
+		hrefCount, srcCount := bytes.Count(rewritten, hrefNeedle), bytes.Count(rewritten, srcNeedle)
+		if hrefCount == 0 || hrefCount != srcCount {
+			return nil, errMatrixReviewSnapshotUnavailable
+		}
+		rewritten = bytes.ReplaceAll(rewritten, hrefNeedle, []byte(`href="`+asset.linkPath+`"`))
+		rewritten = bytes.ReplaceAll(rewritten, srcNeedle, []byte(`src="`+asset.linkPath+`"`))
+	}
+	return rewritten, nil
+}
+
+type matrixReviewSnapshotContextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r matrixReviewSnapshotContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.r.Read(p)
+	if contextErr := r.ctx.Err(); contextErr != nil {
+		return n, contextErr
+	}
+	return n, err
+}
+
+func closeMatrixReviewBrowserAssets(assets []matrixReviewBrowserAsset) error {
+	seen := make(map[*rootfs.Root]struct{}, len(assets))
+	var closeErr error
+	for _, asset := range assets {
+		if asset.sourceRoot == nil {
+			continue
+		}
+		if _, ok := seen[asset.sourceRoot]; ok {
+			continue
+		}
+		seen[asset.sourceRoot] = struct{}{}
+		closeErr = errors.Join(closeErr, asset.sourceRoot.Close())
+	}
+	return closeErr
+}
+
+func createMatrixReviewBrowserSnapshotWithContext(ctx context.Context, data []byte, assets []matrixReviewBrowserAsset) (snapshotPath string, retErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	cleanupStaleMatrixReviewSnapshots()
+	snapshotDir, err := createMatrixReviewSnapshotDir()
+	if err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	createdInfo, err := os.Lstat(snapshotDir)
+	if err != nil || !createdInfo.IsDir() || createdInfo.Mode()&os.ModeSymlink != 0 {
+		_ = os.RemoveAll(snapshotDir)
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	removeOnError := true
+	defer func() {
+		if !removeOnError {
+			return
+		}
+		current, statErr := os.Lstat(snapshotDir)
+		if statErr != nil || !os.SameFile(createdInfo, current) {
+			return
+		}
+		_ = os.RemoveAll(snapshotDir)
+	}()
+	snapshotRoot, err := openCreatedMatrixReviewSnapshotRoot(snapshotDir)
+	if err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	defer func() { _ = snapshotRoot.Close() }()
+	if err := snapshotRoot.Chmod(".", 0o700); err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	data, err = rewriteMatrixReviewAssetLinks(data, assets)
+	if err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	path := filepath.Join(snapshotDir, "index.html")
+	file, err := createMatrixReviewSnapshotFileInRoot(snapshotRoot, "index.html", path)
+	if err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	if err := file.Close(); err != nil {
+		return "", errMatrixReviewSnapshotUnavailable
+	}
+	var copiedAssetBytes int64
+	for _, asset := range assets {
+		if err := ctx.Err(); err != nil {
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if !validMatrixReviewSnapshotLink(asset.linkPath) || asset.sourceRoot == nil {
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		assetPath := filepath.Join(snapshotDir, filepath.FromSlash(asset.linkPath))
+		assetRelativePath := filepath.FromSlash(asset.linkPath)
+		assetRoot, err := openMatrixReviewSnapshotDirInRoot(snapshotRoot, filepath.Dir(assetRelativePath))
+		if err != nil {
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		sourceFile, err := asset.sourceRoot.OpenFile(asset.relativePath)
+		if err != nil {
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		sourceInfo, statErr := sourceFile.Stat()
+		if statErr != nil || !sourceInfo.Mode().IsRegular() || sourceInfo.Size() > maxMatrixArtifactBytes {
+			_ = sourceFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if asset.identity != nil && !os.SameFile(asset.identity, sourceInfo) {
+			_ = sourceFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if sourceInfo.Size() != asset.size {
+			_ = sourceFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		remainingAssetBytes := int64(maxMatrixReviewBrowserBytes) - copiedAssetBytes
+		if remainingAssetBytes <= 0 {
+			_ = sourceFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		assetFile, err := createMatrixReviewSnapshotFileInRoot(assetRoot, filepath.Base(assetRelativePath), assetPath)
+		if err != nil {
+			_ = sourceFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if err := assetFile.Chmod(0o600); err != nil {
+			_ = sourceFile.Close()
+			_ = assetFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		hasher := sha256.New()
+		written, copyErr := io.Copy(io.MultiWriter(assetFile, hasher), io.LimitReader(matrixReviewSnapshotContextReader{ctx: ctx, r: sourceFile}, remainingAssetBytes+1))
+		sourceCloseErr := sourceFile.Close()
+		var digest [sha256.Size]byte
+		copy(digest[:], hasher.Sum(nil))
+		if copyErr != nil || sourceCloseErr != nil || written > maxMatrixArtifactBytes || written > remainingAssetBytes || written != sourceInfo.Size() || digest != asset.digest {
+			_ = assetFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if err := ctx.Err(); err != nil {
+			_ = assetFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		if err := assetFile.Sync(); err != nil {
+			_ = assetFile.Close()
+			_ = assetRoot.Close()
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		assetCloseErr := assetFile.Close()
+		assetRootCloseErr := assetRoot.Close()
+		if assetCloseErr != nil || assetRootCloseErr != nil {
+			return "", errMatrixReviewSnapshotUnavailable
+		}
+		copiedAssetBytes += written
+	}
+	// The browser may open the file after this function returns. Keep the
+	// owner-only snapshot after a successful launch and let the bounded stale
+	// cleanup above reclaim it on a later invocation.
+	removeOnError = false
+	return path, nil
 }
 
 // ReviewApproveRequest configures updates to approved.json.
@@ -56,25 +388,70 @@ func OpenReview(ctx context.Context, req ReviewOpenRequest) (*ReviewOpenResult, 
 	if err != nil {
 		return nil, err
 	}
-	htmlPath, err := resolveReviewArtifactPath(outputDir, strings.TrimSpace(req.HTMLPath), defaultReviewHTMLName)
+	htmlPath, err := resolveReviewArtifactPath(outputDir, req.HTMLPath, defaultReviewHTMLName)
 	if err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(htmlPath)
+	pair, err := readMatrixReviewPairSnapshotWithRoots(htmlPath)
 	if err != nil {
-		return nil, fmt.Errorf("read review HTML: %w", err)
+		if !isUnboundLegacyReviewHTML(ctx, htmlPath) {
+			return nil, err
+		}
+		if req.DryRun {
+			return &ReviewOpenResult{HTMLPath: htmlPath, Opened: false}, nil
+		}
+		open := openPathInBrowser
+		if matrixReviewOpenPathForTest != nil {
+			open = matrixReviewOpenPathForTest
+		}
+		if openErr := open(htmlPath); openErr != nil {
+			return nil, openErr
+		}
+		return &ReviewOpenResult{HTMLPath: htmlPath, Opened: true}, nil
 	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("review HTML path points to a directory")
-	}
-
+	htmlData, manifest := pair.htmlData, pair.manifest
 	if req.DryRun {
+		_ = closeMatrixReviewAssetRoots(pair.assetRootRoots)
 		return &ReviewOpenResult{
 			HTMLPath: htmlPath,
 			Opened:   false,
 		}, nil
 	}
-	if err := openPathInBrowser(htmlPath); err != nil {
+	// Reports without a valid matrix binding retain the historical opener
+	// behavior. Only generated, digest-bound matrix HTML is copied into a
+	// private snapshot with its referenced assets.
+	if manifest == nil {
+		open := openPathInBrowser
+		if matrixReviewOpenPathForTest != nil {
+			open = matrixReviewOpenPathForTest
+		}
+		if err := open(htmlPath); err != nil {
+			return nil, err
+		}
+		return &ReviewOpenResult{HTMLPath: htmlPath, Opened: true}, nil
+	}
+	assets, err := matrixReviewBrowserAssetsWithExpectedRoots(ctx, htmlPath, htmlData, manifest, pair.assetRootRoots)
+	if err != nil {
+		_ = closeMatrixReviewAssetRoots(pair.assetRootRoots)
+		return nil, err
+	}
+	snapshotPath, snapshotErr := createMatrixReviewBrowserSnapshotWithContext(ctx, htmlData, assets)
+	closeErr := closeMatrixReviewBrowserAssets(assets)
+	if snapshotErr != nil || closeErr != nil {
+		if snapshotPath != "" {
+			removeMatrixReviewBrowserSnapshot(snapshotPath)
+		}
+		return nil, errMatrixReviewSnapshotUnavailable
+	}
+	if matrixReviewSnapshotValidatedForTest != nil {
+		matrixReviewSnapshotValidatedForTest(htmlPath)
+	}
+	open := openPathInBrowser
+	if matrixReviewOpenPathForTest != nil {
+		open = matrixReviewOpenPathForTest
+	}
+	if err := open(snapshotPath); err != nil {
+		removeMatrixReviewBrowserSnapshot(snapshotPath)
 		return nil, err
 	}
 	return &ReviewOpenResult{
@@ -93,11 +470,11 @@ func ApproveReview(ctx context.Context, req ReviewApproveRequest) (*ReviewApprov
 	if err != nil {
 		return nil, err
 	}
-	manifestPath, err := resolveReviewArtifactPath(outputDir, strings.TrimSpace(req.ManifestPath), defaultReviewManifestName)
+	manifestPath, err := resolveReviewArtifactPath(outputDir, req.ManifestPath, defaultReviewManifestName)
 	if err != nil {
 		return nil, err
 	}
-	approvalPath, err := resolveReviewArtifactPath(outputDir, strings.TrimSpace(req.ApprovalPath), defaultReviewApprovalsName)
+	approvalPath, err := resolveReviewArtifactPath(outputDir, req.ApprovalPath, defaultReviewApprovalsName)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +516,8 @@ func ApproveReview(ctx context.Context, req ReviewApproveRequest) (*ReviewApprov
 }
 
 func resolveReviewArtifactPath(outputDir, override, defaultName string) (string, error) {
-	path := strings.TrimSpace(override)
-	if path == "" {
+	path := override
+	if strings.TrimSpace(path) == "" {
 		path = filepath.Join(outputDir, defaultName)
 	} else if !filepath.IsAbs(path) {
 		path = filepath.Join(outputDir, path)

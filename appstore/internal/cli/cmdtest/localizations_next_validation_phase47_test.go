@@ -2,6 +2,8 @@ package cmdtest
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -16,10 +18,21 @@ func expectedLocalizationsStderr(argsPrefix []string) string {
 	return ""
 }
 
+// runLocalizationsInvalidNextURLCases exercises the shared --next validation
+// contract for the localization list surfaces.
+//
+// wantUsageExit is true once the command routes its pre-request validation
+// through shared.UsageError, which prints the diagnostic itself and classifies
+// the failure as usage exit code 2. It stays false for a command re-parented by
+// a command-tree rewriter: shared.UsageError writes the message before the
+// rewriter can correct the command path, so those keep returning a plain error
+// until the rewrite runs ahead of the diagnostic. Asserting the classification
+// per case keeps a migrated command from silently regressing to fmt.Errorf.
 func runLocalizationsInvalidNextURLCases(
 	t *testing.T,
 	argsPrefix []string,
 	wantErrPrefix string,
+	wantUsageExit bool,
 ) {
 	t.Helper()
 
@@ -63,6 +76,16 @@ func runLocalizationsInvalidNextURLCases(
 			}
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if wantUsageExit {
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("expected a usage-classified error, got %v", runErr)
+				}
+				assertUsageDiagnosticFirstLine(t, stderr, test.wantErr)
+				return
+			}
+			if errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("expected a plain error for the deferred command, got a usage error: %v", runErr)
 			}
 			if wantWarning := expectedLocalizationsStderr(argsPrefix); wantWarning != "" {
 				if !strings.Contains(stderr, wantWarning) {
@@ -156,6 +179,7 @@ func TestBetaAppLocalizationsListRejectsInvalidNextURL(t *testing.T) {
 		t,
 		[]string{"testflight", "app-localizations", "list"},
 		"testflight app-localizations list: --next",
+		false,
 	)
 }
 
@@ -183,6 +207,7 @@ func TestBuildLocalizationsListRejectsInvalidNextURL(t *testing.T) {
 		t,
 		[]string{"build-localizations", "list", "--build-id", "build-1"},
 		"build-localizations list: --next",
+		true,
 	)
 }
 

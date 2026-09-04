@@ -94,8 +94,8 @@ func TestAlternativeDistributionDomainsListCommand_InvalidLimit(t *testing.T) {
 		t.Fatalf("failed to parse flags: %v", err)
 	}
 
-	if err := cmd.Exec(context.Background(), []string{}); err == nil || errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected validation error for invalid --limit, got %v", err)
+	if err := cmd.Exec(context.Background(), []string{}); err == nil || !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected usage error for invalid --limit, got %v", err)
 	}
 }
 
@@ -285,8 +285,8 @@ func TestAlternativeDistributionPackageVersionsDeltasCommand_InvalidLimit(t *tes
 		t.Fatalf("failed to parse flags: %v", err)
 	}
 
-	if err := cmd.Exec(context.Background(), []string{}); err == nil || errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected validation error for invalid --limit, got %v", err)
+	if err := cmd.Exec(context.Background(), []string{}); err == nil || !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected usage error for invalid --limit, got %v", err)
 	}
 }
 
@@ -296,7 +296,7 @@ func TestAlternativeDistributionPackageVersionsListCommand_InvalidLimit(t *testi
 		t.Fatalf("failed to parse flags: %v", err)
 	}
 
-	if err := cmd.Exec(context.Background(), []string{}); err == nil || errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("expected validation error for invalid --limit, got %v", err)
+	if err := cmd.Exec(context.Background(), []string{}); err == nil || !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected usage error for invalid --limit, got %v", err)
 	}
 }

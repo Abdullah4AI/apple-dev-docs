@@ -135,6 +135,7 @@ func TestBuildReviewShowTableRowsIncludesExpectedSections(t *testing.T) {
 						Relationship: "appStoreVersion",
 						Type:         "appStoreVersions",
 						ID:           "version-1",
+						Label:        "2.2.1",
 					},
 				},
 			},
@@ -167,6 +168,20 @@ func TestBuildReviewShowTableRowsIncludesExpectedSections(t *testing.T) {
 								ReasonDescription: "Performance: App Completeness",
 							},
 						},
+						Related: []webcore.ReviewRelatedResource{
+							{
+								Relationship: "appStoreVersion",
+								Type:         "appStoreVersions",
+								ID:           "version-1",
+								Label:        "2.2.1",
+							},
+							{
+								Relationship: "build",
+								Type:         "builds",
+								ID:           "build-1",
+								Label:        "88",
+							},
+						},
 					},
 				},
 			},
@@ -195,7 +210,10 @@ func TestBuildReviewShowTableRowsIncludesExpectedSections(t *testing.T) {
 
 	assertRowContains(t, rows, "Submission", "Review Status", "UNRESOLVED_ISSUES")
 	assertRowContains(t, rows, "Items Reviewed", "Item 1", "appStoreVersion")
-	assertRowEquals(t, rows, "Rejections", "Reason 1", "code=2.1.0 section=2.1 description=Performance: App Completeness")
+	assertRowContains(t, rows, "Items Reviewed", "Item 1", "2.2.1")
+	assertRowContains(t, rows, "Rejections", "Reason 1", "2.2.1")
+	assertRowContains(t, rows, "Rejections", "Reason 1", "88")
+	assertRowContains(t, rows, "Rejections", "Reason 1", "code=2.1.0 section=2.1 description=Performance: App Completeness")
 	assertRowEquals(t, rows, "Messages", "Message 1", "Hello Issue details")
 	assertRowContains(t, rows, "Screenshots", "Attachment 1", "Screenshot-1.png")
 	assertRowContains(t, rows, "Downloads", "Downloaded 1", ".asc/web-review/6567933550/submission-1/Screenshot-1.png")
@@ -212,6 +230,18 @@ func TestSummarizeMessageForTableStripsHTMLAndLinks(t *testing.T) {
 	}
 	if !strings.Contains(got, "Testing a Release Build") {
 		t.Fatalf("expected link text to remain, got %q", got)
+	}
+}
+
+func TestSummarizeHTMLBodyForTablePreservesPlainAngleBrackets(t *testing.T) {
+	got := summarizeHTMLBodyForTable("a < b > c", "<p>a &lt; b &gt; c</p>")
+	if got != "a < b > c" {
+		t.Fatalf("plain text with comparison operators = %q, want %q", got, "a < b > c")
+	}
+
+	got = summarizeHTMLBodyForTable("", "<p>a &lt; b &gt; c</p>")
+	if got != "a < b > c" {
+		t.Fatalf("raw HTML fallback = %q, want %q", got, "a < b > c")
 	}
 }
 

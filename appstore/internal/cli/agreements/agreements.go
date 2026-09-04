@@ -88,15 +88,15 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("agreements territories list: --limit must be between 1 and 200")
+				return shared.UsageError("agreements territories list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("agreements territories list: %w", err)
+				return shared.UsageErrorf("agreements territories list: %v", err)
 			}
 			if idValue == "" && strings.TrimSpace(*next) != "" {
 				derivedID, err := extractEULATerritoryIDFromNextURL(*next)
 				if err != nil {
-					return fmt.Errorf("agreements territories list: %w", err)
+					return shared.UsageErrorf("agreements territories list: %v", err)
 				}
 				idValue = derivedID
 			}

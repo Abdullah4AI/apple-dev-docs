@@ -33,8 +33,8 @@ Supported actions: launch, tap, type, wait, wait_for (polling), screenshot.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			planPathVal := strings.TrimSpace(*planPath)
-			if planPathVal == "" {
+			planPathVal := *planPath
+			if strings.TrimSpace(planPathVal) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --plan is required")
 				return shared.MissingRequiredUsageError("--plan")
 			}
@@ -55,7 +55,7 @@ Supported actions: launch, tap, type, wait, wait_for (polling), screenshot.`,
 			if override := strings.TrimSpace(*udid); override != "" {
 				plan.App.UDID = override
 			}
-			if override := strings.TrimSpace(*outputDir); override != "" {
+			if override := *outputDir; strings.TrimSpace(override) != "" {
 				plan.App.OutputDir = override
 			}
 

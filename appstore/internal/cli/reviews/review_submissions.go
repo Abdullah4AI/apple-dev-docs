@@ -558,7 +558,7 @@ Examples:
 				return shared.WithDiagnostic(shared.UsageError("unexpected positional arguments"), shared.DiagnosticInvalidInput, "")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return shared.WithDiagnostic(shared.NewValidationError(fmt.Errorf("review submissions-items-ids: %w", err)), shared.DiagnosticInvalidInput, "--next")
+				return shared.WithDiagnostic(shared.NewValidationError(shared.UsageErrorf("review submissions-items-ids: %v", err)), shared.DiagnosticInvalidInput, "--next")
 			}
 			if err := rejectReviewNextFlagConflicts(fs, *next, "review submissions-items-ids", "id", "limit"); err != nil {
 				return err

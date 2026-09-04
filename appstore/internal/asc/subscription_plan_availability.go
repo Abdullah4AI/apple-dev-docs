@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -71,8 +73,13 @@ type SubscriptionPlanAvailabilitiesOption func(*subscriptionPlanAvailabilitiesQu
 
 type subscriptionPlanAvailabilitiesQuery struct {
 	listQuery
-	planTypes []SubscriptionPlanType
+	planTypes                   []SubscriptionPlanType
+	includeAvailableTerritories bool
 }
+
+// SubscriptionPlanAvailabilityIncludedTerritoriesLimit is Apple's maximum for
+// limit[availableTerritories] on subscription plan availability reads.
+const SubscriptionPlanAvailabilityIncludedTerritoriesLimit = 50
 
 // WithSubscriptionPlanAvailabilitiesLimit sets the maximum number of plan availabilities to return.
 func WithSubscriptionPlanAvailabilitiesLimit(limit int) SubscriptionPlanAvailabilitiesOption {
@@ -102,6 +109,16 @@ func WithSubscriptionPlanAvailabilitiesPlanTypes(planTypes ...SubscriptionPlanTy
 				q.planTypes = append(q.planTypes, planType)
 			}
 		}
+	}
+}
+
+// WithSubscriptionPlanAvailabilitiesIncludeAvailableTerritories includes the
+// availableTerritories relationship in plan availability list responses. Apple
+// caps the included linkages at 50 per plan availability; read the complete set
+// through the availableTerritories relationship endpoint when more are needed.
+func WithSubscriptionPlanAvailabilitiesIncludeAvailableTerritories() SubscriptionPlanAvailabilitiesOption {
+	return func(q *subscriptionPlanAvailabilitiesQuery) {
+		q.includeAvailableTerritories = true
 	}
 }
 
@@ -196,6 +213,27 @@ func (c *Client) UpdateSubscriptionPlanAvailability(ctx context.Context, planAva
 	return &response, nil
 }
 
+// GetSubscriptionPlanAvailability retrieves a subscription plan availability by ID.
+func (c *Client) GetSubscriptionPlanAvailability(ctx context.Context, planAvailabilityID string) (*SubscriptionPlanAvailabilityResponse, error) {
+	planAvailabilityID = strings.TrimSpace(planAvailabilityID)
+	if planAvailabilityID == "" {
+		return nil, fmt.Errorf("plan availability ID is required")
+	}
+
+	path := fmt.Sprintf("/v1/subscriptionPlanAvailabilities/%s", planAvailabilityID)
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SubscriptionPlanAvailabilityResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
+}
+
 // GetSubscriptionPlanAvailabilitiesForSubscription retrieves plan availabilities for a subscription.
 func (c *Client) GetSubscriptionPlanAvailabilitiesForSubscription(ctx context.Context, subID string, opts ...SubscriptionPlanAvailabilitiesOption) (*SubscriptionPlanAvailabilitiesResponse, error) {
 	subID = strings.TrimSpace(subID)
@@ -216,8 +254,21 @@ func (c *Client) GetSubscriptionPlanAvailabilitiesForSubscription(ctx context.Co
 			return nil, fmt.Errorf("subscriptionPlanAvailabilities: %w", err)
 		}
 		path = query.nextURL
-	} else if queryString := buildListQuery(&query.listQuery); queryString != "" {
-		path += "?" + queryString
+	} else {
+		values, err := url.ParseQuery(buildListQuery(&query.listQuery))
+		if err != nil {
+			return nil, fmt.Errorf("subscriptionPlanAvailabilities: %w", err)
+		}
+		if query.includeAvailableTerritories {
+			values.Set("include", "availableTerritories")
+			values.Set(
+				"limit[availableTerritories]",
+				strconv.Itoa(SubscriptionPlanAvailabilityIncludedTerritoriesLimit),
+			)
+		}
+		if encoded := values.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
 	}
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {

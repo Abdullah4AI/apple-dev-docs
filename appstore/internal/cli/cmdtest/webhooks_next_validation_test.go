@@ -3,6 +3,7 @@ package cmdtest
 import (
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,50 +15,11 @@ import (
 )
 
 func TestWebhooksListRejectsInvalidNextURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		next    string
-		wantErr string
-	}{
-		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/apps/app-1/webhooks?cursor=AQ",
-			wantErr: "webhooks list: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "webhooks list: --next must be a valid URL:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{"webhooks", "list", "--next", test.next}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
-		})
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"webhooks", "list"},
+		"webhooks list: --next",
+	)
 }
 
 func TestWebhooksListRejectsNextQueryFlagConflicts(t *testing.T) {
@@ -172,50 +134,11 @@ func TestWebhooksListPaginateFromNext(t *testing.T) {
 }
 
 func TestWebhookDeliveriesRejectsInvalidNextURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		next    string
-		wantErr string
-	}{
-		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/webhooks/wh-1/deliveries?cursor=AQ",
-			wantErr: "webhooks deliveries: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "webhooks deliveries: --next must be a valid URL:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{"webhooks", "deliveries", "--webhook-id", "wh-1", "--next", test.next}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
-		})
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"webhooks", "deliveries", "--webhook-id", "wh-1"},
+		"webhooks deliveries: --next",
+	)
 }
 
 func TestWebhookDeliveriesPaginateFromNext(t *testing.T) {
@@ -285,11 +208,16 @@ func TestWebhookDeliveriesRelationshipsRejectsInvalidNextURL(t *testing.T) {
 		name    string
 		next    string
 		wantErr string
+		// usageError marks a pre-request flag check that reports its own
+		// diagnostic and exits with usage semantics (#518). The --next ID
+		// extraction below still fails as an ordinary runtime error.
+		usageError bool
 	}{
 		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/webhooks/wh-1/relationships/deliveries?cursor=AQ",
-			wantErr: "webhooks deliveries links: --next must be an App Store Connect URL",
+			name:       "invalid scheme",
+			next:       "http://api.appstoreconnect.apple.com/v1/webhooks/wh-1/relationships/deliveries?cursor=AQ",
+			wantErr:    "webhooks deliveries links: --next must be an App Store Connect URL",
+			usageError: true,
 		},
 		{
 			name:    "invalid path for id extraction",
@@ -319,6 +247,18 @@ func TestWebhookDeliveriesRelationshipsRejectsInvalidNextURL(t *testing.T) {
 			}
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if test.usageError {
+				if !errors.Is(runErr, flag.ErrHelp) {
+					t.Fatalf("expected flag.ErrHelp, got %v", runErr)
+				}
+				if !strings.Contains(stderr, "Error: "+test.wantErr) {
+					t.Fatalf("expected stderr to contain %q, got %q", "Error: "+test.wantErr, stderr)
+				}
+				return
+			}
+			if errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("errors.Is(flag.ErrHelp) = true, want generic exit semantics: %v", runErr)
 			}
 			if stderr != "" {
 				t.Fatalf("expected empty stderr, got %q", stderr)

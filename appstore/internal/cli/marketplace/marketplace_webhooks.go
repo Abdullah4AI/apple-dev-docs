@@ -67,10 +67,10 @@ Examples:
 			warnMarketplaceWebhooksDeprecated()
 
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("marketplace webhooks list: --limit must be between 1 and 200")
+				return shared.UsageError("marketplace webhooks list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("marketplace webhooks list: %w", err)
+				return shared.UsageErrorf("marketplace webhooks list: %v", err)
 			}
 
 			fieldsValue, err := normalizeMarketplaceWebhookFields(*fields)

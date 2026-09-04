@@ -73,7 +73,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--build-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("performance diagnostics list: --limit must be between 1 and 200")
+				return shared.UsageError("performance diagnostics list: --limit must be between 1 and 200")
 			}
 
 			diagnosticTypes, err := normalizeDiagnosticSignatureTypes(shared.SplitCSVUpper(*diagnosticType))
@@ -153,7 +153,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("performance diagnostics view: --limit must be between 1 and 200")
+				return shared.UsageError("performance diagnostics view: --limit must be between 1 and 200")
 			}
 
 			client, err := shared.GetASCClient()

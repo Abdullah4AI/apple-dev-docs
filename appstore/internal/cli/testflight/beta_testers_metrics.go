@@ -49,7 +49,7 @@ Examples:
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--limit")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight beta-testers metrics: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight beta-testers metrics: %v", err)
 			}
 
 			testerValue := strings.TrimSpace(*testerID)
@@ -66,7 +66,7 @@ Examples:
 
 			periodValue, err := normalizeBetaTesterUsagePeriod(*period)
 			if err != nil {
-				return err
+				return usageErrorFromValidation(ctx, "%v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

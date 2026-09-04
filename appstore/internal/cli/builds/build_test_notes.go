@@ -89,10 +89,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("builds test-notes list: --limit must be between 1 and 200")
+				return shared.UsageError("builds test-notes list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("builds test-notes list: %w", err)
+				return shared.UsageErrorf("builds test-notes list: %v", err)
 			}
 
 			locales := shared.SplitCSV(*locale)

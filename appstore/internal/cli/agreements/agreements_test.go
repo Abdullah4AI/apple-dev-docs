@@ -38,8 +38,8 @@ func TestAgreementsTerritoriesListValidation(t *testing.T) {
 			t.Fatalf("parse error: %v", err)
 		}
 		err := cmd.Exec(context.Background(), nil)
-		if err == nil || errors.Is(err, flag.ErrHelp) {
-			t.Fatalf("expected non-ErrHelp limit error, got %v", err)
+		if err == nil || !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("expected usage limit error, got %v", err)
 		}
 	})
 }

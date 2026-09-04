@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func TestPassTypeIDsListRejectsInvalidNextURL(t *testing.T) {
@@ -49,7 +51,10 @@ func TestPassTypeIDsListRejectsInvalidNextURL(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			assertOnlyDeprecatedCommandWarnings(t, stderr)
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
+			}
+			assertUsageDiagnosticFirstLine(t, stderr, test.wantErr)
 		})
 	}
 }
@@ -154,7 +159,10 @@ func TestMerchantIDsListRejectsInvalidNextURL(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			assertOnlyDeprecatedCommandWarnings(t, stderr)
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
+			}
+			assertUsageDiagnosticFirstLine(t, stderr, test.wantErr)
 		})
 	}
 }

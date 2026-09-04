@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,47 @@ func TestShotsReviewOpen_DryRun(t *testing.T) {
 	}
 	if result.Opened {
 		t.Fatal("expected opened=false in dry-run mode")
+	}
+}
+
+func TestShotsReviewOpenPreservesWhitespaceHTMLPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	outputDir := t.TempDir()
+	htmlPath := filepath.Join(outputDir, "custom.html ")
+	if err := os.WriteFile(htmlPath, []byte("<html><body>ok</body></html>"), 0o644); err != nil {
+		t.Fatalf("write whitespace HTML: %v", err)
+	}
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "review-open",
+		"--output-dir", outputDir,
+		"--html-path", htmlPath,
+		"--dry-run", "--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var result struct {
+		HTMLPath string `json:"html_path"`
+		Opened   bool   `json:"opened"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal review-open output: %v\nstdout=%q", err, stdout)
+	}
+	if result.HTMLPath != htmlPath || result.Opened {
+		t.Fatalf("review-open result = %+v, want literal HTML path %q and dry-run", result, htmlPath)
 	}
 }
 
@@ -125,6 +167,102 @@ func TestShotsReviewApprove_AllReady(t *testing.T) {
 	}
 	if !strings.Contains(string(approvalData), "en|iPhone_Air|home") {
 		t.Fatalf("expected key in approvals file, got %q", string(approvalData))
+	}
+}
+
+func TestShotsReviewApprovePreservesWhitespaceManifestPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	outputDir := t.TempDir()
+	manifestPath := filepath.Join(outputDir, "manifest.json ")
+	if err := os.WriteFile(manifestPath, []byte(`{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "framed_dir": "/tmp/framed",
+  "output_dir": "/tmp/review",
+  "entries": [{"key":"en|iPhone_Air|home","screenshot_id":"home","locale":"en","device":"iPhone_Air","status":"ready"}]
+}`), 0o644); err != nil {
+		t.Fatalf("write whitespace manifest: %v", err)
+	}
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "review-approve",
+		"--output-dir", outputDir,
+		"--manifest-path", manifestPath,
+		"--key", "en|iPhone_Air|home",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var result struct {
+		ManifestPath string `json:"manifest_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal review-approve output: %v\nstdout=%q", err, stdout)
+	}
+	if result.ManifestPath != manifestPath {
+		t.Fatalf("manifest_path = %q, want literal %q", result.ManifestPath, manifestPath)
+	}
+}
+
+func TestShotsReviewApprovePreservesWhitespaceApprovalPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	t.Setenv("ASC_APP_ID", "")
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	outputDir := t.TempDir()
+	manifestPath := filepath.Join(outputDir, "manifest.json")
+	approvalPath := filepath.Join(outputDir, "approved.json ")
+	if err := os.WriteFile(manifestPath, []byte(`{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "framed_dir": "/tmp/framed",
+  "output_dir": "/tmp/review",
+  "entries": [{"key":"en|iPhone_Air|home","screenshot_id":"home","locale":"en","device":"iPhone_Air","status":"ready"}]
+}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(approvalPath, []byte("[]\n"), 0o600); err != nil {
+		t.Fatalf("write whitespace approval: %v", err)
+	}
+	root := RootCommand("1.2.3")
+	if err := root.Parse([]string{
+		"screenshots", "review-approve",
+		"--output-dir", outputDir,
+		"--approval-path", approvalPath,
+		"--key", "en|iPhone_Air|home",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Run(context.Background()); err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var result struct {
+		ApprovalPath string `json:"approval_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("unmarshal review-approve output: %v\nstdout=%q", err, stdout)
+	}
+	if result.ApprovalPath != approvalPath {
+		t.Fatalf("approval_path = %q, want literal %q", result.ApprovalPath, approvalPath)
 	}
 }
 

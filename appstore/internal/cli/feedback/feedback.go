@@ -94,13 +94,13 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 	}
 
 	if *flags.limit != 0 && (*flags.limit < 1 || *flags.limit > 200) {
-		return fmt.Errorf("%s: --limit must be between 1 and 200", prefix)
+		return shared.UsageErrorf("%s: --limit must be between 1 and 200", prefix)
 	}
 	if err := shared.ValidateNextURL(*flags.next); err != nil {
-		return fmt.Errorf("%s: %w", prefix, err)
+		return shared.UsageErrorf("%s: %v", prefix, err)
 	}
 	if err := shared.ValidateSort(*flags.sort, "createdDate", "-createdDate"); err != nil {
-		return fmt.Errorf("%s: %w", prefix, err)
+		return shared.UsageErrorf("%s: %v", prefix, err)
 	}
 	if err := shared.ValidateInclude(*flags.include, "build", "tester"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n\n", err)

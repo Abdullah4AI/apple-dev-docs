@@ -99,10 +99,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("versions list: --limit must be between 1 and 200")
+				return shared.UsageError("versions list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("versions list: %w", err)
+				return shared.UsageErrorf("versions list: %v", err)
 			}
 			if *latest && strings.TrimSpace(*next) != "" {
 				return shared.UsageError("versions list: --latest fetches all pages itself and cannot be combined with --next")
@@ -459,6 +459,7 @@ Examples:
 				VersionString: versionResp.Data.Attributes.VersionString,
 				Platform:      string(versionResp.Data.Attributes.Platform),
 				State:         shared.ResolveAppStoreVersionState(versionResp.Data.Attributes),
+				Downloadable:  versionResp.Data.Attributes.Downloadable,
 			}
 
 			if *includeBuild {
@@ -624,6 +625,11 @@ func VersionsUpdateCommand() *ffcli.Command {
 	releaseType := fs.String("release-type", "", "Release type: MANUAL, AFTER_APPROVAL, SCHEDULED")
 	earliestReleaseDate := fs.String("earliest-release-date", "", "Earliest release date (ISO 8601, e.g., 2026-02-01T08:00:00+00:00)")
 	versionString := fs.String("version", "", "Version string (e.g., 1.0.1)")
+	var downloadable shared.OptionalBool
+	fs.Var(&downloadable, "downloadable", "Download availability for this version on older operating systems and devices: true or false")
+	var confirm shared.OptionalBool
+	confirm.EnableBoolFlag()
+	fs.Var(&confirm, "confirm", "Confirm making this version unavailable for download (required with --downloadable false)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -632,14 +638,32 @@ func VersionsUpdateCommand() *ffcli.Command {
 		ShortHelp:  "Update an app store version.",
 		LongHelp: `Update an app store version.
 
+--downloadable is the public App Store Connect API surface behind App Store
+Connect's Last-Compatible Version Settings screen. It is tri-state: leaving it
+unset sends nothing, so an unrelated update never changes download
+availability. Setting it to false makes a previously released version
+unavailable for download on older operating systems and devices, which is not
+reversible from every state, so that direction requires --confirm.
+
+Read the current value with asc versions list --app APP_ID --paginate --output
+json or asc versions view --version-id VERSION_ID --output json; Apple omits
+the attribute for versions that never carried the setting. --paginate matters
+here because the oldest versions, the ones this setting usually targets, fall
+past the first page.
+
 Examples:
   asc versions update --version-id "VERSION_ID" --copyright "2026 My Company"
   asc versions update --version-id "VERSION_ID" --release-type MANUAL
   asc versions update --version-id "VERSION_ID" --release-type SCHEDULED --earliest-release-date "2026-02-01T08:00:00+00:00"
-  asc versions update --version-id "VERSION_ID" --version "1.0.1"`,
+  asc versions update --version-id "VERSION_ID" --version "1.0.1"
+  asc versions update --version-id "VERSION_ID" --downloadable true
+  asc versions update --version-id "VERSION_ID" --downloadable false --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
+			if err := shared.RejectPositionalArgs(args); err != nil {
+				return err
+			}
 			if err := legacyID.Apply(versionID); err != nil {
 				return err
 			}
@@ -654,9 +678,21 @@ Examples:
 			}
 
 			// Check that at least one update field is provided
-			if *copyright == "" && normalizedReleaseType == "" && *earliestReleaseDate == "" && *versionString == "" {
-				fmt.Fprintln(os.Stderr, "Error: at least one of --copyright, --release-type, --earliest-release-date, or --version is required")
+			if *copyright == "" && normalizedReleaseType == "" && *earliestReleaseDate == "" && *versionString == "" && !downloadable.IsSet() {
+				fmt.Fprintln(os.Stderr, "Error: at least one of --copyright, --release-type, --earliest-release-date, --version, or --downloadable is required")
 				return shared.MissingRequiredUsageError("")
+			}
+
+			// --confirm is tracked rather than read as a plain bool so an
+			// explicit --confirm=false is rejected instead of silently
+			// ignored, the same as a --confirm that was never needed.
+			downloadableFalse := downloadable.IsSet() && !downloadable.Value()
+			if downloadableFalse && (!confirm.IsSet() || !confirm.Value()) {
+				fmt.Fprintln(os.Stderr, "Error: --confirm is required with --downloadable false because making a released version unavailable for download is not reversible from every state. No request was sent.")
+				return shared.MissingRequiredUsageError("--confirm")
+			}
+			if confirm.IsSet() && !downloadableFalse {
+				return shared.UsageError("--confirm applies only to --downloadable false; remove it or pass --downloadable false")
 			}
 
 			client, err := shared.GetASCClient()
@@ -680,6 +716,10 @@ Examples:
 			if *versionString != "" {
 				attrs.VersionString = versionString
 			}
+			if downloadable.IsSet() {
+				value := downloadable.Value()
+				attrs.Downloadable = &value
+			}
 
 			resp, err := client.UpdateAppStoreVersion(requestCtx, strings.TrimSpace(*versionID), attrs)
 			if err != nil {
@@ -691,6 +731,7 @@ Examples:
 				VersionString: resp.Data.Attributes.VersionString,
 				Platform:      string(resp.Data.Attributes.Platform),
 				State:         shared.ResolveAppStoreVersionState(resp.Data.Attributes),
+				Downloadable:  resp.Data.Attributes.Downloadable,
 			}
 
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)

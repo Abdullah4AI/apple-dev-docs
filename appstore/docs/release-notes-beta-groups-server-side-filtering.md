@@ -2,7 +2,7 @@
 
 `asc testflight groups list --app APP_ID --internal` and `--external` are now
 filtered by App Store Connect instead of in the CLI. `GET /v1/apps/{id}/betaGroups`
-accepts only a page limit, so the command previously fetched every page and
+accepts only `limit` and `fields[betaGroups]`, so the command previously fetched every page and
 filtered the aggregate in Go. Those requests now go to `GET /v1/betaGroups`
 with `filter[app]` and `filter[isInternalGroup]`, while retaining the complete
 multi-page result.

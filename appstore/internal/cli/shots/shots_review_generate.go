@@ -38,17 +38,17 @@ func ShotsReviewGenerateCommand() *ffcli.Command {
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			framed := strings.TrimSpace(*framedDir)
-			if framed == "" {
+			framed := *framedDir
+			if strings.TrimSpace(framed) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --framed-dir is required")
 				return shared.MissingRequiredUsageError("--framed-dir")
 			}
 
 			result, err := screenshots.GenerateReview(ctx, screenshots.ReviewRequest{
-				RawDir:       strings.TrimSpace(*rawDir),
+				RawDir:       *rawDir,
 				FramedDir:    framed,
-				OutputDir:    strings.TrimSpace(*outputDir),
-				ApprovalPath: strings.TrimSpace(*approvalPath),
+				OutputDir:    *outputDir,
+				ApprovalPath: *approvalPath,
 			})
 			if err != nil {
 				return fmt.Errorf("screenshots review-generate: %w", err)

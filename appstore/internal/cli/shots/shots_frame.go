@@ -73,8 +73,12 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			configVal := strings.TrimSpace(*configPath)
-			inputVal := strings.TrimSpace(*inputPath)
+			// Keep path values literal after validating emptiness. Trimming a
+			// valid path can select a different filesystem entry.
+			configVal := *configPath
+			inputVal := *inputPath
+			configSet := strings.TrimSpace(configVal) != ""
+			inputSet := strings.TrimSpace(inputVal) != ""
 			watchDebounceSet := false
 			watchReviewDirSet := false
 			watchRawDirSet := false
@@ -98,15 +102,15 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 					}
 				}
 			})
-			if configVal == "" && inputVal == "" {
+			if !configSet && !inputSet {
 				fmt.Fprintln(os.Stderr, "Error: --input is required when --config is not set")
 				return shared.MissingRequiredUsageError("--input")
 			}
-			if configVal != "" && inputVal != "" {
+			if configSet && inputSet {
 				fmt.Fprintln(os.Stderr, "Error: use either --input or --config, not both")
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--config")
 			}
-			if *watch && configVal == "" {
+			if *watch && !configSet {
 				fmt.Fprintln(os.Stderr, "Error: --watch requires --config")
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--watch")
 			}
@@ -139,7 +143,7 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 			if watchDebounceSet && *watchDebounce <= 0 {
 				return shared.WithDiagnostic(shared.UsageError("--watch-debounce must be greater than 0"), shared.DiagnosticInvalidInput, "--watch-debounce")
 			}
-			if configVal != "" {
+			if configSet {
 				absConfig, err := filepath.Abs(configVal)
 				if err != nil {
 					return fmt.Errorf("screenshots frame: resolve config path: %w", err)
@@ -153,10 +157,10 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 				watchCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
 				defer stop()
 				var opts *screenshots.WatchOptions
-				if reviewDir := strings.TrimSpace(*watchReviewDir); reviewDir != "" {
+				if reviewDir := *watchReviewDir; strings.TrimSpace(reviewDir) != "" {
 					opts = &screenshots.WatchOptions{
 						ReviewOutputDir: reviewDir,
-						ReviewRawDir:    strings.TrimSpace(*watchRawDir),
+						ReviewRawDir:    *watchRawDir,
 					}
 				}
 				return screenshots.WatchAndRegenerate(watchCtx, configVal, *watchDebounce, nil, opts)
@@ -189,7 +193,7 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 				canvasParameters = append(canvasParameters, "--subtitle-color")
 			}
 			hasCanvasFlags := len(canvasParameters) > 0
-			if hasCanvasFlags && configVal != "" {
+			if hasCanvasFlags && configSet {
 				fmt.Fprintf(os.Stderr, "Error: --title, --subtitle, --bg-color, --title-color, --subtitle-color cannot be used with --config; set these in the YAML config instead\n")
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticConflictingInput, "--config")
 			}
@@ -203,7 +207,7 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 			}
 
 			absInput := ""
-			if inputVal != "" {
+			if inputSet {
 				var err error
 				absInput, err = filepath.Abs(inputVal)
 				if err != nil {
@@ -212,7 +216,7 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 			}
 
 			outputDevice := string(deviceVal)
-			if configVal != "" && strings.TrimSpace(*outputPath) == "" {
+			if configSet && strings.TrimSpace(*outputPath) == "" {
 				outputDevice = screenshots.ResolveFrameDeviceFromConfig(configVal, outputDevice)
 			}
 
@@ -252,8 +256,8 @@ framed screenshots whenever the YAML config or referenced raw assets change.`,
 }
 
 func resolveOutputPath(explicitPath, outputDir, name, inputPath, device string) (string, error) {
-	explicit := strings.TrimSpace(explicitPath)
-	if explicit != "" {
+	explicit := explicitPath
+	if strings.TrimSpace(explicit) != "" {
 		absPath, err := filepath.Abs(explicit)
 		if err != nil {
 			return "", fmt.Errorf("resolve output path: %w", err)
@@ -261,8 +265,8 @@ func resolveOutputPath(explicitPath, outputDir, name, inputPath, device string) 
 		return absPath, nil
 	}
 
-	dir := strings.TrimSpace(outputDir)
-	if dir == "" {
+	dir := outputDir
+	if strings.TrimSpace(dir) == "" {
 		dir = defaultShotsFrameOutputDir
 	}
 	baseName := strings.TrimSpace(name)
@@ -274,9 +278,8 @@ func resolveOutputPath(explicitPath, outputDir, name, inputPath, device string) 
 		)
 	}
 	if baseName == "" {
-		trimmedInputPath := strings.TrimSpace(inputPath)
-		if trimmedInputPath != "" {
-			baseName = strings.TrimSuffix(filepath.Base(trimmedInputPath), filepath.Ext(trimmedInputPath))
+		if strings.TrimSpace(inputPath) != "" {
+			baseName = strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 		}
 	}
 	if baseName == "" {

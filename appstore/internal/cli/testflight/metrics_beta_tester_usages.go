@@ -108,7 +108,7 @@ Examples:
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--limit")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight metrics beta-tester-usages: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight metrics beta-tester-usages: %v", err)
 			}
 
 			periodValue, err := normalizeBetaTesterUsagePeriod(*period)
@@ -177,7 +177,7 @@ Examples:
 				return shared.PrintOutput(page, *output.Output, *output.Pretty)
 			}
 
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
+			return printAppTesterUsages(resp, *output.Output, *output.Pretty)
 		},
 	}
 }
@@ -246,6 +246,24 @@ func paginateBetaTesterUsages(ctx context.Context, client *asc.Client, appID str
 	}
 
 	return combined, nil
+}
+
+func printAppTesterUsages(resp *asc.BetaTesterUsagesResponse, format string, pretty bool) error {
+	resolved, err := shared.ValidateOutputFormat(format, pretty)
+	if err != nil {
+		return err
+	}
+	if resolved == "table" || resolved == "markdown" {
+		page := &asc.BetaTesterUsagesPage{}
+		if resp != nil && len(resp.Data) > 0 {
+			page, err = parseBetaTesterUsagesPage(resp.Data)
+			if err != nil {
+				return err
+			}
+		}
+		return shared.PrintOutput(page, resolved, pretty)
+	}
+	return shared.PrintOutput(resp, format, pretty)
 }
 
 func parseBetaTesterUsagesPage(data json.RawMessage) (*asc.BetaTesterUsagesPage, error) {
@@ -361,14 +379,17 @@ func betaTesterUsageTesterIDs(rows []json.RawMessage) ([]string, error) {
 		var parsed struct {
 			Dimensions struct {
 				BetaTesters struct {
-					Data string `json:"data"`
+					Data *asc.MetricDimensionData `json:"data"`
 				} `json:"betaTesters"`
 			} `json:"dimensions"`
 		}
 		if err := json.Unmarshal(row, &parsed); err != nil {
 			return nil, fmt.Errorf("parse data[%d] dimensions: %w", i, err)
 		}
-		id := strings.TrimSpace(parsed.Dimensions.BetaTesters.Data)
+		if parsed.Dimensions.BetaTesters.Data == nil {
+			continue
+		}
+		id := strings.TrimSpace(parsed.Dimensions.BetaTesters.Data.ID)
 		if id == "" {
 			continue
 		}

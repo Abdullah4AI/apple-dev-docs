@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
 func runPhase38InvalidNextURLCases(
@@ -66,11 +68,11 @@ func runPhase38InvalidNextURLCases(
 					expectedWarning = crashesRootDeprecationWarning
 				}
 			}
-			if expectedWarning == "" {
-				if stderr != "" {
-					t.Fatalf("expected empty stderr, got %q", stderr)
-				}
-			} else {
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
+			}
+			assertUsageDiagnosticFirstLine(t, stderr, test.wantErr)
+			if expectedWarning != "" {
 				requireStderrContainsWarning(t, stderr, expectedWarning)
 			}
 		})

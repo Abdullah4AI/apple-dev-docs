@@ -140,11 +140,27 @@ func TestCaptureWithProvider_ValidPNG(t *testing.T) {
 }
 
 type fakeProvider struct {
-	path string
+	path    string
+	request CaptureRequest
 }
 
-func (f *fakeProvider) Capture(context.Context, CaptureRequest) (string, error) {
+func (f *fakeProvider) Capture(_ context.Context, request CaptureRequest) (string, error) {
+	f.request = request
 	return f.path, nil
+}
+
+func TestCaptureWithProviderPreservesLiteralOutputDirectorySpelling(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "captured ")
+	pngPath := filepath.Join(t.TempDir(), "capture.png")
+	writeMinimalPNG(t, pngPath, 10, 10)
+	provider := &fakeProvider{path: pngPath}
+	request := CaptureRequest{Provider: ProviderAXe, Name: "home", OutputDir: outputDir}
+	if _, err := CaptureWithProvider(context.Background(), request, provider); err != nil {
+		t.Fatalf("CaptureWithProvider() error = %v", err)
+	}
+	if provider.request.OutputDir != outputDir {
+		t.Fatalf("provider OutputDir = %q, want %q", provider.request.OutputDir, outputDir)
+	}
 }
 
 // writeMinimalPNG writes a minimal valid PNG file for dimension tests.

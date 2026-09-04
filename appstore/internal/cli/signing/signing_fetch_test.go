@@ -1488,3 +1488,27 @@ func profileCreateCertificateIDs(t *testing.T, body io.Reader) []string {
 	}
 	return ids
 }
+
+func TestResolveSigningCertificateTypesCanonicalizesSeparators(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "hyphenated", raw: "ios-distribution", want: "IOS_DISTRIBUTION"},
+		{name: "spaced", raw: "mac installer distribution", want: "MAC_INSTALLER_DISTRIBUTION"},
+		{name: "mixed list", raw: "development,ios-distribution", want: "DEVELOPMENT,IOS_DISTRIBUTION"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveSigningCertificateTypes("IOS_APP_STORE", tt.raw)
+			if err != nil {
+				t.Fatalf("resolveSigningCertificateTypes() error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveSigningCertificateTypes() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

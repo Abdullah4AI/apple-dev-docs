@@ -43,6 +43,7 @@ Examples:
   asc web xcode-cloud usage months --product-ids "UUID" --apple-id "user@example.com" --output table
   asc web xcode-cloud usage days --product-ids "UUID" --apple-id "user@example.com"
   asc web xcode-cloud usage workflows --product-id "UUID" --apple-id "user@example.com" --output table
+  asc web xcode-cloud workflows list --product-id "UUID" --apple-id "user@example.com"
   asc web xcode-cloud workflows create --product-id "UUID" --file ./workflow.json --apple-id "user@example.com"
   asc web xcode-cloud workflows describe --product-id "UUID" --workflow-id "WF-UUID" --apple-id "user@example.com"
   asc web xcode-cloud workflows options product-config --product-id "UUID" --apple-id "user@example.com"
@@ -111,10 +112,8 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -191,10 +190,8 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -289,10 +286,8 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -412,10 +407,8 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}
@@ -641,10 +634,8 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, sessionFlags)
 			defer cancel()
-
-			session, err := resolveWebSessionForCommand(requestCtx, sessionFlags)
 			if err != nil {
 				return err
 			}

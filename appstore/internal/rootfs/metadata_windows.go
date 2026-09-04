@@ -40,6 +40,15 @@ func copyReplacementMetadata(destination, source *os.File, info os.FileInfo) err
 	if err != nil {
 		return fmt.Errorf("inspect replacement access control list: %w", err)
 	}
+	shouldSet, err := shouldSetReplacementDACL(control, dacl)
+	if err != nil {
+		return fmt.Errorf("inspect replacement access control list: %w", err)
+	}
+	if !shouldSet {
+		// The replacement already inherits the parent DACL. Copying that
+		// inherited-only ACL with SetSecurityInfo fails with ACCESS_DENIED.
+		return nil
+	}
 
 	destinationHandle, err := reopenForDACL(destination)
 	if err != nil {
@@ -61,6 +70,40 @@ func copyReplacementMetadata(destination, source *os.File, info os.FileInfo) err
 		return fmt.Errorf("preserve replacement access control list: %w", err)
 	}
 	return nil
+}
+
+func shouldSetReplacementDACL(control windows.SECURITY_DESCRIPTOR_CONTROL, dacl *windows.ACL) (bool, error) {
+	if dacl == nil {
+		// SECURITY_DESCRIPTOR.DACL() returns (nil, _, nil) for a present NULL
+		// DACL, which is fully permissive and must be preserved. A missing
+		// DACL is reported as an error by DACL() before we get here.
+		return true, nil
+	}
+	if dacl.AceCount == 0 {
+		// An empty DACL denies all access. Skipping the copy would leave the
+		// replacement with its inherited parent ACL and broaden access.
+		return true, nil
+	}
+	if control&windows.SE_DACL_PROTECTED != 0 {
+		return true, nil
+	}
+	return hasExplicitACE(dacl)
+}
+
+func hasExplicitACE(dacl *windows.ACL) (bool, error) {
+	if dacl == nil {
+		return false, nil
+	}
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			return false, err
+		}
+		if ace.Header.AceFlags&windows.INHERITED_ACE == 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func reopenForDACL(file *os.File) (windows.Handle, error) {

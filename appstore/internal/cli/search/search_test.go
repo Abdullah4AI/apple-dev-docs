@@ -2,6 +2,7 @@ package search
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -158,6 +159,126 @@ func TestTokenContainsMatchesSingularPluralAndHyphenatedComponents(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			if !tokenContains(test.tokens, test.term) {
 				t.Fatalf("expected %q to match tokens %v", test.term, test.tokens)
+			}
+		})
+	}
+}
+
+func TestScopedAuthActionIntentPrefersEverySupportedActionOverStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    []string
+		expected string
+	}{
+		{name: "auth init", query: []string{"auth", "init", "status"}, expected: "asc auth init"},
+		{name: "auth login", query: []string{"auth", "login", "status"}, expected: "asc auth login"},
+		{name: "auth export-to-config", query: []string{"auth", "export-to-config", "status"}, expected: "asc auth export-to-config"},
+		{name: "auth export alias", query: []string{"auth", "export", "status"}, expected: "asc auth export-to-config"},
+		{name: "auth switch", query: []string{"auth", "switch", "status"}, expected: "asc auth switch"},
+		{name: "auth logout", query: []string{"auth", "logout", "status"}, expected: "asc auth logout"},
+		{name: "auth doctor", query: []string{"auth", "doctor", "status"}, expected: "asc auth doctor"},
+		{name: "auth issuer-id", query: []string{"auth", "issuer-id", "status"}, expected: "asc auth issuer-id"},
+		{name: "auth issuer id split", query: []string{"auth", "issuer", "id", "status"}, expected: "asc auth issuer-id"},
+		{name: "auth token", query: []string{"auth", "token", "status"}, expected: "asc auth token"},
+		{name: "StoreKit login", query: []string{"storekit", "auth", "login", "status"}, expected: "asc storekit auth login"},
+		{name: "StoreKit switch", query: []string{"storekit", "auth", "switch", "status"}, expected: "asc storekit auth switch"},
+		{name: "StoreKit doctor", query: []string{"storekit", "auth", "doctor", "status"}, expected: "asc storekit auth doctor"},
+		{name: "StoreKit logout", query: []string{"storekit", "auth", "logout", "status"}, expected: "asc storekit auth logout"},
+		{name: "Ads login", query: []string{"ads", "auth", "login", "status"}, expected: "asc ads auth login"},
+		{name: "Ads discover", query: []string{"ads", "auth", "discover", "status"}, expected: "asc ads auth discover"},
+		{name: "Ads switch", query: []string{"ads", "auth", "switch", "status"}, expected: "asc ads auth switch"},
+		{name: "Ads token", query: []string{"ads", "auth", "token", "status"}, expected: "asc ads auth token"},
+		{name: "Ads doctor", query: []string{"ads", "auth", "doctor", "status"}, expected: "asc ads auth doctor"},
+		{name: "Ads logout", query: []string{"ads", "auth", "logout", "status"}, expected: "asc ads auth logout"},
+		{name: "web login", query: []string{"web", "auth", "login", "status"}, expected: "asc web auth login"},
+		{name: "web capabilities", query: []string{"web", "auth", "capabilities", "status"}, expected: "asc web auth capabilities"},
+		{name: "web logout", query: []string{"web", "auth", "logout", "status"}, expected: "asc web auth logout"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target, _, ok := scopedAuthActionIntent(test.query)
+			if !ok {
+				t.Fatal("expected an auth action intent")
+			}
+			if target != test.expected {
+				t.Fatalf("scopedAuthActionIntent() = %q, want %q", target, test.expected)
+			}
+		})
+	}
+}
+
+func TestScopedCanonicalIntentPrefersMostSpecificNamedLeaf(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    []string
+		expected string
+	}{
+		{name: "metadata flat sibling", query: []string{"metadata", "plan", "status"}, expected: "asc metadata plan"},
+		{name: "metadata nested keywords plan", query: []string{"metadata", "keywords", "plan", "status"}, expected: "asc metadata keywords plan"},
+		{name: "metadata nested keywords apply", query: []string{"metadata", "keywords", "apply", "status"}, expected: "asc metadata keywords apply"},
+		{name: "metadata nested keywords push", query: []string{"metadata", "keywords", "push", "status"}, expected: "asc metadata keywords push"},
+		{name: "metadata nested keywords audit", query: []string{"metadata", "keywords", "audit", "status"}, expected: "asc metadata keywords audit"},
+		{name: "metadata keywords group", query: []string{"metadata", "keywords", "status"}, expected: "asc metadata keywords"},
+		{name: "analytics compound split", query: []string{"product", "pages", "analytics", "dashboard"}, expected: "asc web analytics product-pages"},
+		{name: "analytics compound hyphenated", query: []string{"product-pages", "analytics", "dashboard"}, expected: "asc web analytics product-pages"},
+		{name: "analytics in app events split", query: []string{"in", "app", "events", "analytics", "dashboard"}, expected: "asc web analytics in-app-events"},
+		{name: "analytics app clips split", query: []string{"app", "clips", "analytics", "dashboard"}, expected: "asc web analytics app-clips"},
+		{name: "analytics overview fallback", query: []string{"analytics", "overview"}, expected: "asc web analytics overview"},
+		{name: "beta cancellation stays on TestFlight", query: []string{"cancel", "beta", "review", "submission", "status"}, expected: "asc testflight review submissions view"},
+		{name: "beta app review cancellation stays on TestFlight", query: []string{"cancel", "beta", "app", "review", "submission", "status"}, expected: "asc testflight review submissions view"},
+		{name: "cross-surface cancellation stays on App Store", query: []string{"cancel", "testflight", "app", "store", "submission", "status"}, expected: "asc submit cancel"},
+		{name: "cross-surface App Review cancellation stays on App Store", query: []string{"cancel", "testflight", "and", "app", "review", "submission", "status"}, expected: "asc submit cancel"},
+		{name: "explicit beta and App Review cancellation is cross-surface", query: []string{"cancel", "testflight", "beta", "and", "app", "review", "submission", "status"}, expected: "asc submit cancel"},
+		{name: "implicit TestFlight App Review cancellation stays scoped", query: []string{"cancel", "testflight", "app", "review", "submission", "status"}, expected: "asc testflight review submissions view"},
+		{name: "status conjunction does not imply cross-surface cancellation", query: []string{"cancel", "testflight", "app", "review", "submission", "and", "status"}, expected: "asc testflight review submissions view"},
+		{name: "agreement download", query: []string{"download", "apple", "developer", "agreement", "status"}, expected: "asc web agreements download"},
+		{name: "Xcode Cloud workflow duplicate", query: []string{"duplicate", "xcode", "cloud", "workflow", "status"}, expected: "asc xcode-cloud workflows duplicate"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target, _, ok := scopedCanonicalIntent(test.query)
+			if !ok {
+				t.Fatalf("expected scoped intent for %v", test.query)
+			}
+			if target != test.expected {
+				t.Fatalf("expected %q, got %q", test.expected, target)
+			}
+		})
+	}
+}
+
+func TestScopedCanonicalIntentLeavesAppReviewDashboardForAggregateStatus(t *testing.T) {
+	target, _, ok := scopedCanonicalIntent([]string{"testflight", "and", "app", "review", "dashboard"})
+	if ok {
+		t.Fatalf("expected aggregate dashboard scoring, got scoped target %q", target)
+	}
+}
+
+func TestScopedCanonicalIntentRequiresWorkflowForXcodeCloudDuplicate(t *testing.T) {
+	for _, query := range [][]string{
+		{"duplicate", "xcode", "cloud", "artifact"},
+		{"duplicate", "xcode", "cloud", "build", "run", "status"},
+	} {
+		t.Run(strings.Join(query, "-"), func(t *testing.T) {
+			target, reason, _ := scopedCanonicalIntent(query)
+			if target == "asc xcode-cloud workflows duplicate" || reason == "canonical:xcode-cloud-workflow-duplicate" {
+				t.Fatalf("expected non-workflow Xcode Cloud routing, got duplicate target %q", target)
+			}
+		})
+	}
+}
+
+func TestScopedCanonicalIntentLeavesTestFlightAgreementDownloadUnscoped(t *testing.T) {
+	for _, query := range [][]string{
+		{"download", "testflight", "beta", "license", "agreement"},
+		{"download", "beta", "license", "agreement"},
+	} {
+		t.Run(strings.Join(query, "-"), func(t *testing.T) {
+			target, reason, _ := scopedCanonicalIntent(query)
+			if target == "asc web agreements download" || reason == "canonical:agreement-download" {
+				t.Fatalf("expected TestFlight agreement scoring, got scoped target %q", target)
 			}
 		})
 	}

@@ -57,8 +57,8 @@ macOS: app must be running. Captures the frontmost visible window by bundle ID.
 				return shared.WithDiagnostic(flag.ErrHelp, shared.DiagnosticInvalidInput, "--provider")
 			}
 
-			outputDirVal := strings.TrimSpace(*outputDir)
-			if outputDirVal == "" {
+			outputDirVal := *outputDir
+			if strings.TrimSpace(outputDirVal) == "" {
 				outputDirVal = "./screenshots/raw"
 			}
 			absOut, err := filepath.Abs(outputDirVal)

@@ -69,13 +69,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("testflight review view: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "testflight review view: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight review view: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight review view: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -392,13 +392,13 @@ Examples:
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("testflight review submissions list: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "testflight review submissions list: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight review submissions list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight review submissions list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -582,13 +582,13 @@ Examples:
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("testflight beta-details view: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "testflight beta-details view: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight beta-details view: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight beta-details view: %v", err)
 			}
 
 			trimmedBuildID := strings.TrimSpace(*buildID)
@@ -865,18 +865,18 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("testflight recruitment options: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "testflight recruitment options: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("testflight recruitment options: %w", err)
+				return shared.UsageErrorfCtx(ctx, "testflight recruitment options: %v", err)
 			}
 
 			fieldsValue, err := normalizeBetaRecruitmentCriterionOptionsFields(*fields)
 			if err != nil {
-				return fmt.Errorf("testflight recruitment options: %w", err)
+				return usageErrorFromValidation(ctx, "testflight recruitment options: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
@@ -930,7 +930,7 @@ Examples:
 
 			filterValues, err := parseDeviceFamilyOsVersionFilters(*filters)
 			if err != nil {
-				return fmt.Errorf("testflight recruitment set: %w", err)
+				return usageErrorFromValidation(ctx, "testflight recruitment set: %v", err)
 			}
 			if len(filterValues) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --os-version-filter is required")

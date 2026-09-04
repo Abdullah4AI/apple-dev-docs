@@ -181,54 +181,9 @@ func TestTestFlightMetricsAppTestersPaginate(t *testing.T) {
 }
 
 func TestTestFlightMetricsAppTestersRejectsInvalidNextURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		next    string
-		wantErr string
-	}{
-		{
-			name:    "invalid scheme",
-			next:    "http://api.appstoreconnect.apple.com/v1/apps/app-1/metrics/betaTesterUsages?limit=2",
-			wantErr: "testflight metrics app-testers: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "malformed URL",
-			next:    "https://api.appstoreconnect.apple.com/%zz",
-			wantErr: "testflight metrics app-testers: --next must be a valid URL:",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			var runErr error
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse([]string{
-					"testflight", "metrics", "app-testers",
-					"--next", test.next,
-				}); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				runErr = root.Run(context.Background())
-			})
-
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if errors.Is(runErr, flag.ErrHelp) {
-				t.Fatalf("expected non-help error, got %v", runErr)
-			}
-			if !strings.Contains(runErr.Error(), test.wantErr) {
-				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
-			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
-			}
-		})
-	}
+	runInvalidNextURLUsageErrorCases(
+		t,
+		[]string{"testflight", "metrics", "app-testers"},
+		"testflight metrics app-testers: --next",
+	)
 }

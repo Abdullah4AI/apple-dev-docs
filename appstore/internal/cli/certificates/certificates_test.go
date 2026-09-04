@@ -546,3 +546,82 @@ func TestCertificatesRelationshipsPassTypeIDCommand_MissingID(t *testing.T) {
 		t.Fatalf("expected flag.ErrHelp when --id is missing, got %v", err)
 	}
 }
+
+func TestCertificatesCreateCommand_PostsCanonicalCertificateType(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "canonical.key")
+	csrOut := filepath.Join(dir, "canonical.csr")
+
+	var got asc.CertificateCreateRequest
+	client := newCertificatesTestClient(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"certificates","id":"cert-1","attributes":{"name":"Cert","certificateType":"IOS_DISTRIBUTION"}}}`), nil
+	}))
+
+	originalGetClient := getCertificatesASCClient
+	getCertificatesASCClient = func() (*asc.Client, error) { return client, nil }
+	t.Cleanup(func() { getCertificatesASCClient = originalGetClient })
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "ios-distribution",
+		"--generate-csr",
+		"--key-out", keyOut,
+		"--csr-out", csrOut,
+		"--common-name", "ASC Signing",
+		"--output", "json",
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	if err := cmd.Exec(context.Background(), []string{}); err != nil {
+		t.Fatalf("exec error: %v", err)
+	}
+
+	if got.Data.Attributes.CertificateType != "IOS_DISTRIBUTION" {
+		t.Fatalf("expected canonical certificate type IOS_DISTRIBUTION, got %q", got.Data.Attributes.CertificateType)
+	}
+}
+
+func TestCertificatesCreateCommand_PassTypeRequirementSurvivesNonCanonicalSpelling(t *testing.T) {
+	dir := t.TempDir()
+	keyOut := filepath.Join(dir, "pass.key")
+	csrOut := filepath.Join(dir, "pass.csr")
+
+	cmd := CertificatesCreateCommand()
+	if err := cmd.FlagSet.Parse([]string{
+		"--certificate-type", "pass-type-id",
+		"--generate-csr",
+		"--key-out", keyOut,
+		"--csr-out", csrOut,
+	}); err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	err := cmd.Exec(context.Background(), []string{})
+	if err == nil {
+		t.Fatal("expected --pass-type-id to be required for a pass type certificate")
+	}
+	if _, statErr := os.Stat(keyOut); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("private key should not be generated, stat error: %v", statErr)
+	}
+	if _, statErr := os.Stat(csrOut); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("CSR should not be generated, stat error: %v", statErr)
+	}
+}
+
+func TestCertificatesCreateCommand_HelpOmitsApplePayTypes(t *testing.T) {
+	usage := CertificatesCreateCommand().FlagSet.Lookup("certificate-type").Usage
+	if strings.Contains(usage, "APPLE_PAY") {
+		t.Fatalf("--certificate-type help offers Apple Pay types the command rejects: %q", usage)
+	}
+	if !strings.Contains(usage, "MAC_INSTALLER_DISTRIBUTION") {
+		t.Fatalf("--certificate-type help should list the creatable types, got %q", usage)
+	}
+}

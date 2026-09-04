@@ -67,13 +67,13 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("apps app-encryption-declarations list: --limit must be between 1 and 200")
+				return shared.UsageError("apps app-encryption-declarations list: --limit must be between 1 and 200")
 			}
 			if *buildLimit != 0 && (*buildLimit < 1 || *buildLimit > 50) {
-				return fmt.Errorf("apps app-encryption-declarations list: --build-limit must be between 1 and 50")
+				return shared.UsageError("apps app-encryption-declarations list: --build-limit must be between 1 and 50")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("apps app-encryption-declarations list: %w", err)
+				return shared.UsageErrorf("apps app-encryption-declarations list: %v", err)
 			}
 
 			fieldsValue, err := normalizeAppEncryptionDeclarationFields(*fields)

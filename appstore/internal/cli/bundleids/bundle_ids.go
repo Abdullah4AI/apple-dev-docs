@@ -92,7 +92,7 @@ Examples:
 			profilesLimitSet := bundleIDsListFlagWasSet(fs, "profiles-limit")
 			capabilitiesLimitSet := bundleIDsListFlagWasSet(fs, "capabilities-limit")
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("bundle-ids list: %w", err)
+				return shared.UsageErrorf("bundle-ids list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,

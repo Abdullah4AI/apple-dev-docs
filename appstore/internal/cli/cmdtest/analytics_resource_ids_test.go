@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
@@ -82,12 +83,14 @@ func TestAnalyticsRequestIDValidationRemainsBeforeClientConstruction(t *testing.
 	setupAnalyticsResourceIDAuth(t)
 
 	tests := []struct {
-		name string
-		args []string
+		name    string
+		args    []string
+		wantErr string
 	}{
 		{
-			name: "view",
-			args: []string{"analytics", "view", "--request-id", "r39-not-a-request-uuid"},
+			name:    "view",
+			args:    []string{"analytics", "view", "--request-id", "r39-not-a-request-uuid"},
+			wantErr: "analytics view: --request-id must be a valid UUID",
 		},
 		{
 			name: "download",
@@ -96,6 +99,7 @@ func TestAnalyticsRequestIDValidationRemainsBeforeClientConstruction(t *testing.
 				"--request-id", "r39-not-a-request-uuid",
 				"--instance-id", "r39-example-instance",
 			},
+			wantErr: "analytics download: --request-id must be a valid UUID",
 		},
 	}
 
@@ -111,9 +115,13 @@ func TestAnalyticsRequestIDValidationRemainsBeforeClientConstruction(t *testing.
 			if runErr == nil || !strings.Contains(runErr.Error(), "--request-id must be a valid UUID") {
 				t.Fatalf("run error = %v, want request UUID validation", runErr)
 			}
-			if stdout != "" || stderr != "" {
-				t.Fatalf("expected empty output, got stdout=%q stderr=%q", stdout, stderr)
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
 			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			assertUsageErrorStderr(t, stderr, test.wantErr)
 			if clientFactoryCalls != 0 {
 				t.Fatalf("client factory calls = %d, want 0", clientFactoryCalls)
 			}
@@ -124,46 +132,57 @@ func TestAnalyticsRequestIDValidationRemainsBeforeClientConstruction(t *testing.
 func TestAnalyticsResourcePathValidationRemainsBeforeClientConstruction(t *testing.T) {
 	setupAnalyticsResourceIDAuth(t)
 
+	const (
+		escapedInstanceID = "r39/escaped-instance"
+		escapedSegmentID  = "s39/escaped-segment"
+	)
+
 	tests := []struct {
-		name string
-		args []string
+		name    string
+		args    []string
+		wantErr string
 	}{
 		{
 			name: "instances view",
 			args: []string{
 				"analytics", "instances", "view",
-				"--instance-id", "r39/escaped-instance",
+				"--instance-id", escapedInstanceID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics instances view", "--instance-id", escapedInstanceID),
 		},
 		{
 			name: "instances links",
 			args: []string{
 				"analytics", "instances", "links",
-				"--instance-id", "r39/escaped-instance",
+				"--instance-id", escapedInstanceID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics instances links", "--instance-id", escapedInstanceID),
 		},
 		{
 			name: "view filter",
 			args: []string{
 				"analytics", "view",
 				"--request-id", analyticsViewRequestID,
-				"--instance-id", "r39/escaped-instance",
+				"--instance-id", escapedInstanceID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics view", "--instance-id", escapedInstanceID),
 		},
 		{
 			name: "segments view",
 			args: []string{
 				"analytics", "segments", "view",
-				"--segment-id", "s39/escaped-segment",
+				"--segment-id", escapedSegmentID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics segments view", "--segment-id", escapedSegmentID),
 		},
 		{
 			name: "download",
 			args: []string{
 				"analytics", "download",
 				"--request-id", analyticsViewRequestID,
-				"--instance-id", "r39/escaped-instance",
+				"--instance-id", escapedInstanceID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics download", "--instance-id", escapedInstanceID),
 		},
 		{
 			name: "download segment",
@@ -171,8 +190,9 @@ func TestAnalyticsResourcePathValidationRemainsBeforeClientConstruction(t *testi
 				"analytics", "download",
 				"--request-id", analyticsViewRequestID,
 				"--instance-id", "r39-example-instance",
-				"--segment-id", "s39/escaped-segment",
+				"--segment-id", escapedSegmentID,
 			},
+			wantErr: analyticsReservedSegmentUsageError("analytics download", "--segment-id", escapedSegmentID),
 		},
 	}
 
@@ -188,9 +208,13 @@ func TestAnalyticsResourcePathValidationRemainsBeforeClientConstruction(t *testi
 			if runErr == nil || !strings.Contains(runErr.Error(), "single path segment") {
 				t.Fatalf("run error = %v, want resource path-segment validation", runErr)
 			}
-			if stdout != "" || stderr != "" {
-				t.Fatalf("expected empty output, got stdout=%q stderr=%q", stdout, stderr)
+			if got := rootcmd.ExitCodeFromError(runErr); got != rootcmd.ExitUsage {
+				t.Fatalf("exit code = %d, want %d", got, rootcmd.ExitUsage)
 			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			assertUsageErrorStderr(t, stderr, test.wantErr)
 			if clientFactoryCalls != 0 {
 				t.Fatalf("client factory calls = %d, want 0", clientFactoryCalls)
 			}

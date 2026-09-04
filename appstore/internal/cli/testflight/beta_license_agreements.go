@@ -70,13 +70,13 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
-					shared.NewValidationError(fmt.Errorf("beta-license-agreements list: --limit must be between 1 and 200")),
+					shared.UsageErrorCtx(ctx, "beta-license-agreements list: --limit must be between 1 and 200"),
 					shared.DiagnosticInvalidInput,
 					"--limit",
 				)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("beta-license-agreements list: %w", err)
+				return shared.UsageErrorfCtx(ctx, "beta-license-agreements list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

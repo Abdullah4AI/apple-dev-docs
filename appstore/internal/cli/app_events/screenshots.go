@@ -67,10 +67,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events screenshots links: --limit must be between 1 and 200")
+				return shared.UsageError("app-events screenshots links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events screenshots links: %w", err)
+				return shared.UsageErrorf("app-events screenshots links: %v", err)
 			}
 
 			trimmedNext := strings.TrimSpace(*next)
@@ -152,10 +152,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-events screenshots list: --limit must be between 1 and 200")
+				return shared.UsageError("app-events screenshots list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-events screenshots list: %w", err)
+				return shared.UsageErrorf("app-events screenshots list: %v", err)
 			}
 			if strings.TrimSpace(*next) == "" && strings.TrimSpace(*localizationID) == "" && strings.TrimSpace(*eventID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --event-id or --localization-id is required")

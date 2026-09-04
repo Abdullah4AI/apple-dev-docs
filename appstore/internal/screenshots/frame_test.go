@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -257,6 +258,101 @@ screenshots:
 	}
 }
 
+func TestFramePreservesWhitespaceInInputPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	runFrameWhitespacePathTest(t, true, false)
+}
+
+func TestFramePreservesWhitespaceInOutputPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	runFrameWhitespacePathTest(t, false, true)
+}
+
+func runFrameWhitespacePathTest(t *testing.T, whitespaceInput, whitespaceOutput bool) {
+	t.Helper()
+	baseDir := t.TempDir()
+	inputName := "raw.png"
+	if whitespaceInput {
+		inputName += " "
+	}
+	outputName := "framed.png"
+	if whitespaceOutput {
+		outputName += " "
+	}
+	inputPath := filepath.Join(baseDir, inputName)
+	outputPath := filepath.Join(baseDir, outputName)
+	writeFrameTestPNG(t, inputPath, makeFrameTestImage(200, 300))
+
+	kouFixturePath := filepath.Join(baseDir, "kou-fixture.png")
+	writeFrameTestPNG(t, kouFixturePath, makeFrameTestImage(1320, 2868))
+	installFrameTestMockKou(t, kouFixturePath, filepath.Join(baseDir, "kou-out", "framed.png"))
+
+	result, err := Frame(context.Background(), FrameRequest{
+		InputPath:  inputPath,
+		OutputPath: outputPath,
+		Device:     string(DefaultFrameDevice()),
+	})
+	if err != nil {
+		t.Fatalf("Frame() error = %v", err)
+	}
+	wantPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		t.Fatalf("Abs(outputPath) error = %v", err)
+	}
+	if result.Path != wantPath {
+		t.Fatalf("result.Path = %q, want literal whitespace path %q", result.Path, wantPath)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("stat literal output path: %v", err)
+	}
+	if whitespaceOutput {
+		if _, err := os.Stat(strings.TrimSpace(outputPath)); !os.IsNotExist(err) {
+			t.Fatalf("trimmed output path stat error = %v, want no accidentally trimmed output", err)
+		}
+	}
+}
+
+func TestFramePreservesWhitespaceInConfigPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows trims trailing spaces from path components")
+	}
+	baseDir := t.TempDir()
+	configPath := filepath.Join(baseDir, "frame.yaml ")
+	config := `project:
+  name: "Demo"
+  output_dir: "./out"
+  device: "iPhone 17 Pro - Silver - Portrait"
+  output_size: "iPhone6_3"
+screenshots:
+  framed:
+    content:
+      - type: "image"
+        asset: "screenshots/raw.png"
+        frame: true
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write whitespace config: %v", err)
+	}
+	kouFixturePath := filepath.Join(baseDir, "kou-fixture.png")
+	writeFrameTestPNG(t, kouFixturePath, makeFrameTestImage(1206, 2622))
+	installFrameTestMockKou(t, kouFixturePath, filepath.Join(baseDir, "kou-out", "framed.png"))
+
+	result, err := Frame(context.Background(), FrameRequest{
+		ConfigPath: configPath,
+		Device:     string(DefaultFrameDevice()),
+	})
+	if err != nil {
+		t.Fatalf("Frame() error = %v", err)
+	}
+	if result.Device != string(FrameDeviceIPhone17Pro) {
+		t.Fatalf("result.Device = %q, want %q from literal config path", result.Device, FrameDeviceIPhone17Pro)
+	}
+}
+
 func TestResolveFrameDeviceFromConfig_LegacyFallbackAliases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -337,6 +433,7 @@ func TestFrame_InputModeCleansTemporaryKoubouDirectory(t *testing.T) {
 
 func installFrameTestMockKou(t *testing.T, fixturePath, outputPath string) {
 	t.Helper()
+	skipWindowsUnixExecutableFixtures(t)
 
 	binDir := t.TempDir()
 	kouPath := filepath.Join(binDir, "kou")

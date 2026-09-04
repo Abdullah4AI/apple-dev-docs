@@ -73,13 +73,13 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("accessibility list: %w", err)
+				return shared.UsageErrorf("accessibility list: %v", err)
 			}
 			if err := rejectAccessibilityNextFlagConflicts(fs, *next, "app", "device-family", "state", "fields", "limit"); err != nil {
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("accessibility list: --limit must be between 1 and 200")
+				return shared.UsageError("accessibility list: --limit must be between 1 and 200")
 			}
 
 			deviceFamilies, err := normalizeAccessibilityDeviceFamilies(shared.SplitCSVUpper(*deviceFamily))

@@ -288,10 +288,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("apps search-keywords list: --limit must be between 1 and 200")
+				return shared.UsageError("apps search-keywords list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("apps search-keywords list: %w", err)
+				return shared.UsageErrorf("apps search-keywords list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

@@ -53,6 +53,9 @@ BOOLEAN_FLAG_OVERRIDES: dict[tuple[str, ...], set[str]] = {
         "--public-link-enabled",
         "--public-link-limit-enabled",
     },
+    # `versions update --confirm` tracks presence so an explicit
+    # `--confirm=false` is rejected instead of silently ignored.
+    ("versions", "update"): {"--confirm"},
 }
 HIDDEN_DEPRECATED_ALIAS_FLAGS: dict[tuple[str, ...], dict[str, bool]] = {
     # DeprecatedUsageFunc intentionally hides FLAGS in help output for

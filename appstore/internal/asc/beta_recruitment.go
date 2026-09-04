@@ -186,18 +186,21 @@ type BetaGroupTesterUsageDimensionLinks struct {
 	Related string `json:"related,omitempty"`
 }
 
-// BetaGroupTesterUsageDimensionData accepts both the string shape in Apple's
-// schema and the resource identifier object returned by current responses.
-type BetaGroupTesterUsageDimensionData struct {
+// MetricDimensionData accepts both the string shape in Apple's schema and
+// the resource identifier object returned by current metric responses.
+type MetricDimensionData struct {
 	Type string `json:"type,omitempty"`
 	ID   string `json:"id,omitempty"`
 	raw  json.RawMessage
 }
 
-func (d *BetaGroupTesterUsageDimensionData) UnmarshalJSON(data []byte) error {
+// BetaGroupTesterUsageDimensionData is the historical name for MetricDimensionData.
+type BetaGroupTesterUsageDimensionData = MetricDimensionData
+
+func (d *MetricDimensionData) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
 	if bytes.Equal(trimmed, []byte("null")) {
-		*d = BetaGroupTesterUsageDimensionData{}
+		*d = MetricDimensionData{}
 		return nil
 	}
 
@@ -222,7 +225,7 @@ func (d *BetaGroupTesterUsageDimensionData) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (d BetaGroupTesterUsageDimensionData) MarshalJSON() ([]byte, error) {
+func (d MetricDimensionData) MarshalJSON() ([]byte, error) {
 	if len(d.raw) > 0 {
 		return d.raw, nil
 	}

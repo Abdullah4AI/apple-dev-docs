@@ -79,7 +79,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("custom-pages list: %w", err)
+				return shared.UsageErrorf("custom-pages list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,
@@ -108,7 +108,7 @@ Examples:
 				}
 			}
 			if *limit != 0 && (*limit < 1 || *limit > productPagesMaxLimit) {
-				return fmt.Errorf("custom-pages list: --limit must be between 1 and %d", productPagesMaxLimit)
+				return shared.UsageErrorf("custom-pages list: --limit must be between 1 and %d", productPagesMaxLimit)
 			}
 			if providedQueryFlags["versions-limit"] && (*versionsLimit < 1 || *versionsLimit > customPagesMaxVersionsLimit) {
 				return shared.UsageError(fmt.Sprintf("custom-pages list: --versions-limit must be between 1 and %d", customPagesMaxVersionsLimit))

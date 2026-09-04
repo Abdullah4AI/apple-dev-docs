@@ -69,10 +69,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("builds individual-testers list: --limit must be between 1 and 200")
+				return shared.UsageError("builds individual-testers list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("builds individual-testers list: %w", err)
+				return shared.UsageErrorf("builds individual-testers list: %v", err)
 			}
 
 			nextValue := strings.TrimSpace(*next)

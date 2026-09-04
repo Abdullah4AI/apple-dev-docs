@@ -74,7 +74,7 @@ Examples:
 				return flag.ErrHelp
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("promoted-purchases list: %w", err)
+				return shared.UsageErrorf("promoted-purchases list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

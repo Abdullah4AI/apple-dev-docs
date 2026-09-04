@@ -120,10 +120,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center leaderboard-sets localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center leaderboard-sets localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center leaderboard-sets localizations list: %w", err)
+				return shared.UsageErrorf("game-center leaderboard-sets localizations list: %v", err)
 			}
 
 			id := strings.TrimSpace(*setID)
@@ -408,10 +408,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center leaderboard-sets list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center leaderboard-sets list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center leaderboard-sets list: %w", err)
+				return shared.UsageErrorf("game-center leaderboard-sets list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)
@@ -742,10 +742,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center leaderboard-sets releases list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center leaderboard-sets releases list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center leaderboard-sets releases list: %w", err)
+				return shared.UsageErrorf("game-center leaderboard-sets releases list: %v", err)
 			}
 
 			id := strings.TrimSpace(*setID)
@@ -1092,10 +1092,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center leaderboard-sets member-localizations list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center leaderboard-sets member-localizations list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center leaderboard-sets member-localizations list: %w", err)
+				return shared.UsageErrorf("game-center leaderboard-sets member-localizations list: %v", err)
 			}
 
 			set := strings.TrimSpace(*setID)

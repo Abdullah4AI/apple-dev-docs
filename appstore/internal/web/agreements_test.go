@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -177,6 +178,48 @@ func TestGetAgreementsStatusPreservesContractMessagesWhenPortalUnavailable(t *te
 	}
 }
 
+func TestGetAgreementHistoryReadsPortalWithoutContractMessages(t *testing.T) {
+	requestCount := 0
+	client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {
+		requestCount++
+		if r.URL.Host == "appstoreconnect.apple.com" {
+			t.Fatalf("history-only read must not request %s", r.URL.String())
+		}
+		switch requestCount {
+		case 1:
+			return developerPortalTestResponse(http.StatusOK, developerPortalTeamsFixture(), nil), nil
+		case 2:
+			if r.URL.Path != developerPortalAgreementHistoryPath {
+				t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+			}
+			return developerPortalTestResponse(http.StatusOK, agreementHistoryFixture(true), nil), nil
+		default:
+			t.Fatalf("unexpected extra request %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	})
+
+	result, err := client.GetAgreementHistory(context.Background())
+	if err != nil {
+		t.Fatalf("GetAgreementHistory() error: %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("request count = %d, want 2 (bootstrap + history)", requestCount)
+	}
+	if result.TeamID != "TEAM123456" {
+		t.Fatalf("TeamID = %q, want TEAM123456", result.TeamID)
+	}
+	if len(result.ContractMessages) != 0 {
+		t.Fatalf("ContractMessages = %+v, want none for a history-only read", result.ContractMessages)
+	}
+	if result.Pending {
+		t.Fatal("Pending = true, want false for an accepted history")
+	}
+	if len(result.Agreements) != 1 || result.Agreements[0].AgreementID != "XG8DNV4HYY" || result.Agreements[0].Pending {
+		t.Fatalf("Agreements = %+v, want one accepted XG8DNV4HYY record", result.Agreements)
+	}
+}
+
 func TestGetAgreementsStatusSurfacesResultCodeError(t *testing.T) {
 	requestCount := 0
 	client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -329,6 +372,362 @@ func TestAcceptAgreementsSurfacesResultCodeError(t *testing.T) {
 	_, err := client.AcceptAgreements(context.Background(), AgreementsAcceptRequest{AgreementIDs: []string{"XG8DNV4HYY"}})
 	if err == nil || !strings.Contains(err.Error(), "Only the Account Holder can accept this agreement.") {
 		t.Fatalf("AcceptAgreements() error = %v, want Apple user message", err)
+	}
+}
+
+// agreementDownloadPortal serves the Developer Portal bootstrap, agreement
+// history, and agreement content endpoints over TLS. contentHandler decides how
+// the content endpoint answers; downloadURL overrides the reported
+// agreementDownloadUrl when non-empty.
+type agreementDownloadPortal struct {
+	server         *httptest.Server
+	downloadURL    string
+	contentCalls   int
+	contentHandler func(w http.ResponseWriter, r *http.Request)
+}
+
+func newAgreementDownloadPortal(t *testing.T) *agreementDownloadPortal {
+	t.Helper()
+	portal := &agreementDownloadPortal{}
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write([]byte("%PDF-1.7 agreement body"))
+	}
+	portal.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == developerPortalTeamsPath:
+			_, _ = io.WriteString(w, developerPortalTeamsFixture())
+		case r.Method == http.MethodPost && r.URL.Path == developerPortalAgreementHistoryPath:
+			downloadURL := portal.downloadURL
+			if downloadURL == "" {
+				downloadURL = "/services-account/agreement/XG8DNV4HYY/content/pdf"
+			}
+			_, _ = io.WriteString(w, `{"resultCode":0,"agreements":[{"agreementDownloadUrl":"`+downloadURL+`","dateEffective":1787060333000,"dateAccepted":1787158607000,"dateAgreeBy":1790899199000,"status":"active","version":"5031","isAgreementPLA":true,"agreementId":"XG8DNV4HYY","title":"Apple Developer Program License Agreement"}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/services-account/agreement/XG8DNV4HYY/content/pdf":
+			portal.contentCalls++
+			portal.contentHandler(w, r)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(portal.server.Close)
+	return portal
+}
+
+func (p *agreementDownloadPortal) client(t *testing.T) *Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New() error: %v", err)
+	}
+	httpClient := p.server.Client()
+	httpClient.Jar = jar
+	return &Client{httpClient: httpClient, developerPortalURL: p.server.URL}
+}
+
+func TestDownloadAgreementFetchesSameOriginContent(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); !strings.Contains(got, "application/pdf") {
+			t.Errorf("content Accept = %q, want application/pdf", got)
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write([]byte("%PDF-1.7 agreement body"))
+	}
+
+	download, err := portal.client(t).DownloadAgreement(context.Background(), " XG8DNV4HYY ")
+	if err != nil {
+		t.Fatalf("DownloadAgreement() error: %v", err)
+	}
+	if portal.contentCalls != 1 {
+		t.Fatalf("content requests = %d, want 1", portal.contentCalls)
+	}
+	if download.AgreementID != "XG8DNV4HYY" || download.TeamID != "TEAM123456" {
+		t.Fatalf("download identity = %q/%q, want XG8DNV4HYY/TEAM123456", download.AgreementID, download.TeamID)
+	}
+	if download.Title != "Apple Developer Program License Agreement" || download.Version != "5031" {
+		t.Fatalf("download title/version = %q/%q", download.Title, download.Version)
+	}
+	if download.ContentType != "application/pdf" {
+		t.Fatalf("ContentType = %q, want application/pdf", download.ContentType)
+	}
+	if string(download.Body) != "%PDF-1.7 agreement body" {
+		t.Fatalf("Body = %q, want agreement content", download.Body)
+	}
+}
+
+func TestDownloadAgreementRedactsMalformedRedirectLocation(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		// net/http fails to parse this Location before CheckRedirect runs and
+		// embeds the raw header value in its error.
+		w.Header().Set("Location", "https://developer.apple.com:badport/agreement.pdf?token=very-secret")
+		w.WriteHeader(http.StatusFound)
+	}
+
+	_, err := portal.client(t).DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("DownloadAgreement() error = %v, want malformed redirect rejection", err)
+	}
+	for _, leaked := range []string{"very-secret", "token=", "badport"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("DownloadAgreement() error = %q leaks %q from the Location header", err, leaked)
+		}
+	}
+}
+
+func TestDownloadAgreementRejectsEmptySuccessfulBody(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{name: "204 no content", status: http.StatusNoContent},
+		{name: "200 empty body", status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			portal := newAgreementDownloadPortal(t)
+			portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/pdf")
+				w.WriteHeader(tc.status)
+			}
+
+			download, err := portal.client(t).DownloadAgreement(context.Background(), "XG8DNV4HYY")
+			if err == nil {
+				t.Fatalf("DownloadAgreement() = %+v, want empty content error", download)
+			}
+			if !strings.Contains(err.Error(), "empty") {
+				t.Fatalf("DownloadAgreement() error = %q, want empty content rejection", err)
+			}
+		})
+	}
+}
+
+func TestDownloadAgreementRejectsCrossOriginRedirect(t *testing.T) {
+	elsewhereCalls := 0
+	elsewhere := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhereCalls++
+		_, _ = w.Write([]byte("leaked"))
+	}))
+	defer elsewhere.Close()
+
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/agreement.pdf?token=very-secret&X-Amz-Signature=abc123", http.StatusFound)
+	}
+
+	download, err := portal.client(t).DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil {
+		t.Fatalf("DownloadAgreement() = %+v, want cross-origin redirect error", download)
+	}
+	if !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("DownloadAgreement() error = %q, want redirect rejection", err)
+	}
+	for _, leaked := range []string{"very-secret", "X-Amz-Signature", "?token="} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("DownloadAgreement() error = %q leaks %q", err, leaked)
+		}
+	}
+	if elsewhereCalls != 0 {
+		t.Fatalf("cross-origin redirect target was requested %d times, want 0", elsewhereCalls)
+	}
+}
+
+func TestDownloadAgreementRejectsNonHTTPSRedirect(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		insecure := "http://" + strings.TrimPrefix(portal.server.URL, "https://") + "/services-account/agreement/XG8DNV4HYY/content/pdf?sig=very-secret"
+		http.Redirect(w, r, insecure, http.StatusFound)
+	}
+
+	_, err := portal.client(t).DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("DownloadAgreement() error = %v, want non-https redirect rejection", err)
+	}
+	if strings.Contains(err.Error(), "very-secret") {
+		t.Fatalf("DownloadAgreement() error = %q leaks the signed redirect URL", err)
+	}
+}
+
+func TestDownloadAgreementCapsSameOriginRedirectLoopDespitePermissiveClientPolicy(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/services-account/agreement/XG8DNV4HYY/content/pdf?hop=very-secret", http.StatusFound)
+	}
+	client := portal.client(t)
+	client.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return nil }
+
+	_, err := client.DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "10 redirects") {
+		t.Fatalf("DownloadAgreement() error = %v, want redirect cap error", err)
+	}
+	if strings.Contains(err.Error(), "very-secret") {
+		t.Fatalf("DownloadAgreement() error = %q leaks the redirect URL", err)
+	}
+	if portal.contentCalls > 11 {
+		t.Fatalf("content requests = %d, want the redirect chain capped at 10 hops", portal.contentCalls)
+	}
+}
+
+func TestDownloadAgreementRejectsRedirectRewrittenByClientPolicy(t *testing.T) {
+	elsewhereCalls := 0
+	elsewhere := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhereCalls++
+		_, _ = w.Write([]byte("leaked"))
+	}))
+	defer elsewhere.Close()
+	elsewhereURL, err := url.Parse(elsewhere.URL + "/agreement.pdf?token=very-secret")
+	if err != nil {
+		t.Fatalf("url.Parse() error: %v", err)
+	}
+
+	portal := newAgreementDownloadPortal(t)
+	portal.contentHandler = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/services-account/agreement/XG8DNV4HYY/content/pdf?hop=1", http.StatusFound)
+	}
+	client := portal.client(t)
+	client.httpClient.CheckRedirect = func(redirect *http.Request, via []*http.Request) error {
+		redirect.URL = elsewhereURL
+		return nil
+	}
+
+	_, err = client.DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("DownloadAgreement() error = %v, want rejection of the rewritten redirect", err)
+	}
+	if strings.Contains(err.Error(), "very-secret") {
+		t.Fatalf("DownloadAgreement() error = %q leaks the rewritten URL", err)
+	}
+	if elsewhereCalls != 0 {
+		t.Fatalf("rewritten redirect target was requested %d times, want 0", elsewhereCalls)
+	}
+}
+
+func TestDownloadAgreementRejectsCrossOriginDownloadURL(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+	portal.downloadURL = "https://cdn.example.test/agreements/XG8DNV4HYY.pdf?token=very-secret"
+
+	_, err := portal.client(t).DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "Developer Portal origin") {
+		t.Fatalf("DownloadAgreement() error = %v, want same-origin rejection", err)
+	}
+	if strings.Contains(err.Error(), "very-secret") {
+		t.Fatalf("DownloadAgreement() error = %q leaks the signed URL", err)
+	}
+	if portal.contentCalls != 0 {
+		t.Fatalf("content requests = %d, want 0 for a rejected URL", portal.contentCalls)
+	}
+}
+
+func TestDownloadAgreementRejectsNonHTTPSDownloadURL(t *testing.T) {
+	requestCount := 0
+	client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			return developerPortalTestResponse(http.StatusOK, developerPortalTeamsFixture(), nil), nil
+		case 2:
+			return developerPortalTestResponse(http.StatusOK, `{"resultCode":0,"agreements":[{"agreementDownloadUrl":"http://developer.apple.com/services-account/agreement/XG8DNV4HYY/content/pdf?sig=very-secret","agreementId":"XG8DNV4HYY","dateEffective":1,"dateAccepted":2}]}`, nil), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	})
+
+	_, err := client.DownloadAgreement(context.Background(), "XG8DNV4HYY")
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("DownloadAgreement() error = %v, want https requirement", err)
+	}
+	if strings.Contains(err.Error(), "very-secret") {
+		t.Fatalf("DownloadAgreement() error = %q leaks the signed URL", err)
+	}
+}
+
+func TestDownloadAgreementErrorsRedactSignedURL(t *testing.T) {
+	signedHistory := `{"resultCode":0,"agreements":[{"agreementDownloadUrl":"https://developer.apple.com/services-account/agreement/XG8DNV4HYY/content/pdf?token=very-secret&X-Amz-Signature=abc123","agreementId":"XG8DNV4HYY","dateEffective":1,"dateAccepted":2}]}`
+	tests := []struct {
+		name     string
+		content  func(r *http.Request) (*http.Response, error)
+		wantText string
+	}{
+		{
+			name: "transport failure",
+			content: func(r *http.Request) (*http.Response, error) {
+				return nil, errors.New("connection reset by peer")
+			},
+			wantText: "connection reset by peer",
+		},
+		{
+			name: "server error",
+			content: func(r *http.Request) (*http.Response, error) {
+				return developerPortalTestResponse(http.StatusInternalServerError, `<html>boom</html>`, http.Header{"Content-Type": []string{"text/html"}}), nil
+			},
+			wantText: "500",
+		},
+		{
+			name: "expired session",
+			content: func(r *http.Request) (*http.Response, error) {
+				return developerPortalTestResponse(http.StatusUnauthorized, ``, nil), nil
+			},
+			wantText: "unauthorized or expired",
+		},
+		{
+			name: "html instead of agreement",
+			content: func(r *http.Request) (*http.Response, error) {
+				return developerPortalTestResponse(http.StatusOK, `<html>sign in</html>`, http.Header{"Content-Type": []string{"text/html; charset=utf-8"}}), nil
+			},
+			wantText: "HTML",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			requestCount := 0
+			client := agreementsTestClient(t, func(r *http.Request) (*http.Response, error) {
+				requestCount++
+				switch requestCount {
+				case 1:
+					return developerPortalTestResponse(http.StatusOK, developerPortalTeamsFixture(), nil), nil
+				case 2:
+					return developerPortalTestResponse(http.StatusOK, signedHistory, nil), nil
+				case 3:
+					if r.Method != http.MethodGet || r.URL.Host != "developer.apple.com" || r.URL.Query().Get("token") != "very-secret" {
+						t.Fatalf("unexpected content request %s %s", r.Method, r.URL.String())
+					}
+					return tc.content(r)
+				default:
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+					return nil, nil
+				}
+			})
+
+			_, err := client.DownloadAgreement(context.Background(), "XG8DNV4HYY")
+			if err == nil || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("DownloadAgreement() error = %v, want text %q", err, tc.wantText)
+			}
+			for _, leaked := range []string{"very-secret", "X-Amz-Signature", "?token=", "content/pdf"} {
+				if strings.Contains(err.Error(), leaked) {
+					t.Fatalf("DownloadAgreement() error = %q leaks %q", err, leaked)
+				}
+			}
+		})
+	}
+}
+
+func TestDownloadAgreementRequiresKnownAgreementID(t *testing.T) {
+	portal := newAgreementDownloadPortal(t)
+
+	_, err := portal.client(t).DownloadAgreement(context.Background(), "UNKNOWN0001")
+	if err == nil || !strings.Contains(err.Error(), "UNKNOWN0001") || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("DownloadAgreement() error = %v, want unknown agreement failure", err)
+	}
+	if portal.contentCalls != 0 {
+		t.Fatalf("content requests = %d, want 0", portal.contentCalls)
+	}
+
+	_, err = portal.client(t).DownloadAgreement(context.Background(), "   ")
+	if err == nil || !strings.Contains(err.Error(), "agreement id is required") {
+		t.Fatalf("DownloadAgreement() blank id error = %v", err)
 	}
 }
 

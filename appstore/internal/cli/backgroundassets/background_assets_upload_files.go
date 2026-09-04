@@ -71,10 +71,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--version-id")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > backgroundAssetsMaxLimit) {
-				return fmt.Errorf("background-assets upload-files list: --limit must be between 1 and %d", backgroundAssetsMaxLimit)
+				return shared.UsageErrorf("background-assets upload-files list: --limit must be between 1 and %d", backgroundAssetsMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("background-assets upload-files list: %w", err)
+				return shared.UsageErrorf("background-assets upload-files list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()

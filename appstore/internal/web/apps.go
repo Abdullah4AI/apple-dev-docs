@@ -257,11 +257,108 @@ func (c *Client) DeleteApp(ctx context.Context, appID string) (*AppResponse, err
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse app response: %w", err)
 	}
-	if strings.TrimSpace(result.Data.ID) == "" {
-		result.Data.ID = appID
-		result.Data.Type = "apps"
-	}
 	return &result, nil
+}
+
+// AppRemovalState is the read model used to preflight and verify web app removal.
+// Field names match the captured removed-apps listing on GET /apps.
+type AppRemovalState struct {
+	ID                        string
+	Name                      string
+	BundleID                  string
+	Removed                   bool
+	RemovedKnown              bool
+	AppStoreLegacyStatus      string
+	Marketplace               string
+	VersionStates             []string
+	DisplayableVersionsLoaded bool
+}
+
+// GetAppRemovalState reads the app attributes needed to check removal
+// eligibility and to verify the post-PATCH removed state.
+func (c *Client) GetAppRemovalState(ctx context.Context, appID string) (*AppRemovalState, error) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil, fmt.Errorf("app id is required")
+	}
+
+	values := url.Values{}
+	values.Set("include", "displayableVersions")
+	values.Set("fields[apps]", "name,bundleId,removed,appStoreLegacyStatus,marketplace,displayableVersions")
+	values.Set("fields[appStoreVersions]", "platform,versionString,appStoreState,appVersionState")
+	values.Set("limit[displayableVersions]", fmt.Sprintf("%d", removedAppsDisplayableVersionMax))
+	path := queryPath("/apps/"+url.PathEscape(appID), values)
+
+	respBody, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Data     jsonAPIResource   `json:"data"`
+		Included []jsonAPIResource `json:"included"`
+	}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse app response: %w", err)
+	}
+	if strings.TrimSpace(payload.Data.ID) == "" {
+		return nil, fmt.Errorf("app %q was not found", appID)
+	}
+	if strings.TrimSpace(payload.Data.ID) != appID {
+		return nil, fmt.Errorf("app %q response returned id %q", appID, strings.TrimSpace(payload.Data.ID))
+	}
+
+	included := make(map[string]jsonAPIResource, len(payload.Included))
+	for _, resource := range payload.Included {
+		included[jsonAPIResourceKey(resource.Type, resource.ID)] = resource
+	}
+	decoded := decodeRemovedAppResource(payload.Data, included)
+	removed, removedKnown := boolAttrKnown(payload.Data.Attributes, "removed")
+
+	versionStates := make([]string, 0, len(decoded.DisplayableVersions)*2)
+	versionsHaveState := true
+	for _, version := range decoded.DisplayableVersions {
+		storeState := strings.TrimSpace(version.AppStoreState)
+		versionState := strings.TrimSpace(version.AppVersionState)
+		if storeState == "" && versionState == "" {
+			versionsHaveState = false
+		}
+		if storeState != "" {
+			versionStates = append(versionStates, storeState)
+		}
+		if versionState != "" {
+			versionStates = append(versionStates, versionState)
+		}
+	}
+
+	return &AppRemovalState{
+		ID:                        decoded.ID,
+		Name:                      decoded.Name,
+		BundleID:                  decoded.BundleID,
+		Removed:                   removed,
+		RemovedKnown:              removedKnown,
+		AppStoreLegacyStatus:      decoded.AppStoreLegacyStatus,
+		Marketplace:               decoded.Marketplace,
+		VersionStates:             versionStates,
+		DisplayableVersionsLoaded: displayableVersionsIncluded(payload.Data, included) && versionsHaveState,
+	}, nil
+}
+
+func displayableVersionsIncluded(resource jsonAPIResource, included map[string]jsonAPIResource) bool {
+	relationship, ok := resource.Relationships["displayableVersions"]
+	if !ok {
+		return false
+	}
+	trimmed := strings.TrimSpace(string(relationship.Data))
+	if trimmed == "" || trimmed == "null" {
+		return false
+	}
+	for _, ref := range parseRelationshipRefs(relationship.Data) {
+		if _, found := included[jsonAPIResourceKey(ref.Type, ref.ID)]; !found {
+			return false
+		}
+	}
+	return true
 }
 
 // FindApp finds an existing app by bundle ID.

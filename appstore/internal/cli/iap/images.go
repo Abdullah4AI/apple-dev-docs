@@ -73,10 +73,10 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap images list: --limit must be between 1 and 200")
+				return shared.UsageError("iap images list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap images list: %w", err)
+				return shared.UsageErrorf("iap images list: %v", err)
 			}
 			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
 			if err != nil {

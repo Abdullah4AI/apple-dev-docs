@@ -86,10 +86,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--app")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > backgroundAssetsMaxLimit) {
-				return fmt.Errorf("background-assets list: --limit must be between 1 and %d", backgroundAssetsMaxLimit)
+				return shared.UsageErrorf("background-assets list: --limit must be between 1 and %d", backgroundAssetsMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("background-assets list: %w", err)
+				return shared.UsageErrorf("background-assets list: %v", err)
 			}
 
 			var archivedFilter []string

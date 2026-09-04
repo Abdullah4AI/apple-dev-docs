@@ -30,14 +30,17 @@ func WebAppsMedicalDeviceCommand() *ffcli.Command {
 Manage the regulated medical device declaration exposed in App Store Connect
 under App Information -> App Store Regulations & Permits.
 
-This command currently automates only the common "No" path. If your app is
-actually a regulated medical device, continue using the App Store Connect web UI
-until the full undocumented "Yes" write contract is captured safely.
+Use ` + "`view`" + ` to read the stored declaration and ` + "`set`" + ` to answer it.
+
+Writing currently automates only the common "No" path. If your app is actually a
+regulated medical device, continue using the App Store Connect web UI until the
+full undocumented "Yes" write contract is captured safely.
 
 `,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
+			WebAppsMedicalDeviceViewCommand(),
 			WebAppsMedicalDeviceSetCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -67,6 +70,9 @@ Set the regulated medical device declaration through Apple web-session complianc
 Only the "No" path is currently supported, which covers the common case for
 apps that are not regulated medical devices.
 
+The stored declaration is read first; when it already matches, no write is sent
+and the receipt reports ` + "`changed: false`" + `.
+
 Examples:
   asc web apps medical-device set --app "6748252780" --declared false
 
@@ -89,20 +95,12 @@ Examples:
 				return shared.UsageError("--declared true is not yet supported; only false is currently supported")
 			}
 
-			session, err := resolveWebSessionForCommand(ctx, authFlags)
+			accountID, client, requestCtx, cancel, err := resolveWebComplianceClient(ctx, authFlags, "web apps medical-device set")
+			defer cancel()
 			if err != nil {
 				return err
 			}
 
-			accountID := strings.TrimSpace(session.PublicProviderID)
-			if accountID == "" {
-				return fmt.Errorf("web apps medical-device set failed: web session is missing public provider/account id (run 'asc web auth login')")
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			client := newWebClientFn(session)
 			var result *webcore.MedicalDeviceDeclarationResult
 			err = withWebSpinner("Saving regulated medical device declaration", func() error {
 				var err error
@@ -116,41 +114,23 @@ Examples:
 				return fmt.Errorf("web apps medical-device set failed: missing declaration result")
 			}
 
-			return shared.PrintOutputWithRenderers(
-				result,
-				*output.Output,
-				*output.Pretty,
-				func() error { return renderWebMedicalDeviceTable(result) },
-				func() error { return renderWebMedicalDeviceMarkdown(result) },
-			)
+			return shared.PrintOutput(webMedicalDeviceDeclarationResultOutput(result), *output.Output, *output.Pretty)
 		},
 	}
 }
 
-func renderWebMedicalDeviceTable(result *webcore.MedicalDeviceDeclarationResult) error {
-	asc.RenderTable(
-		[]string{"App ID", "Requirement", "Declared", "Status", "Countries/Regions"},
-		[][]string{{
-			result.AppID,
-			result.RequirementName,
-			fmt.Sprintf("%t", result.Declared),
-			valueOrNA(result.Status),
-			strings.Join(result.CountriesOrRegions, ","),
-		}},
-	)
-	return nil
-}
-
-func renderWebMedicalDeviceMarkdown(result *webcore.MedicalDeviceDeclarationResult) error {
-	asc.RenderMarkdown(
-		[]string{"App ID", "Requirement", "Declared", "Status", "Countries/Regions"},
-		[][]string{{
-			result.AppID,
-			result.RequirementName,
-			fmt.Sprintf("%t", result.Declared),
-			valueOrNA(result.Status),
-			strings.Join(result.CountriesOrRegions, ","),
-		}},
-	)
-	return nil
+func webMedicalDeviceDeclarationResultOutput(result *webcore.MedicalDeviceDeclarationResult) *asc.WebMedicalDeviceDeclarationResult {
+	if result == nil {
+		return nil
+	}
+	return &asc.WebMedicalDeviceDeclarationResult{
+		AppID:              result.AppID,
+		RequirementID:      result.RequirementID,
+		RequirementName:    result.RequirementName,
+		Status:             result.Status,
+		FormID:             result.FormID,
+		Declared:           result.Declared,
+		Changed:            result.Changed,
+		CountriesOrRegions: result.CountriesOrRegions,
+	}
 }

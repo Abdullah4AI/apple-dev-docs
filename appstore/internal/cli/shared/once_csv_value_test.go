@@ -29,6 +29,34 @@ func TestOnceCSVValue_RejectsRepeatedUse(t *testing.T) {
 	if got := value.String(); got != "a,b" {
 		t.Fatalf("rejected Set() must not overwrite value, got %q", got)
 	}
+	if !value.Provided() {
+		t.Fatal("Provided() should remain true after a rejected second Set()")
+	}
+}
+
+func TestOnceCSVValue_ProvidedAfterRecoveryParse(t *testing.T) {
+	original := flag.NewFlagSet("test", flag.ContinueOnError)
+	original.SetOutput(nopWriter{})
+	value := BindOnceCSVFlag(original, "territories", "territories")
+	confirm := original.Bool("confirm", false, "confirm")
+	availableInNew := original.Bool("available-in-new-territories", false, "available in new")
+
+	if err := original.Parse([]string{"--available-in-new-territories", "false", "--territories", "USA", "--confirm"}); err != nil {
+		t.Fatalf("original parse error: %v", err)
+	}
+	if value.Provided() {
+		t.Fatal("Go flag parse should stop at the spaced boolean and leave --territories unvisited")
+	}
+
+	if err := RecoverBoolFlagTailArgs(original, original.Args(), availableInNew); err != nil {
+		t.Fatalf("RecoverBoolFlagTailArgs() error: %v", err)
+	}
+	if !value.Provided() || value.String() != "USA" {
+		t.Fatalf("recovered --territories, Provided()=%t String()=%q", value.Provided(), value.String())
+	}
+	if !*confirm {
+		t.Fatal("expected --confirm to be recovered onto the shared value")
+	}
 }
 
 func TestOnceCSVValue_ParseRejectsRepeatedFlag(t *testing.T) {

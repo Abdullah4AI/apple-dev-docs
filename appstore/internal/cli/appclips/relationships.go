@@ -36,10 +36,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-clips default-experiences-links: --limit must be between 1 and 200")
+				return shared.UsageError("app-clips default-experiences-links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-clips default-experiences-links: %w", err)
+				return shared.UsageErrorf("app-clips default-experiences-links: %v", err)
 			}
 
 			appClipValue := strings.TrimSpace(*appClipID)
@@ -111,10 +111,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("app-clips advanced-experiences-links: --limit must be between 1 and 200")
+				return shared.UsageError("app-clips advanced-experiences-links: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("app-clips advanced-experiences-links: %w", err)
+				return shared.UsageErrorf("app-clips advanced-experiences-links: %v", err)
 			}
 
 			appClipValue := strings.TrimSpace(*appClipID)

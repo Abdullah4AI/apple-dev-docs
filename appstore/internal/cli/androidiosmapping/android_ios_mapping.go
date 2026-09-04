@@ -73,10 +73,10 @@ Examples:
 				return shared.MissingRequiredUsageError("--app")
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("android-ios-mapping list: --limit must be between 1 and 200")
+				return shared.UsageError("android-ios-mapping list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("android-ios-mapping list: %w", err)
+				return shared.UsageErrorf("android-ios-mapping list: %v", err)
 			}
 			fieldValues, err := normalizeAndroidIosMappingFields(*fields)
 			if err != nil {

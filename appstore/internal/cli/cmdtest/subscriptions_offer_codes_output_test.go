@@ -459,8 +459,8 @@ func TestSubscriptionsOfferCodesListRejectsInvalidNextURL(t *testing.T) {
 				runErr = root.Run(context.Background())
 			})
 
-			if runErr == nil {
-				t.Fatal("expected error, got nil")
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("expected flag.ErrHelp, got %v", runErr)
 			}
 			if !strings.Contains(runErr.Error(), test.wantErr) {
 				t.Fatalf("expected error %q, got %v", test.wantErr, runErr)
@@ -468,8 +468,8 @@ func TestSubscriptionsOfferCodesListRejectsInvalidNextURL(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if stderr != "" {
-				t.Fatalf("expected empty stderr, got %q", stderr)
+			if !strings.Contains(stderr, "Error: "+test.wantErr) {
+				t.Fatalf("expected stderr to contain %q, got %q", "Error: "+test.wantErr, stderr)
 			}
 		})
 	}

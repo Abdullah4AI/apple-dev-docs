@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/rootfs"
 )
 
 // RunStepResult reports one executed step.
@@ -32,6 +34,18 @@ type RunResult struct {
 
 // RunPlan executes a validated plan.
 func RunPlan(ctx context.Context, plan *Plan) (*RunResult, error) {
+	return runPlan(ctx, plan, nil)
+}
+
+// runPlanWithRoot is the matrix-only execution path. Its screenshot output is
+// published through the retained rooted destination instead of handing the
+// private attempt pathname to a provider that may write through a swapped
+// directory entry.
+func runPlanWithRoot(ctx context.Context, plan *Plan, outputRoot rootfs.Root) (*RunResult, error) {
+	return runPlan(ctx, plan, &outputRoot)
+}
+
+func runPlan(ctx context.Context, plan *Plan, rootedOutput *rootfs.Root) (*RunResult, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan is required")
 	}
@@ -43,16 +57,22 @@ func RunPlan(ctx context.Context, plan *Plan) (*RunResult, error) {
 	if udid == "" {
 		udid = "booted"
 	}
-	outputDir := strings.TrimSpace(plan.App.OutputDir)
-	if outputDir == "" {
+	outputDir := plan.App.OutputDir
+	if strings.TrimSpace(outputDir) == "" {
 		outputDir = "./screenshots/raw"
 	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve output dir: %w", err)
-	}
-	if err := os.MkdirAll(absOutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
+	var absOutputDir string
+	var err error
+	if rootedOutput == nil {
+		absOutputDir, err = filepath.Abs(outputDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve output dir: %w", err)
+		}
+		if err := os.MkdirAll(absOutputDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create output dir: %w", err)
+		}
+	} else {
+		absOutputDir = rootedOutput.Path()
 	}
 
 	result := &RunResult{
@@ -61,6 +81,7 @@ func RunPlan(ctx context.Context, plan *Plan) (*RunResult, error) {
 		OutputDir: absOutputDir,
 		Steps:     make([]RunStepResult, 0, len(plan.Steps)),
 	}
+	terminateRunningProcess := plan.App.terminateRunningProcess
 
 	for i, step := range plan.Steps {
 		start := time.Now()
@@ -71,12 +92,15 @@ func RunPlan(ctx context.Context, plan *Plan) (*RunResult, error) {
 			Status: "ok",
 		}
 
-		if err := runStep(ctx, action, step, plan.App.BundleID, udid, absOutputDir); err != nil {
+		if err := runStep(ctx, action, step, plan.App.BundleID, plan.App.LaunchArguments, terminateRunningProcess, udid, absOutputDir, rootedOutput); err != nil {
 			stepResult.Status = "error"
 			stepResult.Error = err.Error()
 			stepResult.DurationMS = time.Since(start).Milliseconds()
 			result.Steps = append(result.Steps, stepResult)
 			return result, fmt.Errorf("step %d (%s): %w", i+1, string(action), err)
+		}
+		if action == ActionLaunch {
+			terminateRunningProcess = false
 		}
 		stepResult.DurationMS = time.Since(start).Milliseconds()
 		result.Steps = append(result.Steps, stepResult)
@@ -92,10 +116,16 @@ func RunPlan(ctx context.Context, plan *Plan) (*RunResult, error) {
 	return result, nil
 }
 
-func runStep(ctx context.Context, action StepAction, step PlanStep, bundleID, udid, outputDir string) error {
+func runStep(ctx context.Context, action StepAction, step PlanStep, bundleID string, launchArguments []string, terminateRunningProcess bool, udid, outputDir string, rootedOutput *rootfs.Root) error {
 	switch action {
 	case ActionLaunch:
-		return runExternal(ctx, "xcrun", "simctl", "launch", udid, bundleID)
+		args := []string{"simctl", "launch"}
+		if terminateRunningProcess {
+			args = append(args, "--terminate-running-process")
+		}
+		args = append(args, udid, bundleID)
+		args = append(args, launchArguments...)
+		return runExternal(ctx, "xcrun", args...)
 	case ActionTap:
 		return runTapStep(ctx, step, udid)
 	case ActionType:
@@ -111,14 +141,20 @@ func runStep(ctx context.Context, action StepAction, step PlanStep, bundleID, ud
 	case ActionWaitFor:
 		return runWaitForStep(ctx, step, udid)
 	case ActionScreenshot:
-		_, err := Capture(ctx, CaptureRequest{
+		req := CaptureRequest{
 			Provider: ProviderAXe,
 			// Screenshot steps capture the current app session state; launch is explicit.
 			BundleID:  "",
 			UDID:      udid,
 			Name:      stringValue(step.Name),
 			OutputDir: outputDir,
-		})
+		}
+		var err error
+		if rootedOutput != nil {
+			_, err = captureWithRoot(ctx, req, *rootedOutput)
+		} else {
+			_, err = Capture(ctx, req)
+		}
 		return err
 	default:
 		return fmt.Errorf("unsupported action %q", action)

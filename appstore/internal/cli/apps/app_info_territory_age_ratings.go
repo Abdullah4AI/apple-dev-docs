@@ -71,10 +71,10 @@ Examples:
 				return shared.UsageError(err.Error())
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("apps info territory-age-ratings list: --limit must be between 1 and 200")
+				return shared.UsageError("apps info territory-age-ratings list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("apps info territory-age-ratings list: %w", err)
+				return shared.UsageErrorf("apps info territory-age-ratings list: %v", err)
 			}
 
 			resolvedAppID := shared.ResolveAppID(*appID)

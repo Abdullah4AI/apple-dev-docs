@@ -368,10 +368,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details app-versions list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details app-versions list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details app-versions list: %w", err)
+				return shared.UsageErrorf("game-center details app-versions list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -536,10 +536,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details achievements-v2 list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details achievements-v2 list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details achievements-v2 list: %w", err)
+				return shared.UsageErrorf("game-center details achievements-v2 list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -635,10 +635,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details leaderboards-v2 list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details leaderboards-v2 list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details leaderboards-v2 list: %w", err)
+				return shared.UsageErrorf("game-center details leaderboards-v2 list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -734,10 +734,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details leaderboard-sets-v2 list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details leaderboard-sets-v2 list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details leaderboard-sets-v2 list: %w", err)
+				return shared.UsageErrorf("game-center details leaderboard-sets-v2 list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -833,10 +833,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details achievement-releases list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details achievement-releases list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details achievement-releases list: %w", err)
+				return shared.UsageErrorf("game-center details achievement-releases list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -932,10 +932,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details leaderboard-releases list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details leaderboard-releases list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details leaderboard-releases list: %w", err)
+				return shared.UsageErrorf("game-center details leaderboard-releases list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -1031,10 +1031,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("game-center details leaderboard-set-releases list: --limit must be between 1 and 200")
+				return shared.UsageError("game-center details leaderboard-set-releases list: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("game-center details leaderboard-set-releases list: %w", err)
+				return shared.UsageErrorf("game-center details leaderboard-set-releases list: %v", err)
 			}
 
 			id := strings.TrimSpace(*detailID)
@@ -1165,10 +1165,10 @@ Examples:
 
 func runDetailsMetrics(ctx context.Context, name string, detailID *string, granularity *string, groupBy *string, filterResult *string, sort *string, limit *int, next *string, paginate *bool, output *string, pretty *bool, fetch func(client *asc.Client, ctx context.Context, id string, opts ...asc.GCMatchmakingMetricsOption) (*asc.GameCenterMetricsResponse, error)) error {
 	if *limit != 0 && (*limit < 1 || *limit > 200) {
-		return fmt.Errorf("game-center details metrics %s: --limit must be between 1 and 200", name)
+		return shared.UsageErrorf("game-center details metrics %s: --limit must be between 1 and 200", name)
 	}
 	if err := shared.ValidateNextURL(*next); err != nil {
-		return fmt.Errorf("game-center details metrics %s: %w", name, err)
+		return shared.UsageErrorf("game-center details metrics %s: %v", name, err)
 	}
 
 	id := strings.TrimSpace(*detailID)

@@ -128,7 +128,13 @@ func rewriteCommandErrors(cmd *ffcli.Command, replacements []textReplacement) {
 
 	if cmd.Exec != nil {
 		originalExec := cmd.Exec
+		usageRewrites := usageMessageRewrites(replacements)
 		cmd.Exec = func(ctx context.Context, args []string) error {
+			// A usage error prints itself and wraps flag.ErrHelp, so it never
+			// reaches the rewrite below. Carry the same replacements on the
+			// context so UsageErrorCtx can apply them before the diagnostic is
+			// written to stderr.
+			ctx = shared.ContextWithUsageMessageRewrites(ctx, usageRewrites...)
 			err := originalExec(ctx, args)
 			if err == nil || errors.Is(err, flag.ErrHelp) {
 				return err
@@ -148,6 +154,20 @@ func rewriteCommandErrors(cmd *ffcli.Command, replacements []textReplacement) {
 	for _, sub := range cmd.Subcommands {
 		rewriteCommandErrors(sub, replacements)
 	}
+}
+
+// usageMessageRewrites projects the tree's text replacements onto the
+// context-carried form UsageErrorCtx consumes, preserving their order so a
+// usage diagnostic renders exactly like a rewritten ordinary error.
+func usageMessageRewrites(replacements []textReplacement) []shared.UsageMessageRewrite {
+	rewrites := make([]shared.UsageMessageRewrite, 0, len(replacements))
+	for _, replacement := range replacements {
+		rewrites = append(rewrites, shared.UsageMessageRewrite{
+			Old: replacement.old,
+			New: replacement.new,
+		})
+	}
+	return rewrites
 }
 
 func applyTextReplacements(input string, replacements []textReplacement) string {

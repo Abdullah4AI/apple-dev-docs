@@ -77,7 +77,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("merchant-ids list: %w", err)
+				return shared.UsageErrorf("merchant-ids list: %v", err)
 			}
 			if err := shared.RejectNextFlagConflicts(
 				fs,
@@ -88,13 +88,13 @@ Examples:
 				return err
 			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("merchant-ids list: --limit must be between 1 and 200")
+				return shared.UsageError("merchant-ids list: --limit must be between 1 and 200")
 			}
 			if *certificatesLimit != 0 && (*certificatesLimit < 1 || *certificatesLimit > 50) {
-				return fmt.Errorf("merchant-ids list: --certificates-limit must be between 1 and 50")
+				return shared.UsageError("merchant-ids list: --certificates-limit must be between 1 and 50")
 			}
 			if err := shared.ValidateSort(*sort, merchantIDSortValues...); err != nil {
-				return fmt.Errorf("merchant-ids list: %w", err)
+				return shared.UsageErrorf("merchant-ids list: %v", err)
 			}
 
 			fieldsValue, err := normalizeMerchantIDFields(*fields, "--fields")
@@ -197,7 +197,7 @@ Examples:
 				return shared.MissingRequiredUsageError("--merchant-id")
 			}
 			if *certificatesLimit != 0 && (*certificatesLimit < 1 || *certificatesLimit > 50) {
-				return fmt.Errorf("merchant-ids view: --certificates-limit must be between 1 and 50")
+				return shared.UsageError("merchant-ids view: --certificates-limit must be between 1 and 50")
 			}
 
 			fieldsValue, err := normalizeMerchantIDFields(*fields, "--fields")

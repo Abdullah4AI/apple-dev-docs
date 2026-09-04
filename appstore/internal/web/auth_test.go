@@ -12,11 +12,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1199,4 +1201,199 @@ func generateSelfSignedCertPEM(t *testing.T) ([]byte, *x509.Certificate) {
 		Bytes: der,
 	}
 	return pem.EncodeToMemory(block), cert
+}
+
+// A stale cached cookie jar makes the post-2FA App Store Connect session
+// bootstrap fail with 401 even though Apple already accepted the 2FA code.
+// The error must identify that as a finalization failure carrying the status.
+func TestSubmitTwoFactorCodeReportsStaleSessionBootstrapAfterAcceptedCode(t *testing.T) {
+	var trustedDeviceCalls, trustCalls, sessionCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/appleauth/auth/verify/trusteddevice/securitycode":
+			trustedDeviceCalls++
+			w.WriteHeader(http.StatusNoContent)
+		case "/appleauth/auth/2sv/trust":
+			trustCalls++
+			w.WriteHeader(http.StatusNoContent)
+		case "/olympus/v1/session":
+			sessionCalls++
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	session := &AuthSession{
+		Client:           newTestServerRoutedClient(t, server),
+		ServiceKey:       "service-key",
+		AppleIDSessionID: "session-id",
+		SCNT:             "scnt-token",
+		twoFactorMethod:  twoFactorMethodTrustedDevice,
+	}
+
+	err := SubmitTwoFactorCode(context.Background(), session, "123456")
+	if err == nil {
+		t.Fatal("expected stale session bootstrap error")
+	}
+	if trustedDeviceCalls != 1 || trustCalls != 1 || sessionCalls != 1 {
+		t.Fatalf("expected one call per 2fa stage, got trusted-device=%d trust=%d session=%d", trustedDeviceCalls, trustCalls, sessionCalls)
+	}
+
+	var finalizeErr *TwoFactorFinalizationError
+	if !errors.As(err, &finalizeErr) {
+		t.Fatalf("expected *TwoFactorFinalizationError, got %T: %v", err, err)
+	}
+	if finalizeErr.Status != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", finalizeErr.Status)
+	}
+	if finalizeErr.HTTPStatusCode() != http.StatusUnauthorized {
+		t.Fatalf("expected HTTPStatusCode 401, got %d", finalizeErr.HTTPStatusCode())
+	}
+	if !IsStaleSessionAfterTwoFactor(err) {
+		t.Fatal("expected a stale-session finalization failure to be retryable with a fresh login")
+	}
+	if got := err.Error(); !strings.Contains(got, "401") {
+		t.Fatalf("expected finalization error to report the HTTP status, got %q", got)
+	}
+	if got := err.Error(); strings.Contains(got, "verification") {
+		t.Fatalf("expected finalization error to avoid verification wording, got %q", got)
+	}
+}
+
+func TestIsStaleSessionAfterTwoFactorIgnoresUnrelatedFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "unauthorized", err: &TwoFactorFinalizationError{Status: http.StatusUnauthorized}, want: true},
+		{name: "forbidden", err: &TwoFactorFinalizationError{Status: http.StatusForbidden}, want: true},
+		{name: "server error", err: &TwoFactorFinalizationError{Status: http.StatusInternalServerError}, want: false},
+		{name: "wrapped", err: fmt.Errorf("wrapped: %w", &TwoFactorFinalizationError{Status: http.StatusUnauthorized}), want: true},
+		{name: "rejected code", err: &twoFAVerificationFailedError{Kind: "trusted-device", Status: http.StatusBadRequest}, want: false},
+		{name: "bare session info", err: &sessionInfoStatusError{Status: http.StatusUnauthorized}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsStaleSessionAfterTwoFactor(tc.err); got != tc.want {
+				t.Fatalf("IsStaleSessionAfterTwoFactor(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// newTestServerRoutedClient routes Apple's hardcoded auth hosts at a local
+// httptest server while preserving request paths, headers, and bodies.
+func newTestServerRoutedClient(t *testing.T, server *httptest.Server) *http.Client {
+	t.Helper()
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+	transport := server.Client().Transport
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		routed := req.Clone(req.Context())
+		routed.URL.Scheme = serverURL.Scheme
+		routed.URL.Host = serverURL.Host
+		routed.Host = ""
+		return transport.RoundTrip(routed)
+	})}
+}
+
+// Apple already consumed the submitted code before the trust step runs, so a
+// 401 from /2sv/trust means the reused cookie jar is stale, not that the code
+// was wrong. It must classify like the session-bootstrap failure so callers
+// discard the proven-stale jar and retry fresh.
+func TestSubmitTwoFactorCodeReportsStaleTrustFailureAfterAcceptedCode(t *testing.T) {
+	var trustedDeviceCalls, trustCalls, sessionCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/appleauth/auth/verify/trusteddevice/securitycode":
+			trustedDeviceCalls++
+			w.WriteHeader(http.StatusNoContent)
+		case "/appleauth/auth/2sv/trust":
+			trustCalls++
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/olympus/v1/session":
+			sessionCalls++
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	session := &AuthSession{
+		Client:           newTestServerRoutedClient(t, server),
+		ServiceKey:       "service-key",
+		AppleIDSessionID: "session-id",
+		SCNT:             "scnt-token",
+		twoFactorMethod:  twoFactorMethodTrustedDevice,
+	}
+
+	err := SubmitTwoFactorCode(context.Background(), session, "123456")
+	if err == nil {
+		t.Fatal("expected the trust failure to be reported")
+	}
+	if trustedDeviceCalls != 1 || trustCalls != 1 || sessionCalls != 0 {
+		t.Fatalf("expected the flow to stop at the trust step, got trusted-device=%d trust=%d session=%d", trustedDeviceCalls, trustCalls, sessionCalls)
+	}
+
+	var finalizeErr *TwoFactorFinalizationError
+	if !errors.As(err, &finalizeErr) {
+		t.Fatalf("expected *TwoFactorFinalizationError, got %T: %v", err, err)
+	}
+	if finalizeErr.Status != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", finalizeErr.Status)
+	}
+	if !IsStaleSessionAfterTwoFactor(err) {
+		t.Fatal("expected a 401 from the trust step to be retryable with a fresh login")
+	}
+	if got := err.Error(); !strings.Contains(got, "401") {
+		t.Fatalf("expected the error to report the HTTP status, got %q", got)
+	}
+	if got := err.Error(); strings.Contains(got, "verification") {
+		t.Fatalf("expected the error to avoid verification wording, got %q", got)
+	}
+}
+
+// A trust step that fails for a reason unrelated to authorization must not be
+// treated as a stale cached session: retrying fresh burns another 2FA code.
+func TestSubmitTwoFactorCodeKeepsNonAuthorizationTrustFailuresUnretryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/appleauth/auth/verify/trusteddevice/securitycode":
+			w.WriteHeader(http.StatusNoContent)
+		case "/appleauth/auth/2sv/trust":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	session := &AuthSession{
+		Client:           newTestServerRoutedClient(t, server),
+		ServiceKey:       "service-key",
+		AppleIDSessionID: "session-id",
+		SCNT:             "scnt-token",
+		twoFactorMethod:  twoFactorMethodTrustedDevice,
+	}
+
+	err := SubmitTwoFactorCode(context.Background(), session, "123456")
+	if err == nil {
+		t.Fatal("expected the trust failure to be reported")
+	}
+	if IsStaleSessionAfterTwoFactor(err) {
+		t.Fatalf("expected a 500 from the trust step to stay unretryable, got %v", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "500") {
+		t.Fatalf("expected the error to report the HTTP status, got %q", got)
+	}
 }

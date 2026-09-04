@@ -136,18 +136,20 @@ func TestGitStoreGitHelperProcess(t *testing.T) {
 	if gitOperation == os.Getenv("ASC_GIT_HELPER_BLOCK_OPERATION") {
 		startedPath := os.Getenv("ASC_GIT_HELPER_STARTED")
 		childPIDPath := os.Getenv("ASC_GIT_HELPER_CHILD_PID")
-		if err := os.WriteFile(startedPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
-			os.Exit(2)
-		}
 		child := exec.Command("sleep", "30")
 		if err := child.Start(); err != nil {
 			os.Exit(3)
 		}
-		if err := os.WriteFile(childPIDPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+		// Publish the child PID before the started marker so the test never
+		// observes a handshake that is only half-written.
+		if err := writeGitHelperFileAtomically(childPIDPath, strconv.Itoa(child.Process.Pid)); err != nil {
 			os.Exit(4)
 		}
+		if err := writeGitHelperFileAtomically(startedPath, strconv.Itoa(os.Getpid())); err != nil {
+			os.Exit(2)
+		}
 		time.Sleep(30 * time.Second)
-		if err := os.WriteFile(os.Getenv("ASC_GIT_HELPER_SUCCESS"), []byte("success"), 0o600); err != nil {
+		if err := writeGitHelperFileAtomically(os.Getenv("ASC_GIT_HELPER_SUCCESS"), "success"); err != nil {
 			os.Exit(6)
 		}
 	}
@@ -167,6 +169,7 @@ func TestGitStoreGitHelperProcess(t *testing.T) {
 
 func configureGitHelperProcess(t *testing.T, operation, startedPath, childPIDPath, environmentPath, successPath string) {
 	t.Helper()
+	isolateGitHelperConfiguration(t)
 	binDir := t.TempDir()
 	writeTestExecutable(t, filepath.Join(binDir, "git"), `#!/bin/sh
 set -eu
@@ -191,6 +194,46 @@ exec "$ASC_GIT_HELPER_BINARY" -test.run=TestGitStoreGitHelperProcess -- "$@"
 	// A non-empty override avoids the local SSH configuration probe; the fake
 	// executable is the transport boundary under test.
 	t.Setenv("GIT_SSH_COMMAND", "true")
+}
+
+func isolateGitHelperConfiguration(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	configPath := filepath.Join(home, ".gitconfig")
+	contents := "[user]\n\tname = asc-gitstore-test\n\temail = gitstore-test@example.invalid\n"
+	if err := writeGitHelperFileAtomically(configPath, contents); err != nil {
+		t.Fatalf("write isolated gitconfig: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "missing-system-config"))
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+}
+
+func writeGitHelperFileAtomically(path, contents string) error {
+	if path == "" {
+		return errors.New("empty helper file path")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.WriteString(contents); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func argsAfterTestSeparator(args []string) []string {
@@ -227,17 +270,22 @@ func waitForGitHelperFile(t *testing.T, path string, ready chan<- struct{}) {
 func readGitHelperPID(t *testing.T, path string) int {
 	t.Helper()
 	deadline := time.Now().Add(gitProcessTestStartupWindow)
+	var lastContents []byte
+	var lastErr error
 	for {
 		data, err := os.ReadFile(path)
 		if err == nil {
+			lastContents = data
 			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-			if parseErr != nil {
-				t.Fatalf("parse helper PID %q: %v", data, parseErr)
+			if parseErr == nil && pid > 0 {
+				return pid
 			}
-			return pid
+			lastErr = parseErr
+		} else {
+			lastErr = err
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("read helper PID %s: %v", path, err)
+			t.Fatalf("read helper PID %s: %v (last contents %q)", path, lastErr, lastContents)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -280,5 +328,73 @@ func assertGitHelperDidNotReportSuccess(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Git helper reported success after deadline: %v", err)
+	}
+}
+
+func TestReadGitHelperPIDWaitsForParseableHandshake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "child-pid")
+	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
+		t.Fatalf("write empty helper PID: %v", err)
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		if err := os.WriteFile(path, []byte("12345\n"), 0o600); err != nil {
+			t.Errorf("write helper PID: %v", err)
+		}
+	}()
+
+	pid := readGitHelperPID(t, path)
+	if pid != 12345 {
+		t.Fatalf("readGitHelperPID() = %d, want 12345", pid)
+	}
+}
+
+func TestConfigureGitHelperProcessIsolatesGitConfiguration(t *testing.T) {
+	hostHome := t.TempDir()
+	hostConfig := filepath.Join(hostHome, ".gitconfig")
+	if err := os.WriteFile(hostConfig, []byte("not a git config\n"), 0o600); err != nil {
+		t.Fatalf("write host gitconfig: %v", err)
+	}
+	t.Setenv("HOME", hostHome)
+	t.Setenv("GIT_CONFIG_GLOBAL", hostConfig)
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(hostHome, "system-gitconfig"))
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.sshCommand")
+	t.Setenv("GIT_CONFIG_VALUE_0", "should-not-leak")
+
+	configureGitHelperProcess(
+		t,
+		"clone",
+		filepath.Join(t.TempDir(), "started"),
+		filepath.Join(t.TempDir(), "child-pid"),
+		filepath.Join(t.TempDir(), "environment"),
+		filepath.Join(t.TempDir(), "success"),
+	)
+
+	home := os.Getenv("HOME")
+	if home == "" || home == hostHome {
+		t.Fatal("configureGitHelperProcess did not isolate HOME")
+	}
+	globalConfig := os.Getenv("GIT_CONFIG_GLOBAL")
+	if globalConfig == "" || globalConfig == hostConfig {
+		t.Fatal("configureGitHelperProcess did not isolate GIT_CONFIG_GLOBAL")
+	}
+	if os.Getenv("GIT_CONFIG_NOSYSTEM") != "1" {
+		t.Fatalf("GIT_CONFIG_NOSYSTEM = %q, want 1", os.Getenv("GIT_CONFIG_NOSYSTEM"))
+	}
+	if os.Getenv("GIT_CONFIG_COUNT") != "0" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 0", os.Getenv("GIT_CONFIG_COUNT"))
+	}
+
+	data, err := os.ReadFile(globalConfig)
+	if err != nil {
+		t.Fatalf("read isolated gitconfig: %v", err)
+	}
+	if strings.Contains(string(data), "not a git config") {
+		t.Fatalf("isolated gitconfig reused host contents: %q", data)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		t.Fatal("isolated gitconfig was empty")
 	}
 }

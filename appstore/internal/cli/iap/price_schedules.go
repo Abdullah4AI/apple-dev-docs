@@ -384,10 +384,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap pricing schedules manual-prices: --limit must be between 1 and 200")
+				return shared.UsageError("iap pricing schedules manual-prices: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap pricing schedules manual-prices: %w", err)
+				return shared.UsageErrorf("iap pricing schedules manual-prices: %v", err)
 			}
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")
@@ -473,10 +473,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return fmt.Errorf("iap pricing schedules automatic-prices: --limit must be between 1 and 200")
+				return shared.UsageError("iap pricing schedules automatic-prices: --limit must be between 1 and 200")
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("iap pricing schedules automatic-prices: %w", err)
+				return shared.UsageErrorf("iap pricing schedules automatic-prices: %v", err)
 			}
 			if *resolved && strings.TrimSpace(*next) != "" {
 				fmt.Fprintln(os.Stderr, "Error: --resolved cannot be combined with --next")

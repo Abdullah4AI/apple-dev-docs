@@ -65,10 +65,10 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if *limit != 0 && (*limit < 1 || *limit > alternativeDistributionMaxLimit) {
-				return fmt.Errorf("alternative-distribution domains list: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
+				return shared.UsageErrorf("alternative-distribution domains list: --limit must be between 1 and %d", alternativeDistributionMaxLimit)
 			}
 			if err := shared.ValidateNextURL(*next); err != nil {
-				return fmt.Errorf("alternative-distribution domains list: %w", err)
+				return shared.UsageErrorf("alternative-distribution domains list: %v", err)
 			}
 
 			client, err := shared.GetASCClient()
