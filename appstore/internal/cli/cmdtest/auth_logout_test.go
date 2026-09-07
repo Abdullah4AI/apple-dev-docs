@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 	authcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/auth"
 )
 
@@ -83,29 +84,64 @@ func TestAuthLogoutConfirmRemovesAllCredentialsWithoutWarning(t *testing.T) {
 	}
 }
 
-func TestAuthLogoutWithoutConfirmWarnsAndPreservesLegacyRemoval(t *testing.T) {
+func TestAuthLogoutWithoutConfirmIsUsageErrorAndRemovesNothing(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{name: "implicit all", args: []string{"auth", "logout"}},
+		{name: "explicit all", args: []string{"auth", "logout", "--all"}},
+		{name: "named", args: []string{"auth", "logout", "--name", "demo"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := stubAuthLogoutRemovers(t)
+
+			root := RootCommand("1.2.3")
+			root.FlagSet.SetOutput(io.Discard)
+			stdout, stderr := captureOutput(t, func() {
+				if err := root.Parse(tt.args); err != nil {
+					t.Fatalf("parse error: %v", err)
+				}
+				err := root.Run(context.Background())
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("run error = %v, want flag.ErrHelp", err)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "--confirm is required to remove stored credentials") {
+				t.Fatalf("expected --confirm usage error, got %q", stderr)
+			}
+			if strings.Contains(stderr, "Warning") || strings.Contains(stderr, "5.0.0") {
+				t.Fatalf("stderr still carries deprecation wording: %q", stderr)
+			}
+			if len(calls.names) != 0 || calls.all != 0 {
+				t.Fatalf("expected no removal without --confirm, got %+v", calls)
+			}
+		})
+	}
+}
+
+func TestAuthLogoutWithoutConfirmExitsWithUsageCode(t *testing.T) {
 	calls := stubAuthLogoutRemovers(t)
 
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
+	var code int
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"auth", "logout"}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		if err := root.Run(context.Background()); err != nil {
-			t.Fatalf("run error: %v", err)
-		}
+		code = rootcmd.Run([]string{"auth", "logout"}, "1.2.3")
 	})
-
-	if stdout != "Successfully removed stored credentials\n" {
-		t.Fatalf("stdout = %q", stdout)
+	if code != rootcmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d; stderr=%q", code, rootcmd.ExitUsage, stderr)
 	}
-	wantWarning := "Warning: auth logout without --confirm is deprecated and will be rejected in 5.0.0; pass --confirm to acknowledge credential removal.\n"
-	if stderr != wantWarning {
-		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if len(calls.names) != 0 || calls.all != 1 {
-		t.Fatalf("unexpected removal calls: %+v", calls)
+	if !strings.Contains(stderr, "--confirm is required to remove stored credentials") {
+		t.Fatalf("expected --confirm usage error, got %q", stderr)
+	}
+	if len(calls.names) != 0 || calls.all != 0 {
+		t.Fatalf("expected no removal without --confirm, got %+v", calls)
 	}
 }
 

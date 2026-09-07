@@ -47,6 +47,19 @@ type WebMedicalDeviceDeclarationResult struct {
 	CountriesOrRegions []string `json:"countriesOrRegions,omitempty"`
 }
 
+// WebMedicalDeviceRegionResult is the mutation receipt from
+// `asc web apps medical-device region set`.
+type WebMedicalDeviceRegionResult struct {
+	AppID           string `json:"appId"`
+	RequirementID   string `json:"requirementId"`
+	RequirementName string `json:"requirementName"`
+	Status          string `json:"status,omitempty"`
+	FormID          string `json:"formId,omitempty"`
+	Region          string `json:"region"`
+	Declared        bool   `json:"declared"`
+	Changed         bool   `json:"changed"`
+}
+
 func webAppDeclarationListRows(result *WebAppDeclarationList) ([]string, [][]string) {
 	headers := []string{"Requirement", "Status", "Required", "Requirement ID", "Form ID"}
 	if result == nil {
@@ -92,6 +105,21 @@ func webMedicalDeviceDeclarationResultRows(result *WebMedicalDeviceDeclarationRe
 		fmt.Sprintf("%t", result.Changed),
 		webDeclarationText(result.Status),
 		webDeclarationText(strings.Join(result.CountriesOrRegions, ",")),
+	}}
+}
+
+func webMedicalDeviceRegionResultRows(result *WebMedicalDeviceRegionResult) ([]string, [][]string) {
+	headers := []string{"App ID", "Requirement", "Region", "Declared", "Changed", "Status"}
+	if result == nil {
+		return headers, nil
+	}
+	return headers, [][]string{{
+		result.AppID,
+		result.RequirementName,
+		result.Region,
+		fmt.Sprintf("%t", result.Declared),
+		fmt.Sprintf("%t", result.Changed),
+		webDeclarationText(result.Status),
 	}}
 }
 

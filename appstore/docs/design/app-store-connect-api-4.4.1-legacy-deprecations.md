@@ -1,5 +1,7 @@
 # App Store Connect API 4.4.1 legacy resource deprecations
 
+> Status: historical. The transition window this document defines closed in 5.0.0, which removed every product-scoped `asc iap localizations|images`, `asc iap submit`, `asc subscriptions localizations|images`, `asc subscriptions groups localizations`, and `asc subscriptions review submit|submit-group` command. `asc iap setup` and `asc subscriptions setup` keep their v1 localization steps and advisory warning. See `migrate-to-5-0.mdx`.
+
 ## Placement and command shape
 
 Apple deprecated the v1 image, localization, and submission resources for

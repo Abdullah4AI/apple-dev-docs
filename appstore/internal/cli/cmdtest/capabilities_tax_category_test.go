@@ -8,7 +8,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 )
 
-func TestRun_CapabilitiesReportsTaxCategoryGap(t *testing.T) {
+func TestRun_CapabilitiesReportsTaxCategorySupport(t *testing.T) {
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
 
 	stdout, stderr := captureOutput(t, func() {
@@ -27,14 +27,23 @@ func TestRun_CapabilitiesReportsTaxCategoryGap(t *testing.T) {
 		t.Fatalf("expected JSON output, got error %v and stdout %s", err, stdout)
 	}
 
-	assertCapability(t, resp, "App and In-App Purchase tax category", "not-public-api", "")
+	assertCapability(t, resp, "App and In-App Purchase tax category", "web-session", "asc web apps tax-category list")
 
 	for _, entry := range resp.Capabilities {
 		if entry.Capability != "App and In-App Purchase tax category" {
 			continue
 		}
-		if len(entry.Commands) != 0 {
-			t.Fatalf("expected no commands for the tax category gap, got %v", entry.Commands)
+		wantCommands := []string{
+			"asc web apps tax-category list",
+			"asc web apps tax-category view",
+			"asc web apps tax-category set",
+			"asc web iap tax-category list",
+			"asc web iap tax-category view",
+			"asc web iap tax-category set",
+			"asc web iap tax-category reset",
+		}
+		if strings.Join(entry.Commands, "\n") != strings.Join(wantCommands, "\n") {
+			t.Fatalf("expected tax category commands %v, got %v", wantCommands, entry.Commands)
 		}
 		return
 	}

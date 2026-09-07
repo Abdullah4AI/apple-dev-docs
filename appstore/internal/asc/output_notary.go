@@ -1,5 +1,41 @@
 package asc
 
+import "strconv"
+
+// NotarizationStapleResult is the computed output for a successful local
+// ticket stapling and validation operation.
+type NotarizationStapleResult struct {
+	FilePath  string `json:"filePath"`
+	Operation string `json:"operation"`
+	Stapled   bool   `json:"stapled"`
+	Validated bool   `json:"validated"`
+}
+
+// NotarizationValidateResult is the computed output for a successful local
+// ticket validation operation.
+type NotarizationValidateResult struct {
+	FilePath  string `json:"filePath"`
+	Operation string `json:"operation"`
+	Validated bool   `json:"validated"`
+}
+
+func notarizationStapleResultRows(result *NotarizationStapleResult) ([]string, [][]string) {
+	return []string{"Operation", "File Path", "Stapled", "Validated"}, [][]string{{
+		result.Operation,
+		result.FilePath,
+		strconv.FormatBool(result.Stapled),
+		strconv.FormatBool(result.Validated),
+	}}
+}
+
+func notarizationValidateResultRows(result *NotarizationValidateResult) ([]string, [][]string) {
+	return []string{"Operation", "File Path", "Validated"}, [][]string{{
+		result.Operation,
+		result.FilePath,
+		strconv.FormatBool(result.Validated),
+	}}
+}
+
 func notarySubmissionStatusRows(resp *NotarySubmissionStatusResponse) ([]string, [][]string) {
 	headers := []string{"ID", "Status", "Name", "Created"}
 	rows := [][]string{{

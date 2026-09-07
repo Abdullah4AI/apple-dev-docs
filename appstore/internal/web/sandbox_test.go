@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -126,5 +128,93 @@ func TestCreateSandboxAccountRejectsDisplayNameEmail(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "account name must be a valid email address") {
 		t.Fatalf("expected account-name validation error, got %v", err)
+	}
+}
+
+func TestDeleteSandboxAccountsMirrorsCapturedWebRequest(t *testing.T) {
+	var method, path, contentType, origin, referer string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		method = r.Method
+		path = r.URL.Path
+		contentType = r.Header.Get("Content-Type")
+		origin = r.Header.Get("Origin")
+		referer = r.Header.Get("Referer")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		baseURL:    server.URL + "/iris/v1",
+	}
+
+	if err := client.DeleteSandboxAccounts(context.Background(), []string{"tester-resource-id"}); err != nil {
+		t.Fatalf("DeleteSandboxAccounts() error = %v", err)
+	}
+
+	if method != http.MethodPost || path != "/sandbox/v2/account/delete" {
+		t.Fatalf("unexpected request: method=%q path=%q", method, path)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("expected JSON content type, got %q", contentType)
+	}
+	if origin != server.URL {
+		t.Fatalf("expected Origin %q, got %q", server.URL, origin)
+	}
+	if referer != server.URL+"/access/users/sandbox" {
+		t.Fatalf("expected Referer %q, got %q", server.URL+"/access/users/sandbox", referer)
+	}
+
+	want := map[string]any{"ids": []any{"tester-resource-id"}}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("unexpected request body: got %#v want %#v", body, want)
+	}
+}
+
+func TestListSandboxAccountsMirrorsCapturedWebRequest(t *testing.T) {
+	var method, path, limit, contentType, origin, referer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		limit = r.URL.Query().Get("limit")
+		contentType = r.Header.Get("Content-Type")
+		origin = r.Header.Get("Origin")
+		referer = r.Header.Get("Referer")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"totalAccounts":1,"totalInactiveAccounts":0,"accounts":[{"id":"tester-resource-id","isInFamily":false,"firstName":"Tester","lastName":"Example","acAccountName":"tester@example.com","storeFront":"USA"}]}`)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		baseURL:    server.URL + "/iris/v1",
+	}
+
+	response, err := client.ListSandboxAccounts(context.Background())
+	if err != nil {
+		t.Fatalf("ListSandboxAccounts() error = %v", err)
+	}
+	if method != http.MethodGet || path != "/sandbox/v2/provider/account/list" || limit != "50" {
+		t.Fatalf("unexpected request: method=%q path=%q limit=%q", method, path, limit)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("expected JSON content type, got %q", contentType)
+	}
+	if origin != server.URL {
+		t.Fatalf("expected Origin %q, got %q", server.URL, origin)
+	}
+	if referer != server.URL+"/access/users/sandbox" {
+		t.Fatalf("expected Referer %q, got %q", server.URL+"/access/users/sandbox", referer)
+	}
+	if response.TotalAccounts != 1 || response.TotalInactiveAccounts != 0 || len(response.Accounts) != 1 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if response.Accounts[0].ID != "tester-resource-id" || response.Accounts[0].IsInFamily == nil || *response.Accounts[0].IsInFamily {
+		t.Fatalf("unexpected account projection: %+v", response.Accounts[0])
 	}
 }

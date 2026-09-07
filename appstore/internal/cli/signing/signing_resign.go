@@ -22,6 +22,7 @@ type signingResignOptions struct {
 	IdentityPath         string
 	IdentityPasswordPath string
 	ProfilesManifestPath string
+	RebaseTeamClaims     bool
 }
 
 // SigningResignCommand returns the experimental local IPA re-signing command.
@@ -32,11 +33,12 @@ func SigningResignCommand() *ffcli.Command {
 	identityPath := fs.String("identity", "", "[experimental] Path to a PKCS#12 signing identity (required)")
 	identityPasswordPath := fs.String("identity-password-file", "", "[experimental] Path to a file containing the PKCS#12 password")
 	profilesManifestPath := fs.String("profiles-manifest", "", "[experimental] Path to the strict bundle-to-profile manifest (required)")
+	rebaseTeamClaims := fs.Bool("rebase-team-claims", false, "[experimental] Rebase allowlisted team-prefix claims; changing KVS selects a different data namespace")
 	format := shared.BindOutputFlagsWith(fs, "format", shared.DefaultOutputFormat(), "Output format: json, table, markdown")
 
 	return &ffcli.Command{
 		Name:       "resign",
-		ShortUsage: "asc signing resign --ipa PATH --output PATH --identity PATH --profiles-manifest PATH [flags]",
+		ShortUsage: "asc signing resign --ipa PATH --output PATH --identity PATH --profiles-manifest PATH [--rebase-team-claims] [flags]",
 		ShortHelp:  "[experimental] Re-sign an existing iOS IPA with complete nested-target profile mappings.",
 		LongHelp: `[experimental] Re-sign an existing iOS IPA into a new destination.
 
@@ -47,6 +49,12 @@ the user's Xcode profile directories.
 
 Use --format to select JSON, table, or Markdown output. The input and output
 paths are separate because --output names the new IPA artifact.
+
+Cross-team entitlement claim rebasing is disabled by default. Use
+--rebase-team-claims only when the allowlisted claims should be transformed;
+all transformed values remain subject to replacement-profile authorization.
+Changing a KVS claim selects a different namespace and can make existing KVS
+data inaccessible.
 
 Example:
   asc signing resign --ipa ./App.ipa --output ./artifacts/App-resigned.ipa --identity ./signing/distribution.p12 --identity-password-file ./secrets/p12-password --profiles-manifest ./signing/profiles.json --format json`,
@@ -85,6 +93,7 @@ Example:
 				IdentityPath:         *identityPath,
 				IdentityPasswordPath: signingResignPathOrEmpty(*identityPasswordPath),
 				ProfilesManifestPath: *profilesManifestPath,
+				RebaseTeamClaims:     *rebaseTeamClaims,
 			})
 			if err != nil {
 				if isSigningResignUsageError(err) {
@@ -149,12 +158,13 @@ func signingResignPathOrEmpty(value string) string {
 // Keep implementation-local aliases while exposing the public receipt from
 // internal/asc, where the shared output registry can render its exact type.
 type (
-	signingResignResult         = asc.SigningResignResult
-	signingResignInputResult    = asc.SigningResignInputResult
-	signingResignArtifactResult = asc.SigningResignArtifactResult
-	signingResignIdentityResult = asc.SigningResignIdentityResult
-	signingResignTargetResult   = asc.SigningResignTargetResult
-	signingResignVerification   = asc.SigningResignVerification
+	signingResignResult                   = asc.SigningResignResult
+	signingResignInputResult              = asc.SigningResignInputResult
+	signingResignArtifactResult           = asc.SigningResignArtifactResult
+	signingResignIdentityResult           = asc.SigningResignIdentityResult
+	signingResignTargetResult             = asc.SigningResignTargetResult
+	signingResignVerification             = asc.SigningResignVerification
+	signingResignOutputEntitlementRewrite = asc.SigningResignEntitlementRewrite
 )
 
 func printSigningResignResult(result signingResignResult, format string, pretty bool) error {

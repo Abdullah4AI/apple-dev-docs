@@ -378,23 +378,6 @@ func TestSubscriptionPricePointNextURLRejectsQueryModifiers(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro","locale":"en-US"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionLocalization(context.Background(), "loc-1"); err != nil {
-		t.Fatalf("GetSubscriptionLocalization() error: %v", err)
-	}
-}
-
 func TestCreateSubscriptionLocalization(t *testing.T) {
 	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro","locale":"en-US"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -429,148 +412,6 @@ func TestCreateSubscriptionLocalization(t *testing.T) {
 	}
 	if _, err := client.CreateSubscriptionLocalization(context.Background(), "sub-1", attrs); err != nil {
 		t.Fatalf("CreateSubscriptionLocalization() error: %v", err)
-	}
-}
-
-func TestUpdateSubscriptionLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionLocalizations","id":"loc-1","attributes":{"name":"Pro+"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		var payload SubscriptionLocalizationUpdateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionLocalizations || payload.Data.ID != "loc-1" {
-			t.Fatalf("unexpected payload: %+v", payload.Data)
-		}
-		if payload.Data.Attributes.Name == nil || *payload.Data.Attributes.Name != "Pro+" {
-			t.Fatalf("expected name update, got %+v", payload.Data.Attributes)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	name := "Pro+"
-	attrs := SubscriptionLocalizationUpdateAttributes{Name: &name}
-	if _, err := client.UpdateSubscriptionLocalization(context.Background(), "loc-1", attrs); err != nil {
-		t.Fatalf("UpdateSubscriptionLocalization() error: %v", err)
-	}
-}
-
-func TestDeleteSubscriptionLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, `{}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodDelete {
-			t.Fatalf("expected DELETE, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.DeleteSubscriptionLocalization(context.Background(), "loc-1"); err != nil {
-		t.Fatalf("DeleteSubscriptionLocalization() error: %v", err)
-	}
-}
-
-func TestGetSubscriptionImage(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionImages","id":"img-1","attributes":{"fileName":"image.png","fileSize":1234}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionImages/img-1" {
-			t.Fatalf("expected path /v1/subscriptionImages/img-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionImage(context.Background(), "img-1"); err != nil {
-		t.Fatalf("GetSubscriptionImage() error: %v", err)
-	}
-}
-
-func TestCreateSubscriptionImage(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionImages","id":"img-1","attributes":{"fileName":"image.png","fileSize":1234}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionImages" {
-			t.Fatalf("expected path /v1/subscriptionImages, got %s", req.URL.Path)
-		}
-		var payload SubscriptionImageCreateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionImages {
-			t.Fatalf("expected type subscriptionImages, got %q", payload.Data.Type)
-		}
-		if payload.Data.Attributes.FileName != "image.png" || payload.Data.Attributes.FileSize != 1234 {
-			t.Fatalf("unexpected attributes: %+v", payload.Data.Attributes)
-		}
-		if payload.Data.Relationships == nil || payload.Data.Relationships.Subscription == nil {
-			t.Fatalf("expected subscription relationship")
-		}
-		if payload.Data.Relationships.Subscription.Data.Type != ResourceTypeSubscriptions || payload.Data.Relationships.Subscription.Data.ID != "sub-1" {
-			t.Fatalf("unexpected relationship: %+v", payload.Data.Relationships.Subscription.Data)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.CreateSubscriptionImage(context.Background(), "sub-1", "image.png", 1234); err != nil {
-		t.Fatalf("CreateSubscriptionImage() error: %v", err)
-	}
-}
-
-func TestUpdateSubscriptionImage(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionImages","id":"img-1","attributes":{"uploaded":true}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionImages/img-1" {
-			t.Fatalf("expected path /v1/subscriptionImages/img-1, got %s", req.URL.Path)
-		}
-		var payload SubscriptionImageUpdateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionImages || payload.Data.ID != "img-1" {
-			t.Fatalf("unexpected payload: %+v", payload.Data)
-		}
-		if payload.Data.Attributes.Uploaded == nil || !*payload.Data.Attributes.Uploaded {
-			t.Fatalf("expected uploaded=true, got %+v", payload.Data.Attributes)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	uploaded := true
-	attrs := SubscriptionImageUpdateAttributes{Uploaded: &uploaded}
-	if _, err := client.UpdateSubscriptionImage(context.Background(), "img-1", attrs); err != nil {
-		t.Fatalf("UpdateSubscriptionImage() error: %v", err)
-	}
-}
-
-func TestDeleteSubscriptionImage(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, `{}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodDelete {
-			t.Fatalf("expected DELETE, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionImages/img-1" {
-			t.Fatalf("expected path /v1/subscriptionImages/img-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.DeleteSubscriptionImage(context.Background(), "img-1"); err != nil {
-		t.Fatalf("DeleteSubscriptionImage() error: %v", err)
 	}
 }
 
@@ -1177,66 +1018,6 @@ func TestGetSubscriptionPricePointAdjustedEqualizationsRequiresIDWithoutNext(t *
 	}
 }
 
-func TestCreateSubscriptionSubmission(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionSubmissions","id":"submit-1"}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionSubmissions" {
-			t.Fatalf("expected path /v1/subscriptionSubmissions, got %s", req.URL.Path)
-		}
-		var payload SubscriptionSubmissionCreateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionSubmissions {
-			t.Fatalf("expected type subscriptionSubmissions, got %q", payload.Data.Type)
-		}
-		if payload.Data.Relationships == nil || payload.Data.Relationships.Subscription == nil {
-			t.Fatalf("expected subscription relationship")
-		}
-		if payload.Data.Relationships.Subscription.Data.ID != "sub-1" {
-			t.Fatalf("unexpected relationship: %+v", payload.Data.Relationships.Subscription.Data)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.CreateSubscriptionSubmission(context.Background(), "sub-1"); err != nil {
-		t.Fatalf("CreateSubscriptionSubmission() error: %v", err)
-	}
-}
-
-func TestCreateSubscriptionGroupSubmission(t *testing.T) {
-	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionGroupSubmissions","id":"submit-1"}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionGroupSubmissions" {
-			t.Fatalf("expected path /v1/subscriptionGroupSubmissions, got %s", req.URL.Path)
-		}
-		var payload SubscriptionGroupSubmissionCreateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionGroupSubmissions {
-			t.Fatalf("expected type subscriptionGroupSubmissions, got %q", payload.Data.Type)
-		}
-		if payload.Data.Relationships == nil || payload.Data.Relationships.SubscriptionGroup == nil {
-			t.Fatalf("expected subscriptionGroup relationship")
-		}
-		if payload.Data.Relationships.SubscriptionGroup.Data.ID != "group-1" {
-			t.Fatalf("unexpected relationship: %+v", payload.Data.Relationships.SubscriptionGroup.Data)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.CreateSubscriptionGroupSubmission(context.Background(), "group-1"); err != nil {
-		t.Fatalf("CreateSubscriptionGroupSubmission() error: %v", err)
-	}
-}
-
 func TestGetSubscriptionAppStoreReviewScreenshot(t *testing.T) {
 	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionAppStoreReviewScreenshots","id":"shot-1","attributes":{"fileName":"shot.png","fileSize":1234}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -1428,23 +1209,6 @@ func TestGetSubscriptionPromotedPurchase(t *testing.T) {
 	}
 }
 
-func TestGetSubscriptionGroupLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionGroupLocalizations","id":"loc-1","attributes":{"name":"Premium","locale":"en-US"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionGroupLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionGroupLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if _, err := client.GetSubscriptionGroupLocalization(context.Background(), "loc-1"); err != nil {
-		t.Fatalf("GetSubscriptionGroupLocalization() error: %v", err)
-	}
-}
-
 func TestCreateSubscriptionGroupLocalization(t *testing.T) {
 	response := jsonResponse(http.StatusCreated, `{"data":{"type":"subscriptionGroupLocalizations","id":"loc-1","attributes":{"name":"Premium","locale":"en-US"}}}`)
 	client := newTestClient(t, func(req *http.Request) {
@@ -1479,51 +1243,5 @@ func TestCreateSubscriptionGroupLocalization(t *testing.T) {
 	}
 	if _, err := client.CreateSubscriptionGroupLocalization(context.Background(), "group-1", attrs); err != nil {
 		t.Fatalf("CreateSubscriptionGroupLocalization() error: %v", err)
-	}
-}
-
-func TestUpdateSubscriptionGroupLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusOK, `{"data":{"type":"subscriptionGroupLocalizations","id":"loc-1","attributes":{"name":"Premium+"}}}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionGroupLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionGroupLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		var payload SubscriptionGroupLocalizationUpdateRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if payload.Data.Type != ResourceTypeSubscriptionGroupLocalizations || payload.Data.ID != "loc-1" {
-			t.Fatalf("unexpected payload: %+v", payload.Data)
-		}
-		if payload.Data.Attributes.Name == nil || *payload.Data.Attributes.Name != "Premium+" {
-			t.Fatalf("expected name update, got %+v", payload.Data.Attributes)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	name := "Premium+"
-	attrs := SubscriptionGroupLocalizationUpdateAttributes{Name: &name}
-	if _, err := client.UpdateSubscriptionGroupLocalization(context.Background(), "loc-1", attrs); err != nil {
-		t.Fatalf("UpdateSubscriptionGroupLocalization() error: %v", err)
-	}
-}
-
-func TestDeleteSubscriptionGroupLocalization(t *testing.T) {
-	response := jsonResponse(http.StatusNoContent, `{}`)
-	client := newTestClient(t, func(req *http.Request) {
-		if req.Method != http.MethodDelete {
-			t.Fatalf("expected DELETE, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/subscriptionGroupLocalizations/loc-1" {
-			t.Fatalf("expected path /v1/subscriptionGroupLocalizations/loc-1, got %s", req.URL.Path)
-		}
-		assertAuthorized(t, req)
-	}, response)
-
-	if err := client.DeleteSubscriptionGroupLocalization(context.Background(), "loc-1"); err != nil {
-		t.Fatalf("DeleteSubscriptionGroupLocalization() error: %v", err)
 	}
 }

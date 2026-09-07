@@ -6,19 +6,28 @@ Add `resign` below the existing `signing` command group. The command is an
 experimental, macOS-only local operation:
 
 ```text
-asc signing resign --ipa PATH --output PATH --identity PATH --profiles-manifest PATH [--identity-password-file PATH] [--format FORMAT]
+asc signing resign --ipa PATH --output PATH --identity PATH --profiles-manifest PATH [--identity-password-file PATH] [--rebase-team-claims] [--format FORMAT]
 ```
 
 The command-specific `--ipa`, `--output`, `--identity`,
 `--identity-password-file`, and `--profiles-manifest` flags are experimental;
 `--ipa`, `--output`, `--identity`, and `--profiles-manifest` are required, while
-the password-file path is optional. The help text marks each of these flags
-with `[experimental]`.
+the password-file path is optional. The opt-in `--rebase-team-claims` flag is
+also experimental and defaults to disabled. The help text marks each of these
+flags with `[experimental]`.
 The destination is create-only: an existing path is a hard conflict and there
 is no overwrite flag in the first release. Positional arguments are rejected.
 The output format uses the repository's standard table, JSON, and Markdown
 renderers. The operation has no App Store Connect API endpoint or network
 dependency.
+
+`--rebase-team-claims` is an explicit opt-in for a narrow cross-team
+transition. Without the flag, the fail-closed refusal behavior below is
+unchanged. With the flag, the command first builds one immutable, whole-IPA
+entitlement plan and validates every transformed value before writing any
+generated entitlement document or replacement profile. A later target or
+nested-code failure therefore cannot leave an earlier target partially
+prepared.
 
 ## Current behavior and boundaries
 
@@ -100,6 +109,32 @@ publication should use the bounded ZIP, `rootfs`, and `secureopen` patterns in
    existing team-identifier claim syntactically, but do not infer that a
    legacy application-ID prefix must equal it. Replacement-profile identity
    claims are checked independently against the target and profile fields.
+   `--rebase-team-claims` permits only these additional transformations, and
+   each transformed value is checked against the replacement profile after
+   transformation: concrete `keychain-access-groups` entries and the scalar
+   `com.apple.developer.ubiquity-kvstore-identifier` may be rebased. KVS is
+   planned once for the whole IPA: an exact existing value is preserved when
+   authorized; otherwise one exact replacement-profile value with the same
+   validated suffix is required. A wildcard can authorize that exact value,
+   but never supplies a KVS destination. KVS prefixes are parsed from the KVS
+   claim itself and may differ from application-ID prefixes. Changing the KVS
+   value selects a different namespace and can make existing KVS data
+   inaccessible. Keychain-group
+   source prefixes are taken from the signed `application-identifier` claim,
+   never from `TeamID`; values must be concrete, well-formed, and retain their
+   original order, including duplicates. A repeated old KVS value or keychain
+   group must resolve to exactly one planned value across the IPA, and
+   distinct old values may not collapse into one destination. A concrete
+   third-prefix value may remain unchanged only when its replacement profile
+   authorizes it. No profile wildcard is emitted, and profile-only entries are
+   never added. App Clip parent and associated-identifier relationship claims
+   are rebased only through a proven unique reciprocal main-app/App-Clip pair;
+   if pairing cannot be proven, each is preserved only when already authorized
+   unchanged. Every other entitlement,
+   including iCloud containers and migration/data claims, remains exact-only
+   and is never generically rewritten. The JSON receipt reports one flattened
+   entry per changed scalar or array element, with optional array indexes, in
+   canonical target/key/index/value order under `entitlementRewrites`.
 7. Create a dedicated temporary keychain using the existing recovery/journal
    and lock boundary, import the already validated identity, and sign leaf
    nested code before its enclosing `.framework`, `.bundle`, and `.xpc` code
@@ -144,10 +179,12 @@ publication should use the bounded ZIP, `rootfs`, and `secureopen` patterns in
 ## Output and errors
 
 JSON is a schema-versioned, registered `internal/asc` output type containing
-only input/output size and
-SHA-256 digests, public leaf-certificate digest/team, target relative path and
-bundle identifier, profile class/UUID/digest, and an all-target verification
-status. Table and Markdown expose the same safe fields. It never emits
+input/output size and SHA-256 digests, public leaf-certificate digest/team,
+target relative path and bundle identifier, profile class/UUID/digest, and an
+all-target verification status. When claim rebasing is enabled, it also
+contains the deterministic `entitlementRewrites` audit records described
+above; the field is omitted when the flag is absent. Table and Markdown expose
+the same safe fields. It never emits
 passwords, PKCS#12/profile source paths, temporary keychain paths, raw profile
 plists, device identifiers, or raw subprocess diagnostics.
 

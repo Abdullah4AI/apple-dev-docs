@@ -26,6 +26,7 @@ const (
 	signingPlanSchemaVersion                      = 1
 	signingSettingsMaxBytes                       = 1 << 20
 	signingPlanMaxBytes                           = 8 << 20
+	signingPlanMaxFiles                           = 4096
 	signingPlanMaxMissingOptionalIncludePathBytes = 4096
 
 	signingPlanCommand = "asc xcode signing plan"
@@ -110,7 +111,10 @@ type signingIncompleteInternalXCConfigError struct {
 }
 
 func (e signingIncompleteInternalXCConfigError) Error() string {
-	return signingIncompleteInternalXCConfigMessage
+	if e.err == nil {
+		return signingIncompleteInternalXCConfigMessage
+	}
+	return fmt.Sprintf("%s: %v", signingIncompleteInternalXCConfigMessage, e.err)
 }
 
 func (e signingIncompleteInternalXCConfigError) Unwrap() error {
@@ -584,6 +588,7 @@ func buildSigningPlan(opts SigningPlanOptions) (*signingPlanBuild, error) {
 
 	var operations []signingPlanOperation
 	var operationBlockers []string
+	baselineResolver := newSigningSettingResolver(project, configFiles, opts.AllowExternalXCConfig, lexicalConfigPaths)
 	converged := false
 	maxIterations := len(candidates) + 1
 	for iteration := 0; iteration < maxIterations; iteration++ {
@@ -610,8 +615,8 @@ func buildSigningPlan(opts SigningPlanOptions) (*signingPlanBuild, error) {
 			operationBlockers = append(operationBlockers, fmt.Sprintf("stage signing plan: %v", stageErr))
 			break
 		}
-		reclassified, resolutionBlockers := reclassifySigningNoOps(candidates, stagedProject, stagedResolver)
-		if len(resolutionBlockers) > 0 {
+		reclassified, resolutionBlockers := reclassifySigningNoOps(candidates, project, stagedProject, stagedResolver, baselineResolver)
+		if len(resolutionBlockers) > 0 && reclassified == 0 {
 			operationBlockers = append(operationBlockers, resolutionBlockers...)
 			break
 		}
@@ -666,6 +671,9 @@ func buildSigningPlan(opts SigningPlanOptions) (*signingPlanBuild, error) {
 		plan.Files = append(plan.Files, file)
 	}
 	sort.Slice(plan.Files, func(left, right int) bool { return plan.Files[left].Path < plan.Files[right].Path })
+	if len(plan.Files) > signingPlanMaxFiles {
+		plan.Blockers = append(plan.Blockers, fmt.Sprintf("signing plan source graph contains %d files, exceeding the limit of %d", len(plan.Files), signingPlanMaxFiles))
+	}
 	sort.Strings(plan.Blockers)
 	sort.Strings(plan.Warnings)
 	plan.Ready = len(plan.Blockers) == 0
@@ -1159,6 +1167,78 @@ func signingConfigurationSourcesAuthorized(
 	return true
 }
 
+func signingConfigurationDefinesUnconditionalEntitlement(
+	project *structuredVersionProject,
+	configuration *versionConfiguration,
+	configFiles map[string][]string,
+	resolver *signingSettingResolver,
+) bool {
+	value, definesUnconditional := configuration.buildSettings["CODE_SIGN_ENTITLEMENTS"].(string)
+	if definesUnconditional && signingValueInherits(value) {
+		definesUnconditional = false
+	}
+	if !definesUnconditional && signingConfigurationSourcesAuthorized(project, configuration, configFiles) {
+		if files := configFiles[configuration.id]; len(files) > 0 {
+			definesUnconditional = signingConfigurationXCConfigHasLiveUnconditionalEntitlementOverride(configuration, files, resolver)
+		}
+	}
+	return definesUnconditional
+}
+
+func signingConfigurationDefinesUnconditionalPBXEntitlement(configuration *versionConfiguration) bool {
+	value, ok := configuration.buildSettings["CODE_SIGN_ENTITLEMENTS"].(string)
+	return ok && !signingValueInherits(value)
+}
+
+// signingConfigurationXCConfigHasLiveUnconditionalEntitlementOverride keeps
+// project fallback protection only when the target xcconfig's effective
+// unconditional slot is a literal replacement. The sentinel probe rejects
+// effective inherited values, while the candidate traversal excludes
+// conditional-only assignments without replaying the xcconfig graph in a
+// second resolver.
+func signingConfigurationXCConfigHasLiveUnconditionalEntitlementOverride(
+	configuration *versionConfiguration,
+	files []string,
+	resolver *signingSettingResolver,
+) bool {
+	if len(files) == 0 || resolver.xcconfigDependsOnFallback(configuration, files[0], "CODE_SIGN_ENTITLEMENTS") {
+		return false
+	}
+	candidates, _, _, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+		configuration,
+		files,
+		resolver,
+		xcconfigResolvedValue{},
+	)
+	if err != nil {
+		return false
+	}
+	for _, filePath := range files {
+		data, readErr := resolver.readXCConfig(filePath)
+		if readErr != nil {
+			return false
+		}
+		document, parseErr := parseXCConfig(data)
+		if parseErr != nil {
+			return false
+		}
+		for _, assignment := range document.assignments {
+			if assignment.baseKey != "CODE_SIGN_ENTITLEMENTS" ||
+				assignment.key != "CODE_SIGN_ENTITLEMENTS" ||
+				!candidates[normalizeSigningLexicalPath(filePath)][assignment.lineIndex] {
+				continue
+			}
+			if signingValueInherits(assignment.value) {
+				continue
+			}
+			if assignment.operator == "=" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // signingSettingResolver is the signing workflow's authorization-aware
 // counterpart to structuredVersionProject.resolveSetting. Its xcconfig reads
 // are limited to paths successfully collected for this plan; this keeps a
@@ -1370,8 +1450,17 @@ func (resolver *signingSettingResolver) expandDirectAssignmentWithContext(
 	setting, assignmentKey, value string,
 	stack map[string]bool,
 ) (string, string, error) {
+	return resolver.expandDirectAssignmentWithSourceContext(configuration, expansionConfiguration, setting, assignmentKey, value, stack, false)
+}
+
+func (resolver *signingSettingResolver) expandDirectAssignmentWithSourceContext(
+	configuration, expansionConfiguration *versionConfiguration,
+	setting, assignmentKey, value string,
+	stack map[string]bool,
+	xcconfigSource bool,
+) (string, string, error) {
 	if strings.Contains(value, "$(inherited)") || strings.Contains(value, "${inherited}") {
-		inherited, err := resolver.resolveInheritedSettingValue(configuration, expansionConfiguration, setting, assignmentKey, value, stack)
+		inherited, err := resolver.resolveInheritedSettingValue(configuration, expansionConfiguration, setting, assignmentKey, value, stack, xcconfigSource)
 		if err != nil {
 			return "", "", fmt.Errorf("resolve inherited %s: %w", setting, err)
 		}
@@ -1385,6 +1474,7 @@ func (resolver *signingSettingResolver) resolveInheritedSettingValue(
 	configuration, expansionConfiguration *versionConfiguration,
 	setting, assignmentKey, currentValue string,
 	stack map[string]bool,
+	xcconfigSource bool,
 ) (string, error) {
 	// Xcode resolves $(inherited) to the value the setting holds at the next
 	// level up for the assignment being expanded. A conditional PBX assignment
@@ -1400,17 +1490,24 @@ func (resolver *signingSettingResolver) resolveInheritedSettingValue(
 	// only available guard against recursing on the assignment being expanded.
 	// Recursion terminates either way because the nested expansion names the
 	// unconditional slot and passes its own text as currentValue.
-	if raw, ok := configuration.buildSettings[setting].(string); ok &&
-		(assignmentKey != setting || strings.TrimSpace(raw) != strings.TrimSpace(currentValue)) {
-		expanded, _, err := resolver.expandDirectAssignmentWithContext(configuration, expansionConfiguration, setting, setting, raw, stack)
-		if err != nil {
-			return "", err
+	if !xcconfigSource {
+		if raw, ok := configuration.buildSettings[setting].(string); ok &&
+			(assignmentKey != setting || strings.TrimSpace(raw) != strings.TrimSpace(currentValue)) {
+			expanded, _, err := resolver.expandDirectAssignmentWithContext(configuration, expansionConfiguration, setting, setting, raw, stack)
+			if err != nil {
+				return "", err
+			}
+			return expanded, nil
 		}
-		return expanded, nil
 	}
-	inherited, _, err := resolver.resolveLowerSettingWithContext(configuration, expansionConfiguration, setting)
+	inherited, err := resolver.resolveLowerSettingWithContext(configuration, expansionConfiguration, setting)
 	if err == nil {
 		return inherited, nil
+	}
+	if errors.Is(err, errVersionSettingNotFound) {
+		if implicit, ok := signingImplicitSettingValue(resolver.project, expansionConfiguration, setting); ok {
+			return implicit, nil
+		}
 	}
 	if fallback := resolver.project.projectConfiguration(configuration.name); fallback != nil && fallback != configuration {
 		for _, key := range matchingBuildSettingKeys(fallback.buildSettings, setting) {
@@ -1426,27 +1523,28 @@ func (resolver *signingSettingResolver) resolveInheritedSettingValue(
 func (resolver *signingSettingResolver) resolveLowerSettingWithContext(
 	configuration, expansionConfiguration *versionConfiguration,
 	setting string,
-) (string, string, error) {
+) (string, error) {
 	if configuration.baseReferenceID != "" {
 		path, err := resolver.project.fileReferencePath(configuration.baseReferenceID)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		resolved, err := resolver.resolveConfigurationXCConfigWithContext(configuration, expansionConfiguration, path, setting)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		if resolved.found {
 			value, _, err := resolver.expandSettingReferences(expansionConfiguration, resolved.value, map[string]bool{setting: true})
-			return value, resolved.path, err
+			return value, err
 		}
 	}
 	if !configuration.projectLevel {
 		if fallback := resolver.project.projectConfiguration(configuration.name); fallback != nil {
-			return resolver.resolveSettingWithContext(fallback, expansionConfiguration, setting)
+			value, _, err := resolver.resolveSettingWithContext(fallback, expansionConfiguration, setting)
+			return value, err
 		}
 	}
-	return "", "", fmt.Errorf("%s: %w", setting, errVersionSettingNotFound)
+	return "", fmt.Errorf("%s: %w", setting, errVersionSettingNotFound)
 }
 
 func (resolver *signingSettingResolver) resolveSettingReference(configuration *versionConfiguration, setting string, stack map[string]bool) (string, string, error) {
@@ -1484,7 +1582,58 @@ func (resolver *signingSettingResolver) resolveSettingReferenceWithContext(
 			return resolver.resolveSettingReferenceWithContext(fallback, expansionConfiguration, setting, stack)
 		}
 	}
+	// Only after every explicit pbxproj and xcconfig layer has been searched
+	// does the implicit context apply, so a project that assigns one of these
+	// names keeps Xcode's precedence.
+	if value, ok := signingImplicitSettingValue(resolver.project, expansionConfiguration, setting); ok {
+		return value, resolver.project.pbxprojPath, nil
+	}
 	return "", "", fmt.Errorf("setting not found")
+}
+
+// signingImplicitSettingValue supplies the build settings Xcode defines for
+// every project from the project's own location. Xcode sets them before any
+// pbxproj or xcconfig assignment is read, so a reference such as
+// $(SRCROOT)/App.entitlements is valid in a project that never assigns SRCROOT
+// itself and must not block an otherwise resolvable signing plan.
+//
+// Only values derivable from the selected .xcodeproj without running a build
+// are returned. Anything that depends on a build context - CONFIGURATION,
+// PLATFORM_NAME, SDKROOT, BUILT_PRODUCTS_DIR, and every other
+// xcodebuild-supplied setting - stays unresolved so the plan fails closed
+// instead of guessing which file it inventoried. A resolved path is still
+// bound to the project root by the caller's rooted, no-follow containment and
+// artifact-alias checks, so an implicit variable cannot widen the plan's
+// reach.
+func signingImplicitSettingValue(
+	project *structuredVersionProject,
+	configuration *versionConfiguration,
+	setting string,
+) (string, bool) {
+	if project == nil {
+		return "", false
+	}
+	switch setting {
+	case "SRCROOT", "SOURCE_ROOT", "PROJECT_DIR":
+		return project.rootDir, project.rootDir != ""
+	case "PROJECT_FILE_PATH":
+		return project.projectPath, project.projectPath != ""
+	case "PROJECT_NAME":
+		base := filepath.Base(project.projectPath)
+		name := strings.TrimSuffix(base, filepath.Ext(base))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			return "", false
+		}
+		return name, true
+	case "TARGET_NAME":
+		// A project-level configuration is shared by every target, so Xcode
+		// has no single TARGET_NAME to define there.
+		if configuration == nil || configuration.projectLevel || configuration.target == "" {
+			return "", false
+		}
+		return configuration.target, true
+	}
+	return "", false
 }
 
 // resolveXCConfigBaseWithContext returns the lower-layer state that the
@@ -1553,7 +1702,7 @@ func (resolver *signingSettingResolver) resolveXCConfigSettingStateWithContext(
 			return resolver.identifyXCConfigFor(configuration, includePath)
 		}
 	}
-	return resolveXCConfigSettingStateWithReaderAndIdentity(path, setting, base, read, stat, identify, observe)
+	return resolveXCConfigSettingStateWithReaderAndIdentity(path, setting, base, read, stat, identify, observe, nil)
 }
 
 func (resolver *signingSettingResolver) resolveConfigurationXCConfigWithContext(
@@ -1576,13 +1725,16 @@ func (resolver *signingSettingResolver) resolveConfigurationXCConfigWithContext(
 			return resolver.identifyXCConfigFor(configuration, includePath)
 		}
 	}
-	return resolveXCConfigSettingWithBaseReaderAndIdentity(
+	return resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
 		path,
 		setting,
 		base,
 		read,
 		stat,
 		identify,
+		func(name string) (string, bool) {
+			return signingImplicitSettingValue(resolver.project, expansionConfiguration, name)
+		},
 	)
 }
 
@@ -1876,8 +2028,10 @@ func stageSigningPlan(
 // keeps the public plan's old-value and resolution fields stable.
 func reclassifySigningNoOps(
 	candidates []signingCandidate,
+	originalProject *structuredVersionProject,
 	stagedProject *structuredVersionProject,
 	resolver *signingSettingResolver,
+	baselineResolver *signingSettingResolver,
 ) (int, []string) {
 	configurations := make(map[string]*versionConfiguration, len(stagedProject.configurations))
 	for _, configuration := range stagedProject.configurations {
@@ -1903,8 +2057,31 @@ func reclassifySigningNoOps(
 				blockers = append(blockers, signingSettingBlocker(candidate.configuration, candidate.setting, errors.New("staged project still has a direct assignment")))
 				continue
 			}
-			if _, _, err := resolver.resolveSetting(configuration, candidate.setting); err != nil && !errors.Is(err, errVersionSettingNotFound) {
+			resolved, _, err := resolver.resolveSetting(configuration, candidate.setting)
+			if err != nil && !errors.Is(err, errVersionSettingNotFound) {
 				blockers = append(blockers, signingSettingBlocker(candidate.configuration, candidate.setting, err))
+			} else if err == nil && baselineResolver != nil {
+				baselineProject := cloneSigningStructuredVersionProject(originalProject)
+				var baselineConfiguration *versionConfiguration
+				for _, candidateConfiguration := range baselineProject.configurations {
+					if candidateConfiguration != nil && candidateConfiguration.id == candidate.configuration.id {
+						baselineConfiguration = candidateConfiguration
+						break
+					}
+				}
+				if baselineConfiguration == nil {
+					continue
+				}
+				for _, key := range matchingBuildSettingKeys(baselineConfiguration.buildSettings, candidate.setting) {
+					delete(baselineConfiguration.buildSettings, key)
+				}
+				baselineResolver = newSigningSettingResolver(baselineProject, baselineResolver.configFiles, baselineResolver.allowExternal, baselineResolver.lexicalConfigPaths)
+				baseline, _, baselineErr := baselineResolver.resolveSetting(baselineConfiguration, candidate.setting)
+				if signingRemovalFallbackChanged(resolved, err, baseline, baselineErr) && baselineErr == nil {
+					blockers = append(blockers, signingSettingBlocker(candidate.configuration, candidate.setting, fmt.Errorf("staged value %q differs from value after removal alone %q; another operation in this plan would change the fallback", resolved, baseline)))
+				} else if signingRemovalFallbackChanged(resolved, err, baseline, baselineErr) {
+					blockers = append(blockers, signingSettingBlocker(candidate.configuration, candidate.setting, fmt.Errorf("staged value %q appears after removal alone left the setting unresolved; another operation in this plan would create the fallback", resolved)))
+				}
 			}
 			continue
 		}
@@ -1943,6 +2120,16 @@ func reclassifySigningNoOps(
 	}
 	sort.Strings(blockers)
 	return reclassified, blockers
+}
+
+func signingRemovalFallbackChanged(staged string, stagedErr error, baseline string, baselineErr error) bool {
+	if stagedErr != nil {
+		return false
+	}
+	if baselineErr != nil {
+		return true
+	}
+	return staged != baseline
 }
 
 func cloneSigningStructuredVersionProject(project *structuredVersionProject) *structuredVersionProject {
@@ -2675,7 +2862,7 @@ func signingProjectInputPaths(
 	// A conditional key such as CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] composes
 	// its $(inherited) through the object's unconditional assignment; callers
 	// holding an already-effective value pass "CODE_SIGN_ENTITLEMENTS".
-	appendResolvedEntitlements := func(configuration *versionConfiguration, assignmentKey, value string) error {
+	appendResolvedEntitlements := func(configuration *versionConfiguration, assignmentKey, value string, xcconfigSource bool) error {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			return nil
@@ -2690,13 +2877,14 @@ func signingProjectInputPaths(
 			// reference. This keeps raw PBX and xcconfig scans aligned with the
 			// effective resolver and prevents an inherited entitlement path from
 			// disappearing from the protected-input inventory.
-			expanded, _, err := resolver.expandDirectAssignmentWithContext(
+			expanded, _, err := resolver.expandDirectAssignmentWithSourceContext(
 				configuration,
 				configuration,
 				"CODE_SIGN_ENTITLEMENTS",
 				assignmentKey,
 				value,
 				map[string]bool{"CODE_SIGN_ENTITLEMENTS": true},
+				xcconfigSource,
 			)
 			if err != nil {
 				return err
@@ -2737,7 +2925,7 @@ func signingProjectInputPaths(
 		if authorized {
 			value, _, err := resolver.resolveSetting(configuration, "CODE_SIGN_ENTITLEMENTS")
 			if err == nil {
-				if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", value); err != nil {
+				if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", value, false); err != nil {
 					if lexicalErr := appendLexicalEntitlementCandidate(value); lexicalErr != nil {
 						return nil, externalEntitlementPaths, inputBlockers, lexicalErr
 					}
@@ -2770,7 +2958,7 @@ func signingProjectInputPaths(
 					inputBlockers = append(inputBlockers, fmt.Sprintf("target %q configuration %q has unresolved CODE_SIGN_ENTITLEMENTS reference; signing scope is uncertain", configuration.target, configuration.name))
 					continue
 				}
-				if err := appendResolvedEntitlements(configuration, key, value); err != nil {
+				if err := appendResolvedEntitlements(configuration, key, value, false); err != nil {
 					if lexicalErr := appendLexicalEntitlementCandidate(value); lexicalErr != nil {
 						return nil, externalEntitlementPaths, inputBlockers, lexicalErr
 					}
@@ -2788,19 +2976,97 @@ func signingProjectInputPaths(
 				}
 			}
 		}
-		value, targetDefinesUnconditional := configuration.buildSettings["CODE_SIGN_ENTITLEMENTS"].(string)
-		if targetDefinesUnconditional && (strings.Contains(value, "$(inherited)") || strings.Contains(value, "${inherited}")) {
-			targetDefinesUnconditional = false
-		}
-		if !targetDefinesUnconditional && authorized {
+		// An unconditional inherited target assignment can consume any
+		// project-level entitlement assignment when the project fallback is
+		// genuinely uncertain. The effective resolver intentionally reports one
+		// value (or falls back to its first literal) for callers that need a
+		// single setting, but the artifact alias inventory must retain every
+		// concrete composition that Xcode may select. Same-object conditional
+		// assignments inherit through the target's unconditional slot, and a
+		// target xcconfig can provide the lower value, so neither case should be
+		// cross-composed with project seeds here.
+		for _, key := range matchingBuildSettingKeys(configuration.buildSettings, "CODE_SIGN_ENTITLEMENTS") {
+			if key != "CODE_SIGN_ENTITLEMENTS" {
+				continue
+			}
+			value, ok := configuration.buildSettings[key].(string)
+			if !ok || !signingValueInherits(value) {
+				continue
+			}
+			if _, err := resolver.resolveLowerSettingWithContext(configuration, configuration, "CODE_SIGN_ENTITLEMENTS"); err == nil {
+				continue
+			}
 			if files := configFiles[configuration.id]; len(files) > 0 {
-				if resolved, resolveErr := resolver.resolveConfigurationXCConfigWithContext(configuration, configuration, files[0], "CODE_SIGN_ENTITLEMENTS"); resolveErr == nil && resolved.found && resolved.exact {
-					if !strings.Contains(resolved.value, "$(inherited)") && !strings.Contains(resolved.value, "${inherited}") {
-						targetDefinesUnconditional = true
+				if signingConfigurationXCConfigHasLiveUnconditionalEntitlementOverride(configuration, files, resolver) {
+					continue
+				}
+			}
+			for _, projectCfg := range project.configurations {
+				if !projectCfg.projectLevel || projectCfg.name != configuration.name {
+					continue
+				}
+				for _, projectKey := range matchingBuildSettingKeys(projectCfg.buildSettings, "CODE_SIGN_ENTITLEMENTS") {
+					projectValue, ok := projectCfg.buildSettings[projectKey].(string)
+					if !ok {
+						continue
+					}
+					if strings.Contains(projectValue, "$(") || strings.Contains(projectValue, "${") {
+						expanded, _, expandErr := resolver.expandDirectAssignmentWithContext(
+							projectCfg,
+							configuration,
+							"CODE_SIGN_ENTITLEMENTS",
+							projectKey,
+							projectValue,
+							map[string]bool{"CODE_SIGN_ENTITLEMENTS": true},
+						)
+						if expandErr != nil {
+							// The later project-expression scan applies the same
+							// fail-closed lexical handling for an unresolved seed.
+							// Do not invent a composed path here when the target
+							// context cannot resolve the project reference.
+							continue
+						}
+						projectValue = expanded
+					}
+					composed := strings.ReplaceAll(value, "$(inherited)", projectValue)
+					composed = strings.ReplaceAll(composed, "${inherited}", projectValue)
+					if err := appendResolvedEntitlements(configuration, key, composed, false); err != nil {
+						if lexicalErr := appendLexicalEntitlementCandidate(composed); lexicalErr != nil {
+							return nil, externalEntitlementPaths, inputBlockers, lexicalErr
+						}
+						if selected {
+							return nil, externalEntitlementPaths, inputBlockers, err
+						}
+						inputBlockers = append(inputBlockers, fmt.Sprintf("target %q configuration %q has an unresolved inherited CODE_SIGN_ENTITLEMENTS input: %v", configuration.target, configuration.name, err))
+					}
+				}
+				projectFiles := configFiles[projectCfg.id]
+				if signingConfigurationDefinesUnconditionalPBXEntitlement(projectCfg) {
+					continue
+				}
+				if len(projectFiles) == 0 {
+					continue
+				}
+				projectValues, projectErr := signingProjectXCConfigEntitlementValues(projectCfg, configuration, projectFiles, resolver)
+				if projectErr != nil {
+					return nil, externalEntitlementPaths, inputBlockers, fmt.Errorf("resolve project-level CODE_SIGN_ENTITLEMENTS for target %q configuration %q: %w", configuration.target, configuration.name, projectErr)
+				}
+				for _, projectValue := range projectValues {
+					composed := strings.ReplaceAll(value, "$(inherited)", projectValue)
+					composed = strings.ReplaceAll(composed, "${inherited}", projectValue)
+					if err := appendResolvedEntitlements(configuration, key, composed, false); err != nil {
+						if lexicalErr := appendLexicalEntitlementCandidate(composed); lexicalErr != nil {
+							return nil, externalEntitlementPaths, inputBlockers, lexicalErr
+						}
+						if selected {
+							return nil, externalEntitlementPaths, inputBlockers, err
+						}
+						inputBlockers = append(inputBlockers, fmt.Sprintf("target %q configuration %q has an unresolved inherited CODE_SIGN_ENTITLEMENTS input: %v", configuration.target, configuration.name, err))
 					}
 				}
 			}
 		}
+		targetDefinesUnconditional := signingConfigurationDefinesUnconditionalEntitlement(project, configuration, configFiles, resolver)
 		if targetDefinesUnconditional {
 			continue
 		}
@@ -2844,6 +3110,7 @@ func signingProjectInputPaths(
 		}
 	}
 	entitlementCandidatesByConfiguration := make(map[string]map[string]map[int]bool)
+	entitlementAssignmentExpansionsByConfiguration := make(map[string]map[string]map[int]signingXCConfigEntitlementAssignmentExpansion)
 	configurationsByID := make(map[string]*versionConfiguration, len(project.configurations))
 	for _, configuration := range project.configurations {
 		configurationsByID[configuration.id] = configuration
@@ -2868,14 +3135,17 @@ func signingProjectInputPaths(
 				base = resolvedBase
 			}
 		}
-		candidates, composed, err := signingXCConfigEntitlementAssignmentCandidates(configurationsByID[configurationID], files, resolver, base)
+		candidates, composed, expansions, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+			configurationsByID[configurationID], files, resolver, base,
+		)
 		if err != nil {
 			return nil, externalEntitlementPaths, inputBlockers, err
 		}
 		entitlementCandidatesByConfiguration[configurationID] = candidates
+		entitlementAssignmentExpansionsByConfiguration[configurationID] = expansions
 		configuration := configurationsByID[configurationID]
 		for _, value := range composed {
-			if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", value); err != nil {
+			if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", value, true); err != nil {
 				if lexicalErr := appendLexicalEntitlementCandidate(value); lexicalErr != nil {
 					return nil, externalEntitlementPaths, inputBlockers, lexicalErr
 				}
@@ -2883,6 +3153,7 @@ func signingProjectInputPaths(
 		}
 	}
 	knownConfigurationIDs := make(map[string]bool, len(project.configurations))
+	projectEntitlementCandidatesByConfiguration := make(map[string]map[string]map[int]bool)
 	for _, configuration := range project.configurations {
 		knownConfigurationIDs[configuration.id] = true
 		files, ok := configFiles[configuration.id]
@@ -2916,6 +3187,100 @@ func signingProjectInputPaths(
 				if assignment.baseKey != "CODE_SIGN_ENTITLEMENTS" {
 					continue
 				}
+				if configuration.projectLevel && signingConfigurationDefinesUnconditionalPBXEntitlement(configuration) {
+					continue
+				}
+				if configuration.projectLevel {
+					candidates, cached := projectEntitlementCandidatesByConfiguration[configuration.id]
+					if !cached {
+						var candidateErr error
+						candidates, _, _, candidateErr = signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+							configuration,
+							files,
+							resolver,
+							xcconfigResolvedValue{},
+						)
+						if candidateErr != nil {
+							return nil, externalEntitlementPaths, inputBlockers, candidateErr
+						}
+						projectEntitlementCandidatesByConfiguration[configuration.id] = candidates
+					}
+					if !candidates[normalizeSigningLexicalPath(filePath)][assignment.lineIndex] {
+						continue
+					}
+				}
+				if configuration.projectLevel && (strings.Contains(assignment.value, "$(") || strings.Contains(assignment.value, "${")) {
+					expandedForTarget := false
+					targetExpansionFailed := false
+					matchingTargetCount := 0
+					shadowedTargetCount := 0
+					for _, targetConfiguration := range project.configurations {
+						if targetConfiguration.projectLevel || targetConfiguration.name != configuration.name {
+							continue
+						}
+						matchingTargetCount++
+						if signingConfigurationDefinesUnconditionalEntitlement(project, targetConfiguration, configFiles, resolver) {
+							shadowedTargetCount++
+							continue
+						}
+						expanded, _, expandErr := resolver.expandDirectAssignmentWithSourceContext(
+							configuration,
+							targetConfiguration,
+							"CODE_SIGN_ENTITLEMENTS",
+							assignment.key,
+							assignment.value,
+							map[string]bool{"CODE_SIGN_ENTITLEMENTS": true},
+							true,
+						)
+						if expandErr != nil {
+							targetExpansionFailed = true
+							continue
+						}
+						projectSeeds, projectSeedErr := signingProjectPBXInheritedEntitlementValues(
+							configuration,
+							targetConfiguration,
+							expanded,
+							resolver,
+						)
+						if projectSeedErr != nil {
+							targetExpansionFailed = true
+							continue
+						}
+						for _, projectSeed := range projectSeeds {
+							targetValues, targetInherited, targetValueErr := signingConfigurationInheritedEntitlementValues(
+								targetConfiguration,
+								configFiles,
+								resolver,
+								projectSeed,
+							)
+							if targetValueErr != nil {
+								targetExpansionFailed = true
+								continue
+							}
+							if !targetInherited {
+								targetValues = []string{projectSeed}
+							}
+							for _, targetValue := range targetValues {
+								if err := appendEntitlements(targetValue); err != nil {
+									return nil, externalEntitlementPaths, inputBlockers, err
+								}
+							}
+						}
+						expandedForTarget = true
+					}
+					if matchingTargetCount > 0 && shadowedTargetCount == matchingTargetCount {
+						continue
+					}
+					if targetExpansionFailed {
+						if lexicalErr := appendLexicalEntitlementCandidate(assignment.value); lexicalErr != nil {
+							return nil, externalEntitlementPaths, inputBlockers, lexicalErr
+						}
+						continue
+					}
+					if expandedForTarget {
+						continue
+					}
+				}
 				if !isConditionalEntitlementKey(assignment.key) {
 					if !uncertainEntitlementConfigurations[configuration.id] {
 						continue
@@ -2931,7 +3296,16 @@ func signingProjectInputPaths(
 				// object's unconditional assignment is not this assignment's
 				// inherited base. Selector-aware composition inside an xcconfig
 				// is handled by signingXCConfigEntitlementAssignmentCandidates.
-				if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", assignment.value); err != nil {
+				// For an uncertain configuration, that pass has already expanded
+				// every live assignment against the preceding xcconfig/project
+				// state. Re-resolving an inherited raw assignment through the
+				// configuration's whole xcconfig would use the final value of this
+				// same file as its base and compose the suffix twice.
+				rawValue := assignment.value
+				if expansion := entitlementAssignmentExpansionsByConfiguration[configuration.id][normalizeSigningLexicalPath(filePath)][assignment.lineIndex]; expansion.inheritedResolved {
+					rawValue = expansion.value
+				}
+				if err := appendResolvedEntitlements(configuration, "CODE_SIGN_ENTITLEMENTS", rawValue, true); err != nil {
 					if lexicalErr := appendLexicalEntitlementCandidate(assignment.value); lexicalErr != nil {
 						return nil, externalEntitlementPaths, inputBlockers, lexicalErr
 					}
@@ -3010,6 +3384,337 @@ func signingXCConfigSelectorIdentity(key string) string {
 	return base + strings.Join(selectors, "")
 }
 
+type signingXCConfigEntitlementAssignmentExpansion struct {
+	value             string
+	inheritedResolved bool
+}
+
+// signingProjectXCConfigEntitlementValues returns the concrete project-level
+// entitlement values that an inherited target assignment can consume. The
+// source configuration owns the xcconfig graph while the target configuration
+// owns build-setting reference expansion; keeping those contexts separate
+// prevents a target's xcconfig from being combined with a sibling project
+// configuration while still resolving references such as $(PRODUCT_NAME) for
+// the target that will inherit the value.
+func signingProjectXCConfigEntitlementValues(
+	projectConfiguration, targetConfiguration *versionConfiguration,
+	files []string,
+	resolver *signingSettingResolver,
+) ([]string, error) {
+	_, composed, _, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+		projectConfiguration,
+		files,
+		resolver,
+		xcconfigResolvedValue{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(composed))
+	seen := make(map[string]bool, len(composed))
+	for _, value := range composed {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "$(") || strings.Contains(value, "${") {
+			expanded, _, expandErr := resolver.expandSettingReferences(
+				targetConfiguration,
+				value,
+				map[string]bool{"CODE_SIGN_ENTITLEMENTS": true},
+			)
+			if expandErr != nil {
+				// The ordinary project xcconfig scan retains the raw assignment
+				// for lexical/fail-closed handling when target context cannot
+				// expand a reference. Do not guess a composed path here.
+				continue
+			}
+			value = expanded
+		}
+		if !seen[value] {
+			seen[value] = true
+			values = append(values, value)
+		}
+	}
+	if signingConfigurationDefinesUnconditionalPBXEntitlement(projectConfiguration) {
+		return nil, nil
+	}
+	projectComposed := make([]string, 0, len(values))
+	seen = make(map[string]bool, len(values))
+	for _, value := range values {
+		projectValues, err := signingProjectPBXInheritedEntitlementValues(
+			projectConfiguration,
+			targetConfiguration,
+			value,
+			resolver,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for _, projectValue := range projectValues {
+			if !seen[projectValue] {
+				seen[projectValue] = true
+				projectComposed = append(projectComposed, projectValue)
+			}
+		}
+	}
+	return projectComposed, nil
+}
+
+type signingPBXInheritedEntitlementAssignment struct {
+	key   string
+	value string
+}
+
+// signingPBXInheritedEntitlementValues composes raw PBX inherited
+// assignments through a supplied lower-layer value. Xcode evaluates a
+// conditional assignment's $(inherited) against the same object's effective
+// unconditional slot, so conditional assignments must consume the computed
+// unconditional values rather than the lower layer directly. The raw key is
+// retained for the resolver call; this preserves its assignment-aware
+// recursion and avoids a second syntax-level composition pass.
+func signingPBXInheritedEntitlementValues(
+	configuration, expansionConfiguration *versionConfiguration,
+	lowerValues []string,
+	resolver *signingSettingResolver,
+) ([]string, error) {
+	normalizedLowerValues := make([]string, 0, len(lowerValues))
+	seenLower := make(map[string]bool, len(lowerValues))
+	for _, value := range lowerValues {
+		value = strings.TrimSpace(value)
+		if !seenLower[value] {
+			seenLower[value] = true
+			normalizedLowerValues = append(normalizedLowerValues, value)
+		}
+	}
+	if len(normalizedLowerValues) == 0 {
+		normalizedLowerValues = []string{""}
+	}
+
+	assignments := make([]signingPBXInheritedEntitlementAssignment, 0, len(configuration.buildSettings))
+	for _, key := range matchingBuildSettingKeys(configuration.buildSettings, "CODE_SIGN_ENTITLEMENTS") {
+		value, ok := configuration.buildSettings[key].(string)
+		if ok && signingValueInherits(value) {
+			assignments = append(assignments, signingPBXInheritedEntitlementAssignment{key: key, value: value})
+		}
+	}
+	if len(assignments) == 0 {
+		return normalizedLowerValues, nil
+	}
+
+	expand := func(assignment signingPBXInheritedEntitlementAssignment, lower string) (string, error) {
+		seededConfiguration := *configuration
+		seededConfiguration.buildSettings = cloneSigningSerializedObject(configuration.buildSettings)
+		seededConfiguration.buildSettings["CODE_SIGN_ENTITLEMENTS"] = lower
+		expanded, _, err := resolver.expandDirectAssignmentWithContext(
+			&seededConfiguration,
+			expansionConfiguration,
+			"CODE_SIGN_ENTITLEMENTS",
+			assignment.key,
+			assignment.value,
+			map[string]bool{"CODE_SIGN_ENTITLEMENTS": true},
+		)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(expanded), nil
+	}
+
+	// The unconditional assignment establishes the same-object state that a
+	// conditional assignment inherits. With no unconditional assignment, a
+	// conditional slot falls through to the supplied lower-layer values.
+	unconditionalValues := make([]string, 0, len(normalizedLowerValues))
+	seenUnconditional := make(map[string]bool, len(normalizedLowerValues))
+	for _, assignment := range assignments {
+		if assignment.key != "CODE_SIGN_ENTITLEMENTS" {
+			continue
+		}
+		for _, lower := range normalizedLowerValues {
+			expanded, err := expand(assignment, lower)
+			if err != nil {
+				return nil, err
+			}
+			if expanded != "" && !seenUnconditional[expanded] {
+				seenUnconditional[expanded] = true
+				unconditionalValues = append(unconditionalValues, expanded)
+			}
+		}
+	}
+	if len(unconditionalValues) == 0 {
+		unconditionalValues = normalizedLowerValues
+	}
+
+	composed := make([]string, 0, len(assignments)*len(unconditionalValues))
+	seen := make(map[string]bool, len(composed))
+	for _, assignment := range assignments {
+		if assignment.key == "CODE_SIGN_ENTITLEMENTS" {
+			for _, value := range unconditionalValues {
+				if !seen[value] {
+					seen[value] = true
+					composed = append(composed, value)
+				}
+			}
+			continue
+		}
+		for _, lower := range unconditionalValues {
+			expanded, err := expand(assignment, lower)
+			if err != nil {
+				return nil, err
+			}
+			if expanded != "" && !seen[expanded] {
+				seen[expanded] = true
+				composed = append(composed, expanded)
+			}
+		}
+	}
+	if len(composed) == 0 {
+		return normalizedLowerValues, nil
+	}
+	return composed, nil
+}
+
+// signingProjectPBXInheritedEntitlementValues composes a project xcconfig
+// seed through the project's raw PBX entitlement assignment. Project PBX
+// inherited suffixes sit above the project xcconfig and therefore must be
+// applied before a target's inherited suffix is considered.
+func signingProjectPBXInheritedEntitlementValues(
+	projectConfiguration, targetConfiguration *versionConfiguration,
+	projectSeed string,
+	resolver *signingSettingResolver,
+) ([]string, error) {
+	if signingConfigurationDefinesUnconditionalPBXEntitlement(projectConfiguration) {
+		return nil, nil
+	}
+	return signingPBXInheritedEntitlementValues(
+		projectConfiguration,
+		targetConfiguration,
+		[]string{projectSeed},
+		resolver,
+	)
+}
+
+// signingXCConfigInheritedEntitlementValues returns raw target-xcconfig
+// entitlement assignments that remain live and still consume a lower-layer
+// value. The candidate traversal supplies the same replacement semantics used
+// by the uncertain-configuration inventory, so a shadowed assignment cannot
+// re-enter target-context composition merely because it was parsed.
+func signingXCConfigInheritedEntitlementValues(
+	configuration *versionConfiguration,
+	files []string,
+	resolver *signingSettingResolver,
+) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	candidates, _, _, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+		configuration,
+		files,
+		resolver,
+		xcconfigResolvedValue{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, filePath := range files {
+		data, readErr := resolver.readXCConfig(filePath)
+		if readErr != nil {
+			return nil, readErr
+		}
+		document, parseErr := parseXCConfig(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse %s: %w", filePath, parseErr)
+		}
+		path := normalizeSigningLexicalPath(filePath)
+		for _, assignment := range document.assignments {
+			if assignment.baseKey != "CODE_SIGN_ENTITLEMENTS" ||
+				(!signingValueInherits(assignment.value) && assignment.operator != "+=") ||
+				!candidates[path][assignment.lineIndex] {
+				continue
+			}
+			if !seen[assignment.value] {
+				seen[assignment.value] = true
+				values = append(values, assignment.value)
+			}
+		}
+	}
+	return values, nil
+}
+
+// signingConfigurationInheritedEntitlementValues composes one concrete
+// project seed through the target's raw inherited entitlement sources. The
+// target xcconfig graph is resolved with the supplied seed as its lower layer
+// before any PBX inherited suffix is appended, which keeps a target-xcconfig
+// suffix and a PBX suffix in their actual order and avoids protecting the bare
+// project reference as a synthetic path.
+func signingConfigurationInheritedEntitlementValues(
+	configuration *versionConfiguration,
+	configFiles map[string][]string,
+	resolver *signingSettingResolver,
+	projectSeed string,
+) ([]string, bool, error) {
+	values := []string{strings.TrimSpace(projectSeed)}
+	targetXCConfigValues := values
+	if files := configFiles[configuration.id]; len(files) > 0 {
+		_, composed, _, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+			configuration,
+			files,
+			resolver,
+			xcconfigResolvedValue{value: projectSeed, found: true, exact: true},
+		)
+		if err != nil {
+			return nil, false, err
+		}
+		targetXCConfigValues = make([]string, 0, len(composed))
+		seen := make(map[string]bool, len(composed))
+		for _, value := range composed {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if strings.Contains(value, "$(") || strings.Contains(value, "${") {
+				value, _, err = resolver.expandSettingReferences(configuration, value, map[string]bool{"CODE_SIGN_ENTITLEMENTS": true})
+				if err != nil {
+					return nil, false, err
+				}
+			}
+			if !seen[value] {
+				seen[value] = true
+				targetXCConfigValues = append(targetXCConfigValues, value)
+			}
+		}
+		if len(targetXCConfigValues) == 0 {
+			targetXCConfigValues = values
+		}
+	}
+
+	if targetValues, err := signingXCConfigInheritedEntitlementValues(configuration, configFiles[configuration.id], resolver); err != nil {
+		return nil, false, err
+	} else {
+		pbxInherited := make([]string, 0)
+		for _, key := range matchingBuildSettingKeys(configuration.buildSettings, "CODE_SIGN_ENTITLEMENTS") {
+			value, ok := configuration.buildSettings[key].(string)
+			if ok && signingValueInherits(value) {
+				pbxInherited = append(pbxInherited, value)
+			}
+		}
+		if len(pbxInherited) == 0 {
+			return targetXCConfigValues, len(targetValues) > 0, nil
+		}
+		composed, err := signingPBXInheritedEntitlementValues(
+			configuration,
+			configuration,
+			targetXCConfigValues,
+			resolver,
+		)
+		if err != nil {
+			return nil, true, err
+		}
+		return composed, true, nil
+	}
+}
+
 // signingXCConfigEntitlementAssignmentCandidates returns the assignments that
 // can still contribute to CODE_SIGN_ENTITLEMENTS when effective resolution is
 // uncertain. It uses the configuration-scoped resolver's event traversal and
@@ -3021,6 +3726,18 @@ func signingXCConfigEntitlementAssignmentCandidates(
 	resolver *signingSettingResolver,
 	base xcconfigResolvedValue,
 ) (map[string]map[int]bool, []string, error) {
+	candidates, composed, _, err := signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+		configuration, files, resolver, base,
+	)
+	return candidates, composed, err
+}
+
+func signingXCConfigEntitlementAssignmentCandidatesWithExpansions(
+	configuration *versionConfiguration,
+	files []string,
+	resolver *signingSettingResolver,
+	base xcconfigResolvedValue,
+) (map[string]map[int]bool, []string, map[string]map[int]signingXCConfigEntitlementAssignmentExpansion, error) {
 	type assignmentReference struct {
 		path        string
 		assignment  xcconfigAssignment
@@ -3033,7 +3750,7 @@ func signingXCConfigEntitlementAssignmentCandidates(
 	// an empty state so every target assignment remains protected.
 	hasExactValue := base.found
 	if len(files) == 0 {
-		return map[string]map[int]bool{}, nil, nil
+		return map[string]map[int]bool{}, nil, nil, nil
 	}
 	var observerErr error
 	observe := func(path string, assignment xcconfigAssignment) {
@@ -3113,57 +3830,80 @@ func signingXCConfigEntitlementAssignmentCandidates(
 		base,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if observerErr != nil {
-		return nil, nil, observerErr
+		return nil, nil, nil, observerErr
 	}
 	candidates := make(map[string]map[int]bool)
+	expansions := make(map[string]map[int]signingXCConfigEntitlementAssignmentExpansion)
 	for _, candidate := range active {
 		path := normalizeSigningLexicalPath(candidate.path)
 		if candidates[path] == nil {
 			candidates[path] = make(map[int]bool)
 		}
 		candidates[path][candidate.assignment.lineIndex] = true
+		if expansions[path] == nil {
+			expansions[path] = make(map[int]signingXCConfigEntitlementAssignmentExpansion)
+		}
 	}
 	composed := make([]string, 0)
 	if strings.TrimSpace(resolved.value) != "" {
 		composed = append(composed, resolved.value)
 	}
 	accumulated := map[string]string{}
-	if strings.TrimSpace(base.value) != "" {
+	accumulatedKnown := map[string]bool{}
+	if base.found {
 		accumulated["CODE_SIGN_ENTITLEMENTS"] = strings.TrimSpace(base.value)
+		accumulatedKnown["CODE_SIGN_ENTITLEMENTS"] = true
+	}
+	lookupAccumulated := func(selector string) (string, bool) {
+		previous, known := accumulated[selector], accumulatedKnown[selector]
+		if !known && previous == "" && selector != "CODE_SIGN_ENTITLEMENTS" {
+			previous = accumulated["CODE_SIGN_ENTITLEMENTS"]
+			known = accumulatedKnown["CODE_SIGN_ENTITLEMENTS"]
+		}
+		return previous, known
 	}
 	for _, candidate := range active {
 		selector := candidate.selectorKey
 		value := strings.TrimSpace(candidate.assignment.value)
+		inheritedResolved := false
 		switch candidate.assignment.operator {
 		case "+=":
-			previous := accumulated[selector]
-			if previous == "" && selector != "CODE_SIGN_ENTITLEMENTS" {
-				previous = accumulated["CODE_SIGN_ENTITLEMENTS"]
-			}
+			previous, previousKnown := lookupAccumulated(selector)
 			if strings.Contains(value, "$(inherited)") || strings.Contains(value, "${inherited}") {
+				inheritedResolved = previousKnown
 				value = strings.ReplaceAll(value, "$(inherited)", previous)
 				value = strings.ReplaceAll(value, "${inherited}", previous)
 				accumulated[selector] = strings.TrimSpace(value)
+				accumulatedKnown[selector] = true
 				break
 			}
 			accumulated[selector] = strings.TrimSpace(strings.TrimSpace(previous) + " " + value)
+			accumulatedKnown[selector] = true
 		case "?=":
-			if _, ok := accumulated[selector]; !ok {
+			if !accumulatedKnown[selector] {
 				accumulated[selector] = value
+				accumulatedKnown[selector] = true
 			}
 		default:
 			if strings.Contains(value, "$(inherited)") || strings.Contains(value, "${inherited}") {
-				previous := accumulated[selector]
-				if previous == "" && selector != "CODE_SIGN_ENTITLEMENTS" {
-					previous = accumulated["CODE_SIGN_ENTITLEMENTS"]
-				}
+				previous, previousKnown := lookupAccumulated(selector)
+				inheritedResolved = previousKnown
 				value = strings.ReplaceAll(value, "$(inherited)", previous)
 				value = strings.ReplaceAll(value, "${inherited}", previous)
 			}
 			accumulated[selector] = strings.TrimSpace(value)
+			accumulatedKnown[selector] = true
+		}
+		path := normalizeSigningLexicalPath(candidate.path)
+		if expansions[path] == nil {
+			expansions[path] = make(map[int]signingXCConfigEntitlementAssignmentExpansion)
+		}
+		expansions[path][candidate.assignment.lineIndex] = signingXCConfigEntitlementAssignmentExpansion{
+			value:             strings.TrimSpace(value),
+			inheritedResolved: inheritedResolved,
 		}
 	}
 	for _, value := range accumulated {
@@ -3171,7 +3911,7 @@ func signingXCConfigEntitlementAssignmentCandidates(
 			composed = append(composed, value)
 		}
 	}
-	return candidates, composed, nil
+	return candidates, composed, expansions, nil
 }
 
 func validateSigningXCConfigPath(project *structuredVersionProject, path string, allowExternal bool) error {
@@ -3617,6 +4357,9 @@ func readSigningPlanArtifact(path string) (*SigningPlan, error) {
 	}
 	if plan.Command != signingPlanCommand {
 		return nil, newSigningInputError(fmt.Errorf("plan command is not %q", signingPlanCommand))
+	}
+	if len(plan.Files) > signingPlanMaxFiles {
+		return nil, newSigningInputError(fmt.Errorf("plan contains %d signing source files, exceeding the limit of %d", len(plan.Files), signingPlanMaxFiles))
 	}
 	if len(plan.MissingOptionalIncludes) > signingPlanMaxMissingOptionalIncludes {
 		return nil, newSigningInputError(fmt.Errorf("plan contains too many missing optional xcconfig includes"))

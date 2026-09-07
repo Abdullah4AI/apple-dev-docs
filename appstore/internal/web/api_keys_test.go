@@ -208,6 +208,161 @@ func TestClientGetAPIKeyParsesIssuerID(t *testing.T) {
 	}
 }
 
+func TestClientListAPIKeysByKindUsesOnlyRequestedEndpoint(t *testing.T) {
+	t.Setenv("ASC_WEB_MIN_REQUEST_INTERVAL", "0")
+	tests := []struct {
+		name           string
+		kind           string
+		path           string
+		wantInclude    string
+		wantVisibleApp string
+	}{
+		{
+			name:        "team",
+			kind:        APIKeyKindTeam,
+			path:        "/iris/v1/apiKeys",
+			wantInclude: "createdBy,revokedBy,provider",
+		},
+		{
+			name:           "individual",
+			kind:           APIKeyKindIndividual,
+			path:           "/iris/v2/apiKeys",
+			wantInclude:    "visibleApps,createdByActor,revokedByActor",
+			wantVisibleApp: "3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests []string
+			client := newAPIKeyHTTPTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.URL.Path)
+				if r.URL.Path != tt.path {
+					t.Fatalf("unexpected endpoint %s %s", r.Method, r.URL.Path)
+				}
+				if got := r.URL.Query().Get("include"); got != tt.wantInclude {
+					t.Fatalf("unexpected include %q", got)
+				}
+				if tt.wantVisibleApp != "" {
+					if got := r.URL.Query().Get("limit[visibleApps]"); got != tt.wantVisibleApp {
+						t.Fatalf("unexpected visible-app limit %q", got)
+					}
+					if got := r.URL.Query().Get("limit"); got != "2000" {
+						t.Fatalf("unexpected individual limit %q", got)
+					}
+				}
+				if tt.kind == APIKeyKindTeam {
+					if got := r.URL.Query().Get("sort"); got != "-isActive,-revokingDate" {
+						t.Fatalf("unexpected team sort %q", got)
+					}
+					if got := r.URL.Query().Get("limit"); got != "2000" {
+						t.Fatalf("unexpected team limit %q", got)
+					}
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"KEY123","attributes":{"nickname":"Example","roles":["ADMIN"],"isActive":true,"keyType":"PUBLIC_API"}}]}`))
+			}))
+
+			keys, err := client.ListAPIKeysByKind(context.Background(), tt.kind)
+			if err != nil {
+				t.Fatalf("ListAPIKeysByKind() error: %v", err)
+			}
+			if len(requests) != 1 || requests[0] != tt.path {
+				t.Fatalf("expected one %s request, got %#v", tt.kind, requests)
+			}
+			if len(keys) != 1 || keys[0].KeyID != "KEY123" || keys[0].Kind != tt.kind || !keys[0].Active {
+				t.Fatalf("unexpected keys: %#v", keys)
+			}
+		})
+	}
+}
+
+func TestClientListAPIKeysByKindRejectsUnknownTypeBeforeHTTP(t *testing.T) {
+	called := false
+	client := newAPIKeyHTTPTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	_, err := client.ListAPIKeysByKind(context.Background(), "other")
+	if err == nil || !strings.Contains(err.Error(), "api key type must be team or individual") {
+		t.Fatalf("expected invalid type error, got %v", err)
+	}
+	if called {
+		t.Fatal("did not expect HTTP for an invalid key type")
+	}
+}
+
+func TestClientRevokeAPIKeySendsTypeSpecificPatch(t *testing.T) {
+	t.Setenv("ASC_WEB_MIN_REQUEST_INTERVAL", "0")
+	tests := []struct {
+		name string
+		kind string
+		path string
+	}{
+		{name: "team", kind: APIKeyKindTeam, path: "/iris/v1/apiKeys/KEY123"},
+		{name: "individual", kind: APIKeyKindIndividual, path: "/iris/v2/apiKeys/KEY123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestBody map[string]any
+			var requestMethod, requestPath string
+			client := newAPIKeyHTTPTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestMethod = r.Method
+				requestPath = r.URL.Path
+				if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+
+			if err := client.RevokeAPIKey(context.Background(), "KEY123", tt.kind); err != nil {
+				t.Fatalf("RevokeAPIKey() error: %v", err)
+			}
+			if requestMethod != http.MethodPatch || requestPath != tt.path {
+				t.Fatalf("unexpected request %s %s, want PATCH %s", requestMethod, requestPath, tt.path)
+			}
+			data, ok := requestBody["data"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected JSON:API data object, got %#v", requestBody)
+			}
+			if data["id"] != "KEY123" || data["type"] != "apiKeys" {
+				t.Fatalf("unexpected resource identity: %#v", data)
+			}
+			attrs, ok := data["attributes"].(map[string]any)
+			if !ok || attrs["isActive"] != false {
+				t.Fatalf("unexpected revoke attributes: %#v", data["attributes"])
+			}
+		})
+	}
+}
+
+func TestClientRevokeAPIKeyValidatesBeforeHTTP(t *testing.T) {
+	called := false
+	client := newAPIKeyHTTPTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	for _, tt := range []struct {
+		name string
+		id   string
+		kind string
+		want string
+	}{
+		{name: "missing id", id: " ", kind: APIKeyKindTeam, want: "api key id is required"},
+		{name: "invalid type", id: "KEY123", kind: "other", want: "api key type must be team or individual"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := client.RevokeAPIKey(context.Background(), tt.id, tt.kind)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+	if called {
+		t.Fatal("did not expect HTTP for invalid revoke input")
+	}
+}
+
 func TestClientListAPIKeysCombinesTeamAndIndividualKeys(t *testing.T) {
 	fixture := handlertest.New(t)
 	var teamPath, individualPath string

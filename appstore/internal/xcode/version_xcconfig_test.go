@@ -2,11 +2,153 @@ package xcode
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestXCConfigImplicitLookupShadowsConditionalDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name, setting, contents, implicit, want string
+	}{
+		{"conditional", "PROJECT_DIR", "PROJECT_DIR ?= /fallback\n", "/project", "/project"},
+		{"conditional selector", "PROJECT_DIR", "PROJECT_DIR[sdk=iphoneos*] ?= /fallback\n", "/project", "/project"},
+		{"inherited", "PROJECT_DIR", "PROJECT_DIR = $(inherited)/Sub\n", "/project", "/project/Sub"},
+		{"append", "PROJECT_NAME", "PROJECT_NAME += Suffix\n", "App", "App Suffix"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "App.xcconfig")
+			if err := os.WriteFile(path, []byte(tc.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(path, tc.setting, xcconfigResolvedValue{}, os.ReadFile, os.Stat, nil, func(string) (string, bool) { return tc.implicit, true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resolved.found || !resolved.exact || resolved.value != tc.want {
+				t.Fatalf("resolved = %#v, want an exact implicit value %q", resolved, tc.want)
+			}
+		})
+	}
+}
+
+func TestXCConfigImplicitLookupPreservesExplicitConditional(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "App.xcconfig")
+	contents := "PROJECT_DIR[sdk=iphoneos*] = /special\nPROJECT_DIR = $(inherited)/Sub\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+		path,
+		"PROJECT_DIR",
+		xcconfigResolvedValue{},
+		os.ReadFile,
+		os.Stat,
+		nil,
+		func(string) (string, bool) { return "/project", true },
+	)
+	if err == nil || !strings.Contains(err.Error(), "differing conditional") {
+		t.Fatalf("resolve implicit value error = %v, want divergent explicit conditional error", err)
+	}
+}
+
+func TestXCConfigConditionalAssignmentExpandsInheritedValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "App.xcconfig")
+	contents := "OTHER[sdk=iphoneos*] = $(inherited)-child\nOTHER = base-child\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+		path, "OTHER", xcconfigResolvedValue{}, os.ReadFile, os.Stat, nil,
+		func(string) (string, bool) { return "base", true },
+	)
+	if err != nil {
+		t.Fatalf("resolve conditional inherited value: %v", err)
+	}
+	if len(resolved.conditionals) != 1 || resolved.conditionals[0].value != "base-child" {
+		t.Fatalf("conditional state = %#v, want expanded base-child", resolved.conditionals)
+	}
+}
+
+func TestXCConfigImplicitLookupComposesInheritedConditional(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "App.xcconfig")
+	contents := "PROJECT_DIR[sdk=iphoneos*] = $(inherited)\nPROJECT_DIR = $(inherited)\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+		path,
+		"PROJECT_DIR",
+		xcconfigResolvedValue{},
+		os.ReadFile,
+		os.Stat,
+		nil,
+		func(string) (string, bool) { return "/project", true },
+	)
+	if err != nil {
+		t.Fatalf("resolve implicit inherited value error = %v", err)
+	}
+	if !resolved.found || !resolved.exact || resolved.value != "/project" {
+		t.Fatalf("resolved = %#v, want an exact implicit value %q", resolved, "/project")
+	}
+}
+
+func TestXCConfigImplicitLookupExpandsConditionalReferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "App.xcconfig")
+	contents := "PROJECT_DIR[sdk=iphoneos*] = $(SRCROOT)\nPROJECT_DIR = $(inherited)\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+		path,
+		"PROJECT_DIR",
+		xcconfigResolvedValue{},
+		os.ReadFile,
+		os.Stat,
+		nil,
+		func(name string) (string, bool) {
+			if name == "SRCROOT" || name == "PROJECT_DIR" {
+				return "/project", true
+			}
+			return "", false
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolve implicit conditional reference error = %v", err)
+	}
+	if !resolved.found || !resolved.exact || resolved.value != "/project" {
+		t.Fatalf("resolved = %#v, want an exact implicit value %q", resolved, "/project")
+	}
+}
+
+func TestXCConfigImplicitLookupComposesRepeatedConditionalInheritedValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "App.xcconfig")
+	contents := "PROJECT_DIR = /base\n" +
+		"PROJECT_DIR[sdk=iphoneos*] = /special\n" +
+		"PROJECT_DIR[sdk=iphoneos*] = $(inherited)/Suffix\n" +
+		"PROJECT_DIR = /special/Suffix\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+		path,
+		"PROJECT_DIR",
+		xcconfigResolvedValue{},
+		os.ReadFile,
+		os.Stat,
+		nil,
+		func(string) (string, bool) { return "/implicit", true },
+	)
+	if err != nil {
+		t.Fatalf("resolve repeated conditional inherited value error = %v", err)
+	}
+	if !resolved.found || !resolved.exact || resolved.value != "/special/Suffix" {
+		t.Fatalf("resolved = %#v, want an exact value %q", resolved, "/special/Suffix")
+	}
+}
 
 func TestXCConfigRecursiveIncludesHandleCyclesOptionalFilesAndOrder(t *testing.T) {
 	root := t.TempDir()
@@ -32,6 +174,357 @@ func TestXCConfigRecursiveIncludesHandleCyclesOptionalFilesAndOrder(t *testing.T
 	}
 	if !resolved.found || resolved.value != "3.0.0" || resolved.path != rootPath {
 		t.Fatalf("unexpected resolved value: %#v", resolved)
+	}
+}
+
+func TestXCConfigCollectorBoundsSigningSourceGraph(t *testing.T) {
+	paths := make([]string, signingPlanMaxFiles+1)
+	for i := range paths {
+		paths[i] = filepath.Join(t.TempDir(), "source.xcconfig")
+	}
+	contents := make(map[string][]byte, len(paths))
+	for i, path := range paths {
+		if i+1 < len(paths) {
+			contents[path] = []byte(`#include "` + paths[i+1] + `"`)
+		} else {
+			contents[path] = []byte("CODE_SIGN_STYLE = Manual")
+		}
+	}
+	_, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(paths[0], func(path string) ([]byte, error) {
+		data, ok := contents[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return data, nil
+	}, func(string) error { return nil }, nil, nil, nil, nil, signingPlanMaxFiles, nil)
+	if err == nil || !strings.Contains(err.Error(), "more than 4096 files") {
+		t.Fatalf("collectXCConfigFilesWithReader() error = %v, want aggregate source limit", err)
+	}
+}
+
+func TestXCConfigCollectorStopsWideGraphAtLimit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Root.xcconfig")
+	left := filepath.Join(filepath.Dir(root), "Left.xcconfig")
+	right := filepath.Join(filepath.Dir(root), "Right.xcconfig")
+	contents := map[string][]byte{root: []byte(`#include "Left.xcconfig"
+#include "Right.xcconfig"`), left: []byte("A = 1"), right: []byte("B = 2")}
+	readCount := make(map[string]int)
+	errorCount := 0
+	_, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(root, func(path string) ([]byte, error) {
+		readCount[path]++
+		return contents[path], nil
+	}, nil, nil, func(string, error) { errorCount++ }, nil, nil, 2, nil)
+	if err == nil || errorCount != 1 || readCount[right] != 0 {
+		t.Fatalf("wide graph err=%v errors=%d reads=%#v, want one overflow and no sibling read", err, errorCount, readCount)
+	}
+}
+
+func TestXCConfigCollectorSharesUniqueBudgetAcrossRoots(t *testing.T) {
+	rootDir := t.TempDir()
+	firstRoot := filepath.Join(rootDir, "First.xcconfig")
+	firstChild := filepath.Join(rootDir, "First-child.xcconfig")
+	secondRoot := filepath.Join(rootDir, "Second.xcconfig")
+	secondChild := filepath.Join(rootDir, "Second-child.xcconfig")
+	contents := map[string][]byte{
+		firstRoot:   []byte(`#include "First-child.xcconfig"`),
+		firstChild:  []byte("A = 1"),
+		secondRoot:  []byte(`#include "Second-child.xcconfig"`),
+		secondChild: []byte("B = 2"),
+	}
+	readCount := make(map[string]int)
+	read := func(path string) ([]byte, error) {
+		readCount[path]++
+		data, ok := contents[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return data, nil
+	}
+	budget := &xcconfigSourceBudget{}
+	collect := func(root string) ([]string, error) {
+		return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
+			root, read, nil, nil, nil, nil, nil, 3, nil, budget,
+		)
+	}
+	if files, err := collect(firstRoot); err != nil || len(files) != 2 {
+		t.Fatalf("first collection files=%#v error=%v, want two sources", files, err)
+	}
+	// Repeating an already observed root must not consume the plan-wide budget.
+	if files, err := collect(firstRoot); err != nil || len(files) != 2 {
+		t.Fatalf("repeated first collection files=%#v error=%v, want two sources", files, err)
+	}
+	_, err := collect(secondRoot)
+	if err == nil || !isXCConfigSourceGraphLimitError(err) || !strings.Contains(err.Error(), "more than 3 files") {
+		t.Fatalf("second collection error=%v, want shared unique-source limit", err)
+	}
+	if readCount[secondChild] != 0 {
+		t.Fatalf("second child was read after shared budget exhaustion: %d reads", readCount[secondChild])
+	}
+}
+
+func TestXCConfigCollectorReplaysCompletedRootWithoutRepeatedWork(t *testing.T) {
+	const sourceCount = signingPlanMaxFiles
+	rootDir := t.TempDir()
+	paths := make([]string, sourceCount)
+	for index := range paths {
+		paths[index] = filepath.Join(rootDir, fmt.Sprintf("Source-%04d.xcconfig", index))
+		contents := []byte("CODE_SIGN_STYLE = Manual")
+		if index+1 < len(paths) {
+			contents = []byte(fmt.Sprintf("#include \"Source-%04d.xcconfig\"", index+1))
+		}
+		if err := os.WriteFile(paths[index], contents, 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", paths[index], err)
+		}
+	}
+
+	readCount := make(map[string]int)
+	statCount := make(map[string]int)
+	read := func(path string) ([]byte, error) {
+		readCount[path]++
+		return os.ReadFile(path)
+	}
+	identify := func(path string) (os.FileInfo, error) {
+		statCount[path]++
+		return os.Stat(path)
+	}
+	budget := &xcconfigSourceBudget{}
+	collect := func() ([]string, error) {
+		return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
+			paths[0], read, nil, nil, nil, identify, nil, sourceCount, nil, budget,
+		)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		files, err := collect()
+		if err != nil || len(files) != sourceCount {
+			t.Fatalf("collection %d files=%d error=%v, want %d sources", attempt+1, len(files), err, sourceCount)
+		}
+	}
+	for _, path := range paths {
+		if readCount[path] != 1 || statCount[path] != 1 {
+			t.Fatalf("source %s read/stat counts = %d/%d, want 1/1", path, readCount[path], statCount[path])
+		}
+	}
+}
+
+func TestSigningXCConfigConsumersReuseRootIdentityWork(t *testing.T) {
+	projectPath := writeStructuredVersionProject(t, false)
+	attachSigningAppXCConfig(t, projectPath, "#include \"Shared.xcconfig\"\n")
+	sharedPath := filepath.Join(filepath.Dir(projectPath), "Configs", "Shared.xcconfig")
+	if err := os.WriteFile(sharedPath, []byte("CODE_SIGN_STYLE = Manual\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(Shared.xcconfig) error = %v", err)
+	}
+	project, err := openSigningStructuredVersionProject(projectPath)
+	if err != nil {
+		t.Fatalf("openSigningStructuredVersionProject() error = %v", err)
+	}
+
+	previousReader := signingXCConfigReadFileFn
+	previousIdentity := signingXCConfigIdentityFn
+	t.Cleanup(func() {
+		signingXCConfigReadFileFn = previousReader
+		signingXCConfigIdentityFn = previousIdentity
+	})
+	readCount := make(map[string]int)
+	identityCount := make(map[string]int)
+	signingXCConfigReadFileFn = func(path string, limit int64) ([]byte, error) {
+		readCount[path]++
+		return previousReader(path, limit)
+	}
+	signingXCConfigIdentityFn = func(path string) (os.FileInfo, error) {
+		identityCount[path]++
+		return os.Stat(path)
+	}
+
+	_, configFiles, _, _, _, _, _, _, _, err := project.signingXCConfigConsumersWithOptionalMissing(nil, false)
+	if err != nil {
+		t.Fatalf("signingXCConfigConsumersWithOptionalMissing() error = %v", err)
+	}
+	var appRoot string
+	for _, configuration := range project.configurations {
+		if configuration.target == "App" && configuration.baseReferenceID != "" {
+			if appRoot == "" {
+				appRoot = configFiles[configuration.id][0]
+			}
+			if len(configFiles[configuration.id]) != 2 {
+				t.Fatalf("App %s files=%#v, want shared two-source graph", configuration.name, configFiles[configuration.id])
+			}
+		}
+	}
+	if appRoot == "" {
+		t.Fatal("project fixture has no App xcconfig root")
+	}
+	for _, path := range []string{appRoot, sharedPath} {
+		if readCount[path] != 1 || identityCount[path] != 2 {
+			t.Fatalf("source %s read/identity counts = %d/%d, want 1/2", path, readCount[path], identityCount[path])
+		}
+	}
+}
+
+func TestXCConfigCollectorSharedBudgetSkipsAbsentOptionalIncludeAtLimit(t *testing.T) {
+	rootDir := t.TempDir()
+	root := filepath.Join(rootDir, "Root.xcconfig")
+	child := filepath.Join(rootDir, "Child.xcconfig")
+	missing := filepath.Join(rootDir, "Missing.xcconfig")
+	contents := map[string][]byte{
+		root:  []byte("#include \"Child.xcconfig\"\n#include? \"Missing.xcconfig\""),
+		child: []byte("A = 1"),
+	}
+	readCount := make(map[string]int)
+	probeCount := make(map[string]int)
+	var optionalMissing string
+	budget := &xcconfigSourceBudget{}
+	collect := func() ([]string, error) {
+		return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
+			root,
+			func(path string) ([]byte, error) {
+				readCount[path]++
+				data, ok := contents[path]
+				if !ok {
+					return nil, os.ErrNotExist
+				}
+				return data, nil
+			},
+			nil,
+			nil,
+			nil,
+			nil,
+			func(path string) { optionalMissing = path },
+			2,
+			func(path string) (os.FileInfo, error) {
+				probeCount[path]++
+				return nil, os.ErrNotExist
+			},
+			budget,
+		)
+	}
+	if files, err := collect(); err != nil || len(files) != 2 {
+		t.Fatalf("first collection files=%#v error=%v, want two sources", files, err)
+	}
+	readCount = make(map[string]int)
+	probeCount = make(map[string]int)
+	optionalMissing = ""
+	files, err := collect()
+	if err != nil || len(files) != 2 || optionalMissing != missing {
+		t.Fatalf("repeated collection files=%#v error=%v optionalMissing=%q, want absent optional include %q", files, err, optionalMissing, missing)
+	}
+	if readCount[missing] != 0 || probeCount[missing] != 1 {
+		t.Fatalf("absent optional read/probe counts = %d/%d, want 0/1", readCount[missing], probeCount[missing])
+	}
+}
+
+func TestXCConfigCollectorSkipsAbsentOptionalIncludeAtLimit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Root.xcconfig")
+	left := filepath.Join(filepath.Dir(root), "Left.xcconfig")
+	missing := filepath.Join(filepath.Dir(root), "Missing.xcconfig")
+	contents := map[string][]byte{
+		root: []byte("#include \"Left.xcconfig\"\n#include? \"Missing.xcconfig\""),
+		left: []byte("A = 1"),
+	}
+	readCount := make(map[string]int)
+	probeCount := make(map[string]int)
+	var optionalMissing string
+	files, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(
+		root,
+		func(path string) ([]byte, error) {
+			readCount[path]++
+			data, ok := contents[path]
+			if !ok {
+				return nil, os.ErrNotExist
+			}
+			return data, nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(path string) { optionalMissing = path },
+		2,
+		func(path string) (os.FileInfo, error) {
+			probeCount[path]++
+			if _, ok := contents[path]; !ok {
+				return nil, os.ErrNotExist
+			}
+			return fakeXCConfigFileInfo{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("collector error = %v, want absent optional include to be ignored", err)
+	}
+	if len(files) != 2 || optionalMissing != missing {
+		t.Fatalf("files=%#v optionalMissing=%q, want root/left and %q", files, optionalMissing, missing)
+	}
+	if readCount[missing] != 0 || probeCount[missing] != 1 {
+		t.Fatalf("missing optional read/probe counts = %d/%d, want 0/1", readCount[missing], probeCount[missing])
+	}
+}
+
+func TestXCConfigCollectorRejectsPresentOptionalIncludeAtLimitBeforeRead(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Root.xcconfig")
+	left := filepath.Join(filepath.Dir(root), "Left.xcconfig")
+	present := filepath.Join(filepath.Dir(root), "Present.xcconfig")
+	contents := map[string][]byte{
+		root:    []byte("#include \"Left.xcconfig\"\n#include? \"Present.xcconfig\""),
+		left:    []byte("A = 1"),
+		present: []byte("B = 2"),
+	}
+	readCount := make(map[string]int)
+	probeCount := make(map[string]int)
+	_, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(
+		root,
+		func(path string) ([]byte, error) {
+			readCount[path]++
+			return contents[path], nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		2,
+		func(path string) (os.FileInfo, error) {
+			probeCount[path]++
+			return fakeXCConfigFileInfo{}, nil
+		},
+	)
+	if err == nil || !isXCConfigSourceGraphLimitError(err) || !strings.Contains(err.Error(), "more than 2 files") {
+		t.Fatalf("collector error = %v, want typed source-graph limit", err)
+	}
+	if readCount[present] != 0 || probeCount[present] != 1 {
+		t.Fatalf("present optional read/probe counts = %d/%d, want 0/1", readCount[present], probeCount[present])
+	}
+}
+
+// fakeXCConfigFileInfo is sufficient for the optional-probe contract: the
+// bounded collector only needs a non-nil result to distinguish presence from
+// os.ErrNotExist when the source budget is exhausted.
+type fakeXCConfigFileInfo struct{}
+
+func (fakeXCConfigFileInfo) Name() string       { return "xcconfig" }
+func (fakeXCConfigFileInfo) Size() int64        { return 0 }
+func (fakeXCConfigFileInfo) Mode() os.FileMode  { return 0 }
+func (fakeXCConfigFileInfo) ModTime() time.Time { return time.Time{} }
+func (fakeXCConfigFileInfo) IsDir() bool        { return false }
+func (fakeXCConfigFileInfo) Sys() any           { return nil }
+
+func TestXCConfigStableCollectorAllowsLargeGraph(t *testing.T) {
+	const count = signingPlanMaxFiles + 1
+	dir := t.TempDir()
+	paths := make([]string, count)
+	contents := make(map[string][]byte, count)
+	for i := range paths {
+		paths[i] = filepath.Join(dir, fmt.Sprintf("source-%d.xcconfig", i))
+		if i+1 < count {
+			contents[paths[i]] = []byte(fmt.Sprintf(`#include "source-%d.xcconfig"`, i+1))
+		} else {
+			contents[paths[i]] = []byte("CODE_SIGN_STYLE = Manual")
+		}
+		if err := os.WriteFile(paths[i], contents[paths[i]], 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := collectStableXCConfigFiles(paths[0])
+	if err != nil || len(files) != count {
+		t.Fatalf("stable collector err=%v files=%d, want %d files with no signing bound", err, len(files), count)
 	}
 }
 
@@ -310,6 +803,20 @@ func TestXCConfigParserRejectsUnterminatedBlockComment(t *testing.T) {
 	_, err := parseXCConfig([]byte("MARKETING_VERSION = 1.0\n/* never closed"))
 	if err == nil {
 		t.Fatal("expected unterminated-comment error")
+	}
+}
+
+func TestXCConfigParserPropagatesBlockCommentStateAcrossContinuation(t *testing.T) {
+	data := []byte("OTHER = \"SDK\\\n\" /* comment\nMARKETING_VERSION = 9.9.9 */\nCURRENT_PROJECT_VERSION = 2\n")
+	document, err := parseXCConfig(data)
+	if err != nil {
+		t.Fatalf("parseXCConfig() error = %v", err)
+	}
+	if len(document.assignments) != 2 {
+		t.Fatalf("assignments = %#v, want only OTHER and CURRENT_PROJECT_VERSION", document.assignments)
+	}
+	if document.assignments[0].key != "OTHER" || document.assignments[1].key != "CURRENT_PROJECT_VERSION" {
+		t.Fatalf("assignments = %#v, want comment-contained line ignored", document.assignments)
 	}
 }
 
@@ -688,9 +1195,6 @@ func TestIdentityAwareDarwinCollectorDeduplicatesCaseVariantSameFile(t *testing.
 			}
 			return []byte("CODE_SIGN_STYLE = Manual\n"), nil
 		},
-		nil,
-		nil,
-		nil,
 		func(string) (os.FileInfo, error) { return identity, nil },
 	)
 	if err != nil {
@@ -735,9 +1239,6 @@ func TestIdentityAwareLinuxCollectorDeduplicatesCaseVariantSameFile(t *testing.T
 			}
 			return []byte("CODE_SIGN_STYLE = Manual\nCODE_SIGN_STYLE += Extra\n"), nil
 		},
-		nil,
-		nil,
-		nil,
 		func(string) (os.FileInfo, error) { return identity, nil },
 	)
 	if err != nil {
@@ -788,9 +1289,6 @@ func TestIdentityAwareWindowsCollectorKeepsCaseDistinctFilesOnCaseSensitiveDirec
 				return nil, os.ErrNotExist
 			}
 		},
-		nil,
-		nil,
-		nil,
 		func(string) (os.FileInfo, error) { return identity, nil },
 	)
 	if err != nil {
@@ -835,9 +1333,6 @@ func TestIdentityAwareWindowsCollectorCoalescesCaseVariantOnCaseInsensitiveDirec
 				return nil, os.ErrNotExist
 			}
 		},
-		nil,
-		nil,
-		nil,
 		func(string) (os.FileInfo, error) { return identity, nil },
 	)
 	if err != nil {
@@ -900,9 +1395,6 @@ func TestIdentityAwareCollectorKeepsCaseDistinctHardlinkedIncludesOnCaseSensitiv
 				return nil, os.ErrNotExist
 			}
 		},
-		nil,
-		nil,
-		nil,
 		func(path string) (os.FileInfo, error) {
 			return identity, nil
 		},
@@ -1082,9 +1574,6 @@ func TestIdentityAwareWindowsCollectorReportsMissingRequiredCaseVariant(t *testi
 			}
 			return os.ReadFile(path)
 		},
-		nil,
-		nil,
-		nil,
 		func(path string) (os.FileInfo, error) {
 			if filepath.Clean(path) == missingPath {
 				return nil, os.ErrNotExist

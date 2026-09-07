@@ -222,6 +222,7 @@ func TestWaitForBuildDiscoveryToleratesTransientLookupFailures(t *testing.T) {
 	selector := appBuildWaitSelector{
 		AppID:       "123456789",
 		BuildNumber: "42",
+		Platform:    "IOS",
 	}
 
 	var buildResp *asc.BuildResponse
@@ -260,6 +261,7 @@ func TestWaitForBuildDiscoveryFailsAfterConsecutiveTransientLimit(t *testing.T) 
 	selector := appBuildWaitSelector{
 		AppID:       "123456789",
 		BuildNumber: "42",
+		Platform:    "IOS",
 	}
 
 	var err error

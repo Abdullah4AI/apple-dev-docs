@@ -1081,7 +1081,7 @@ func TestNewGitCommandScrubsSigningSyncPasswordsFromGitAndHooks(t *testing.T) {
 	capture := filepath.Join(t.TempDir(), "hook-environment.txt")
 	writeTestExecutable(t, hook, `#!/bin/sh
 set -eu
-if [ -n "${ASC_SIGNING_SYNC_PASSWORD-}" ] || [ -n "${ASC_MATCH_PASSWORD-}" ]; then
+if [ -n "${ASC_SIGNING_SYNC_PASSWORD-}" ]; then
   exit 41
 fi
 printf '%s' "$ASC_GIT_REQUIRED_CANARY" > "$ASC_FAKE_GIT_CAPTURE"
@@ -1093,7 +1093,6 @@ set -eu
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ASC_SIGNING_SYNC_PASSWORD", "CANARY-NEW-PASSWORD")
-	t.Setenv("ASC_MATCH_PASSWORD", "CANARY-LEGACY-PASSWORD")
 	t.Setenv("ASC_GIT_REQUIRED_CANARY", "required-environment-preserved")
 	t.Setenv("ASC_FAKE_GIT_CAPTURE", capture)
 	t.Setenv("ASC_FAKE_GIT_HOOK", hook)
@@ -1268,7 +1267,6 @@ func TestGitEnvironmentWithoutSigningSyncPasswordsMatchesWindowsKeysCaseInsensit
 	environment := gitEnvironmentWithoutSigningSyncPasswords([]string{
 		"PATH=C:\\Windows\\System32",
 		"asc_signing_sync_password=NEW-CANARY",
-		"Asc_Match_Password=LEGACY-CANARY",
 		`GIT_CONFIG_GLOBAL=C:\config\gitconfig`,
 	}, "windows")
 	want := []string{

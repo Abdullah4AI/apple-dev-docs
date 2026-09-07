@@ -72,22 +72,6 @@ func TestIAPRelationshipEndpoints(t *testing.T) {
 				wantPath: "/v1/inAppPurchasePriceSchedules/sch-1/relationships/manualPrices",
 			},
 			{
-				name: "in-app purchase images",
-				call: func(c *Client) error {
-					_, err := c.GetInAppPurchaseImagesRelationships(context.Background(), "iap-1", WithLinkagesLimit(4))
-					return err
-				},
-				wantPath: "/v2/inAppPurchases/iap-1/relationships/images",
-			},
-			{
-				name: "in-app purchase localizations",
-				call: func(c *Client) error {
-					_, err := c.GetInAppPurchaseInAppPurchaseLocalizationsRelationships(context.Background(), "iap-1", WithLinkagesLimit(4))
-					return err
-				},
-				wantPath: "/v2/inAppPurchases/iap-1/relationships/inAppPurchaseLocalizations",
-			},
-			{
 				name: "in-app purchase offer codes",
 				call: func(c *Client) error {
 					_, err := c.GetInAppPurchaseOfferCodesRelationships(context.Background(), "iap-1", WithLinkagesLimit(4))

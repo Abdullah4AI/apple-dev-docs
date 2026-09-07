@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -272,7 +271,11 @@ func TestAppClipsAdvancedExperienceImagesCreateSupportsUnattachedAndAttachedUplo
 	}
 }
 
-func TestAppClipsAdvancedExperienceImagesDeleteIsDeprecatedUnsupportedShim(t *testing.T) {
+// TestAppClipsAdvancedExperienceImagesDeleteIsRemoved locks the 5.0.0 removal
+// of the unsupported `images delete` shim. App Store Connect has no delete
+// endpoint for advanced experience images, so the verb is no longer
+// registered and fails with the generic unknown-command usage error.
+func TestAppClipsAdvancedExperienceImagesDeleteIsRemoved(t *testing.T) {
 	clientFactoryCalls := 0
 	restore := appclipscli.SetClientFactory(func() (*asc.Client, error) {
 		clientFactoryCalls++
@@ -280,40 +283,36 @@ func TestAppClipsAdvancedExperienceImagesDeleteIsDeprecatedUnsupportedShim(t *te
 	})
 	t.Cleanup(restore)
 
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
-	var runErr error
+	root := RootCommand("5.0.0")
+	if command := findSubcommand(root, "app-clips", "advanced-experiences", "images", "delete"); command != nil {
+		t.Fatal("removed command `asc app-clips advanced-experiences images delete` is still registered")
+	}
+	images := findSubcommand(root, "app-clips", "advanced-experiences", "images")
+	if images == nil || findSubcommand(images, "view") == nil || findSubcommand(images, "create") == nil {
+		t.Fatal("`images view` and `images create` must stay registered")
+	}
+	if strings.Contains(images.LongHelp, "images delete") {
+		t.Fatalf("images help still advertises the removed delete verb: %q", images.LongHelp)
+	}
+
+	var code int
 	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{"app-clips", "advanced-experiences", "images", "delete", "--id", "img-1", "--confirm"}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		runErr = root.Run(context.Background())
+		code = rootcmd.Run([]string{"app-clips", "advanced-experiences", "images", "delete", "--id", "img-1", "--confirm"}, "5.0.0")
 	})
 
-	if !errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("expected usage failure, got %v", runErr)
+	if code != rootcmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", code, rootcmd.ExitUsage)
 	}
 	if stdout != "" {
 		t.Fatalf("expected no success output, got %q", stdout)
 	}
-	for _, want := range []string{"DEPRECATED", "does not support deleting", "images create --file", "advanced-experiences update --experience-id", "--header-image-id"} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("stderr = %q, want %q", stderr, want)
-		}
+	if !strings.HasPrefix(stderr, "Error: unknown command `asc app-clips advanced-experiences images delete`\n") {
+		t.Fatalf("stderr = %q, want generic unknown-command failure", stderr)
+	}
+	if strings.Contains(stderr, "DEPRECATED") {
+		t.Fatalf("stderr = %q, must not carry the retired shim guidance", stderr)
 	}
 	if clientFactoryCalls != 0 {
 		t.Fatalf("expected no authentication or HTTP setup, got %d client factory calls", clientFactoryCalls)
-	}
-
-	cmd := appclipscli.AppClipAdvancedExperienceImagesDeleteCommand()
-	if !strings.HasPrefix(cmd.ShortHelp, "DEPRECATED:") {
-		t.Fatalf("ShortHelp = %q, want deprecation marker", cmd.ShortHelp)
-	}
-	if !strings.Contains(cmd.LongHelp, "images create --file") || !strings.Contains(cmd.LongHelp, "--header-image-id") {
-		t.Fatalf("LongHelp lacks migration guidance: %q", cmd.LongHelp)
-	}
-	parent := appclipscli.AppClipAdvancedExperienceImagesCommand()
-	if strings.Contains(parent.LongHelp, "images delete") {
-		t.Fatalf("parent LongHelp advertises unsupported delete invocation: %q", parent.LongHelp)
 	}
 }

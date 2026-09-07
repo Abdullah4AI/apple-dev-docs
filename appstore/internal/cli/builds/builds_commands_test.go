@@ -229,9 +229,8 @@ func TestBuildsUpdateCommand_Shape(t *testing.T) {
 		t.Fatal("expected --build-id flag to be defined")
 	}
 
-	buildFlag := cmd.FlagSet.Lookup("build")
-	if buildFlag == nil {
-		t.Fatal("expected hidden legacy --build flag to be defined")
+	if buildFlag := cmd.FlagSet.Lookup("build"); buildFlag != nil {
+		t.Fatal("expected removed --build alias to be undefined")
 	}
 
 	appFlag := cmd.FlagSet.Lookup("app")
@@ -287,7 +286,7 @@ func TestBuildsUpdateCommand_HelpContainsExamples(t *testing.T) {
 
 func TestBuildsUpdateCommand_ShortUsageShowsRequiredFlag(t *testing.T) {
 	cmd := BuildsUpdateCommand()
-	want := "asc builds update (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --uses-non-exempt-encryption [true|false] [flags]"
+	want := "asc builds update (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --uses-non-exempt-encryption [true|false] [flags]"
 	if cmd.ShortUsage != want {
 		t.Fatalf("expected ShortUsage %q, got %q", want, cmd.ShortUsage)
 	}

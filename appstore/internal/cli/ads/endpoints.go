@@ -30,7 +30,6 @@ type endpointFlagValues struct {
 	paginate *bool
 
 	pathStrings   map[string]*string
-	pathAliases   map[string][]*shared.DeprecatedStringFlagAlias
 	queryStrings  map[string]*string
 	queryRepeated map[string]*repeatedFlagValue
 	queryInts     map[string]*int
@@ -362,7 +361,6 @@ func bindEndpointFlags(spec appleads.EndpointSpec, flagSetName string) (*flag.Fl
 		output:        bindAdsRawOutputFlags(fs),
 		flagSet:       fs,
 		pathStrings:   map[string]*string{},
-		pathAliases:   map[string][]*shared.DeprecatedStringFlagAlias{},
 		queryStrings:  map[string]*string{},
 		queryRepeated: map[string]*repeatedFlagValue{},
 		queryInts:     map[string]*int{},
@@ -379,9 +377,6 @@ func bindEndpointFlags(spec appleads.EndpointSpec, flagSetName string) (*flag.Fl
 			continue
 		}
 		values.pathStrings[param.Name] = fs.String(param.Flag, "", flagUsage(param))
-		for _, alias := range param.Aliases {
-			values.pathAliases[param.Name] = append(values.pathAliases[param.Name], shared.BindDeprecatedStringFlagAlias(fs, alias, param.Flag))
-		}
 	}
 	for _, param := range spec.QueryParams {
 		switch param.Type {
@@ -526,11 +521,6 @@ func collectPathParams(spec appleads.EndpointSpec, flags endpointFlagValues) (ma
 			continue
 		}
 		ptr := flags.pathStrings[param.Name]
-		for _, alias := range flags.pathAliases[param.Name] {
-			if err := alias.Apply(ptr); err != nil {
-				return nil, err
-			}
-		}
 		value := value(ptr)
 		if param.Required && value == "" {
 			return nil, fmt.Errorf("--%s is required", param.Flag)

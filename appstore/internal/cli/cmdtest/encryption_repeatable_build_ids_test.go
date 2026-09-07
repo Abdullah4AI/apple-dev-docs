@@ -129,7 +129,7 @@ func TestEncryptionAssignBuildsExplicitEmptyValueKeepsRequiredValidation(t *test
 	}
 }
 
-func TestEncryptionAssignBuildsCanonicalAndLegacyFlagsConflictBeforeRequest(t *testing.T) {
+func TestEncryptionAssignBuildsLegacyBuildFlagIsUnknownBeforeRequest(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 
@@ -143,7 +143,6 @@ func TestEncryptionAssignBuildsCanonicalAndLegacyFlagsConflictBeforeRequest(t *t
 		code := rootcmd.Run([]string{
 			"encryption", "declarations", "assign-builds",
 			"--id", "DECL_ID",
-			"--build-id", "BUILD_A",
 			"--build", "BUILD_B",
 		}, "1.2.3")
 		if code != rootcmd.ExitUsage {
@@ -154,13 +153,13 @@ func TestEncryptionAssignBuildsCanonicalAndLegacyFlagsConflictBeforeRequest(t *t
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "Warning: `--build` is deprecated. Use `--build-id`.") {
-		t.Fatalf("stderr = %q, want deprecation warning", stderr)
+	if !strings.Contains(stderr, "Error: unknown flag `--build` for `asc encryption declarations assign-builds`") {
+		t.Fatalf("stderr = %q, want unknown flag error", stderr)
 	}
-	if !strings.Contains(stderr, "--build conflicts with --build-id") {
-		t.Fatalf("stderr = %q, want conflict error", stderr)
+	if strings.Contains(stderr, "deprecated") {
+		t.Fatalf("stderr = %q, want no deprecation guidance for the removed alias", stderr)
 	}
 	if requestCount != 0 {
-		t.Fatalf("conflicting flags made %d HTTP requests, want 0", requestCount)
+		t.Fatalf("removed --build alias made %d HTTP requests, want 0", requestCount)
 	}
 }

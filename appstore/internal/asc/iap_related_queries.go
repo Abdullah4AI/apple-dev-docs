@@ -8,12 +8,6 @@ type IAPReviewScreenshotOption func(*iapReviewScreenshotQuery)
 // IAPContentOption configures content detail and related-resource reads.
 type IAPContentOption func(*iapContentQuery)
 
-// IAPImageOption configures a legacy in-app purchase image detail read.
-type IAPImageOption func(*iapImageQuery)
-
-// IAPLocalizationOption configures a legacy in-app purchase localization detail read.
-type IAPLocalizationOption func(*iapLocalizationQuery)
-
 // PromotedPurchaseGetOption configures promoted purchase detail and related-resource reads.
 type PromotedPurchaseGetOption func(*promotedPurchaseGetQuery)
 
@@ -23,16 +17,6 @@ type iapReviewScreenshotQuery struct {
 }
 
 type iapContentQuery struct {
-	iapFields []string
-	include   []string
-}
-
-type iapImageQuery struct {
-	iapFields []string
-	include   []string
-}
-
-type iapLocalizationQuery struct {
 	iapFields []string
 	include   []string
 }
@@ -63,26 +47,6 @@ func WithIAPContentInclude(include []string) IAPContentOption {
 	return func(q *iapContentQuery) { q.include = normalizeUniqueList(include) }
 }
 
-// WithIAPImageIAPFields sets fields[inAppPurchases] for an included IAP.
-func WithIAPImageIAPFields(fields []string) IAPImageOption {
-	return func(q *iapImageQuery) { q.iapFields = normalizeUniqueList(fields) }
-}
-
-// WithIAPImageInclude sets the exact image relationship include set.
-func WithIAPImageInclude(include []string) IAPImageOption {
-	return func(q *iapImageQuery) { q.include = normalizeUniqueList(include) }
-}
-
-// WithIAPLocalizationIAPFields sets fields[inAppPurchases] for an included IAP.
-func WithIAPLocalizationIAPFields(fields []string) IAPLocalizationOption {
-	return func(q *iapLocalizationQuery) { q.iapFields = normalizeUniqueList(fields) }
-}
-
-// WithIAPLocalizationInclude sets the exact localization relationship include set.
-func WithIAPLocalizationInclude(include []string) IAPLocalizationOption {
-	return func(q *iapLocalizationQuery) { q.include = normalizeUniqueList(include) }
-}
-
 // WithPromotedPurchaseIAPFields sets fields[inAppPurchases] for an included IAP.
 func WithPromotedPurchaseIAPFields(fields []string) PromotedPurchaseGetOption {
 	return func(q *promotedPurchaseGetQuery) { q.iapFields = normalizeUniqueList(fields) }
@@ -106,20 +70,6 @@ func buildIAPReviewScreenshotQuery(query *iapReviewScreenshotQuery) string {
 }
 
 func buildIAPContentQuery(query *iapContentQuery) string {
-	values := url.Values{}
-	addCSV(values, "fields[inAppPurchases]", query.iapFields)
-	addCSV(values, "include", includeWhenFieldsSelected(query.include, "inAppPurchaseV2", query.iapFields))
-	return values.Encode()
-}
-
-func buildIAPImageQuery(query *iapImageQuery) string {
-	values := url.Values{}
-	addCSV(values, "fields[inAppPurchases]", query.iapFields)
-	addCSV(values, "include", includeWhenFieldsSelected(query.include, "inAppPurchase", query.iapFields))
-	return values.Encode()
-}
-
-func buildIAPLocalizationQuery(query *iapLocalizationQuery) string {
 	values := url.Values{}
 	addCSV(values, "fields[inAppPurchases]", query.iapFields)
 	addCSV(values, "include", includeWhenFieldsSelected(query.include, "inAppPurchaseV2", query.iapFields))

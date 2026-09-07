@@ -26,67 +26,7 @@ type InAppPurchaseLocalizationCreateRequest struct {
 	Data InAppPurchaseLocalizationCreateData `json:"data"`
 }
 
-type InAppPurchaseLocalizationUpdateData struct {
-	Type       ResourceType                               `json:"type"`
-	ID         string                                     `json:"id"`
-	Attributes *InAppPurchaseLocalizationUpdateAttributes `json:"attributes,omitempty"`
-}
-
-type InAppPurchaseLocalizationUpdateRequest struct {
-	Data InAppPurchaseLocalizationUpdateData `json:"data"`
-}
-
 type InAppPurchaseLocalizationResponse = SingleResponse[InAppPurchaseLocalizationAttributes]
-
-// In-app purchase images.
-type InAppPurchaseImageAttributes struct {
-	FileSize           int64             `json:"fileSize,omitempty"`
-	FileName           string            `json:"fileName,omitempty"`
-	SourceFileChecksum string            `json:"sourceFileChecksum,omitempty"`
-	AssetToken         string            `json:"assetToken,omitempty"`
-	ImageAsset         *ImageAsset       `json:"imageAsset,omitempty"`
-	UploadOperations   []UploadOperation `json:"uploadOperations,omitempty"`
-	State              string            `json:"state,omitempty"`
-}
-
-type (
-	InAppPurchaseImagesResponse = Response[InAppPurchaseImageAttributes]
-	InAppPurchaseImageResponse  = SingleResponse[InAppPurchaseImageAttributes]
-)
-
-type InAppPurchaseImageCreateAttributes struct {
-	FileSize int64  `json:"fileSize"`
-	FileName string `json:"fileName"`
-}
-
-type InAppPurchaseImageRelationships struct {
-	InAppPurchase Relationship `json:"inAppPurchase"`
-}
-
-type InAppPurchaseImageCreateData struct {
-	Type          ResourceType                       `json:"type"`
-	Attributes    InAppPurchaseImageCreateAttributes `json:"attributes"`
-	Relationships InAppPurchaseImageRelationships    `json:"relationships"`
-}
-
-type InAppPurchaseImageCreateRequest struct {
-	Data InAppPurchaseImageCreateData `json:"data"`
-}
-
-type InAppPurchaseImageUpdateAttributes struct {
-	SourceFileChecksum *string `json:"sourceFileChecksum,omitempty"`
-	Uploaded           *bool   `json:"uploaded,omitempty"`
-}
-
-type InAppPurchaseImageUpdateData struct {
-	Type       ResourceType                        `json:"type"`
-	ID         string                              `json:"id"`
-	Attributes *InAppPurchaseImageUpdateAttributes `json:"attributes,omitempty"`
-}
-
-type InAppPurchaseImageUpdateRequest struct {
-	Data InAppPurchaseImageUpdateData `json:"data"`
-}
 
 // In-app purchase App Store review screenshots.
 type InAppPurchaseAppStoreReviewScreenshotAttributes struct {
@@ -418,22 +358,4 @@ type InAppPurchaseOfferCodeOneTimeUseCodeUpdateData struct {
 // InAppPurchaseOfferCodeOneTimeUseCodeUpdateRequest is a request to update one-time use codes.
 type InAppPurchaseOfferCodeOneTimeUseCodeUpdateRequest struct {
 	Data InAppPurchaseOfferCodeOneTimeUseCodeUpdateData `json:"data"`
-}
-
-// In-app purchase submissions.
-type InAppPurchaseSubmissionResponse = SingleResponse[InAppPurchaseSubmissionAttributes]
-
-type InAppPurchaseSubmissionAttributes struct{}
-
-type InAppPurchaseSubmissionCreateRequest struct {
-	Data InAppPurchaseSubmissionCreateData `json:"data"`
-}
-
-type InAppPurchaseSubmissionCreateData struct {
-	Type          ResourceType                         `json:"type"`
-	Relationships InAppPurchaseSubmissionRelationships `json:"relationships"`
-}
-
-type InAppPurchaseSubmissionRelationships struct {
-	InAppPurchaseV2 Relationship `json:"inAppPurchaseV2"`
 }

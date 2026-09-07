@@ -10,45 +10,30 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
-func TestIAPLegacy441CommandsAreDeprecated(t *testing.T) {
-	tests := []struct {
-		name        string
-		command     func() *ffcli.Command
-		oldCommand  string
-		replacement string
-	}{
-		{"images list", IAPImagesListCommand, "asc iap images list", "asc iap versions images list --version-id \"IAP_VERSION_ID\""},
-		{"images view", IAPImagesGetCommand, "asc iap images view", "asc iap versions images view --image-id \"IMAGE_ID\""},
-		{"images create", IAPImagesCreateCommand, "asc iap images create", "asc iap versions images create --version-id \"IAP_VERSION_ID\" --file \"./image.png\""},
-		{"images update", IAPImagesUpdateCommand, "asc iap images update", "asc iap versions images create --version-id \"IAP_VERSION_ID\" --file \"./image.png\""},
-		{"images delete", IAPImagesDeleteCommand, "asc iap images delete", "asc iap versions images delete --image-id \"IMAGE_ID\" --confirm"},
-		{"localizations list", IAPLocalizationsListCommand, "asc iap localizations list", "asc iap versions localizations list --version-id \"IAP_VERSION_ID\""},
-		{"localizations create", IAPLocalizationsCreateCommand, "asc iap localizations create", "asc iap versions localizations create --version-id \"IAP_VERSION_ID\" --name \"NAME\" --locale \"LOCALE\""},
-		{"localizations update", IAPLocalizationsUpdateCommand, "asc iap localizations update", "asc iap versions localizations update --localization-id \"LOCALIZATION_ID\" --name \"NAME\""},
-		{"localizations delete", IAPLocalizationsDeleteCommand, "asc iap localizations delete", "asc iap versions localizations delete --localization-id \"LOCALIZATION_ID\" --confirm"},
-		{"submit", IAPSubmitCommand, "asc iap submit", "asc review items add --submission \"SUBMISSION_ID\" --item-type inAppPurchaseVersions --item-id \"IAP_VERSION_ID\""},
+// TestIAPProductScoped441SurfacesAreRemoved locks the 5.0.0 removal of the
+// App Store Connect API 4.4.1 product-scoped surfaces. The former
+// `asc iap images`, `asc iap localizations`, and `asc iap submit` commands are
+// no longer registered, so the CLI reports them as unknown commands instead of
+// warning and continuing. The version-scoped commands are the replacements.
+func TestIAPProductScoped441SurfacesAreRemoved(t *testing.T) {
+	cmd := IAPCommand()
+	removed := map[string]bool{"images": true, "localizations": true, "submit": true}
+	for _, sub := range cmd.Subcommands {
+		if sub != nil && removed[sub.Name] {
+			t.Fatalf("asc iap still registers removed product-scoped subcommand %q", sub.Name)
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := tt.command()
-			if !strings.HasPrefix(cmd.ShortHelp, "DEPRECATED:") {
-				t.Fatalf("ShortHelp = %q, want DEPRECATED prefix", cmd.ShortHelp)
-			}
-			if !strings.Contains(cmd.LongHelp, tt.replacement) {
-				t.Fatalf("LongHelp = %q, want replacement %q", cmd.LongHelp, tt.replacement)
-			}
-
-			stderr := captureIAPLegacy441Stderr(t, func() {
-				_ = cmd.Exec(context.Background(), nil)
-			})
-			if strings.Count(stderr, "Warning:") != 1 {
-				t.Fatalf("stderr = %q, want exactly one warning", stderr)
-			}
-			if !strings.Contains(stderr, "`"+tt.oldCommand+"`") || !strings.Contains(stderr, "`"+tt.replacement+"`") {
-				t.Fatalf("stderr = %q, want old command %q and replacement %q", stderr, tt.oldCommand, tt.replacement)
-			}
-		})
+	usage := cmd.UsageFunc(cmd)
+	for _, entry := range []string{"\n  images", "\n  localizations", "\n  submit", "DEPRECATED"} {
+		if strings.Contains(usage, entry) {
+			t.Fatalf("usage still lists removed surface %q: %q", entry, usage)
+		}
+	}
+	for _, legacy := range []string{"asc iap images", "asc iap localizations", "asc iap submit"} {
+		if strings.Contains(cmd.LongHelp, legacy) {
+			t.Fatalf("LongHelp still teaches removed command %q: %q", legacy, cmd.LongHelp)
+		}
 	}
 }
 
@@ -95,26 +80,11 @@ func TestIAPVersionScoped441CommandsAreNotDeprecated(t *testing.T) {
 }
 
 func TestIAP441ParentHelpPromotesVersionScopedResources(t *testing.T) {
-	tests := []struct {
-		name        string
-		command     *ffcli.Command
-		legacy      string
-		replacement string
-	}{
-		{"iap", IAPCommand(), "asc iap localizations list", "asc iap versions localizations list"},
-		{"localizations", IAPLocalizationsCommand(), "asc iap localizations list", "asc iap versions localizations list"},
-		{"images", IAPImagesCommand(), "asc iap images list", "asc iap versions images list"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if strings.Contains(tt.command.LongHelp, tt.legacy) {
-				t.Fatalf("LongHelp still teaches deprecated command %q: %q", tt.legacy, tt.command.LongHelp)
-			}
-			if !strings.Contains(tt.command.LongHelp, tt.replacement) {
-				t.Fatalf("LongHelp = %q, want replacement %q", tt.command.LongHelp, tt.replacement)
-			}
-		})
+	parent := IAPCommand()
+	for _, replacement := range []string{"asc iap versions localizations list", "asc iap versions images create"} {
+		if !strings.Contains(parent.LongHelp, replacement) {
+			t.Fatalf("LongHelp = %q, want replacement %q", parent.LongHelp, replacement)
+		}
 	}
 
 	setup := IAPSetupCommand()
@@ -123,20 +93,6 @@ func TestIAP441ParentHelpPromotesVersionScopedResources(t *testing.T) {
 	}
 	if !strings.Contains(setup.LongHelp, "deprecated v1 localization resource") {
 		t.Fatalf("setup LongHelp lacks localization migration guidance: %q", setup.LongHelp)
-	}
-}
-
-func TestIAP441ParentHelpListsDeprecatedSubmitMigration(t *testing.T) {
-	cmd := IAPCommand()
-	usage := cmd.UsageFunc(cmd)
-	const submitEntry = "\n  submit"
-	const migration = "DEPRECATED: App Store Connect API 4.4.1 replaced this resource. Use `asc review items add --submission \"SUBMISSION_ID\" --item-type inAppPurchaseVersions --item-id \"IAP_VERSION_ID\"`."
-
-	if got := strings.Count(usage, submitEntry); got != 1 {
-		t.Fatalf("submit entry count = %d, want 1; usage = %q", got, usage)
-	}
-	if !strings.Contains(usage, migration) {
-		t.Fatalf("usage = %q, want migration text %q", usage, migration)
 	}
 }
 

@@ -47,7 +47,7 @@ func (c *Client) fetchJSONAPIPagesFromWithOptions(ctx context.Context, baseURL, 
 		visited[nextPath] = struct{}{}
 		currentPath := nextPath
 
-		responseBody, err := c.doJSONAPIRequest(ctx, baseURL, http.MethodGet, nextPath)
+		responseBody, err := c.doJSONAPIRequest(ctx, baseURL, nextPath)
 		if err != nil {
 			return jsonAPIListPayload{}, err
 		}
@@ -107,14 +107,14 @@ func (c *Client) fetchJSONAPIPagesFromWithOptions(ctx context.Context, baseURL, 
 	return combined, nil
 }
 
-func (c *Client) doJSONAPIRequest(ctx context.Context, baseURL, method, path string) ([]byte, error) {
+func (c *Client) doJSONAPIRequest(ctx context.Context, baseURL, path string) ([]byte, error) {
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Accept", "application/json")
 	headers.Set("X-Requested-With", "XMLHttpRequest")
 	headers.Set("Origin", appStoreBaseURL)
 	headers.Set("Referer", appStoreBaseURL+"/")
-	return c.doRequestBase(ctx, baseURL, method, path, nil, headers)
+	return c.doRequestBase(ctx, baseURL, http.MethodGet, path, nil, headers)
 }
 
 func resolveJSONAPINextPath(nextLink, currentPath, baseURL string) (string, error) {

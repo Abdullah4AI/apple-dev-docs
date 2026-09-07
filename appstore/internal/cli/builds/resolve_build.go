@@ -22,6 +22,8 @@ type ResolveBuildOptions struct {
 	ExcludeExpired        bool
 }
 
+const buildNumberRequiresPlatformMessage = "--platform is required with --build-number (IOS, MAC_OS, TV_OS, VISION_OS)"
+
 type buildNumberSelectionOptions struct {
 	AppID                 string
 	Version               string
@@ -115,6 +117,9 @@ func validateResolveBuildOptions(opts ResolveBuildOptions) error {
 	if !opts.Latest && buildNumber == "" {
 		return shared.UsageError("--build-id, --latest, or --build-number is required")
 	}
+	if buildNumber != "" && platform == "" {
+		return shared.UsageError(buildNumberRequiresPlatformMessage)
+	}
 	if platform != "" {
 		if _, err := shared.NormalizeAppStoreVersionPlatform(platform); err != nil {
 			return shared.UsageError(err.Error())
@@ -140,13 +145,13 @@ func resolveBuildByNumberSelection(
 
 	buildNumber := strings.TrimSpace(opts.BuildNumber)
 	version := strings.TrimSpace(opts.Version)
-	platform := applyLegacyImplicitBuildNumberPlatformDefault(buildNumber, strings.TrimSpace(opts.Platform))
-	if platform != "" {
-		normalized, err := shared.NormalizeAppStoreVersionPlatform(platform)
-		if err != nil {
-			return nil, shared.UsageError(err.Error())
-		}
-		platform = normalized
+	platform := strings.TrimSpace(opts.Platform)
+	if platform == "" {
+		return nil, shared.UsageError(buildNumberRequiresPlatformMessage)
+	}
+	platform, err := shared.NormalizeAppStoreVersionPlatform(platform)
+	if err != nil {
+		return nil, shared.UsageError(err.Error())
 	}
 
 	resolvedAppID, err := shared.ResolveAppIDWithLookup(ctx, client, appID)

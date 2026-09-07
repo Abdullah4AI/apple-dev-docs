@@ -146,7 +146,7 @@ func StatusCommand(rt *runtime.Runtime, runF func(context.Context, *StatusOption
 
 - [cmd/root.go](../../cmd/root.go)
 - [internal/cli/shared/shared.go](../../internal/cli/shared/shared.go)
-- [internal/cli/shared/compat_aliases.go](../../internal/cli/shared/compat_aliases.go)
+- [internal/cli/shared/visible_usage.go](../../internal/cli/shared/visible_usage.go)
 - [internal/cli/registry/registry.go](../../internal/cli/registry/registry.go)
 
 ### CLI packages with the most non-test weight
@@ -229,7 +229,7 @@ Owner outcome:
 Primary targets:
 
 - [internal/cli/registry/registry.go](../../internal/cli/registry/registry.go)
-- [internal/cli/shared/compat_aliases.go](../../internal/cli/shared/compat_aliases.go)
+- [internal/cli/shared/visible_usage.go](../../internal/cli/shared/visible_usage.go)
 - command-specific deprecated wrappers
 
 ### Workstream E: Testing and Guardrails

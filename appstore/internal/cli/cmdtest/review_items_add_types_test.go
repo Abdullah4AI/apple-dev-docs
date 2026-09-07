@@ -66,7 +66,7 @@ func TestRunReviewItemsAddSupportsGameCenterChallengeVersions(t *testing.T) {
 		}
 	})
 
-	if got := stripDeprecatedCommandWarnings(stderr); strings.TrimSpace(got) != "" {
+	if strings.TrimSpace(stderr) != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 

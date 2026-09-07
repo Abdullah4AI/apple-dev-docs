@@ -18,6 +18,8 @@ var webLeafExclusions = map[string]string{
 	"asc web auth login":  "Session authentication plumbing for other web commands.",
 	"asc web auth status": "Session status check, not a product workflow.",
 	"asc web auth logout": "Session cache cleanup, not a product workflow.",
+	"asc web auth export": "Session cache transfer plumbing for other machines and CI.",
+	"asc web auth import": "Session cache transfer plumbing for other machines and CI.",
 }
 
 func TestRun_CapabilitiesInventoryCoversWebLeaves(t *testing.T) {

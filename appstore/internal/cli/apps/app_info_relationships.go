@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
@@ -84,7 +85,6 @@ func appsInfoCategoryRelationshipCommand(name, shortHelp string, fetch appInfoCa
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	infoID := fs.String("info-id", "", "App Info ID (optional override)")
-	legacyID := fs.String("id", "", "Deprecated alias for --info-id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -99,10 +99,7 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			infoIDValue, err := resolveInfoIDFlags(*infoID, *legacyID, "--id")
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
+			infoIDValue := strings.TrimSpace(*infoID)
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" && infoIDValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app or --info-id is required (or set ASC_APP_ID)")

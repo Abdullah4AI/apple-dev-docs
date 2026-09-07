@@ -57,13 +57,13 @@ func TestSigningSyncPushPreservesTargetsFilePathWhitespace(t *testing.T) {
 		return nil, errors.New("client reached after manifest")
 	}))
 
+	t.Setenv(signingSyncPasswordEnvVar, "repository-password")
 	cmd := syncPushCommand()
 	cmd.FlagSet.SetOutput(io.Discard)
 	if err := cmd.Parse([]string{
 		"--targets-file", filename,
 		"--profile-type", "IOS_APP_STORE",
 		"--repo", "git@example.com:team/signing.git",
-		"--password", "repository-password",
 	}); err != nil {
 		t.Fatal(err)
 	}

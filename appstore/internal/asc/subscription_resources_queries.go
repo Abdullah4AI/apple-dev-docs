@@ -69,15 +69,6 @@ type SubscriptionGroupLocalizationsOption func(*subscriptionGroupLocalizationsQu
 // SubscriptionAppStoreReviewScreenshotOption configures the subscription screenshot relationship endpoint.
 type SubscriptionAppStoreReviewScreenshotOption func(*subscriptionAppStoreReviewScreenshotQuery)
 
-// SubscriptionGroupLocalizationOption configures a v1 subscription group localization detail read.
-type SubscriptionGroupLocalizationOption func(*subscriptionRelatedFieldsQuery)
-
-// SubscriptionImageOption configures a v1 subscription image detail read.
-type SubscriptionImageOption func(*subscriptionRelatedFieldsQuery)
-
-// SubscriptionLocalizationOption configures a v1 subscription localization detail read.
-type SubscriptionLocalizationOption func(*subscriptionRelatedFieldsQuery)
-
 // SubscriptionOfferCodeOption configures a subscription offer code detail read.
 type SubscriptionOfferCodeOption func(*subscriptionRelatedFieldsQuery)
 
@@ -648,48 +639,6 @@ func WithSubscriptionAppStoreReviewScreenshotSubscriptionFields(fields []string)
 // It is accepted by both screenshot detail and subscription relationship reads.
 func WithSubscriptionAppStoreReviewScreenshotInclude(include []string) SubscriptionAppStoreReviewScreenshotOption {
 	return func(q *subscriptionAppStoreReviewScreenshotQuery) {
-		q.include = normalizeList(include)
-	}
-}
-
-// WithSubscriptionGroupLocalizationGroupFields sets fields[subscriptionGroups] on a group localization detail read.
-func WithSubscriptionGroupLocalizationGroupFields(fields []string) SubscriptionGroupLocalizationOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
-		q.parentFields = normalizeList(fields)
-	}
-}
-
-// WithSubscriptionGroupLocalizationInclude sets relationships to include on a group localization detail read.
-func WithSubscriptionGroupLocalizationInclude(include []string) SubscriptionGroupLocalizationOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
-		q.include = normalizeList(include)
-	}
-}
-
-// WithSubscriptionImageSubscriptionFields sets fields[subscriptions] on a subscription image detail read.
-func WithSubscriptionImageSubscriptionFields(fields []string) SubscriptionImageOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
-		q.parentFields = normalizeList(fields)
-	}
-}
-
-// WithSubscriptionImageInclude sets relationships to include on a subscription image detail read.
-func WithSubscriptionImageInclude(include []string) SubscriptionImageOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
-		q.include = normalizeList(include)
-	}
-}
-
-// WithSubscriptionLocalizationSubscriptionFields sets fields[subscriptions] on a subscription localization detail read.
-func WithSubscriptionLocalizationSubscriptionFields(fields []string) SubscriptionLocalizationOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
-		q.parentFields = normalizeList(fields)
-	}
-}
-
-// WithSubscriptionLocalizationInclude sets relationships to include on a subscription localization detail read.
-func WithSubscriptionLocalizationInclude(include []string) SubscriptionLocalizationOption {
-	return func(q *subscriptionRelatedFieldsQuery) {
 		q.include = normalizeList(include)
 	}
 }

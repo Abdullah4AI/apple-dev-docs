@@ -77,7 +77,6 @@ func PublishTestFlightCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (required, or ASC_APP_ID env)")
 	ipaPath := fs.String("ipa", "", "Path to .ipa file (required unless --build-id/--build-number is provided)")
 	buildID := fs.String("build-id", "", "Existing build ID to distribute (skip upload)")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	version := fs.String("version", "", "CFBundleShortVersionString (auto-extracted from IPA if not provided)")
 	buildNumber := fs.String("build-number", "", "CFBundleVersion (used for upload metadata with --ipa, or build lookup when --ipa is omitted)")
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
@@ -124,10 +123,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			resolvedAppInput := shared.ResolveAppID(*appID)
 			if resolvedAppInput == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")
@@ -148,7 +143,7 @@ Examples:
 						return shared.UsageErrorf("--%s cannot be used with --upload-only", flagName)
 					}
 				}
-				if setFlags["build-id"] || setFlags["build"] {
+				if setFlags["build-id"] {
 					return shared.UsageError("--build-id cannot be used with --upload-only")
 				}
 			}

@@ -119,7 +119,7 @@ func NewCatalog(version string) *Catalog {
 	catalog.factories = []factory{
 		commandFactory("auth", "Manage authentication for the App Store Connect API.", auth.AuthCommand),
 		commandFactory("doctor", "Diagnose authentication configuration issues.", auth.AuthDoctorCommand),
-		commandFactory("web", "Apple web-session workflows.", web.WebCommand),
+		commandFactory("web", "Apple web-session workflows, including finance report downloads.", web.WebCommand),
 		commandFactory("account", "Inspect account-level health and access signals.", account.AccountCommand),
 		commandFactory("install-skills", "Install the asc skill pack globally for App Store Connect workflows.", install.InstallSkillsCommand),
 		commandFactory("init", "Initialize asc helper docs in the current repo.", initcmd.InitCommand),

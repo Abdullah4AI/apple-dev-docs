@@ -1,5 +1,9 @@
 # Xcode Cloud status ID alias
 
+> Status: the `--id` alias described below was removed in 5.0.0. `asc
+> xcode-cloud status --id` is now an unknown flag; use `--run-id`. See
+> `migrate-to-5-0.mdx`.
+
 `asc xcode-cloud status` now accepts `--id` as a deprecated compatibility alias
 for `--run-id`. Existing alias calls continue after printing this warning to
 stderr:

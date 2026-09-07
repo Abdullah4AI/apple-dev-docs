@@ -31,24 +31,6 @@ func TestSubscriptionSparseFields441CommandQueries(t *testing.T) {
 			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
 		},
 		{
-			name:      "group localization detail",
-			args:      []string{"subscriptions", "groups", "localizations", "view", "--id", "group-loc-1", "--group-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptionGroupLocalizations/group-loc-1",
-			wantQuery: url.Values{"fields[subscriptionGroups]": {"versions"}, "include": {"subscriptionGroup"}},
-		},
-		{
-			name:      "image detail",
-			args:      []string{"subscriptions", "images", "view", "--id", "image-1", "--subscription-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptionImages/image-1",
-			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
-		},
-		{
-			name:      "localization detail",
-			args:      []string{"subscriptions", "localizations", "view", "--id", "loc-1", "--subscription-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptionLocalizations/loc-1",
-			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
-		},
-		{
 			name:      "offer code detail",
 			args:      []string{"subscriptions", "offers", "offer-codes", "view", "--offer-code-id", "code-1", "--subscription-fields", "versions", "--output", "json"},
 			path:      "/v1/subscriptionOfferCodes/code-1",
@@ -67,12 +49,6 @@ func TestSubscriptionSparseFields441CommandQueries(t *testing.T) {
 			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
 		},
 		{
-			name:      "group localizations",
-			args:      []string{"subscriptions", "groups", "localizations", "list", "--group-id", "group-1", "--group-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptionGroups/group-1/subscriptionGroupLocalizations",
-			wantQuery: url.Values{"fields[subscriptionGroups]": {"versions"}, "include": {"subscriptionGroup"}},
-		},
-		{
 			name:      "offer code prices",
 			args:      []string{"subscriptions", "offers", "offer-codes", "prices", "--offer-code-id", "code-1", "--price-point-fields", "adjustedEqualizations", "--output", "json"},
 			path:      "/v1/subscriptionOfferCodes/code-1/prices",
@@ -88,12 +64,6 @@ func TestSubscriptionSparseFields441CommandQueries(t *testing.T) {
 			name:      "subscription screenshot relationship",
 			args:      []string{"subscriptions", "review", "app-store-screenshot", "view", "--subscription-id", "123456789", "--subscription-fields", "versions", "--output", "json"},
 			path:      "/v1/subscriptions/123456789/appStoreReviewScreenshot",
-			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
-		},
-		{
-			name:      "subscription images",
-			args:      []string{"subscriptions", "images", "list", "--subscription-id", "123456789", "--subscription-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptions/123456789/images",
 			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
 		},
 		{
@@ -128,12 +98,6 @@ func TestSubscriptionSparseFields441CommandQueries(t *testing.T) {
 			name:      "subscription promotional offers",
 			args:      []string{"subscriptions", "offers", "promotional", "list", "--subscription-id", "123456789", "--subscription-fields", "versions", "--output", "json"},
 			path:      "/v1/subscriptions/123456789/promotionalOffers",
-			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
-		},
-		{
-			name:      "subscription localizations",
-			args:      []string{"subscriptions", "localizations", "list", "--subscription-id", "123456789", "--subscription-fields", "versions", "--output", "json"},
-			path:      "/v1/subscriptions/123456789/subscriptionLocalizations",
 			wantQuery: url.Values{"fields[subscriptions]": {"versions"}, "include": {"subscription"}},
 		},
 	}
@@ -180,17 +144,12 @@ func TestSubscriptionSparseFields441ValidationBeforeClient(t *testing.T) {
 		want string
 	}{
 		{"review screenshot detail", []string{"subscriptions", "review", "screenshots", "view", "--screenshot-id", "shot-1", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"group localization detail", []string{"subscriptions", "groups", "localizations", "view", "--id", "loc-1", "--group-fields", "bogus"}, "--group-fields must be one of"},
-		{"image detail", []string{"subscriptions", "images", "view", "--id", "image-1", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"localization detail", []string{"subscriptions", "localizations", "view", "--id", "loc-1", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
 		{"offer code detail", []string{"subscriptions", "offers", "offer-codes", "view", "--offer-code-id", "code-1", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
 		{"price point detail", []string{"subscriptions", "pricing", "price-points", "view", "--price-point-id", "point-1", "--fields", "bogus"}, "--fields must be one of"},
 		{"promotional offer detail", []string{"subscriptions", "offers", "promotional", "view", "--id", "promo-1", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"group localizations", []string{"subscriptions", "groups", "localizations", "list", "--group-id", "group-1", "--group-fields", "bogus"}, "--group-fields must be one of"},
 		{"offer code prices", []string{"subscriptions", "offers", "offer-codes", "prices", "--offer-code-id", "code-1", "--price-point-fields", "bogus"}, "--price-point-fields must be one of"},
 		{"promotional offer prices", []string{"subscriptions", "offers", "promotional", "prices", "--id", "promo-1", "--price-point-fields", "bogus"}, "--price-point-fields must be one of"},
 		{"subscription screenshot relationship", []string{"subscriptions", "review", "app-store-screenshot", "view", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"subscription images", []string{"subscriptions", "images", "list", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
 		{"introductory subscription fields", []string{"subscriptions", "offers", "introductory", "list", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
 		{"introductory price point fields", []string{"subscriptions", "offers", "introductory", "list", "--subscription-id", "123456789", "--price-point-fields", "bogus"}, "--price-point-fields must be one of"},
 		{"subscription offer codes", []string{"subscriptions", "offers", "offer-codes", "list", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
@@ -198,11 +157,9 @@ func TestSubscriptionSparseFields441ValidationBeforeClient(t *testing.T) {
 		{"subscription promoted purchase invalid subscription fields", []string{"subscriptions", "promoted-purchases", "view", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
 		{"subscription promoted purchase selector conflict", []string{"subscriptions", "promoted-purchases", "view", "--subscription-id", "123456789", "--promoted-purchase-id", "promo-1"}, "--promoted-purchase-id and --subscription-id are mutually exclusive"},
 		{"subscription promotional offers", []string{"subscriptions", "offers", "promotional", "list", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"subscription localizations", []string{"subscriptions", "localizations", "list", "--subscription-id", "123456789", "--subscription-fields", "bogus"}, "--subscription-fields must be one of"},
-		{"subscription fields reject price point field", []string{"subscriptions", "images", "view", "--id", "image-1", "--subscription-fields", "adjustedEqualizations"}, "--subscription-fields must be one of"},
-		{"group fields reject subscription field", []string{"subscriptions", "groups", "localizations", "view", "--id", "loc-1", "--group-fields", "productId"}, "--group-fields must be one of"},
+		{"subscription fields reject price point field", []string{"subscriptions", "offers", "offer-codes", "view", "--offer-code-id", "code-1", "--subscription-fields", "adjustedEqualizations"}, "--subscription-fields must be one of"},
 		{"price point fields reject subscription field", []string{"subscriptions", "offers", "offer-codes", "prices", "--offer-code-id", "code-1", "--price-point-fields", "versions"}, "--price-point-fields must be one of"},
-		{"explicit empty", []string{"subscriptions", "images", "view", "--id", "image-1", "--subscription-fields", ""}, "--subscription-fields must not be empty"},
+		{"explicit empty", []string{"subscriptions", "offers", "offer-codes", "view", "--offer-code-id", "code-1", "--subscription-fields", ""}, "--subscription-fields must not be empty"},
 	}
 
 	for _, test := range tests {
@@ -236,24 +193,12 @@ func TestSubscriptionSparseFields441ValidationBeforeClient(t *testing.T) {
 }
 
 func TestSubscriptionSparseFields441NextConflictsBeforeClient(t *testing.T) {
-	const next = "https://api.appstoreconnect.apple.com/v1/subscriptions/123456789/images?cursor=next"
+	const next = "https://api.appstoreconnect.apple.com/v1/subscriptions/123456789/introductoryOffers?cursor=next"
 	commands := []struct {
 		name      string
 		base      []string
 		modifiers [][]string
 	}{
-		{
-			name: "group localizations", base: []string{"subscriptions", "groups", "localizations", "list"},
-			modifiers: [][]string{{"--group-id", "group-1"}, {"--limit", "10"}, {"--group-fields", "versions"}},
-		},
-		{
-			name: "images", base: []string{"subscriptions", "images", "list"},
-			modifiers: subscriptionNextModifierFamilies441(),
-		},
-		{
-			name: "localizations", base: []string{"subscriptions", "localizations", "list"},
-			modifiers: subscriptionNextModifierFamilies441(),
-		},
 		{
 			name: "introductory offers", base: []string{"subscriptions", "offers", "introductory", "list"},
 			modifiers: append(subscriptionNextModifierFamilies441(), []string{"--price-point-fields", "adjustedEqualizations"}),

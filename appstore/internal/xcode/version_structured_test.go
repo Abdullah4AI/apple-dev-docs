@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1710,6 +1711,88 @@ func TestStructuredVersion_CommitRejectsSameByteReplacementOfPinnedSource(t *tes
 	}
 }
 
+func TestStructuredVersion_CommitCapturesSourceIdentityBeforePublication(t *testing.T) {
+	requireStrictVersionMutationPlatform(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.xcconfig")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileRoot, err := rootfs.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileRoot.Close() })
+	if err := commitVersionWrites([]preparedVersionWrite{{
+		path: path, root: fileRoot, name: filepath.Base(path),
+		original: []byte("old"), updated: []byte("new"), mode: 0o644,
+		strictIdentity: true,
+	}}); err != nil {
+		t.Fatalf("commitVersionWrites() error = %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("committed contents = %q, want new", got)
+	}
+}
+
+func TestStructuredVersion_CommitRejectsReplacementAfterIdentityCapture(t *testing.T) {
+	requireStrictVersionMutationPlatform(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.xcconfig")
+	original := []byte("old")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileRoot, err := rootfs.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileRoot.Close() })
+	previous := afterVersionSourceCaptureFn
+	t.Cleanup(func() { afterVersionSourceCaptureFn = previous })
+	afterVersionSourceCaptureFn = func([]preparedVersionWrite) error {
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		return os.WriteFile(path, original, 0o644)
+	}
+	err = commitVersionWrites([]preparedVersionWrite{{
+		path: path, root: fileRoot, name: filepath.Base(path), original: original,
+		updated: []byte("new"), mode: 0o644, strictIdentity: true,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "file identity changed") {
+		t.Fatalf("commit error = %v, want replacement rejection", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("replacement contents = %q, want original", got)
+	}
+}
+
+func TestStructuredVersion_CommitNoOpSkipsSourceIdentityCapture(t *testing.T) {
+	requireStrictVersionMutationPlatform(t)
+	dir := t.TempDir()
+	fileRoot, err := rootfs.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileRoot.Close() })
+	const contents = "unchanged"
+	err = commitVersionWrites([]preparedVersionWrite{
+		{path: filepath.Join(dir, "missing.xcconfig"), root: fileRoot, name: "missing.xcconfig", original: []byte(contents), updated: []byte(contents), strictIdentity: true},
+	})
+	if err != nil {
+		t.Fatalf("no-op commit unexpectedly failed: %v", err)
+	}
+}
+
 func TestSetVersionKeepsProvenWindowsCaseDistinctXCConfigsSeparate(t *testing.T) {
 	previousOS := runtimeGOOS
 	runtimeGOOS = "windows"
@@ -2509,6 +2592,146 @@ func TestStructuredVersion_ReceiptCleanupReplacementKeepsEarlierWrites(t *testin
 	}
 	if replacementInfo == nil || !os.SameFile(replacementInfo, finalReceiptInfo) {
 		t.Fatal("replacement receipt inode was not preserved")
+	}
+}
+
+func TestStructuredVersion_QuarantineCleanupFailureAfterCanonicalAbsenceRollsBackEarlierWrites(t *testing.T) {
+	requireStrictVersionMutationPlatform(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "settings.xcconfig")
+	receiptPath := filepath.Join(root, "receipt.json")
+	if err := os.WriteFile(path, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	injectedErr := errors.New("injected post-publication receipt failure")
+	originalCreator := atomicCreateVersionFileFn
+	atomicCreateVersionFileFn = func(write preparedVersionWrite, data []byte) (*rootfs.FileIdentity, error) {
+		identity, err := originalCreator(write, data)
+		if err != nil || !write.createOnly {
+			return identity, err
+		}
+		return identity, injectedErr
+	}
+	t.Cleanup(func() { atomicCreateVersionFileFn = originalCreator })
+
+	originalRemover := removeCreatedVersionFileFn
+	removeCreatedVersionFileFn = func(write preparedVersionWrite) error {
+		if err := os.Remove(write.path); err != nil {
+			t.Fatalf("remove canonical receipt: %v", err)
+		}
+		quarantinePath := filepath.Join(root, ".asc-tmp-rollback-receipt")
+		if err := os.WriteFile(quarantinePath, write.updated, 0o600); err != nil {
+			t.Fatalf("preserve receipt quarantine: %v", err)
+		}
+		return errors.Join(
+			rootfs.ErrQuarantineCleanupUncertain,
+			rootfs.ErrFileIdentityRemoved,
+			fmt.Errorf("quarantined file %q was left in place", quarantinePath),
+		)
+	}
+	t.Cleanup(func() { removeCreatedVersionFileFn = originalRemover })
+
+	fileRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalIdentity, err := fileRoot.CaptureFile(filepath.Base(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = commitVersionWrites([]preparedVersionWrite{
+		{path: path, root: fileRoot, name: filepath.Base(path), original: []byte("old"), updated: []byte("new"), mode: 0o640, preserveMetadata: true, originalIdentity: originalIdentity, strictIdentity: true},
+		{path: receiptPath, root: receiptRoot, name: filepath.Base(receiptPath), updated: []byte("receipt"), mode: 0o600, createOnly: true},
+	})
+	if !errors.Is(err, injectedErr) || !errors.Is(err, rootfs.ErrQuarantineCleanupUncertain) || !errors.Is(err, rootfs.ErrFileIdentityRemoved) {
+		t.Fatalf("commitVersionWrites() error = %v, want receipt cleanup failure with removed sentinel", err)
+	}
+	if got := mustReadVersionTestFile(t, path); got != "old" {
+		t.Fatalf("ordinary write after absent receipt cleanup failure = %q, want old", got)
+	}
+	if _, statErr := os.Lstat(receiptPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("canonical receipt after cleanup failure = %v, want absent", statErr)
+	}
+	if !strings.Contains(err.Error(), ".asc-tmp-rollback-receipt") {
+		t.Fatalf("cleanup error = %v, want quarantine evidence", err)
+	}
+}
+
+func TestStructuredVersion_QuarantineCleanupFailureWithReplacementKeepsEarlierWrites(t *testing.T) {
+	requireStrictVersionMutationPlatform(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "settings.xcconfig")
+	receiptPath := filepath.Join(root, "receipt.json")
+	if err := os.WriteFile(path, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	injectedErr := errors.New("injected post-publication receipt failure")
+	originalCreator := atomicCreateVersionFileFn
+	atomicCreateVersionFileFn = func(write preparedVersionWrite, data []byte) (*rootfs.FileIdentity, error) {
+		identity, err := originalCreator(write, data)
+		if err != nil || !write.createOnly {
+			return identity, err
+		}
+		return identity, injectedErr
+	}
+	t.Cleanup(func() { atomicCreateVersionFileFn = originalCreator })
+
+	originalRemover := removeCreatedVersionFileFn
+	removeCreatedVersionFileFn = func(write preparedVersionWrite) error {
+		if err := os.Remove(write.path); err != nil {
+			t.Fatalf("remove transaction receipt: %v", err)
+		}
+		replacementPath := write.path + ".replacement"
+		if err := os.WriteFile(replacementPath, []byte("concurrent receipt"), 0o600); err != nil {
+			t.Fatalf("write replacement receipt: %v", err)
+		}
+		if err := os.Rename(replacementPath, write.path); err != nil {
+			t.Fatalf("install replacement receipt: %v", err)
+		}
+		quarantinePath := filepath.Join(root, ".asc-tmp-rollback-receipt")
+		if err := os.WriteFile(quarantinePath, write.updated, 0o600); err != nil {
+			t.Fatalf("preserve receipt quarantine: %v", err)
+		}
+		return errors.Join(
+			rootfs.ErrQuarantineCleanupUncertain,
+			fmt.Errorf("quarantined file %q was left in place", quarantinePath),
+		)
+	}
+	t.Cleanup(func() { removeCreatedVersionFileFn = originalRemover })
+
+	fileRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalIdentity, err := fileRoot.CaptureFile(filepath.Base(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptRoot, err := rootfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = commitVersionWrites([]preparedVersionWrite{
+		{path: path, root: fileRoot, name: filepath.Base(path), original: []byte("old"), updated: []byte("new"), mode: 0o640, preserveMetadata: true, originalIdentity: originalIdentity, strictIdentity: true},
+		{path: receiptPath, root: receiptRoot, name: filepath.Base(receiptPath), updated: []byte("receipt"), mode: 0o600, createOnly: true},
+	})
+	if !errors.Is(err, injectedErr) || !errors.Is(err, rootfs.ErrQuarantineCleanupUncertain) || errors.Is(err, rootfs.ErrFileIdentityRemoved) {
+		t.Fatalf("commitVersionWrites() error = %v, want surviving replacement without removed sentinel", err)
+	}
+	if got := mustReadVersionTestFile(t, path); got != "new" {
+		t.Fatalf("ordinary write after replacement receipt cleanup failure = %q, want new", got)
+	}
+	if got := mustReadVersionTestFile(t, receiptPath); got != "concurrent receipt" {
+		t.Fatalf("replacement receipt = %q, want concurrent receipt", got)
+	}
+	if got := mustReadVersionTestFile(t, filepath.Join(root, ".asc-tmp-rollback-receipt")); got != "receipt" {
+		t.Fatalf("preserved receipt quarantine = %q, want transaction receipt", got)
 	}
 }
 

@@ -29,60 +29,6 @@ func TestIAPListPaginateFromNextWithoutAppPhase61(t *testing.T) {
 	)
 }
 
-func TestIAPImagesListRejectsInvalidNextURLPhase61(t *testing.T) {
-	runGameCenterAchievementsInvalidNextURLCases(
-		t,
-		[]string{"iap", "images", "list"},
-		"iap images list: --next",
-	)
-}
-
-func TestIAPImagesListPaginateFromNextWithoutIAPIDPhase61(t *testing.T) {
-	const firstURL = "https://api.appstoreconnect.apple.com/v2/inAppPurchases/iap-1/images?cursor=AQ&limit=200"
-	const secondURL = "https://api.appstoreconnect.apple.com/v2/inAppPurchases/iap-1/images?cursor=BQ&limit=200"
-
-	firstBody := `{"data":[{"type":"inAppPurchaseImages","id":"iap-image-next-1"}],"links":{"next":"` + secondURL + `"}}`
-	secondBody := `{"data":[{"type":"inAppPurchaseImages","id":"iap-image-next-2"}],"links":{"next":""}}`
-
-	runGameCenterAchievementsPaginateFromNext(
-		t,
-		[]string{"iap", "images", "list"},
-		firstURL,
-		secondURL,
-		firstBody,
-		secondBody,
-		"iap-image-next-1",
-		"iap-image-next-2",
-	)
-}
-
-func TestIAPLocalizationsListRejectsInvalidNextURLPhase61(t *testing.T) {
-	runGameCenterAchievementsInvalidNextURLCases(
-		t,
-		[]string{"iap", "localizations", "list"},
-		"iap localizations list: --next",
-	)
-}
-
-func TestIAPLocalizationsListPaginateFromNextWithoutIAPIDPhase61(t *testing.T) {
-	const firstURL = "https://api.appstoreconnect.apple.com/v2/inAppPurchases/iap-1/inAppPurchaseLocalizations?cursor=AQ&limit=200"
-	const secondURL = "https://api.appstoreconnect.apple.com/v2/inAppPurchases/iap-1/inAppPurchaseLocalizations?cursor=BQ&limit=200"
-
-	firstBody := `{"data":[{"type":"inAppPurchaseLocalizations","id":"iap-localization-next-1"}],"links":{"next":"` + secondURL + `"}}`
-	secondBody := `{"data":[{"type":"inAppPurchaseLocalizations","id":"iap-localization-next-2"}],"links":{"next":""}}`
-
-	runGameCenterAchievementsPaginateFromNext(
-		t,
-		[]string{"iap", "localizations", "list"},
-		firstURL,
-		secondURL,
-		firstBody,
-		secondBody,
-		"iap-localization-next-1",
-		"iap-localization-next-2",
-	)
-}
-
 func TestIAPOfferCodeCustomCodesListRejectsInvalidNextURLPhase61(t *testing.T) {
 	runGameCenterAchievementsInvalidNextURLCases(
 		t,

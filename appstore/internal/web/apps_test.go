@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,62 @@ func TestNormalizeCreateAttrsDefaults(t *testing.T) {
 	}
 	if attrs.VersionString != defaultVersion {
 		t.Fatalf("expected default version %q, got %q", defaultVersion, attrs.VersionString)
+	}
+}
+
+func TestRestoreAndPermissionCapturedContracts(t *testing.T) {
+	for _, tc := range []struct{ name, access, operation string }{
+		{"full", "full", "GRANT"},
+		{"limited", "limited", "REVOKE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := handlertest.New(t)
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				body, _ := io.ReadAll(r.Body)
+				if calls == 1 {
+					if r.Method != http.MethodPatch || r.URL.Path != "/apps/123" || string(body) != `{"data":{"attributes":{"removed":false},"id":"123","type":"apps"}}` {
+						fixture.Respond(w, "bad patch")
+						return
+					}
+					_, _ = w.Write([]byte(`{"data":{"id":"123","type":"apps"}}`))
+					return
+				}
+				want := fmt.Sprintf(`{"data":{"attributes":{"appAdamId":"123","operationType":"%s","userOperationType":"ALL_SILOABLE_USERS"},"type":"userAppPermissions"}}`, tc.operation)
+				if r.Method != http.MethodPost || r.URL.Path != "/userAppPermissions" || string(body) != want {
+					fixture.Respond(w, "bad permission")
+					return
+				}
+				_, _ = w.Write([]byte(`{"data":{}}`))
+			}))
+			defer server.Close()
+			c := &Client{httpClient: server.Client(), baseURL: server.URL}
+			if _, err := c.RestoreApp(context.Background(), "123"); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.SetUserAppPermission(context.Background(), "123", tc.access); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSetUserAppPermissionRejectsInvalid(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	c := &Client{httpClient: server.Client(), baseURL: server.URL}
+	for _, tc := range []struct{ appID, access, want string }{
+		{"", "full", "app id is required"},
+		{"123", "other", "access must be limited or full"},
+	} {
+		if err := c.SetUserAppPermission(context.Background(), tc.appID, tc.access); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("expected %q, got %v", tc.want, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("invalid arguments sent %d requests", requests)
 	}
 }
 

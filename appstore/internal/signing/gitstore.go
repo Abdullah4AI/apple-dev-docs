@@ -607,7 +607,6 @@ func newGitCommand(ctx context.Context, dir string, args ...string) (*exec.Cmd, 
 
 var gitSigningSyncPasswordEnvironmentKeys = []string{
 	"ASC_SIGNING_SYNC_PASSWORD",
-	"ASC_MATCH_PASSWORD",
 }
 
 func gitEnvironmentWithoutSigningSyncPasswords(environment []string, goos string) []string {

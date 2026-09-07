@@ -40,10 +40,6 @@ func appendIncludeForFields(include []string, fields []string, relationship stri
 	return append(include, relationship)
 }
 
-func subscriptionGroupFieldsList() []string {
-	return []string{"referenceName", "subscriptions", "subscriptionGroupLocalizations", "versions"}
-}
-
 func subscriptionPricePointFieldsList() []string {
 	return []string{"customerPrice", "proceeds", "proceedsYear2", "territory", "equalizations", "adjustedEqualizations"}
 }

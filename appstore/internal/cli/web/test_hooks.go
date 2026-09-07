@@ -92,6 +92,38 @@ func SetEnableDeveloperBundleIDCapability(fn func(context.Context, *webcore.Clie
 	}
 }
 
+func SetDisableDeveloperBundleIDCapability(fn func(context.Context, *webcore.Client, webcore.DeveloperBundleIDCapabilityDisableRequest) (*asc.DeveloperBundleIDCapabilityDisableResult, error)) func() {
+	prev := disableDeveloperBundleIDCapabilityFn
+	disableDeveloperBundleIDCapabilityFn = fn
+	return func() {
+		disableDeveloperBundleIDCapabilityFn = prev
+	}
+}
+
+func SetListDeveloperBundleIDs(fn func(context.Context, *webcore.Client) (*webcore.DeveloperBundleIDsListResult, error)) func() {
+	prev := listDeveloperBundleIDsFn
+	listDeveloperBundleIDsFn = fn
+	return func() {
+		listDeveloperBundleIDsFn = prev
+	}
+}
+
+func SetGetDeveloperBundleID(fn func(context.Context, *webcore.Client, string) (*webcore.DeveloperBundleIDGetResult, error)) func() {
+	prev := getDeveloperBundleIDFn
+	getDeveloperBundleIDFn = fn
+	return func() {
+		getDeveloperBundleIDFn = prev
+	}
+}
+
+func SetPersistWebSession(fn func(*webcore.AuthSession) error) func() {
+	prev := persistWebSessionFn
+	persistWebSessionFn = fn
+	return func() {
+		persistWebSessionFn = prev
+	}
+}
+
 // DisableControllingTTYForTesting prevents tests from opening the process's
 // controlling terminal. The returned function restores the previous behavior.
 func DisableControllingTTYForTesting() func() {

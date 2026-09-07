@@ -13,8 +13,6 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-const legacyLocalizationIDWarning = "Warning: `--id` is deprecated. Use `--localization-id`."
-
 type testNotesBuildSelectorFlags struct {
 	buildSelectorFlags
 }
@@ -32,12 +30,12 @@ func BuildsTestNotesCommand() *ffcli.Command {
 Build selector modes:
   --build-id BUILD_ID
   --app APP --latest [--version VER] [--platform PLATFORM]
-  --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+  --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes list --build-id "BUILD_ID"
   asc builds test-notes view --app "123456789" --latest --locale "en-US"
-  asc builds test-notes create --app "123456789" --build-number "42" --version "1.2.3" --locale "en-US" --whats-new "Test instructions"
+  asc builds test-notes create --app "123456789" --build-number "42" --platform IOS --version "1.2.3" --locale "en-US" --whats-new "Test instructions"
   asc builds test-notes update --build-id "BUILD_ID" --locale "en-US" --whats-new "Updated instructions"
   asc builds test-notes delete --build-id "BUILD_ID" --locale "en-US" --confirm`,
 		FlagSet:   fs,
@@ -68,26 +66,23 @@ func BuildsTestNotesListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc builds test-notes list [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM [--version VER] [--platform PLATFORM]] [flags]",
+		ShortUsage: "asc builds test-notes list [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM --platform PLATFORM [--version VER]] [flags]",
 		ShortHelp:  "List What to Test notes for a build.",
 		LongHelp: `List What to Test notes for a build.
 
 Build selector modes (one of):
   --build-id BUILD_ID
   --app APP --latest [--version VER] [--platform PLATFORM]
-  --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+  --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes list --build-id "BUILD_ID"
   asc builds test-notes list --app "123456789" --latest --locale "en-US,ja"
-  asc builds test-notes list --app "123456789" --build-number "42"
+  asc builds test-notes list --app "123456789" --build-number "42" --platform IOS
   asc builds test-notes list --build-id "BUILD_ID" --paginate`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("builds test-notes list: --limit must be between 1 and 200")
 			}
@@ -164,7 +159,6 @@ func BuildsTestNotesViewCommand() *ffcli.Command {
 
 	selectors := bindTestNotesBuildSelectorFlags(fs)
 	localizationID := fs.String("localization-id", "", "Localization ID (low-level escape hatch)")
-	legacyLocalizationID := bindHiddenLocalizationIDFlag(fs)
 	locale := fs.String("locale", "", "Locale (e.g., en-US, required with build selectors)")
 	output := shared.BindOutputFlags(fs)
 
@@ -179,22 +173,15 @@ Selector modes:
   --locale LOCALE with one of:
     --build-id BUILD_ID
     --app APP --latest [--version VER] [--platform PLATFORM]
-    --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+    --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes view --build-id "BUILD_ID" --locale "en-US"
   asc builds test-notes view --app "123456789" --latest --locale "en-US"
-  asc builds test-notes view --app "123456789" --build-number "42" --version "1.2.3" --locale "en-US"`,
+  asc builds test-notes view --app "123456789" --build-number "42" --platform IOS --version "1.2.3" --locale "en-US"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
-			if err := applyLegacyLocalizationIDAlias(localizationID, legacyLocalizationID); err != nil {
-				return err
-			}
-
 			id := strings.TrimSpace(*localizationID)
 			localeValue := strings.TrimSpace(*locale)
 			if err := validateTestNotesLocalizationTarget(id, localeValue, selectors); err != nil {
@@ -237,26 +224,22 @@ func BuildsTestNotesCreateCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "create",
-		ShortUsage: "asc builds test-notes create [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM [--version VER] [--platform PLATFORM]] [flags]",
+		ShortUsage: "asc builds test-notes create [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM --platform PLATFORM [--version VER]] [flags]",
 		ShortHelp:  "Create What to Test notes for a build.",
 		LongHelp: `Create What to Test notes for a build.
 
 Build selector modes (one of):
   --build-id BUILD_ID
   --app APP --latest [--version VER] [--platform PLATFORM]
-  --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+  --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes create --build-id "BUILD_ID" --locale "en-US" --whats-new "Test instructions"
   asc builds test-notes create --app "123456789" --latest --locale "en-US" --whats-new "Test instructions"
-  asc builds test-notes create --app "123456789" --build-number "42" --version "1.2.3" --locale "en-US" --whats-new "Test instructions"`,
+  asc builds test-notes create --app "123456789" --build-number "42" --platform IOS --version "1.2.3" --locale "en-US" --whats-new "Test instructions"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
-
 			localeValue := strings.TrimSpace(*locale)
 			if localeValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --locale is required")
@@ -303,7 +286,6 @@ func BuildsTestNotesUpdateCommand() *ffcli.Command {
 
 	selectors := bindTestNotesBuildSelectorFlags(fs)
 	localizationID := fs.String("localization-id", "", "Localization ID (low-level escape hatch)")
-	legacyLocalizationID := bindHiddenLocalizationIDFlag(fs)
 	locale := fs.String("locale", "", "Locale (e.g., en-US, required with build selectors)")
 	whatsNew := fs.String("whats-new", "", "What to Test notes")
 	output := shared.BindOutputFlags(fs)
@@ -319,21 +301,14 @@ Selector modes:
   --locale LOCALE with one of:
     --build-id BUILD_ID
     --app APP --latest [--version VER] [--platform PLATFORM]
-    --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+    --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes update --build-id "BUILD_ID" --locale "en-US" --whats-new "Updated notes"
-  asc builds test-notes update --app "123456789" --build-number "42" --version "1.2.3" --locale "en-US" --whats-new "Updated notes"`,
+  asc builds test-notes update --app "123456789" --build-number "42" --platform IOS --version "1.2.3" --locale "en-US" --whats-new "Updated notes"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
-			if err := applyLegacyLocalizationIDAlias(localizationID, legacyLocalizationID); err != nil {
-				return err
-			}
-
 			id := strings.TrimSpace(*localizationID)
 			localeValue := strings.TrimSpace(*locale)
 			if err := validateTestNotesLocalizationTarget(id, localeValue, selectors); err != nil {
@@ -382,7 +357,6 @@ func BuildsTestNotesDeleteCommand() *ffcli.Command {
 
 	selectors := bindTestNotesBuildSelectorFlags(fs)
 	localizationID := fs.String("localization-id", "", "Localization ID (low-level escape hatch)")
-	legacyLocalizationID := bindHiddenLocalizationIDFlag(fs)
 	locale := fs.String("locale", "", "Locale (e.g., en-US, required with build selectors)")
 	confirm := fs.Bool("confirm", false, "Confirm deletion")
 	output := shared.BindOutputFlags(fs)
@@ -398,21 +372,14 @@ Selector modes:
   --locale LOCALE with one of:
     --build-id BUILD_ID
     --app APP --latest [--version VER] [--platform PLATFORM]
-    --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+    --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds test-notes delete --build-id "BUILD_ID" --locale "en-US" --confirm
-  asc builds test-notes delete --app "123456789" --build-number "42" --version "1.2.3" --locale "en-US" --confirm`,
+  asc builds test-notes delete --app "123456789" --build-number "42" --platform IOS --version "1.2.3" --locale "en-US" --confirm`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
-			if err := applyLegacyLocalizationIDAlias(localizationID, legacyLocalizationID); err != nil {
-				return err
-			}
-
 			id := strings.TrimSpace(*localizationID)
 			localeValue := strings.TrimSpace(*locale)
 			if err := validateTestNotesLocalizationTarget(id, localeValue, selectors); err != nil {
@@ -461,7 +428,7 @@ func bindTestNotesBuildSelectorFlags(fs *flag.FlagSet) testNotesBuildSelectorFla
 			latestUsage:      "Resolve the latest matching build for --app context",
 			versionUsage:     "App version string (e.g., 1.2.3)",
 			buildNumberUsage: "Build number (CFBundleVersion)",
-			platformUsage:    "Platform: IOS, MAC_OS, TV_OS, VISION_OS",
+			platformUsage:    "Platform (required with --build-number): IOS, MAC_OS, TV_OS, VISION_OS",
 		}),
 	}
 }
@@ -486,17 +453,6 @@ func (f testNotesBuildSelectorFlags) resolveBuild(ctx context.Context, client *a
 	defer cancel()
 
 	return ResolveBuild(requestCtx, client, opts)
-}
-
-func bindHiddenLocalizationIDFlag(fs *flag.FlagSet) *trackedStringFlag {
-	value := &trackedStringFlag{}
-	fs.Var(value, "id", "DEPRECATED: use --localization-id")
-	shared.HideFlagFromHelp(fs.Lookup("id"))
-	return value
-}
-
-func applyLegacyLocalizationIDAlias(localizationID *string, legacyLocalizationID *trackedStringFlag) error {
-	return applyLegacyStringAlias(localizationID, legacyLocalizationID, "--id", "--localization-id", legacyLocalizationIDWarning)
 }
 
 func validateTestNotesLocalizationTarget(localizationID, locale string, selectors testNotesBuildSelectorFlags) error {

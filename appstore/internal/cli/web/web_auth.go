@@ -370,7 +370,7 @@ func promptTwoFactorCodeInteractive() (string, error) {
 	if termIsTerminalFn(int(os.Stdin.Fd())) {
 		return readTwoFactorCodeFromTerminalFD(int(os.Stdin.Fd()), os.Stderr)
 	}
-	return "", fmt.Errorf("2fa required: run in a terminal for an interactive prompt, pass --two-factor-code-command, set %s, or re-run with deprecated --%s", webTwoFactorCodeCommandEnv, deprecatedTwoFactorCodeFlagName)
+	return "", fmt.Errorf("2fa required: run in a terminal for an interactive prompt, pass --two-factor-code-command, or set %s", webTwoFactorCodeCommandEnv)
 }
 
 func twoFactorCodeCommandShellArgs(command string) []string {
@@ -791,7 +791,7 @@ func resolveWebSession(ctx context.Context, appleID, password, twoFactorCode str
 	// baseline for the next read: the retry, and the phone fallback that follows
 	// a rejected trusted-device code, both have to wait past the value they just
 	// burned rather than only past the one the cached attempt consumed. Before
-	// the command has produced anything the literal --two-factor-code stands in,
+	// the command has produced anything the literal two-factor code stands in,
 	// and with nothing consumed at all this is a plain pass-through.
 	readCommandTwoFactorCode := func(ctx context.Context, command string) (string, error) {
 		burned := lastCommandTwoFactor
@@ -828,7 +828,7 @@ func resolveWebSession(ctx context.Context, appleID, password, twoFactorCode str
 	}
 
 	// Apple consumes a 2FA code as soon as it is accepted, so a literal
-	// --two-factor-code value cannot be resubmitted on the fresh retry. Only a
+	// two-factor code value cannot be resubmitted on the fresh retry. Only a
 	// configured code command may produce a replacement: supplying the code up
 	// front is a non-interactive choice, so falling back to a prompt could hang
 	// a scripted invocation that happens to own a terminal.
@@ -1136,6 +1136,8 @@ Manage Apple web-session authentication used by "asc web" commands.
 			WebAuthLoginCommand(),
 			WebAuthStatusCommand(),
 			WebAuthCapabilitiesCommand(),
+			WebAuthExportCommand(),
+			WebAuthImportCommand(),
 			WebAuthLogoutCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
@@ -1149,7 +1151,6 @@ func WebAuthLoginCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web auth login", flag.ExitOnError)
 
 	appleID := fs.String("apple-id", "", "Apple Account email")
-	twoFactorCode := bindDeprecatedTwoFactorCodeFlag(fs)
 	twoFactorCodeCommand := fs.String("two-factor-code-command", "", "Shell command that prints the 2FA code to stdout if verification is required")
 	providerID := fs.Int64("provider-id", 0, "Numeric App Store Connect provider ID to select for this web session")
 	publicProviderID := fs.String("public-provider-id", "", "Public App Store Connect provider/team ID to select for this web session")
@@ -1173,7 +1174,6 @@ Two-factor input options:
   - secure interactive prompt (default for manual use)
   - --two-factor-code-command
   - %s environment variable (recommended for automation)
-  - --two-factor-code (deprecated compatibility alias when the code is already known)
 
 Phone-code fallback (including SMS):
   - interactive: if Apple offers a registered phone fallback, enter an incorrect trusted-device code once
@@ -1200,12 +1200,11 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			warnDeprecatedTwoFactorCodeFlag(*twoFactorCode)
 			selection := webcore.ProviderSelection{
 				ProviderID:       *providerID,
 				PublicProviderID: *publicProviderID,
 			}
-			session, source, err := callResolveSessionForProviderSelection(ctx, *appleID, "", *twoFactorCode, *twoFactorCodeCommand, selection)
+			session, source, err := callResolveSessionForProviderSelection(ctx, *appleID, "", "", *twoFactorCodeCommand, selection)
 			if err != nil {
 				return err
 			}

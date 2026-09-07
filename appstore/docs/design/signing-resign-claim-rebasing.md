@@ -73,11 +73,11 @@ The allowlist is intentionally narrow. A key is not eligible because its value h
 | --- | --- | --- | --- |
 | `keychain-access-groups` | array of strings | allow, prefix-only | Transform each concrete `<oldPrefix>.<suffix>` item to `<newPrefix>.<suffix>`; preserve order and authorize the resulting array items against the replacement profile. |
 | `com.apple.developer.ubiquity-kvstore-identifier` | string | allow only through its transfer-aware rule | Preserve an already-authorized value. Otherwise derive the destination prefix from the replacement profile's KVS entitlement, never from the App ID prefix or Team ID; transform only when that profile value proves one unambiguous concrete destination prefix. |
-| `com.apple.developer.parent-application-identifiers` | array of strings | unsupported in v1; graph-only if added | Enable only together with reciprocal associated App Clip references so both sides of the relationship are planned and authorized as one graph change. |
+| `com.apple.developer.parent-application-identifiers` | array of strings | allow, paired graph-only | Rewrite only as part of a proven unique main-app/App-Clip pair; otherwise preserve an exact profile-authorized value. |
 | `com.apple.developer.ubiquity-container-identifiers` | array of strings | unsupported in v1 | Enable only after signed/profile fixtures prove the exact prefix grammar and replacement profile authorization behavior. |
 | `com.apple.developer.icloud-container-identifiers` | array of strings | unsupported in v1 | Treat the container identifier as a shared resource reference, not as a string to rewrite, until its signed grammar and ownership rules are proven for this command. |
 | `com.apple.developer.icloud-container-development-container-identifiers` | array of strings | unsupported in v1 | Same boundary as production iCloud container identifiers; no speculative rewrite. |
-| `com.apple.developer.associated-appclip-app-identifiers` | array of strings | unsupported in v1; graph-only if added | Enable only together with parent application identifiers. A future implementation must map references to discovered App Clip targets and verify both sides; it must never rewrite an arbitrary sibling bundle identifier. |
+| `com.apple.developer.associated-appclip-app-identifiers` | array of strings | allow, paired graph-only | Rewrite only as part of a proven unique main-app/App-Clip pair; never rewrite an arbitrary sibling bundle identifier. |
 
 The first implementation ships only the rows marked allow. Unsupported v1 keys remain unchanged when the replacement profile authorizes their exact existing values and are refused otherwise. Adding a key later is an additive allowlist change with its own fixtures and output tests; paired graph claims enter together or remain deferred together.
 
@@ -149,15 +149,15 @@ All target entitlement plans are built before the first generated entitlement fi
 - the referenced target kind must be valid for the claim;
 - the referenced target's planned application identifier must be concrete;
 - the existing signed claim must pass its type and grammar checks, and the replacement profile must authorize the planned candidate;
-- a failure in any node or edge rejects the complete operation without a partial output IPA.
+- a failure in any node or edge that is required for rebasing rejects the complete operation without a partial output IPA; an unproven existing relationship may remain unchanged when its replacement profile authorizes it exactly.
 
 ### App Clip relationships
 
-V1 does not rewrite either side of the App Clip relationship. `com.apple.developer.parent-application-identifiers` and `com.apple.developer.associated-appclip-app-identifiers` remain unchanged only when their respective replacement profiles authorize the existing concrete values; otherwise the operation refuses the IPA before mutation. Rewriting only the parent edge would leave a reciprocal main-app claim pointing at the old App Clip identifier, so the two claims cannot be enabled independently.
+App Clip relationships are rebased only as a paired graph change. A unique main application and App Clip target must have reciprocal concrete claims, and both replacement profiles must authorize their respective planned values. If pairing cannot be proven, an existing concrete claim remains unchanged when its replacement profile authorizes it; an unauthorized claim refuses the IPA before mutation. A one-sided rewrite is never permitted.
 
-A future additive implementation must discover a unique main-app/App-Clip pair, map both existing concrete references to that pair, plan both new application identifiers together, and require each replacement profile to authorize its own planned claim. It must reject missing or ambiguous targets, multiple parents, arbitrary sibling references, mismatched pairs, and any one-sided rewrite.
+The implementation discovers a unique main-app/App-Clip pair, maps both existing concrete references to that pair, plans both new application identifiers together, and requires each replacement profile to authorize its own planned claim. Missing or ambiguous targets, multiple parents, arbitrary sibling references, mismatched pairs, and any one-sided rewrite invalidate rebasing; the existing claims are preserved together when each is already authorized unchanged, otherwise the operation refuses before mutation.
 
-Other cross-bundle or sibling references remain unchanged and must be authorized unchanged by the replacement profile. If their relationship cannot be proven, the operation fails closed rather than signing a partially rebased IPA.
+Other cross-bundle or sibling references remain unchanged and must be authorized unchanged by the replacement profile. If their relationship cannot be proven, preserve it when authorized unchanged; otherwise fail closed rather than signing a partially rebased IPA.
 
 ## Pipeline and verification order
 
@@ -269,8 +269,8 @@ Tests should begin with the smallest failing assertion at the command or planner
 
 ### Cross-target graph
 
-- App Clip relationship tests prove that both parent and associated claims are preserved only when separately authorized unchanged, and that either unauthorized old-team claim refuses the whole IPA before mutation.
-- Any future App Clip rewrite starts with paired two-way mapping, one-sided-rewrite rejection, and arbitrary-sibling-reference rejection tests before either claim enters the allowlist.
+- App Clip relationship tests prove that authorized unpaired claims remain unchanged, unauthorized claims refuse before mutation, and paired claims rewrite together.
+- Paired graph tests cover two-way mapping, one-sided-rewrite rejection, unique-pair enforcement, and arbitrary-sibling-reference rejection.
 
 ### Output and privacy
 

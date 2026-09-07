@@ -1,5 +1,10 @@
 # TestFlight external-testing deprecation
 
+> **Removed in 5.0.0.** The `--external-testing` flag no longer exists on
+> `asc testflight distribution edit`; passing it produces the generic
+> unknown-flag usage error. The rest of this document is retained as design
+> history for the deprecation window.
+
 ## Command and API contract
 
 `asc testflight distribution edit` is the canonical command for updating a

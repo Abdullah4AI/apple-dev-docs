@@ -811,23 +811,21 @@ Examples:
 	}
 }
 
-const authLogoutConfirmDeprecationWarning = "Warning: auth logout without --confirm is deprecated and will be rejected in 5.0.0; pass --confirm to acknowledge credential removal."
-
 // AuthLogout command factory
 func AuthLogoutCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("auth logout", flag.ExitOnError)
 	all := fs.Bool("all", false, "Remove all stored credentials")
 	name := fs.String("name", "", "Remove a named credential")
-	confirm := fs.Bool("confirm", false, "Confirm credential removal (required in 5.0.0)")
+	confirm := fs.Bool("confirm", false, "Confirm credential removal (required)")
 
 	return &ffcli.Command{
 		Name:       "logout",
-		ShortUsage: "asc auth logout [--name NAME | --all] [--confirm]",
+		ShortUsage: "asc auth logout [--name NAME | --all] --confirm",
 		ShortHelp:  "Remove stored API credentials.",
 		LongHelp: `Remove stored API credentials.
 
-Omitting --name continues to remove all credentials during the compatibility
-window. Pass --confirm now; it will be required in 5.0.0.
+Omitting --name removes all stored credentials. --confirm is required before
+any credential is removed.
 
 Examples:
   asc auth logout --all --confirm
@@ -855,7 +853,7 @@ Examples:
 				return shared.UsageError("--all and --name are mutually exclusive")
 			}
 			if !*confirm {
-				fmt.Fprintln(os.Stderr, authLogoutConfirmDeprecationWarning)
+				return shared.UsageError("--confirm is required to remove stored credentials")
 			}
 
 			if trimmedName != "" {

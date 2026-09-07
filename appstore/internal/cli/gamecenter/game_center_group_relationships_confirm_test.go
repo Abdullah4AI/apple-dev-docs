@@ -8,9 +8,12 @@ import (
 	"testing"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-func TestGameCenterGroupRelationshipReplacementsWarnWithoutConfirmDuringCompatibilityWindow(t *testing.T) {
+func TestGameCenterGroupRelationshipReplacementsRejectWithoutConfirmBeforeHTTP(t *testing.T) {
 	isolateGameCenterAuthEnv(t)
 
 	commands := map[string]func() *ffcli.Command{
@@ -21,6 +24,13 @@ func TestGameCenterGroupRelationshipReplacementsWarnWithoutConfirmDuringCompatib
 	for name, newCommand := range commands {
 		for _, v2 := range []bool{false, true} {
 			t.Run(name+" v2="+boolString(v2), func(t *testing.T) {
+				factoryCalled := false
+				restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+					factoryCalled = true
+					return nil, errors.New("poison client factory called")
+				})
+				t.Cleanup(restore)
+
 				cmd := newCommand()
 				args := []string{"--group-id", "group-1", "--ids", "resource-1"}
 				if v2 {
@@ -34,12 +44,17 @@ func TestGameCenterGroupRelationshipReplacementsWarnWithoutConfirmDuringCompatib
 				stderr := captureGameCenterStderr(t, func() {
 					err = cmd.Exec(context.Background(), []string{})
 				})
-				if errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("replacement without --confirm must remain compatible before 5.0.0, got %v", err)
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("replacement without --confirm must fail validation, got %v", err)
 				}
-				want := gameCenterReplacementConfirmWarning + "\n"
-				if stderr != want {
-					t.Fatalf("stderr = %q, want %q", stderr, want)
+				if err.Error() != "--confirm" {
+					t.Fatalf("error = %q, want missing parameter %q", err.Error(), "--confirm")
+				}
+				if stderr != "Error: --confirm is required\n" {
+					t.Fatalf("stderr = %q, want exact missing --confirm diagnostic", stderr)
+				}
+				if factoryCalled {
+					t.Fatal("client factory called before --confirm validation")
 				}
 			})
 		}
@@ -75,7 +90,7 @@ func TestGameCenterGroupRelationshipReplacementConfirmPassesValidation(t *testin
 	}
 }
 
-func TestGameCenterRelationshipReplacementConfirmFlagsAreExperimental(t *testing.T) {
+func TestGameCenterRelationshipReplacementConfirmFlagsAreStable(t *testing.T) {
 	commands := map[string]*ffcli.Command{
 		"group achievements":         GameCenterGroupAchievementsSetCommand(),
 		"group leaderboards":         GameCenterGroupLeaderboardsSetCommand(),
@@ -88,8 +103,20 @@ func TestGameCenterRelationshipReplacementConfirmFlagsAreExperimental(t *testing
 			if confirm == nil {
 				t.Fatal("--confirm is not registered")
 			}
-			if !strings.HasPrefix(confirm.Usage, "[experimental] ") {
-				t.Fatalf("--confirm usage = %q, want [experimental] prefix", confirm.Usage)
+			if strings.HasPrefix(confirm.Usage, "[experimental] ") {
+				t.Fatalf("--confirm usage = %q, want no [experimental] prefix now that it is required", confirm.Usage)
+			}
+			if !strings.Contains(confirm.Usage, "required") {
+				t.Fatalf("--confirm usage = %q, want it documented as required", confirm.Usage)
+			}
+			if strings.Contains(command.ShortUsage, "[--confirm]") {
+				t.Fatalf("ShortUsage = %q, must not present --confirm as optional", command.ShortUsage)
+			}
+			if !strings.Contains(command.ShortUsage, "--confirm") {
+				t.Fatalf("ShortUsage = %q, want --confirm", command.ShortUsage)
+			}
+			if strings.Contains(command.LongHelp, "5.0.0") {
+				t.Fatalf("LongHelp = %q, must not reference the completed 5.0.0 transition", command.LongHelp)
 			}
 		})
 	}

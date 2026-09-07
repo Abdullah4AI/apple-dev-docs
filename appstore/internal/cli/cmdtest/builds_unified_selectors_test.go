@@ -170,7 +170,7 @@ func TestBuildsMutatingCommandsAcceptUnifiedSelectorsForValidation(t *testing.T)
 		},
 		{
 			name:    "update build-number requires update flag",
-			args:    []string{"builds", "update", "--app", "123456789", "--build-number", "42"},
+			args:    []string{"builds", "update", "--app", "123456789", "--build-number", "42", "--platform", "IOS"},
 			wantErr: "Error: at least one update flag is required",
 		},
 		{
@@ -180,7 +180,7 @@ func TestBuildsMutatingCommandsAcceptUnifiedSelectorsForValidation(t *testing.T)
 		},
 		{
 			name:    "remove-groups build-number requires group",
-			args:    []string{"builds", "remove-groups", "--app", "123456789", "--build-number", "42", "--confirm"},
+			args:    []string{"builds", "remove-groups", "--app", "123456789", "--build-number", "42", "--platform", "IOS", "--confirm"},
 			wantErr: "Error: --group is required",
 		},
 		{
@@ -190,7 +190,7 @@ func TestBuildsMutatingCommandsAcceptUnifiedSelectorsForValidation(t *testing.T)
 		},
 		{
 			name:    "individual-testers remove build-number requires tester",
-			args:    []string{"builds", "individual-testers", "remove", "--app", "123456789", "--build-number", "42", "--confirm"},
+			args:    []string{"builds", "individual-testers", "remove", "--app", "123456789", "--build-number", "42", "--platform", "IOS", "--confirm"},
 			wantErr: "Error: --tester is required",
 		},
 	}

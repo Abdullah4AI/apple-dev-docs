@@ -44,7 +44,7 @@ asc <subcommand> [flags]
 
 ### Web Session Commands
 
-- `web` - Apple web-session workflows.
+- `web` - Apple web-session workflows, including finance report downloads.
 
 ### Analytics and Finance
 
@@ -182,6 +182,10 @@ asc xcode doctor --output json
 
 # Install and verify one signed IPA on an exact connected device
 asc xcode install --ipa .asc/artifacts/App.ipa --device-id COREDEVICE_IDENTIFIER --timeout 5m --output json
+
+# Staple and validate a notarized macOS artifact locally
+ASC_BYPASS_KEYCHAIN=1 asc notarization staple --file ./MyApp.dmg --confirm --output json
+ASC_BYPASS_KEYCHAIN=1 asc notarization validate --file ./MyApp.dmg --output json
 
 # Run local Xcode tests with structured results
 asc xcode test --project App.xcodeproj --scheme App --destination 'platform=iOS Simulator,name=iPhone 17 Pro' --output json

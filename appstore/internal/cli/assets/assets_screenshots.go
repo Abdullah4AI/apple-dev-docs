@@ -296,7 +296,6 @@ func AssetsScreenshotsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	localizationID := fs.String("version-localization", "", "App Store version localization ID")
-	legacyLocalizationID := shared.BindDeprecatedStringFlagAlias(fs, "localization-id", "version-localization")
 	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (or ASC_APP_ID env)")
 	version := fs.String("version", "", "App Store version string (requires --app)")
 	versionID := fs.String("version-id", "", "App Store version ID")
@@ -323,9 +322,6 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.RejectPositionalArgs(args); err != nil {
-				return err
-			}
-			if err := legacyLocalizationID.Apply(localizationID); err != nil {
 				return err
 			}
 

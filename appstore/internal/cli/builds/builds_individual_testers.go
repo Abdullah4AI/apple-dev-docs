@@ -54,7 +54,7 @@ func BuildsIndividualTestersListCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "list",
-		ShortUsage: "asc builds individual-testers list (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) [flags]",
+		ShortUsage: "asc builds individual-testers list (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) [flags]",
 		ShortHelp:  "List individual testers assigned to a build.",
 		LongHelp: `List individual testers assigned to a build.
 
@@ -65,9 +65,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("builds individual-testers list: --limit must be between 1 and 200")
 			}
@@ -143,7 +140,7 @@ func BuildsIndividualTestersAddCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "add",
-		ShortUsage: "asc builds individual-testers add (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --tester \"TESTER_ID[,TESTER_ID...]\"",
+		ShortUsage: "asc builds individual-testers add (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --tester \"TESTER_ID[,TESTER_ID...]\"",
 		ShortHelp:  "Add individual testers to a build.",
 		LongHelp: `Add individual testers to a build.
 
@@ -154,9 +151,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}
@@ -206,7 +200,7 @@ func BuildsIndividualTestersRemoveCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "remove",
-		ShortUsage: "asc builds individual-testers remove (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --tester \"TESTER_ID[,TESTER_ID...]\" --confirm",
+		ShortUsage: "asc builds individual-testers remove (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --tester \"TESTER_ID[,TESTER_ID...]\" --confirm",
 		ShortHelp:  "Remove individual testers from a build.",
 		LongHelp: `Remove individual testers from a build.
 
@@ -217,9 +211,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}

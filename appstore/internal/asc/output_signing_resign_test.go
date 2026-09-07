@@ -1,6 +1,7 @@
 package asc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -50,5 +51,82 @@ func TestSigningResignResultRegisteredTableAndMarkdownOutput(t *testing.T) {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("expected markdown to contain %q, got %q", want, markdown)
 		}
+	}
+}
+
+func TestSigningResignResultEntitlementRewritesAreAdditiveAndOrdered(t *testing.T) {
+	firstIndex := 0
+	result := &SigningResignResult{
+		EntitlementRewrites: func() *[]SigningResignEntitlementRewrite {
+			values := []SigningResignEntitlementRewrite{
+				{
+					TargetRelativePath: "Payload/App.app",
+					BundleID:           "com.example.app",
+					Key:                "keychain-access-groups",
+					ElementIndex:       &firstIndex,
+					From:               "OLDPREFIX.com.example.app",
+					To:                 "NEWPREFIX.com.example.app",
+				},
+				{
+					TargetRelativePath: "Payload/App.app",
+					BundleID:           "com.example.app",
+					Key:                "com.apple.developer.ubiquity-kvstore-identifier",
+					From:               "OLDPREFIX.com.example.app",
+					To:                 "NEWPREFIX.com.example.app",
+				},
+			}
+			return &values
+		}(),
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"entitlementRewrites"`) || strings.Index(text, "keychain-access-groups") > strings.Index(text, "ubiquity-kvstore-identifier") {
+		t.Fatalf("entitlement rewrites JSON is missing or nondeterministic: %s", text)
+	}
+	if !strings.Contains(text, `"targetRelativePath":"Payload/App.app"`) || !strings.Contains(text, `"elementIndex":0`) {
+		t.Fatalf("entitlement rewrite JSON uses the wrong field names: %s", text)
+	}
+	var decoded struct {
+		EntitlementRewrites []SigningResignEntitlementRewrite `json:"entitlementRewrites"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.EntitlementRewrites) != 2 || decoded.EntitlementRewrites[0].To == nil || decoded.EntitlementRewrites[0].ElementIndex == nil || *decoded.EntitlementRewrites[0].ElementIndex != 0 {
+		t.Fatalf("decoded entitlement rewrites = %#v, want every additive rewrite", decoded.EntitlementRewrites)
+	}
+	rows, values := signingResignResultRows(result)
+	foundRewriteRow := false
+	for _, row := range values {
+		if len(row) > 0 && row[0] == "entitlementRewrite.000.key" {
+			foundRewriteRow = true
+			break
+		}
+	}
+	if len(rows) == 0 || len(values) == 0 || !strings.Contains(rows[0], "field") || !foundRewriteRow {
+		t.Fatalf("table rows omitted entitlement rewrites: headers=%#v rows=%#v", rows, values)
+	}
+}
+
+func TestSigningResignResultEntitlementRewritesOmitDisabledAndEmitEnabledEmpty(t *testing.T) {
+	withoutRewrites := &SigningResignResult{}
+	encoded, err := json.Marshal(withoutRewrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "entitlementRewrites") {
+		t.Fatalf("disabled result unexpectedly emitted entitlementRewrites: %s", encoded)
+	}
+	empty := []SigningResignEntitlementRewrite{}
+	withEmptyRewrites := &SigningResignResult{EntitlementRewrites: &empty}
+	encoded, err = json.Marshal(withEmptyRewrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"entitlementRewrites":[]`) {
+		t.Fatalf("enabled result did not emit empty entitlementRewrites array: %s", encoded)
 	}
 }

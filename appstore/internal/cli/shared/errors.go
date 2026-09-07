@@ -72,23 +72,32 @@ type classifiedUsageError struct {
 }
 
 type processExitError struct {
-	code int
+	code  int
+	cause error
 }
 
 func (e processExitError) Error() string {
 	return fmt.Sprintf("child command exited with status %d", e.code)
 }
+func (e processExitError) Unwrap() error           { return e.cause }
 func (e processExitError) Reported() bool          { return true }
 func (e processExitError) ascProcessExitCode() int { return e.code }
 func (e processExitError) isASCProcessExit()       {}
+func (e processExitError) isLocalProcessFailure()  {}
 
 // NewProcessExitError preserves a child process exit code without duplicating
 // the child's stderr through the root error renderer.
 func NewProcessExitError(code int) error {
+	return NewProcessExitErrorWithCause(code, nil)
+}
+
+// NewProcessExitErrorWithCause preserves a local child exit status while
+// retaining the typed child failure for errors.Is/errors.As and telemetry.
+func NewProcessExitErrorWithCause(code int, cause error) error {
 	if code <= 0 || code > 255 {
 		code = 1
 	}
-	return processExitError{code: code}
+	return processExitError{code: code, cause: cause}
 }
 
 // ProcessExitCode reports an exact child-process exit code only for errors
@@ -100,6 +109,14 @@ func ProcessExitCode(err error) (int, bool) {
 		return 0, false
 	}
 	return exitErr.ascProcessExitCode(), true
+}
+
+// IsLocalProcessFailure reports whether err contains a process-exit marker
+// created by this package. The private marker prevents arbitrary errors from
+// being mistaken for local child failures.
+func IsLocalProcessFailure(err error) bool {
+	var marker interface{ isLocalProcessFailure() }
+	return errors.As(err, &marker)
 }
 
 func (e classifiedUsageError) Error() string {

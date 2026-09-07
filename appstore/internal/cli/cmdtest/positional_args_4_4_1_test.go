@@ -10,7 +10,7 @@ func TestChanged441CommandValidationReturnsUsageExit(t *testing.T) {
 	}{
 		{name: "iap list positional", args: []string{"iap", "list", "--app", "app-1", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
 		{name: "iap view positional", args: []string{"iap", "view", "--id", "iap-1", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
-		{name: "iap localization update positional", args: []string{"iap", "localizations", "update", "--localization-id", "loc-1", "--name", "Name", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
+		{name: "iap version localization update positional", args: []string{"iap", "versions", "localizations", "update", "--localization-id", "loc-1", "--name", "Name", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
 		{name: "subscription groups list positional", args: []string{"subscriptions", "groups", "list", "--app", "app-1", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
 		{name: "subscription groups view positional", args: []string{"subscriptions", "groups", "view", "--id", "group-1", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},
 		{name: "subscriptions list positional", args: []string{"subscriptions", "list", "--group-id", "group-1", "unexpected"}, wantErr: "unexpected argument(s): unexpected"},

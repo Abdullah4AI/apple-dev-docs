@@ -44,7 +44,6 @@ func AppsInfoTerritoryAgeRatingsListCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	infoID := fs.String("info-id", "", "App Info ID (optional override)")
-	legacyID := fs.String("id", "", "Deprecated alias for --info-id")
 	fields := fs.String("fields", "", "Fields to include: "+strings.Join(territoryAgeRatingFieldsList(), ", "))
 	territoryFields := fs.String("territory-fields", "", "Territory fields to include: "+strings.Join(territoryFieldsList(), ", "))
 	include := fs.String("include", "", "Include relationships: "+strings.Join(territoryAgeRatingIncludeList(), ", "))
@@ -66,10 +65,7 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			infoIDValue, err := resolveInfoIDFlags(*infoID, *legacyID, "--id")
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
+			infoIDValue := strings.TrimSpace(*infoID)
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("apps info territory-age-ratings list: --limit must be between 1 and 200")
 			}

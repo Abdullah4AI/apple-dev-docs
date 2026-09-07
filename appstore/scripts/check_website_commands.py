@@ -58,9 +58,11 @@ BOOLEAN_FLAG_OVERRIDES: dict[tuple[str, ...], set[str]] = {
     ("versions", "update"): {"--confirm"},
 }
 HIDDEN_DEPRECATED_ALIAS_FLAGS: dict[tuple[str, ...], dict[str, bool]] = {
-    # DeprecatedUsageFunc intentionally hides FLAGS in help output for
-    # compatibility aliases, but we still need accurate flag validation so docs
-    # examples fail on deprecations instead of bogus unknown-flag errors.
+    # `asc submit create` and `asc submit preflight` are removed-command
+    # stubs handled by the parent's Exec, so they have no FLAGS in help output.
+    # Keep the historical flag shape here so migration docs that quote the old
+    # invocations fail on the removal itself instead of a bogus unknown-flag
+    # error.
     ("submit", "create"): {
         "--app": False,
         "--build": False,

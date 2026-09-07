@@ -11,8 +11,6 @@ import (
 
 type buildSelectorFlags struct {
 	buildID        *string
-	legacyBuildID  *trackedStringFlag
-	legacyID       *trackedStringFlag
 	appID          *string
 	latest         *bool
 	version        *string
@@ -23,7 +21,6 @@ type buildSelectorFlags struct {
 }
 
 type buildSelectorFlagOptions struct {
-	includeLegacyID  bool
 	buildIDUsage     string
 	appUsage         string
 	latestUsage      string
@@ -55,12 +52,11 @@ func bindBuildSelectorFlags(fs *flag.FlagSet, opts buildSelectorFlagOptions) bui
 	}
 	platformUsage := strings.TrimSpace(opts.platformUsage)
 	if platformUsage == "" {
-		platformUsage = "Optional platform filter for --app selectors: IOS, MAC_OS, TV_OS, VISION_OS"
+		platformUsage = "Platform filter for --app selectors (required with --build-number): IOS, MAC_OS, TV_OS, VISION_OS"
 	}
 
-	selectors := buildSelectorFlags{
+	return buildSelectorFlags{
 		buildID:        fs.String("build-id", "", buildIDUsage),
-		legacyBuildID:  bindHiddenStringFlag(fs, "build"),
 		appID:          fs.String("app", "", appUsage),
 		latest:         fs.Bool("latest", false, latestUsage),
 		version:        fs.String("version", "", versionUsage),
@@ -69,23 +65,6 @@ func bindBuildSelectorFlags(fs *flag.FlagSet, opts buildSelectorFlagOptions) bui
 		excludeExpired: fs.Bool("exclude-expired", false, "Exclude expired builds when selecting --latest"),
 		notExpired:     fs.Bool("not-expired", false, "Alias for --exclude-expired"),
 	}
-	if opts.includeLegacyID {
-		selectors.legacyID = bindHiddenStringFlag(fs, "id")
-	}
-
-	return selectors
-}
-
-func (s buildSelectorFlags) applyLegacyAliases() error {
-	if err := applyLegacyBuildIDAlias(s.buildID, s.legacyBuildID); err != nil {
-		return err
-	}
-	if s.legacyID != nil {
-		if err := applyLegacyIDAlias(s.buildID, s.legacyID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s buildSelectorFlags) resolveOptions() ResolveBuildOptions {

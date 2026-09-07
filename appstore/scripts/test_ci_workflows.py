@@ -21,6 +21,13 @@ DEPENDABOT_CONFIG = ROOT / ".github/dependabot.yml"
 MAKEFILE = ROOT / "Makefile"
 
 
+def assert_lint_timeout_budget() -> None:
+    makefile = MAKEFILE.read_text()
+    match = re.search(r"^GOLANGCI_LINT_TIMEOUT \?= (\d+)m$", makefile, re.MULTILINE)
+    assert match, "Makefile must define the golangci-lint timeout in minutes"
+    assert int(match.group(1)) >= 15, "full-module lint needs at least a 15-minute cold-run budget"
+
+
 def assert_go_toolchain_source() -> None:
     workflow_dir = ROOT / ".github/workflows"
     workflows = sorted([*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")])
@@ -756,6 +763,7 @@ def assert_security_target_contract() -> None:
 
 
 def main() -> None:
+    assert_lint_timeout_budget()
     assert_go_toolchain_source_accepts_normalized_scalars()
     assert_go_toolchain_source_rejects_step_local_violations()
     assert_go_toolchain_source()

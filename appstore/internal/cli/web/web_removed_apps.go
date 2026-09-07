@@ -18,6 +18,15 @@ var listRemovedWebAppsFn = func(ctx context.Context, client *webcore.Client, opt
 	return client.ListRemovedApps(ctx, opts)
 }
 
+var restoreRemovedWebAppFn = func(ctx context.Context, client *webcore.Client, appID string) error {
+	_, err := client.RestoreApp(ctx, appID)
+	return err
+}
+
+var setRemovedWebAppPermissionFn = func(ctx context.Context, client *webcore.Client, appID, access string) error {
+	return client.SetUserAppPermission(ctx, appID, access)
+}
+
 // WebRemovedAppsCommand returns the removed apps command group.
 func WebRemovedAppsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web removed-apps", flag.ExitOnError)
@@ -38,6 +47,7 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			WebRemovedAppsListCommand(),
+			WebRemovedAppsRestoreCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -106,6 +116,57 @@ Examples:
 				func() error { return renderRemovedAppsTable(result) },
 				func() error { return renderRemovedAppsMarkdown(result) },
 			)
+		},
+	}
+}
+
+// WebRemovedAppsRestoreCommand restores a removed app and configures access.
+func WebRemovedAppsRestoreCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("web removed-apps restore", flag.ExitOnError)
+	app := fs.String("app", "", "[experimental] App Store Connect app ID")
+	access := fs.String("access", "", "[experimental] Access mode: limited or full")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm restoring this app (required)")
+	authFlags := bindWebSessionFlags(fs)
+	output := shared.BindOutputFlags(fs)
+	return &ffcli.Command{
+		Name: "restore", ShortUsage: "asc web removed-apps restore --app APP_ID --access limited|full --confirm [flags]", ShortHelp: "Restore a removed app via Apple web API.", FlagSet: fs, UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageError("web removed-apps restore does not accept positional arguments")
+			}
+			id, mode := strings.TrimSpace(*app), strings.ToLower(strings.TrimSpace(*access))
+			if id == "" {
+				return shared.UsageError("--app is required")
+			}
+			if mode != "limited" && mode != "full" {
+				return shared.UsageError("--access must be limited or full")
+			}
+			if !*confirm {
+				return shared.UsageError("--confirm is required")
+			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return shared.UsageError(err.Error())
+			}
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
+			if err != nil {
+				return withWebAuthHint(err, "web removed-apps restore")
+			}
+			client := newWebClientFn(session)
+			if err = restoreRemovedWebAppFn(requestCtx, client, id); err != nil {
+				return withWebAuthHint(fmt.Errorf("web removed-apps restore failed: app PATCH: %w", err), "web removed-apps restore")
+			}
+			verified, err := getWebAppRemovalStateFn(requestCtx, client, id)
+			if err != nil {
+				return fmt.Errorf("web removed-apps restore failed: could not verify removed state: %w", err)
+			}
+			if verified == nil || !verified.RemovedKnown || verified.Removed {
+				return fmt.Errorf("web removed-apps restore failed: Apple did not confirm app %q is restored", id)
+			}
+			if err = setRemovedWebAppPermissionFn(requestCtx, client, id, mode); err != nil {
+				return withWebAuthHint(fmt.Errorf("web removed-apps restore failed: app was restored but access update failed: %w", err), "web removed-apps restore")
+			}
+			return shared.PrintOutput(&asc.WebRemovedAppRestoreResult{AppID: id, Access: mode, Removed: false, PermissionWritten: true}, *output.Output, *output.Pretty)
 		},
 	}
 }

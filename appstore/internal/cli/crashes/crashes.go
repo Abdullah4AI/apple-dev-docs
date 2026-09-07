@@ -21,7 +21,6 @@ type listCommandFlags struct {
 	appPlatform     *string
 	devicePlatform  *string
 	buildID         *string
-	legacyBuildID   *shared.DeprecatedStringFlagAlias
 	buildPreRelease *string
 	tester          *string
 	include         *string
@@ -40,7 +39,6 @@ func bindListCommandFlags(fs *flag.FlagSet) listCommandFlags {
 		appPlatform:     fs.String("app-platform", "", "Filter by app platform(s), comma-separated (IOS, MAC_OS, TV_OS, VISION_OS)"),
 		devicePlatform:  fs.String("device-platform", "", "Filter by device platform(s), comma-separated (IOS, MAC_OS, TV_OS, VISION_OS)"),
 		buildID:         fs.String("build-id", "", "Filter by build ID(s), comma-separated"),
-		legacyBuildID:   shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id"),
 		buildPreRelease: fs.String("build-pre-release-version", "", "Filter by pre-release version ID(s), comma-separated"),
 		tester:          fs.String("tester", "", "Filter by tester ID(s), comma-separated"),
 		include:         fs.String("include", "", "Include related resources, comma-separated (build, tester)"),
@@ -82,13 +80,6 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 	prefix := strings.TrimSpace(config.ErrorPrefix)
 	if prefix == "" {
 		prefix = "crashes"
-	}
-	if strings.TrimSpace(config.DeprecatedWarning) != "" {
-		fmt.Fprintln(os.Stderr, config.DeprecatedWarning)
-	}
-
-	if err := flags.legacyBuildID.Apply(flags.buildID); err != nil {
-		return err
 	}
 
 	if *flags.limit != 0 && (*flags.limit < 1 || *flags.limit > 200) {
@@ -165,25 +156,4 @@ func runListCommand(ctx context.Context, config shared.ListCommandConfig, flags 
 	}
 
 	return shared.PrintOutput(crashes, *flags.output.Output, *flags.output.Pretty)
-}
-
-// Crashes command factory
-func CrashesCommand() *ffcli.Command {
-	return NewListCommand(shared.ListCommandConfig{
-		Name:       "crashes",
-		ShortUsage: "asc testflight crashes list [flags]",
-		ShortHelp:  "DEPRECATED: use `asc testflight crashes list`.",
-		LongHelp: `DEPRECATED: use ` + "`asc testflight crashes list`" + `.
-
-This compatibility shim preserves the legacy root crash list behavior while
-the canonical TestFlight surface moves under ` + "`asc testflight crashes ...`" + `.
-
-Examples:
-  asc testflight crashes list --app "123456789"
-  asc testflight crashes list --app "123456789" --device-model "iPhone15,3" --os-version "17.2"
-  asc testflight crashes list --next "<links.next>"`,
-		ErrorPrefix:       "crashes",
-		DeprecatedWarning: "Warning: `asc crashes` is deprecated. Use `asc testflight crashes list`.",
-		UsageFunc:         shared.DeprecatedUsageFunc,
-	})
 }

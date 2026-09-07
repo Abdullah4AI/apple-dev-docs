@@ -32,7 +32,6 @@ func BuildsDsymsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("dsyms", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID")
-	legacyBuildID := bindHiddenStringFlag(fs, "build")
 	appID := fs.String("app", "", "App ID, bundle ID, or app name (or ASC_APP_ID)")
 	version := fs.String("version", "", "App version string (e.g., 1.2.3)")
 	buildNumber := fs.String("build-number", "", "Build number (CFBundleVersion)")
@@ -45,7 +44,7 @@ func BuildsDsymsCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "dsyms",
-		ShortUsage: "asc builds dsyms [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM [--version VER] [--platform PLATFORM]] [flags]",
+		ShortUsage: "asc builds dsyms [--build-id BUILD_ID | --app APP --latest [--version VER] [--platform PLATFORM] | --app APP --build-number NUM --platform PLATFORM [--version VER]] [flags]",
 		ShortHelp:  "Download dSYM files for a build.",
 		LongHelp: `Download dSYM debug symbol files for a build.
 
@@ -56,22 +55,18 @@ download URL.
 Build selection (one of):
   --build-id BUILD_ID
   --app APP --latest [--version VER] [--platform PLATFORM]
-  --app APP --build-number NUM [--version VER] [--platform PLATFORM]
+  --app APP --build-number NUM --platform PLATFORM [--version VER]
 
 Examples:
   asc builds dsyms --build-id "BUILD_ID"
   asc builds dsyms --app "com.example.app" --latest
   asc builds dsyms --app "com.example.app" --latest --platform IOS
   asc builds dsyms --app "com.example.app" --latest --version "1.2.3"
-  asc builds dsyms --app "com.example.app" --build-number "42"
-  asc builds dsyms --app "com.example.app" --build-number "42" --version "1.2.3" --output-dir "./dsyms"`,
+  asc builds dsyms --app "com.example.app" --build-number "42" --platform IOS
+  asc builds dsyms --app "com.example.app" --build-number "42" --platform IOS --version "1.2.3" --output-dir "./dsyms"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildID, legacyBuildID); err != nil {
-				return err
-			}
-
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			appInput := strings.TrimSpace(*appID)
 			resolveOpts := ResolveBuildOptions{

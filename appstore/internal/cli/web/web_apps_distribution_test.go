@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
@@ -180,5 +181,175 @@ func TestWebAppsDistributionGroupIsRegisteredUnderWebApps(t *testing.T) {
 	}
 	if !hasDistribution {
 		t.Fatal("expected asc web apps distribution to be registered")
+	}
+}
+
+func TestWebAppsDistributionGroupIncludesSetCommand(t *testing.T) {
+	group := WebAppsDistributionCommand()
+
+	for _, sub := range group.Subcommands {
+		if sub.Name == "set" {
+			return
+		}
+	}
+
+	t.Fatal("expected distribution set subcommand")
+}
+
+func TestWebAppsDistributionSetRequiresConfirmationBeforeSession(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+	var resolveCalls int
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		resolveCalls++
+		return &webcore.AuthSession{}, "cache", nil
+	}
+
+	cmd := WebAppsDistributionSetCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--method", "private"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var runErr error
+	_, stderr := captureWebCommandOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), nil)
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", runErr)
+	}
+	if !strings.Contains(stderr, "--confirm is required") {
+		t.Fatalf("stderr = %q, want confirmation diagnostic", stderr)
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("session resolver calls = %d, want 0", resolveCalls)
+	}
+}
+
+func TestWebAppsDistributionSetRejectsInvalidOutputBeforeSession(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+	var resolveCalls int
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		resolveCalls++
+		return &webcore.AuthSession{}, "cache", nil
+	}
+
+	cmd := WebAppsDistributionSetCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--method", "private", "--confirm", "--output", "table", "--pretty"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "--pretty is only valid with JSON output") {
+		t.Fatalf("error = %v, want invalid output error", err)
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("session resolver calls = %d, want 0", resolveCalls)
+	}
+}
+
+func TestWebAppsDistributionSetCallsClientAndPrintsReceipt(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	stubWebAppsDistributionSession(t)
+
+	origSet := setWebAppDistributionFn
+	t.Cleanup(func() { setWebAppDistributionFn = origSet })
+	var gotRequest webcore.AppDistributionSetRequest
+	setWebAppDistributionFn = func(ctx context.Context, client *webcore.Client, request webcore.AppDistributionSetRequest) (*asc.WebAppDistributionSetResult, error) {
+		gotRequest = request
+		return &asc.WebAppDistributionSetResult{
+			AppID:                 request.AppID,
+			DistributionType:      request.DistributionType,
+			EducationDiscountType: webcore.AppDistributionEducationNotApplicable,
+			Changed:               true,
+			Verified:              true,
+			Status:                "verified",
+		}, nil
+	}
+
+	cmd := WebAppsDistributionSetCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--method", "private", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureWebCommandOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if gotRequest.AppID != "app-1" || gotRequest.DistributionType != webcore.AppDistributionTypeCustom || gotRequest.EducationDiscountType != "" {
+		t.Fatalf("unexpected request: %+v", gotRequest)
+	}
+	var result asc.WebAppDistributionSetResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode output: %v; stdout=%q", err, stdout)
+	}
+	if result.AppID != "app-1" || !result.Changed || !result.Verified || result.Status != "verified" {
+		t.Fatalf("unexpected receipt: %+v", result)
+	}
+}
+
+func TestWebAppsDistributionSetRejectsEducationForPrivate(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+	var resolveCalls int
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		resolveCalls++
+		return &webcore.AuthSession{}, "cache", nil
+	}
+
+	cmd := WebAppsDistributionSetCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--method", "private", "--education-discount", "discounted", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	var runErr error
+	_, stderr := captureWebCommandOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), nil)
+	})
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", runErr)
+	}
+	if !strings.Contains(stderr, "cannot be used with --method private") {
+		t.Fatalf("stderr = %q, want private education diagnostic", stderr)
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("session resolver calls = %d, want 0", resolveCalls)
+	}
+}
+
+func TestWebAppsDistributionSetPrintsUncertainReceiptBeforeReturningError(t *testing.T) {
+	t.Setenv("ASC_APP_ID", "")
+	stubWebAppsDistributionSession(t)
+
+	origSet := setWebAppDistributionFn
+	t.Cleanup(func() { setWebAppDistributionFn = origSet })
+	setWebAppDistributionFn = func(ctx context.Context, client *webcore.Client, request webcore.AppDistributionSetRequest) (*asc.WebAppDistributionSetResult, error) {
+		return &asc.WebAppDistributionSetResult{
+			AppID:                 request.AppID,
+			DistributionType:      request.DistributionType,
+			EducationDiscountType: webcore.AppDistributionEducationNotApplicable,
+			Changed:               true,
+			Verified:              false,
+			Status:                "uncertain",
+		}, errors.New("provider write outcome is uncertain")
+	}
+
+	cmd := WebAppsDistributionSetCommand()
+	if err := cmd.FlagSet.Parse([]string{"--app", "app-1", "--method", "private", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	var runErr error
+	stdout, _ := captureWebCommandOutput(t, func() {
+		runErr = cmd.Exec(context.Background(), nil)
+	})
+	if runErr == nil {
+		t.Fatal("expected uncertain write error")
+	}
+	if !strings.Contains(stdout, `"status":"uncertain"`) {
+		t.Fatalf("stdout = %q, want uncertain receipt", stdout)
 	}
 }

@@ -274,7 +274,7 @@ func TestValidateSigningResignWatchKitSupportEnforcesShapeAndProvenance(t *testi
 	if err := validateSigningResignWatchKitSupport(context.Background(), root); err != nil {
 		t.Fatalf("validateSigningResignWatchKitSupport() error = %v, want standard WK layout accepted", err)
 	}
-	if len(verified) != 1 || filepath.Base(verified[0]) != "WK" {
+	if len(verified) != 1 || !strings.Contains(filepath.Base(verified[0]), ".signing-resign-verify-") {
 		t.Fatalf("verified = %v, want provenance verification of the WK binary", verified)
 	}
 	if err := os.WriteFile(filepath.Join(wkDir, "extra"), []byte("x"), 0o644); err != nil {
@@ -329,5 +329,59 @@ func TestCaptureSigningResignPreservedInventoryIncludesWatchKit(t *testing.T) {
 	if entry.RelativePath != "WatchKitSupport2/WK" || entry.SizeBytes != int64(len(contents)) ||
 		entry.Mode != 0o755 || entry.SHA256 != signingResignSHA256(contents) {
 		t.Fatalf("inventory entry = %+v, want exact WK path, size, mode, and digest", entry)
+	}
+}
+
+func TestCaptureSigningResignWatchKitInventoryRejectsMissingEntry(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "WatchKitSupport2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureSigningResignPreservedInventory(context.Background(), root); err == nil || !strings.Contains(err.Error(), "inspect WatchKitSupport2 entry") {
+		t.Fatalf("captureSigningResignPreservedInventory() error = %v, want missing-entry failure", err)
+	}
+}
+
+func TestSigningResignCombinedPreservedOperationsShareOneStagingRoot(t *testing.T) {
+	originalTool := runSigningResignToolFn
+	t.Cleanup(func() { runSigningResignToolFn = originalTool })
+	runSigningResignToolFn = func(context.Context, string, ...string) (signingResignToolOutput, error) {
+		return signingResignToolOutput{}, nil
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "SwiftSupport", "iphoneos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "SwiftSupport", "iphoneos", "libswiftCore.dylib"), []byte("swift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "WatchKitSupport2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "WatchKitSupport2", "WK"), []byte("watch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSigningResignPreservedExternalDirectories(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := captureSigningResignPreservedInventory(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory) != 2 || inventory[0].RelativePath != "SwiftSupport/iphoneos/libswiftCore.dylib" || inventory[1].RelativePath != "WatchKitSupport2/WK" {
+		t.Fatalf("inventory = %+v, want both preserved trees in sorted order", inventory)
+	}
+}
+
+func TestSigningResignPreservedDirectoriesRejectSymlinks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, "SwiftSupport")); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSigningResignPreservedExternalDirectories(context.Background(), root); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("validate error = %v", err)
+	}
+	if _, err := captureSigningResignPreservedInventory(context.Background(), root); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("capture error = %v", err)
 	}
 }

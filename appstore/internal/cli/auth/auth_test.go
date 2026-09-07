@@ -848,18 +848,30 @@ func stubLogoutRemovers(t *testing.T) *authLogoutTestCalls {
 }
 
 func TestAuthLogoutCommand(t *testing.T) {
-	t.Run("help recommends confirmation", func(t *testing.T) {
+	t.Run("help requires confirmation", func(t *testing.T) {
 		cmd := AuthLogoutCommand()
-		if cmd.FlagSet.Lookup("confirm") == nil {
+		confirmFlag := cmd.FlagSet.Lookup("confirm")
+		if confirmFlag == nil {
 			t.Fatal("expected --confirm flag")
+		}
+		if confirmFlag.Usage != "Confirm credential removal (required)" {
+			t.Fatalf("--confirm usage = %q", confirmFlag.Usage)
+		}
+		if cmd.ShortUsage != "asc auth logout [--name NAME | --all] --confirm" {
+			t.Fatalf("ShortUsage = %q", cmd.ShortUsage)
 		}
 		for _, expected := range []string{
 			`asc auth logout --all --confirm`,
 			`asc auth logout --name "MyKey" --confirm`,
-			"will be required in 5.0.0",
+			"--confirm is required",
 		} {
 			if !strings.Contains(cmd.LongHelp, expected) {
 				t.Fatalf("expected logout help to contain %q, got %q", expected, cmd.LongHelp)
+			}
+		}
+		for _, unexpected := range []string{"5.0.0", "deprecated", "compatibility"} {
+			if strings.Contains(cmd.LongHelp, unexpected) {
+				t.Fatalf("logout help still mentions %q: %q", unexpected, cmd.LongHelp)
 			}
 		}
 	})
@@ -927,25 +939,59 @@ func TestAuthLogoutCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("missing confirm warns during compatibility window", func(t *testing.T) {
+	t.Run("missing confirm is a usage error before removal", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"--name", "legacy"},
+			{"--all"},
+			{},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				calls := stubLogoutRemovers(t)
+
+				cmd := AuthLogoutCommand()
+				if err := cmd.FlagSet.Parse(args); err != nil {
+					t.Fatalf("Parse() error: %v", err)
+				}
+				stdout, stderr := captureAuthOutput(t, func() {
+					err := cmd.Exec(context.Background(), []string{})
+					if !errors.Is(err, flag.ErrHelp) {
+						t.Fatalf("Exec() error = %v, want flag.ErrHelp", err)
+					}
+				})
+				if stdout != "" {
+					t.Fatalf("stdout = %q, want empty", stdout)
+				}
+				if !strings.Contains(stderr, "--confirm is required to remove stored credentials") {
+					t.Fatalf("stderr = %q, want --confirm usage error", stderr)
+				}
+				if strings.Contains(stderr, "Warning") || strings.Contains(stderr, "5.0.0") {
+					t.Fatalf("stderr still carries deprecation wording: %q", stderr)
+				}
+				if len(calls.names) != 0 || calls.all != 0 {
+					t.Fatalf("credentials were removed without --confirm: %+v", calls)
+				}
+			})
+		}
+	})
+
+	t.Run("explicit confirm false is rejected before removal", func(t *testing.T) {
 		calls := stubLogoutRemovers(t)
 
 		cmd := AuthLogoutCommand()
-		if err := cmd.FlagSet.Parse([]string{"--name", "legacy"}); err != nil {
+		if err := cmd.FlagSet.Parse([]string{"--all", "--confirm=false"}); err != nil {
 			t.Fatalf("Parse() error: %v", err)
 		}
 		_, stderr := captureAuthOutput(t, func() {
-			if err := cmd.Exec(context.Background(), []string{}); err != nil {
-				t.Fatalf("Exec() error: %v", err)
+			err := cmd.Exec(context.Background(), []string{})
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("Exec() error = %v, want flag.ErrHelp", err)
 			}
 		})
-		wantWarning := "Warning: auth logout without --confirm is deprecated and will be rejected in 5.0.0; pass --confirm to acknowledge credential removal.\n"
-		if stderr != wantWarning {
-			t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+		if !strings.Contains(stderr, "--confirm must be true when specified") {
+			t.Fatalf("stderr = %q, want explicit-false usage error", stderr)
 		}
-
-		if len(calls.names) != 1 || calls.names[0] != "legacy" || calls.all != 0 {
-			t.Fatalf("unexpected removal calls: %+v", calls)
+		if len(calls.names) != 0 || calls.all != 0 {
+			t.Fatalf("credentials were removed with --confirm=false: %+v", calls)
 		}
 	})
 

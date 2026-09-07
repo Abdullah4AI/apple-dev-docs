@@ -27,36 +27,6 @@ func TestLegacyIAPResponsesPreserveIncludedVersionRelationships(t *testing.T) {
 			},
 		},
 		{
-			name: "image read response",
-			decode: func(client *Client) (json.RawMessage, error) {
-				response, err := client.GetInAppPurchaseImage(context.Background(), "image-1")
-				if err != nil {
-					return nil, err
-				}
-				return response.Included, nil
-			},
-		},
-		{
-			name: "localization read response",
-			decode: func(client *Client) (json.RawMessage, error) {
-				response, err := client.GetInAppPurchaseLocalization(context.Background(), "localization-1")
-				if err != nil {
-					return nil, err
-				}
-				return response.Included, nil
-			},
-		},
-		{
-			name: "submission create response",
-			decode: func(client *Client) (json.RawMessage, error) {
-				response, err := client.CreateInAppPurchaseSubmission(context.Background(), "iap-1")
-				if err != nil {
-					return nil, err
-				}
-				return response.Included, nil
-			},
-		},
-		{
 			name: "promoted purchase read response",
 			decode: func(client *Client) (json.RawMessage, error) {
 				response, err := client.GetPromotedPurchase(context.Background(), "promoted-purchase-1")

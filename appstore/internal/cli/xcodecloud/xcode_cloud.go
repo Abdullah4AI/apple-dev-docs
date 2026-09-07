@@ -344,7 +344,6 @@ func XcodeCloudStatusCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 
 	runID := fs.String("run-id", "", "Build run ID to check")
-	legacyRunID := shared.BindVisibleDeprecatedStringFlagAlias(fs, "id", "run-id")
 	wait := fs.Bool("wait", false, "Wait for build to complete")
 	pollInterval := fs.Duration("poll-interval", 10*time.Second, "Poll interval when waiting")
 	timeout := fs.Duration("timeout", 0, "Timeout for Xcode Cloud requests (0 = use ASC_TIMEOUT or 30m default)")
@@ -364,9 +363,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyRunID.ApplyExclusive(runID); err != nil {
-				return shared.WithDiagnostic(err, shared.DiagnosticConflictingInput, "--run-id")
-			}
 			if strings.TrimSpace(*runID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --run-id is required")
 				return shared.MissingRequiredUsageError("--run-id")

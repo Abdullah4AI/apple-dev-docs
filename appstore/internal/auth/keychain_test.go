@@ -1661,7 +1661,7 @@ func TestStoreCredentials_RejectsDistinctNormalizedProfileCollisionBeforeMutatio
 
 	err := StoreCredentials("  spaced  ", "NEW", "ISSUER-NEW", "/tmp/new.p8")
 	wantErr := `credential profile name "  spaced  " conflicts with existing normalized profile "spaced"; ` +
-		`remove the existing profile with 'asc auth logout --name "spaced"' and retry`
+		`remove the existing profile with 'asc auth logout --name "spaced" --confirm' and retry`
 	if err == nil || err.Error() != wantErr {
 		t.Fatalf("StoreCredentials() error = %v, want %q", err, wantErr)
 	}

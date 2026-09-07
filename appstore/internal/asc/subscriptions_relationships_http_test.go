@@ -25,14 +25,6 @@ func TestSubscriptionRelationshipEndpoints(t *testing.T) {
 				wantPath: "/v1/subscriptionAvailabilities/avail-1/relationships/availableTerritories",
 			},
 			{
-				name: "subscription group localizations",
-				call: func(c *Client) error {
-					_, err := c.GetSubscriptionGroupSubscriptionGroupLocalizationsRelationships(context.Background(), "group-1", WithLinkagesLimit(5))
-					return err
-				},
-				wantPath: "/v1/subscriptionGroups/group-1/relationships/subscriptionGroupLocalizations",
-			},
-			{
 				name: "subscription group subscriptions",
 				call: func(c *Client) error {
 					_, err := c.GetSubscriptionGroupSubscriptionsRelationships(context.Background(), "group-1", WithLinkagesLimit(5))
@@ -81,14 +73,6 @@ func TestSubscriptionRelationshipEndpoints(t *testing.T) {
 				wantPath: "/v1/subscriptionPromotionalOffers/promo-1/relationships/prices",
 			},
 			{
-				name: "subscription images",
-				call: func(c *Client) error {
-					_, err := c.GetSubscriptionImagesRelationships(context.Background(), "sub-1", WithLinkagesLimit(5))
-					return err
-				},
-				wantPath: "/v1/subscriptions/sub-1/relationships/images",
-			},
-			{
 				name: "subscription introductory offers",
 				call: func(c *Client) error {
 					_, err := c.GetSubscriptionIntroductoryOffersRelationships(context.Background(), "sub-1", WithLinkagesLimit(5))
@@ -127,14 +111,6 @@ func TestSubscriptionRelationshipEndpoints(t *testing.T) {
 					return err
 				},
 				wantPath: "/v1/subscriptions/sub-1/relationships/promotionalOffers",
-			},
-			{
-				name: "subscription localizations",
-				call: func(c *Client) error {
-					_, err := c.GetSubscriptionSubscriptionLocalizationsRelationships(context.Background(), "sub-1", WithLinkagesLimit(5))
-					return err
-				},
-				wantPath: "/v1/subscriptions/sub-1/relationships/subscriptionLocalizations",
 			},
 		}
 

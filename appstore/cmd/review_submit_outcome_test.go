@@ -51,7 +51,7 @@ func TestRunReviewSubmitMissingVersionIsNotFound(t *testing.T) {
 			"review", "submit",
 			"--app", "app-1",
 			"--version", "9.9.9",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--dry-run",
 		}, "4.0.0"); code != ExitNotFound {
 			t.Fatalf("Run() exit code = %d, want %d", code, ExitNotFound)

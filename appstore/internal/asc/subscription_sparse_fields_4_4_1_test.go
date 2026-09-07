@@ -123,54 +123,6 @@ func TestSubscriptionSparseFields441ExactQueries(t *testing.T) {
 			},
 		},
 		{
-			name: "group localization detail group versions",
-			path: "/v1/subscriptionGroupLocalizations/group-loc-1",
-			wantQuery: url.Values{
-				"fields[subscriptionGroups]": {"versions"},
-				"include":                    {"subscriptionGroup"},
-			},
-			call: func(c *Client) error {
-				_, err := c.GetSubscriptionGroupLocalization(
-					context.Background(), "group-loc-1",
-					WithSubscriptionGroupLocalizationGroupFields([]string{"versions"}),
-					WithSubscriptionGroupLocalizationInclude([]string{"subscriptionGroup"}),
-				)
-				return err
-			},
-		},
-		{
-			name: "image detail subscription versions",
-			path: "/v1/subscriptionImages/image-1",
-			wantQuery: url.Values{
-				"fields[subscriptions]": {"versions"},
-				"include":               {"subscription"},
-			},
-			call: func(c *Client) error {
-				_, err := c.GetSubscriptionImage(
-					context.Background(), "image-1",
-					WithSubscriptionImageSubscriptionFields([]string{"versions"}),
-					WithSubscriptionImageInclude([]string{"subscription"}),
-				)
-				return err
-			},
-		},
-		{
-			name: "localization detail subscription versions",
-			path: "/v1/subscriptionLocalizations/loc-1",
-			wantQuery: url.Values{
-				"fields[subscriptions]": {"versions"},
-				"include":               {"subscription"},
-			},
-			call: func(c *Client) error {
-				_, err := c.GetSubscriptionLocalization(
-					context.Background(), "loc-1",
-					WithSubscriptionLocalizationSubscriptionFields([]string{"versions"}),
-					WithSubscriptionLocalizationInclude([]string{"subscription"}),
-				)
-				return err
-			},
-		},
-		{
 			name: "offer code detail subscription versions",
 			path: "/v1/subscriptionOfferCodes/code-1",
 			wantQuery: url.Values{

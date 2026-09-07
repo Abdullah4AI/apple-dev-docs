@@ -2,7 +2,6 @@ package cmdtest
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
@@ -23,9 +22,6 @@ func TestSubscriptionsInputValidationReturnsUsageExitCode(t *testing.T) {
 		name    string
 		args    []string
 		wantErr string
-		// deprecated marks a command that prints a deprecation notice ahead
-		// of its diagnostic, so the diagnostic is not the first stderr line.
-		deprecated bool
 	}{
 		{
 			name:    "groups list app 123 limit 201",
@@ -36,18 +32,6 @@ func TestSubscriptionsInputValidationReturnsUsageExitCode(t *testing.T) {
 			name:    "groups list app 123 next non apple url",
 			args:    []string{"subscriptions", "groups", "list", "--app", "123", "--next", "http://example.com/x"},
 			wantErr: "subscriptions groups list: --next must be an App Store Connect URL",
-		},
-		{
-			name:       "groups localizations list group-id g limit 201",
-			args:       []string{"subscriptions", "groups", "localizations", "list", "--group-id", "g", "--limit", "201"},
-			wantErr:    "subscriptions groups localizations list: --limit must be between 1 and 200",
-			deprecated: true,
-		},
-		{
-			name:       "groups localizations list group-id g next non apple url",
-			args:       []string{"subscriptions", "groups", "localizations", "list", "--group-id", "g", "--next", "http://example.com/x"},
-			wantErr:    "subscriptions groups localizations list: --next must be an App Store Connect URL",
-			deprecated: true,
 		},
 		{
 			name:    "list group-id g limit 201",
@@ -139,30 +123,6 @@ func TestSubscriptionsInputValidationReturnsUsageExitCode(t *testing.T) {
 			args:    []string{"subscriptions", "offers", "offer-codes", "prices", "--offer-code-id", "o", "--next", "http://example.com/x"},
 			wantErr: "subscriptions offers offer-codes prices: --next must be an App Store Connect URL",
 		},
-		{
-			name:       "localizations list subscription-id s limit 201",
-			args:       []string{"subscriptions", "localizations", "list", "--subscription-id", "s", "--limit", "201"},
-			wantErr:    "subscriptions localizations list: --limit must be between 1 and 200",
-			deprecated: true,
-		},
-		{
-			name:       "localizations list subscription-id s next non apple url",
-			args:       []string{"subscriptions", "localizations", "list", "--subscription-id", "s", "--next", "http://example.com/x"},
-			wantErr:    "subscriptions localizations list: --next must be an App Store Connect URL",
-			deprecated: true,
-		},
-		{
-			name:       "images list subscription-id s limit 201",
-			args:       []string{"subscriptions", "images", "list", "--subscription-id", "s", "--limit", "201"},
-			wantErr:    "subscriptions images list: --limit must be between 1 and 200",
-			deprecated: true,
-		},
-		{
-			name:       "images list subscription-id s next non apple url",
-			args:       []string{"subscriptions", "images", "list", "--subscription-id", "s", "--next", "http://example.com/x"},
-			wantErr:    "subscriptions images list: --next must be an App Store Connect URL",
-			deprecated: true,
-		},
 	}
 
 	for _, test := range tests {
@@ -178,27 +138,7 @@ func TestSubscriptionsInputValidationReturnsUsageExitCode(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if test.deprecated {
-				assertUsageErrorStderrAfterNotices(t, stderr, test.wantErr)
-				return
-			}
 			assertUsageErrorStderr(t, stderr, test.wantErr)
 		})
-	}
-}
-
-// assertUsageErrorStderrAfterNotices is assertUsageErrorStderr for a command
-// that prints a deprecation notice ahead of its diagnostic. The diagnostic is
-// still the complete, single "Error: <message>" line, but it is not the first
-// line of stderr.
-func assertUsageErrorStderrAfterNotices(t *testing.T, stderr, wantMessage string) {
-	t.Helper()
-
-	wantLine := "Error: " + wantMessage + "\n"
-	if !strings.Contains(stderr, wantLine) {
-		t.Fatalf("stderr = %q, want it to contain %q", stderr, wantLine)
-	}
-	if got := strings.Count(stderr, "Error: "); got != 1 {
-		t.Fatalf("stderr = %q, want exactly one %q diagnostic, got %d", stderr, "Error: ", got)
 	}
 }

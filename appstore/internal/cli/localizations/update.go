@@ -20,7 +20,6 @@ func LocalizationsUpdateCommand() *ffcli.Command {
 
 	localizationID := fs.String("id", "", "Localization resource ID (skips parent and locale lookup)")
 	versionID := fs.String("version", "", "App Store version ID (for version localizations)")
-	legacyVersionID := shared.BindDeprecatedStringFlagAlias(fs, "version-id", "version")
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID, for app-info localizations)")
 	appInfoID := fs.String("app-info", "", "App Info ID (optional override)")
 	locType := fs.String("type", shared.LocalizationTypeVersion, "Localization type: version (default) or app-info")
@@ -80,9 +79,6 @@ At least one field flag must be provided.`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyVersionID.Apply(versionID); err != nil {
-				return err
-			}
 			localizationIDValue := strings.TrimSpace(*localizationID)
 			if localizationIDValue != "" && (strings.TrimSpace(*versionID) != "" || strings.TrimSpace(*appID) != "" || strings.TrimSpace(*appInfoID) != "" || strings.TrimSpace(*locale) != "") {
 				fmt.Fprintln(os.Stderr, "Error: --id cannot be combined with --version, --app, --app-info, or --locale")

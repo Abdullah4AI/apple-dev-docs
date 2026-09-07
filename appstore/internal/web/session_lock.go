@@ -23,26 +23,98 @@ import (
 // item. Holding whichever anchors can be created makes those processes exclude
 // each other as long as either anchor is shared.
 //
-// The lock is advisory and best effort by design. Acquisition is bounded, a
-// lock left behind by a killed process remains harmless because advisory locks
-// are released when descriptors close, and any failure to lock falls through
-// to the unlocked operation: refusing to persist or discard a session because
-// a lock file cannot be created would turn a cache
-// optimization into an auth outage, and refusing to discard one would leave a
-// proven-stale jar to burn another 2FA code.
+// The lock is advisory and acquisition is bounded. A lock left behind by a
+// killed process remains harmless because advisory locks are released when
+// descriptors close. Store mutations fail closed when the shared lock cannot
+// be acquired, preventing an aggregate read-modify-write from racing another
+// process and silently dropping a different Apple ID's session.
 var (
-	errSessionLockHeld      = errors.New("session lock is held")
-	sessionLockPollInterval = 2 * time.Millisecond
-	sessionLockWaitTimeout  = 2 * time.Second
-	sessionSharedLockRoot   = platformSessionLockRoot
+	errSessionLockHeld             = errors.New("session lock is held")
+	errSessionStoreLockUnavailable = errors.New("shared session-store lock unavailable")
+	sessionLockPollInterval        = 2 * time.Millisecond
+	sessionLockWaitTimeout         = 2 * time.Second
+	sessionSharedLockRoot          = platformSessionLockRoot
 )
 
-// withSessionEntryLock runs fn while holding the advisory lock for one cached
-// session entry.
+// withSessionEntryLock runs fn while holding the cache-local global lock and
+// the advisory locks for one cached session entry. The cache-local lock is
+// what lets DeleteAllSessions exclude file mutations; keychain mutations take
+// the stable store lock below while they are inside this critical section.
 func withSessionEntryLock(key string, fn func() error) error {
+	releaseGlobal := acquireSessionCacheGlobalLock()
+	defer releaseGlobal()
+
 	release := acquireSessionEntryLock(key)
 	defer release()
 	return fn()
+}
+
+// withSessionDeleteAllLock serializes a delete-all transaction with every
+// backend mutation that can touch the selected cache. The cache-local anchor
+// is attempted first, followed by the stable aggregate-keychain anchor, which
+// is the same order used by per-entry persistence and deletion paths. A cache
+// directory that cannot hold a local lock follows the existing fail-open file
+// mutation behavior, so the underlying file operation still reports its own
+// error. The callback must use unlocked keychain helpers because the store
+// lock is held for the whole cross-backend transaction.
+func withSessionDeleteAllLock(selection backendSelection, fn func() error) error {
+	needsFileLock := selection.backend == sessionBackendFile || selection.fallbackFile
+	needsStoreLock := selection.backend == sessionBackendKeychain || selection.fallbackKeychain
+
+	if needsFileLock {
+		release := acquireSessionCacheGlobalLock()
+		defer release()
+	}
+
+	if needsStoreLock {
+		return withSessionStoreLock(fn)
+	}
+	return fn()
+}
+
+// withSessionStoreLock serializes read-modify-write operations on the single
+// aggregate keychain item shared by all Apple IDs.
+func withSessionStoreLock(fn func() error) error {
+	dir := strings.TrimSpace(sessionSharedLockRoot())
+	if dir == "" {
+		return errSessionStoreLockUnavailable
+	}
+	path := filepath.Join(dir, sessionSharedLockDirName(), "store.lock")
+	if release, ok := acquireSharedSessionLockFile(path); ok {
+		defer release()
+	} else {
+		return errSessionStoreLockUnavailable
+	}
+	return fn()
+}
+
+// acquireSessionCacheGlobalLock is best effort, matching the existing
+// per-entry file mutation behavior when the selected cache directory cannot
+// host a lock file. The required form below remains available to tests and to
+// callers that need to distinguish an unavailable local barrier.
+func acquireSessionCacheGlobalLock() func() {
+	release, ok := acquireRequiredSessionCacheGlobalLock()
+	if !ok || release == nil {
+		return func() {}
+	}
+	return release
+}
+
+// acquireRequiredSessionCacheGlobalLock acquires the store anchor belonging
+// to the selected file cache and reports whether it was acquired. A missing
+// cache anchor is acceptable when the cache directory itself cannot be
+// resolved; the file operation will report that error. Callers that require
+// the barrier can fail closed, while normal file mutations use the best-effort
+// wrapper above for compatibility with existing behavior.
+func acquireRequiredSessionCacheGlobalLock() (func(), bool) {
+	paths := sessionGlobalLockPaths()
+	if len(paths) == 0 {
+		return func() {}, true
+	}
+	if paths[0] == sessionSharedGlobalLockPath() {
+		return acquireSharedSessionLockFile(paths[0])
+	}
+	return acquireLockFile(paths[0])
 }
 
 // acquireSessionEntryLock takes the entry lock at every anchor that can be
@@ -83,6 +155,55 @@ func sessionEntryLockPaths(key string) []string {
 		paths = append(paths, path)
 	}
 	return paths
+}
+
+// sessionGlobalLockPaths describes the cache-local and stable shared store
+// anchors used by lock-observation tests and the delete-all transaction.
+// Per-account keychain mutations use withSessionStoreLock for only the stable
+// shared anchor; file mutations use the cache-local anchor through
+// withSessionEntryLock.
+func sessionGlobalLockPaths() []string {
+	paths := make([]string, 0, 2)
+	if dir, err := webSessionCacheDir(); err == nil && strings.TrimSpace(dir) != "" {
+		paths = append(paths, filepath.Join(dir, "store.lock"))
+	}
+	if path := sessionSharedGlobalLockPath(); path != "" {
+		if len(paths) == 0 || paths[0] != path {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func sessionSharedGlobalLockPath() string {
+	dir := strings.TrimSpace(sessionSharedLockRoot())
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, sessionSharedLockDirName(), "store.lock")
+}
+
+// acquireSessionGlobalLock is retained as a lock-test seam. It follows the
+// same cache-directory-then-stable-anchor order as sessionEntryLockPaths but
+// is not used by production store mutations.
+func acquireSessionGlobalLock() func() {
+	paths := sessionGlobalLockPaths()
+	releases := make([]func(), 0, len(paths))
+	sharedPath := sessionSharedGlobalLockPath()
+	for _, path := range paths {
+		acquire := acquireLockFile
+		if path == sharedPath {
+			acquire = acquireSharedSessionLockFile
+		}
+		if release, ok := acquire(path); ok {
+			releases = append(releases, release)
+		}
+	}
+	return func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}
 }
 
 func sessionSharedEntryLockPath(key string) string {

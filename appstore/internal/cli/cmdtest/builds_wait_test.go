@@ -367,6 +367,7 @@ func TestBuildsWaitByAppWithSinceSkipsOlderMatch(t *testing.T) {
 			"--app", "123456789",
 			"--version", "2.4.0",
 			"--build-number", "2",
+			"--platform", "IOS",
 			"--since", "2026-03-02T18:00:00Z",
 			"--poll-interval", "1ms",
 			"--timeout", "250ms",
@@ -456,6 +457,7 @@ func TestBuildsWaitByBuildNumberSinceFiltersBeforeUniqueness(t *testing.T) {
 			"builds", "wait",
 			"--app", "123456789",
 			"--build-number", "42",
+			"--platform", "IOS",
 			"--since", "2026-03-02T18:00:00Z",
 			"--poll-interval", "1ms",
 			"--timeout", "200ms",
@@ -477,11 +479,50 @@ func TestBuildsWaitByBuildNumberSinceFiltersBeforeUniqueness(t *testing.T) {
 	if waitResult.ProcessingState != "VALID" {
 		t.Fatalf("expected processingState=VALID, got %q", waitResult.ProcessingState)
 	}
-	if !strings.Contains(stderr, deprecatedImplicitIOSBuildNumberPlatformWarning) {
-		t.Fatalf("expected implicit IOS deprecation warning, got %q", stderr)
+	if strings.Contains(stderr, "Defaulting to IOS") {
+		t.Fatalf("expected no implicit IOS default, got %q", stderr)
 	}
 	if !strings.Contains(stderr, "Waiting for build build-new... (VALID") {
 		t.Fatalf("expected wait progress output, got %q", stderr)
+	}
+}
+
+func TestBuildsWaitByBuildNumberRequiresPlatform(t *testing.T) {
+	setupAuth(t)
+	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("ASC_APP_ID", "")
+
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request %s %s", req.Method, req.URL.String())
+		return nil, nil
+	})
+
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
+
+	var runErr error
+	stdout, stderr := captureOutput(t, func() {
+		if err := root.Parse([]string{"builds", "wait", "--app", "123456789", "--build-number", "42", "--poll-interval", "1ms"}); err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		runErr = root.Run(context.Background())
+	})
+
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("expected ErrHelp, got %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, buildNumberRequiresPlatformError) {
+		t.Fatalf("expected stderr to require --platform, got %q", stderr)
+	}
+	if strings.Contains(stderr, "Defaulting to IOS") {
+		t.Fatalf("expected no implicit IOS default, got %q", stderr)
 	}
 }
 
@@ -594,7 +635,7 @@ func TestBuildsWaitByBuildNumberRequiresUniqueMatch(t *testing.T) {
 			t.Fatalf("expected filter[version]=42, got %q", query.Get("filter[version]"))
 		}
 		if query.Get("filter[preReleaseVersion.platform]") != "IOS" {
-			t.Fatalf("expected implicit IOS platform filter, got %q", query.Get("filter[preReleaseVersion.platform]"))
+			t.Fatalf("expected IOS platform filter, got %q", query.Get("filter[preReleaseVersion.platform]"))
 		}
 		if query.Get("filter[processingState]") != "PROCESSING,FAILED,INVALID,VALID" {
 			t.Fatalf("expected wait processing-state filter, got %q", query.Get("filter[processingState]"))
@@ -628,6 +669,7 @@ func TestBuildsWaitByBuildNumberRequiresUniqueMatch(t *testing.T) {
 			"builds", "wait",
 			"--app", "123456789",
 			"--build-number", "42",
+			"--platform", "IOS",
 			"--poll-interval", "1ms",
 			"--timeout", "200ms",
 		}); err != nil {
@@ -648,12 +690,12 @@ func TestBuildsWaitByBuildNumberRequiresUniqueMatch(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout on ambiguity error, got %q", stdout)
 	}
-	if !strings.Contains(stderr, deprecatedImplicitIOSBuildNumberPlatformWarning) {
-		t.Fatalf("expected implicit IOS deprecation warning, got %q", stderr)
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 }
 
-func TestBuildsWaitByBuildNumberDiscoveryWarnsOnlyOnce(t *testing.T) {
+func TestBuildsWaitByBuildNumberDiscoveryPollsUntilTimeout(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("ASC_APP_ID", "")
@@ -681,7 +723,7 @@ func TestBuildsWaitByBuildNumberDiscoveryWarnsOnlyOnce(t *testing.T) {
 			t.Fatalf("expected filter[version]=42, got %q", query.Get("filter[version]"))
 		}
 		if query.Get("filter[preReleaseVersion.platform]") != "IOS" {
-			t.Fatalf("expected implicit IOS platform filter, got %q", query.Get("filter[preReleaseVersion.platform]"))
+			t.Fatalf("expected IOS platform filter, got %q", query.Get("filter[preReleaseVersion.platform]"))
 		}
 
 		body := `{"data":[]}`
@@ -701,6 +743,7 @@ func TestBuildsWaitByBuildNumberDiscoveryWarnsOnlyOnce(t *testing.T) {
 			"builds", "wait",
 			"--app", "123456789",
 			"--build-number", "42",
+			"--platform", "IOS",
 			"--poll-interval", "1ms",
 			"--timeout", "50ms",
 		}); err != nil {
@@ -718,8 +761,8 @@ func TestBuildsWaitByBuildNumberDiscoveryWarnsOnlyOnce(t *testing.T) {
 	if requestCount < 2 {
 		t.Fatalf("expected multiple discovery polls, got %d", requestCount)
 	}
-	if got := strings.Count(stderr, deprecatedImplicitIOSBuildNumberPlatformWarning); got != 1 {
-		t.Fatalf("expected one implicit IOS warning, got %d in %q", got, stderr)
+	if strings.Contains(stderr, "Defaulting to IOS") {
+		t.Fatalf("expected no implicit IOS default, got %q", stderr)
 	}
 	if !strings.Contains(stderr, "Waiting for build discovery") {
 		t.Fatalf("expected discovery progress output, got %q", stderr)

@@ -584,7 +584,7 @@ func rejectNormalizedCredentialCollision(originalName, normalizedName string) (b
 		}
 		return currentAvailable, legacyAvailable, fmt.Errorf(
 			"credential profile name %q conflicts with existing normalized profile %q; "+
-				"remove the existing profile with 'asc auth logout --name %q' and retry",
+				"remove the existing profile with 'asc auth logout --name %q --confirm' and retry",
 			originalName,
 			normalizedName,
 			normalizedName,

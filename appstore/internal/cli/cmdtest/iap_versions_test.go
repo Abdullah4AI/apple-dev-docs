@@ -46,8 +46,6 @@ func TestIAPVersionsValidationErrors(t *testing.T) {
 		{"iap list rejects parent fields on legacy endpoint", []string{"iap", "list", "--app", "app-1", "--legacy", "--fields", "name"}, "--fields requires the v2 endpoint"},
 		{"version localization update rejects name and clear-name", []string{"iap", "versions", "localizations", "update", "--localization-id", "loc-1", "--name", "Name", "--clear-name"}, "--name and --clear-name are mutually exclusive"},
 		{"version localization update rejects description and clear-description", []string{"iap", "versions", "localizations", "update", "--localization-id", "loc-1", "--description", "Description", "--clear-description"}, "--description and --clear-description are mutually exclusive"},
-		{"legacy localization update rejects name and clear-name", []string{"iap", "localizations", "update", "--localization-id", "loc-1", "--name", "Name", "--clear-name"}, "--name and --clear-name are mutually exclusive"},
-		{"legacy localization update rejects description and clear-description", []string{"iap", "localizations", "update", "--localization-id", "loc-1", "--description", "Description", "--clear-description"}, "--description and --clear-description are mutually exclusive"},
 		{"version list rejects next with selectors", []string{"iap", "versions", "list", "--next", next, "--state", "READY_FOR_REVIEW"}, "--next cannot be combined"},
 		{"image list rejects next with fields", []string{"iap", "versions", "images", "list", "--next", next, "--image-fields", "fileName"}, "--next cannot be combined"},
 		{"localization list rejects next with include", []string{"iap", "versions", "localizations", "list", "--next", next, "--include", "version"}, "--next cannot be combined"},

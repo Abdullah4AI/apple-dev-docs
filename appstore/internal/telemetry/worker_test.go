@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -238,5 +239,23 @@ func TestInternalWorkerInvocationRequiresMarker(t *testing.T) {
 	}
 	if isMaintenanceWorkerInvocation([]string{internalWorkerArg, "extra"}) {
 		t.Fatal("worker invocation accepted extra arguments")
+	}
+}
+
+func TestMaintenanceWorkerEnvironmentFiltersWebSession(t *testing.T) {
+	environment := maintenanceWorkerEnvironment([]string{
+		"ASC_WEB_SESSION=super-secret-token",
+		"asc_web_session=case-variant-secret",
+		"PATH=/usr/bin",
+	})
+
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, "ASC_WEB_SESSION") {
+			t.Fatalf("maintenance worker environment contains session input: %q", entry)
+		}
+	}
+	if got, want := environment[len(environment)-1], internalWorkerEnvVar+"=1"; got != want {
+		t.Fatalf("maintenance worker marker = %q, want %q", got, want)
 	}
 }

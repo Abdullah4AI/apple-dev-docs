@@ -16,6 +16,7 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/itunes"
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/telemetry"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
+	localxcode "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/xcode"
 )
 
 func TestRuntimeFailureContextClassifiesItunesHTTPStatus(t *testing.T) {
@@ -205,6 +206,61 @@ func TestRuntimeFailureContextClassifiesLowCardinalityFailures(t *testing.T) {
 	}
 }
 
+func TestRuntimeFailureContextDoesNotTreatLocalStaplerExitAsAPIStatus(t *testing.T) {
+	analysis := invocationAnalysis{shape: telemetry.InvocationShapeLeaf}
+	for _, code := range []int{3, 4, 5, 65, 66} {
+		t.Run(fmt.Sprintf("exit-%d", code), func(t *testing.T) {
+			cause := &localxcode.StaplerCommandError{
+				Operation: string(localxcode.StaplerOperationValidate),
+				ExitCode:  code,
+				Err:       errors.New("local stapler failure"),
+			}
+			err := shared.NewProcessExitErrorWithCause(code, cause)
+			var gotCause *localxcode.StaplerCommandError
+			if !errors.As(err, &gotCause) || gotCause != cause {
+				t.Fatalf("process exit error = %T %v, want preserved stapler cause", err, err)
+			}
+			got := runtimeFailureContext(analysis, err, code)
+			if got.ErrorKind != telemetry.ErrorKindOther || got.FailureStage != telemetry.FailureStageExecution ||
+				got.OutcomeKind != telemetry.OutcomeInternalError || got.HTTPStatus != 0 {
+				t.Fatalf("runtimeFailureContext() = %+v, want local execution/internal failure", got)
+			}
+		})
+	}
+}
+
+func TestRuntimeFailureContextKeepsInterruptedLocalStaplerExitOutOfAPIBuckets(t *testing.T) {
+	analysis := invocationAnalysis{shape: telemetry.InvocationShapeLeaf}
+	tests := []struct {
+		name        string
+		contextErr  error
+		wantOutcome telemetry.OutcomeKind
+	}{
+		{name: "cancellation", contextErr: context.Canceled, wantOutcome: telemetry.OutcomeCancelled},
+		{name: "deadline", contextErr: context.DeadlineExceeded, wantOutcome: telemetry.OutcomeTransportError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// A stapler child can return a concrete status in the same window in
+			// which the caller's context is canceled, so the local status and the
+			// context error travel together.
+			cause := errors.Join(&localxcode.StaplerCommandError{
+				Operation: string(localxcode.StaplerOperationStaple),
+				ExitCode:  66,
+				Err:       errors.New("local stapler failure"),
+			}, test.contextErr)
+			err := shared.NewProcessExitErrorWithCause(66, cause)
+			got := runtimeFailureContext(analysis, err, 66)
+			if got.ErrorKind != telemetry.ErrorKindOther || got.FailureStage != telemetry.FailureStageExecution || got.HTTPStatus != 0 {
+				t.Fatalf("runtimeFailureContext() = %+v, want local execution failure without API classification", got)
+			}
+			if got.OutcomeKind != test.wantOutcome {
+				t.Fatalf("runtimeFailureContext() outcome = %v, want %v", got.OutcomeKind, test.wantOutcome)
+			}
+		})
+	}
+}
+
 func TestValidationFailureContextPrefersStructuredDiagnostic(t *testing.T) {
 	err := shared.WithDiagnostic(
 		shared.NewReportedUsageError(shared.UsageErrorMissingRequired, "--issuer-id is required"),
@@ -331,6 +387,7 @@ func TestCommonCommandPathRecoveryRejectsUnsupportedSuffix(t *testing.T) {
 		{"versions", "info", "--version-id", "VERSION_ID", "--include", "unknown"},
 		{"versions", "info", "--version-id", "VERSION_ID", "--include", "build", "--include-build"},
 		{"versions", "info", "--version-id", "ONE", "--id", "TWO"},
+		{"versions", "info", "--id", "VERSION_ID"},
 		{"versions", "info", "--version-id", "VERSION_ID", "--output", "yaml"},
 		{"versions", "info", "--version-id", "VERSION_ID", "--include-build", "maybe"},
 		{"versions", "info", "--version-id", "VERSION_ID", "localizations"},
@@ -382,7 +439,6 @@ func TestCommonCommandPathRecoveryAcceptsCompleteDestinationFlags(t *testing.T) 
 		{"versions", "info", "--version-id", "VERSION_ID", "--include", "build", "--include-build=false"},
 		{"versions", "info", "--version-id", "VERSION_ID", "--include="},
 		{"versions", "info", "--version-id", "VERSION_ID", "--include", ""},
-		{"versions", "info", "--id", "VERSION_ID"},
 		{"reviewsubmissions", "list", "--app", "APP_ID", "--limit=10"},
 		{"reviewsubmissions", "list", "--app", "APP_ID", "--limit", "10"},
 		{"reviewsubmissions", "list", "--app", "APP_ID", "--platform="},

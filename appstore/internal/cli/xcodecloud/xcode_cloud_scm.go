@@ -385,38 +385,6 @@ Examples:
 	})
 }
 
-func DeprecatedXcodeCloudScmRepositoriesRelationshipsAliasCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("relationships", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "relationships",
-		ShortUsage: "asc xcode-cloud scm repositories links <git-references|pull-requests> [flags]",
-		ShortHelp:  "DEPRECATED: use `asc xcode-cloud scm repositories links ...`.",
-		LongHelp:   "Deprecated compatibility alias for `asc xcode-cloud scm repositories links ...`.",
-		FlagSet:    fs,
-		UsageFunc:  shared.DeprecatedUsageFunc,
-		Subcommands: []*ffcli.Command{
-			shared.DeprecatedAliasLeafCommand(
-				XcodeCloudScmRepositoriesRelationshipsGitReferencesCommand(),
-				"git-references",
-				"asc xcode-cloud scm repositories links git-references --repo-id \"REPO_ID\" [flags]",
-				"asc xcode-cloud scm repositories links git-references",
-				"Warning: `asc xcode-cloud scm repositories relationships git-references` is deprecated. Use `asc xcode-cloud scm repositories links git-references`.",
-			),
-			shared.DeprecatedAliasLeafCommand(
-				XcodeCloudScmRepositoriesRelationshipsPullRequestsCommand(),
-				"pull-requests",
-				"asc xcode-cloud scm repositories links pull-requests --repo-id \"REPO_ID\" [flags]",
-				"asc xcode-cloud scm repositories links pull-requests",
-				"Warning: `asc xcode-cloud scm repositories relationships pull-requests` is deprecated. Use `asc xcode-cloud scm repositories links pull-requests`.",
-			),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}
-
 // XcodeCloudScmGitReferencesCommand returns the SCM git references command group.
 func XcodeCloudScmGitReferencesCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("git-references", flag.ExitOnError)

@@ -616,12 +616,12 @@ func TestValidateSubcommandsRejectParentValidateFlags(t *testing.T) {
 	}{
 		{
 			name:    "top-level version selector before subcommand",
-			args:    []string{"validate", "--version-id", "ver-1", "testflight", "--app", "app-1", "--build", "build-1"},
+			args:    []string{"validate", "--version-id", "ver-1", "testflight", "--app", "app-1", "--build-id", "build-1"},
 			wantErr: "--version-id is only valid for asc validate",
 		},
 		{
 			name:    "shared flag before subcommand",
-			args:    []string{"validate", "--strict", "testflight", "--app", "app-1", "--build", "build-1"},
+			args:    []string{"validate", "--strict", "testflight", "--app", "app-1", "--build-id", "build-1"},
 			wantErr: "--strict must be passed after the validate subcommand name",
 		},
 	}

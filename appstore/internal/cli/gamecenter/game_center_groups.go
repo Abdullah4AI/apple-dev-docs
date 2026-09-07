@@ -35,8 +35,7 @@ Examples:
   asc game-center groups leaderboards set --group-id "GROUP_ID" --ids "LB_1,LB_2" --confirm
   asc game-center groups leaderboard-sets list --group-id "GROUP_ID"
   asc game-center groups activities list --group-id "GROUP_ID"
-  asc game-center groups challenges list --group-id "GROUP_ID"
-  asc game-center groups challenges set --group-id "GROUP_ID" --ids "CH_1,CH_2"`,
+  asc game-center groups challenges list --group-id "GROUP_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
@@ -337,7 +336,7 @@ func GameCenterGroupAchievementsCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "achievements",
-		ShortUsage: "asc game-center groups achievements set --group-id \"GROUP_ID\" --ids \"ACH_1,ACH_2\" [--confirm]",
+		ShortUsage: "asc game-center groups achievements set --group-id \"GROUP_ID\" --ids \"ACH_1,ACH_2\" --confirm",
 		ShortHelp:  "Manage group achievements relationships.",
 		LongHelp: `Manage group achievements relationships.
 
@@ -456,7 +455,7 @@ func GameCenterGroupAchievementsSetCommand() *ffcli.Command {
 	groupID := fs.String("group-id", "", "Game Center group ID")
 	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated achievement IDs")
 	v2 := fs.Bool("v2", false, "Use v2 relationships endpoint")
-	confirm := fs.Bool("confirm", false, "[experimental] Confirm replacing all relationships")
+	confirm := fs.Bool("confirm", false, "Confirm replacing all relationships (required)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -465,7 +464,7 @@ func GameCenterGroupAchievementsSetCommand() *ffcli.Command {
 		ShortHelp:  "Replace group achievements relationships.",
 		LongHelp: `Replace group achievements relationships.
 
-Because replacement can remove existing relationships, pass --confirm now; it will be required in 5.0.0.
+Because replacement can remove existing relationships, --confirm is required.
 
 Examples:
   asc game-center groups achievements set --group-id "GROUP_ID" --ids "ACH_1,ACH_2" --confirm
@@ -517,7 +516,7 @@ func GameCenterGroupLeaderboardsCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "leaderboards",
-		ShortUsage: "asc game-center groups leaderboards set --group-id \"GROUP_ID\" --ids \"LB_1,LB_2\" [--confirm]",
+		ShortUsage: "asc game-center groups leaderboards set --group-id \"GROUP_ID\" --ids \"LB_1,LB_2\" --confirm",
 		ShortHelp:  "Manage group leaderboards relationships.",
 		LongHelp: `Manage group leaderboards relationships.
 
@@ -636,7 +635,7 @@ func GameCenterGroupLeaderboardsSetCommand() *ffcli.Command {
 	groupID := fs.String("group-id", "", "Game Center group ID")
 	ids := shared.BindOnceCSVFlag(fs, "ids", "Comma-separated leaderboard IDs")
 	v2 := fs.Bool("v2", false, "Use v2 relationships endpoint")
-	confirm := fs.Bool("confirm", false, "[experimental] Confirm replacing all relationships")
+	confirm := fs.Bool("confirm", false, "Confirm replacing all relationships (required)")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -645,7 +644,7 @@ func GameCenterGroupLeaderboardsSetCommand() *ffcli.Command {
 		ShortHelp:  "Replace group leaderboards relationships.",
 		LongHelp: `Replace group leaderboards relationships.
 
-Because replacement can remove existing relationships, pass --confirm now; it will be required in 5.0.0.
+Because replacement can remove existing relationships, --confirm is required.
 
 Examples:
   asc game-center groups leaderboards set --group-id "GROUP_ID" --ids "LB_1,LB_2" --confirm
@@ -912,18 +911,20 @@ func GameCenterGroupChallengesCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "challenges",
-		ShortUsage: "asc game-center groups challenges <subcommand> [flags]",
-		ShortHelp:  "Manage group challenges relationships.",
-		LongHelp: `Manage group challenges relationships.
+		ShortUsage: "asc game-center groups challenges list --group-id \"GROUP_ID\"",
+		ShortHelp:  "List group challenges relationships.",
+		LongHelp: `List group challenges relationships.
+
+App Store Connect exposes a group's challenge relationships as read-only. To add
+a challenge to a group, create it with:
+  asc game-center challenges create --group-id "GROUP_ID" --reference-name "Weekly" --vendor-id "grp.com.example.weekly" --leaderboard-id "LEADERBOARD_ID"
 
 Examples:
-  asc game-center groups challenges list --group-id "GROUP_ID"
-  asc game-center groups challenges set --group-id "GROUP_ID" --ids "CH_1,CH_2"`,
+  asc game-center groups challenges list --group-id "GROUP_ID"`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Subcommands: []*ffcli.Command{
 			GameCenterGroupChallengesListCommand(),
-			GameCenterGroupChallengesSetCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -1003,61 +1004,6 @@ Examples:
 			}
 
 			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-		},
-	}
-}
-
-// GameCenterGroupChallengesSetCommand preserves the released relationship setter during its deprecation window.
-func GameCenterGroupChallengesSetCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("set", flag.ExitOnError)
-
-	groupID := fs.String("group-id", "", "Game Center group ID")
-	ids := fs.String("ids", "", "Comma-separated challenge IDs")
-	shared.BindOutputFlags(fs)
-
-	const guidance = "App Store Connect does not support replacing a group's challenge relationships. To add a challenge to a group, use `asc game-center challenges create --group-id \"GROUP_ID\" ...`."
-
-	return &ffcli.Command{
-		Name:       "set",
-		ShortUsage: "asc game-center groups challenges set --group-id \"GROUP_ID\" --ids \"CH_1,CH_2\"",
-		ShortHelp:  "DEPRECATED: App Store Connect does not support replacing group challenge relationships.",
-		LongHelp: `DEPRECATED: App Store Connect does not support replacing a Game Center group's challenge relationships.
-
-The --group-id and --ids flags remain available during the deprecation window,
-but the operation always exits with migration guidance before authentication or
-an HTTP request. The prior output flags remain registered for parser compatibility
-but are rejected because this command produces no result. To add a challenge to
-a group, create it with --group-id.
-
-Examples:
-  asc game-center groups challenges set --group-id "GROUP_ID" --ids "CH_1,CH_2"
-  asc game-center challenges create --group-id "GROUP_ID" --reference-name "Weekly" --vendor-id "grp.com.example.weekly" --leaderboard-id "LEADERBOARD_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			fmt.Fprintln(os.Stderr, "Warning: `asc game-center groups challenges set` is deprecated and unsupported.")
-
-			if strings.TrimSpace(*groupID) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --group-id is required")
-				return shared.MissingRequiredUsageError("--group-id")
-			}
-			if len(shared.SplitCSV(*ids)) == 0 {
-				fmt.Fprintln(os.Stderr, "Error: --ids is required")
-				return shared.MissingRequiredUsageError("--ids")
-			}
-
-			outputFlagUsed := false
-			fs.Visit(func(f *flag.Flag) {
-				if f.Name == "output" || f.Name == "pretty" {
-					outputFlagUsed = true
-				}
-			})
-			if outputFlagUsed {
-				const outputGuidance = "the deprecated command produces no data output; omit --output and --pretty"
-				return fmt.Errorf("game-center groups challenges set: %w", shared.UsageError(outputGuidance))
-			}
-
-			return fmt.Errorf("game-center groups challenges set: %w", shared.UsageError(guidance))
 		},
 	}
 }

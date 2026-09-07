@@ -354,6 +354,8 @@ func isKnownFailureParameter(name string) bool {
 // dimension, so only public flags and compatibility aliases that help diagnose
 // common agent failures belong here.
 var knownFailureParameters = map[string]struct{}{
+	"recipient-apple-id": {},
+
 	"access-all-builds":                 {},
 	"access-type":                       {},
 	"achievement-id":                    {},
@@ -449,7 +451,6 @@ var knownFailureParameters = map[string]struct{}{
 	"experience-id":                     {},
 	"experiment-id":                     {},
 	"export-xcodebuild-flag":            {},
-	"external-testing":                  {},
 	"expression":                        {},
 	"fallback-url":                      {},
 	"fastlane-dir":                      {},
@@ -576,6 +577,7 @@ var knownFailureParameters = map[string]struct{}{
 	"schedule":                          {},
 	"schedule-id":                       {},
 	"scheme":                            {},
+	"scm-provider-id":                   {},
 	"sdk":                               {},
 	"scoped-player-id":                  {},
 	"score":                             {},

@@ -182,3 +182,18 @@ func TestWithDiagnosticRejectsUnboundedCode(t *testing.T) {
 		t.Fatal("DiagnosticFromError() accepted an unknown code")
 	}
 }
+
+func TestNewProcessExitErrorWithCausePreservesExitCodeAndCause(t *testing.T) {
+	cause := errors.New("local child failure")
+	err := NewProcessExitErrorWithCause(65, cause)
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("NewProcessExitErrorWithCause() = %v, want preserved cause", err)
+	}
+	if code, ok := ProcessExitCode(err); !ok || code != 65 {
+		t.Fatalf("ProcessExitCode() = %d/%v, want 65/true", code, ok)
+	}
+	if !IsLocalProcessFailure(err) {
+		t.Fatalf("IsLocalProcessFailure() = false for %T", err)
+	}
+}

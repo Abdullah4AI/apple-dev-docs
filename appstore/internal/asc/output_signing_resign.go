@@ -34,6 +34,18 @@ type SigningResignTargetResult struct {
 	Status        string `json:"status"`
 }
 
+// SigningResignEntitlementRewrite records one explicitly requested,
+// profile-authorized claim transformation. Values are emitted as the
+// entitlement plist values, not as profile wildcards.
+type SigningResignEntitlementRewrite struct {
+	TargetRelativePath string `json:"targetRelativePath"`
+	BundleID           string `json:"bundleId"`
+	Key                string `json:"key"`
+	ElementIndex       *int   `json:"elementIndex,omitempty"`
+	From               any    `json:"from"`
+	To                 any    `json:"to"`
+}
+
 // SigningResignVerification reports the scope and result of post-signing
 // verification.
 type SigningResignVerification struct {
@@ -44,13 +56,14 @@ type SigningResignVerification struct {
 // SigningResignResult is the stable computed output contract for
 // `asc signing resign`.
 type SigningResignResult struct {
-	SchemaVersion int                         `json:"schemaVersion"`
-	Command       string                      `json:"command"`
-	Input         SigningResignInputResult    `json:"input"`
-	Output        SigningResignArtifactResult `json:"output"`
-	Identity      SigningResignIdentityResult `json:"identity"`
-	Targets       []SigningResignTargetResult `json:"targets"`
-	Verification  SigningResignVerification   `json:"verification"`
+	SchemaVersion       int                                `json:"schemaVersion"`
+	Command             string                             `json:"command"`
+	Input               SigningResignInputResult           `json:"input"`
+	Output              SigningResignArtifactResult        `json:"output"`
+	Identity            SigningResignIdentityResult        `json:"identity"`
+	Targets             []SigningResignTargetResult        `json:"targets"`
+	EntitlementRewrites *[]SigningResignEntitlementRewrite `json:"entitlementRewrites,omitempty"`
+	Verification        SigningResignVerification          `json:"verification"`
 }
 
 func signingResignResultRows(result *SigningResignResult) ([]string, [][]string) {
@@ -77,6 +90,26 @@ func signingResignResultRows(result *SigningResignResult) ([]string, [][]string)
 			[]string{prefix + ".profileUuid", target.ProfileUUID},
 			[]string{prefix + ".profileSha256", target.ProfileSHA256},
 			[]string{prefix + ".status", target.Status},
+		)
+	}
+	if result.EntitlementRewrites == nil {
+		return []string{"field", "value"}, rows
+	}
+	for index, rewrite := range *result.EntitlementRewrites {
+		prefix := fmt.Sprintf("entitlementRewrite.%03d", index)
+		rows = append(
+			rows,
+			[]string{prefix + ".targetRelativePath", rewrite.TargetRelativePath},
+			[]string{prefix + ".bundleId", rewrite.BundleID},
+			[]string{prefix + ".key", rewrite.Key},
+		)
+		if rewrite.ElementIndex != nil {
+			rows = append(rows, []string{prefix + ".elementIndex", fmt.Sprintf("%d", *rewrite.ElementIndex)})
+		}
+		rows = append(
+			rows,
+			[]string{prefix + ".from", fmt.Sprintf("%v", rewrite.From)},
+			[]string{prefix + ".to", fmt.Sprintf("%v", rewrite.To)},
 		)
 	}
 	return []string{"field", "value"}, rows

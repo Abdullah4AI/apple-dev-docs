@@ -750,6 +750,22 @@ func runtimeFailureContext(analysis invocationAnalysis, err error, exitCode int)
 	if diagnostic, ok := shared.DiagnosticFromError(err); ok {
 		eventContext.FailureParameter = diagnostic.Parameter
 	}
+	if shared.IsLocalProcessFailure(err) {
+		// A local child status never describes an API result, even when the
+		// child returns it in the same window in which the caller's context is
+		// canceled or its deadline expires. Keep the execution stage and the
+		// cancellation or timeout outcome instead of letting the child's exit
+		// code fall into the API status buckets below.
+		switch {
+		case errors.Is(err, context.Canceled):
+			eventContext.OutcomeKind = telemetry.OutcomeCancelled
+		case errors.Is(err, context.DeadlineExceeded):
+			eventContext.OutcomeKind = telemetry.OutcomeTransportError
+		default:
+			eventContext.OutcomeKind = telemetry.OutcomeInternalError
+		}
+		return eventContext
+	}
 	switch {
 	case errors.Is(err, shared.ErrMissingAuth):
 		eventContext.FailureStage = telemetry.FailureStageValidation

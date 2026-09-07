@@ -16,11 +16,10 @@ func TestBuiltBinaryOrdinaryExecFailureRemainsGeneric(t *testing.T) {
 		binary,
 		"signing", "sync", "pull",
 		"--repo", "file:///definitely/not/an/asc/repo",
-		"--password", "test-only",
 		"--output-dir", filepath.Join(t.TempDir(), "output"),
 		"--output", "json",
 	)
-	cmd.Env = append(os.Environ(), "ASC_BYPASS_KEYCHAIN=1")
+	cmd.Env = append(os.Environ(), "ASC_BYPASS_KEYCHAIN=1", "ASC_SIGNING_SYNC_PASSWORD=test-only")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

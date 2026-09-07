@@ -412,7 +412,7 @@ Examples:
   asc builds info --build-id "BUILD_ID"
   asc builds info --app "123456789" --latest
   asc builds info --app "123456789" --latest --version "1.2.3" --platform IOS
-  asc builds info --app "123456789" --build-number "42"
+  asc builds info --app "123456789" --build-number "42" --platform IOS
   asc builds next-build-number --app "123456789" --version "1.2.3" --platform IOS
   asc builds expire --app "123456789" --latest --confirm
   asc builds expire-all --app "123456789" --older-than 90d --dry-run
@@ -543,7 +543,6 @@ func BuildsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (or ASC_APP_ID env)")
-	legacyAppID := shared.BindDeprecatedStringFlagAlias(fs, "app-id", "app")
 	output := shared.BindOutputFlags(fs)
 	sort := fs.String("sort", "", "Sort by "+strings.Join(buildsListSortValues, ", "))
 	version := fs.String("version", "", "Filter by marketing version string (CFBundleShortVersionString)")
@@ -585,9 +584,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyAppID.Apply(appID); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageErrorf("builds: --limit must be between 1 and 200")
 			}
@@ -802,12 +798,11 @@ func BuildsInfoCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("builds info", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID")
-	legacyBuildID := bindHiddenStringFlag(fs, "build")
 	appID := fs.String("app", "", "App Store Connect app ID, bundle ID, or exact app name (required when --build-id is not provided)")
 	latest := fs.Bool("latest", false, "Show details for the latest build in --app context")
 	version := fs.String("version", "", "Optional marketing version filter (CFBundleShortVersionString) for --app selectors")
 	buildNumber := fs.String("build-number", "", "Build number (CFBundleVersion) for --app unique lookup")
-	platform := fs.String("platform", "", "Optional platform filter for app-scoped selectors: IOS, MAC_OS, TV_OS, VISION_OS")
+	platform := fs.String("platform", "", "Platform filter for app-scoped selectors (required with --build-number): IOS, MAC_OS, TV_OS, VISION_OS")
 	processingState := fs.String("processing-state", "", "Optional processing state filter for --latest: VALID, PROCESSING, FAILED, INVALID, or all")
 	excludeExpired := fs.Bool("exclude-expired", false, "Exclude expired builds when resolving --latest")
 	notExpired := fs.Bool("not-expired", false, "Alias for --exclude-expired")
@@ -824,21 +819,18 @@ Selector modes:
   --app APP --latest [--version VERSION] [--platform PLATFORM]
                      [--processing-state STATES]
                      [--exclude-expired | --not-expired]
-  --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]
+  --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]
 
 Examples:
   asc builds info --build-id "BUILD_ID"
   asc builds info --app "123456789" --latest
   asc builds info --app "123456789" --latest --version "1.2.3" --platform IOS
   asc builds info --app "123456789" --latest --processing-state "PROCESSING,VALID"
-  asc builds info --app "123456789" --build-number "42"
+  asc builds info --app "123456789" --build-number "42" --platform IOS
   asc builds info --app "123456789" --build-number "42" --version "1.2.3" --platform IOS`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildID, legacyBuildID); err != nil {
-				return err
-			}
 			excludeExpiredValue := *excludeExpired || *notExpired
 			processingStateValues, err := normalizeBuildProcessingStateFilter(*processingState)
 			if err != nil {
@@ -892,7 +884,7 @@ func BuildsExpireCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "expire",
-		ShortUsage: "asc builds expire (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --confirm [flags]",
+		ShortUsage: "asc builds expire (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --confirm [flags]",
 		ShortHelp:  "Expire a build for TestFlight.",
 		LongHelp: `Expire a build for TestFlight.
 
@@ -904,9 +896,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}

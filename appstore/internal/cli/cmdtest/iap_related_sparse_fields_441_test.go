@@ -411,8 +411,6 @@ func TestIAPRelatedSparseFieldValidationPrecedesHTTP441(t *testing.T) {
 		{name: "invalid subscription fields", args: []string{"subscriptions", "promoted-purchases", "list", "--app", "app-1", "--subscription-fields", "notAField"}, want: "--subscription-fields must be one of"},
 		{name: "invalid cross-scope iap fields", args: []string{"subscriptions", "promoted-purchases", "view", "--promoted-purchase-id", "promo-1", "--iap-fields", "notAField"}, want: "--iap-fields must be one of"},
 		{name: "invalid cross-scope subscription fields", args: []string{"iap", "promoted-purchases", "view", "--promoted-purchase-id", "promo-1", "--subscription-fields", "notAField"}, want: "--subscription-fields must be one of"},
-		{name: "images next conflict", args: []string{"iap", "images", "list", "--next", next, "--iap-fields", "versions"}, want: "--next cannot be combined with --iap-fields"},
-		{name: "localizations next conflict", args: []string{"iap", "localizations", "list", "--next", next, "--iap-fields", "versions"}, want: "--next cannot be combined with --iap-fields"},
 		{name: "iap promoted next conflict", args: []string{"iap", "promoted-purchases", "list", "--next", next, "--subscription-fields", "versions"}, want: "--next cannot be combined with --iap-fields or --subscription-fields"},
 		{name: "subscription promoted next conflict", args: []string{"subscriptions", "promoted-purchases", "list", "--next", next, "--iap-fields", "versions"}, want: "--next cannot be combined with --iap-fields or --subscription-fields"},
 		{name: "promoted view missing selector", args: []string{"iap", "promoted-purchases", "view"}, want: "--promoted-purchase-id or --iap-id is required"},
@@ -498,9 +496,6 @@ func TestIAPRelatedSparseFieldHelp441(t *testing.T) {
 	}{
 		{path: []string{"iap", "review-screenshots", "view"}, flag: "--iap-fields"},
 		{path: []string{"iap", "content", "view"}, flag: "--iap-fields"},
-		{path: []string{"iap", "images", "list"}, flag: "--iap-fields"},
-		{path: []string{"iap", "images", "view"}, flag: "--iap-fields"},
-		{path: []string{"iap", "localizations", "list"}, flag: "--iap-fields"},
 		{path: []string{"iap", "promoted-purchases", "list"}, flag: "--iap-fields"},
 		{path: []string{"iap", "promoted-purchases", "list"}, flag: "--subscription-fields"},
 		{path: []string{"iap", "promoted-purchases", "view"}, flag: "--iap-id"},

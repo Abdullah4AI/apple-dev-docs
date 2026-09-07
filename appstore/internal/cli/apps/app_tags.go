@@ -620,26 +620,6 @@ Examples:
 	}
 }
 
-func DeprecatedAppTagsTerritoriesRelationshipsAliasCommand() *ffcli.Command {
-	return shared.DeprecatedAliasLeafCommand(
-		AppTagsTerritoriesRelationshipsCommand(),
-		"territories-relationships",
-		"asc app-tags territories-links --id TAG_ID [flags]",
-		"asc app-tags territories-links",
-		"Warning: `asc app-tags territories-relationships` is deprecated. Use `asc app-tags territories-links`.",
-	)
-}
-
-func DeprecatedAppTagsRelationshipsAliasCommand() *ffcli.Command {
-	return shared.DeprecatedAliasLeafCommand(
-		AppTagsRelationshipsCommand(),
-		"relationships",
-		"asc app-tags links --app APP_ID [flags]",
-		"asc app-tags links",
-		"Warning: `asc app-tags relationships` is deprecated. Use `asc app-tags links`.",
-	)
-}
-
 func normalizeAppTagVisibilityFilter(value string) ([]string, error) {
 	values := shared.SplitCSV(value)
 	if len(values) == 0 {

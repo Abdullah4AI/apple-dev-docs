@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,9 +13,20 @@ import (
 
 const (
 	medicalDeviceRequirementName = "MEDICAL_DEVICE"
+	medicalDeviceDeclarationYes  = "yes"
 	medicalDeviceDeclarationNo   = "no"
 	medicalDeviceCollectedStatus = "COLLECTED"
 )
+
+var medicalDeviceSupportedRegions = []string{"EEA", "GBR", "USA"}
+
+// MedicalDeviceDeclarationOptions controls the app-level regulated
+// medical-device answer. Apple currently exposes only these three regions in
+// the web form; the detailed registration/support/contact subform is a
+// separate operation and is intentionally not represented here.
+type MedicalDeviceDeclarationOptions struct {
+	CountriesOrRegions []string
+}
 
 // MedicalDeviceDeclarationResult reports the resulting app-level declaration.
 type MedicalDeviceDeclarationResult struct {
@@ -63,6 +75,22 @@ type medicalDeviceFormResponse struct {
 	MedicalDeviceData  struct {
 		Declaration string `json:"declaration"`
 	} `json:"medicalDeviceData"`
+	rawPayload map[string]any
+}
+
+func (r *medicalDeviceFormResponse) UnmarshalJSON(data []byte) error {
+	type response medicalDeviceFormResponse
+	var decoded response
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var rawPayload map[string]any
+	if err := json.Unmarshal(data, &rawPayload); err != nil {
+		return err
+	}
+	*r = medicalDeviceFormResponse(decoded)
+	r.rawPayload = rawPayload
+	return nil
 }
 
 func trimComplianceRequirement(req complianceRequirement) complianceRequirement {
@@ -122,6 +150,46 @@ func normalizeMedicalDeviceRegion(value string) string {
 	default:
 		return value
 	}
+}
+
+func normalizeMedicalDeviceRegions(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return append([]string(nil), medicalDeviceSupportedRegions...), nil
+	}
+
+	allowed := make(map[string]struct{}, len(medicalDeviceSupportedRegions))
+	for _, region := range medicalDeviceSupportedRegions {
+		allowed[region] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	regions := make([]string, 0, len(values))
+	for _, value := range values {
+		region := normalizeMedicalDeviceRegion(value)
+		if region == "" {
+			continue
+		}
+		if _, ok := allowed[region]; !ok {
+			return nil, fmt.Errorf("unsupported medical device country/region %q (supported: EEA, GBR, USA)", strings.TrimSpace(value))
+		}
+		if _, ok := seen[region]; ok {
+			continue
+		}
+		seen[region] = struct{}{}
+		regions = append(regions, region)
+	}
+	if len(regions) == 0 {
+		return nil, fmt.Errorf("at least one medical device country/region is required")
+	}
+	slices.Sort(regions)
+	return regions, nil
+}
+
+// NormalizeMedicalDeviceDeclarationRegions validates and canonicalizes the
+// region values accepted by the medical-device web form. An empty list means
+// Apple's captured default region set.
+func NormalizeMedicalDeviceDeclarationRegions(values []string) ([]string, error) {
+	return normalizeMedicalDeviceRegions(values)
 }
 
 func medicalDeviceRegionsFromConstraints(constraints map[string]complianceConstraint) ([]string, error) {
@@ -227,13 +295,289 @@ func (c *Client) getMedicalDeviceForm(ctx context.Context, accountID, appID, req
 	return &payload, nil
 }
 
-// SetMedicalDeviceDeclaration sets the regulated medical device declaration.
-//
-// Only the false/no path is currently supported because Apple requires
-// additional region-specific metadata for the true/yes flow.
-func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, appID string, declared bool) (*MedicalDeviceDeclarationResult, error) {
+func medicalDeviceFormObject(form *medicalDeviceFormResponse) (map[string]any, error) {
+	if form == nil {
+		return map[string]any{}, nil
+	}
+
+	trimmedData := bytes.TrimSpace(form.Data)
+	if len(trimmedData) > 0 && !bytes.Equal(trimmedData, []byte("null")) {
+		var object map[string]any
+		if err := json.Unmarshal(trimmedData, &object); err == nil && object != nil {
+			return object, nil
+		}
+
+		var list []map[string]any
+		if err := json.Unmarshal(trimmedData, &list); err == nil {
+			if len(list) == 0 {
+				return map[string]any{}, nil
+			}
+			if list[0] != nil {
+				return list[0], nil
+			}
+		}
+
+		return nil, fmt.Errorf("medical device form data must be an object or a non-empty object array")
+	}
+
+	if len(form.rawPayload) == 0 {
+		return map[string]any{}, nil
+	}
+	// Some compliance-form responses put the stored answer fields at the
+	// top level instead of under `data`. Preserve that complete answer shape,
+	// while omitting the response envelope's metadata fields.
+	object := cloneMedicalDeviceMap(form.rawPayload)
+	delete(object, "constraints")
+	delete(object, "data")
+	if len(object) == 0 {
+		return map[string]any{}, nil
+	}
+	return object, nil
+}
+
+func cloneMedicalDeviceMap(source map[string]any) map[string]any {
+	clone := make(map[string]any, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func medicalDeviceFormMedicalData(form *medicalDeviceFormResponse, formData map[string]any) (map[string]any, bool, error) {
+	if raw, ok := formData["medicalDeviceData"]; ok && raw != nil {
+		medicalData, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("medical device form medicalDeviceData must be an object")
+		}
+		medicalData = cloneMedicalDeviceMap(medicalData)
+		declaration, _ := medicalData["declaration"].(string)
+		return medicalData, strings.TrimSpace(declaration) != "", nil
+	}
+
+	if form != nil {
+		if declaration := strings.TrimSpace(form.MedicalDeviceData.Declaration); declaration != "" {
+			return map[string]any{"declaration": declaration}, true, nil
+		}
+	}
+	return map[string]any{}, false, nil
+}
+
+func medicalDeviceRegistrationInfo(medicalData map[string]any) ([]any, error) {
+	raw, ok := medicalData["registrationInfo"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	registrationInfo, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("medical device registrationInfo must be an array")
+	}
+	return registrationInfo, nil
+}
+
+func medicalDeviceRegistrationRegion(value any) string {
+	row, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch countries := row["countriesOrRegions"].(type) {
+	case []any:
+		if len(countries) == 0 {
+			return ""
+		}
+		region, _ := countries[0].(string)
+		return normalizeMedicalDeviceRegion(region)
+	case []string:
+		if len(countries) == 0 {
+			return ""
+		}
+		return normalizeMedicalDeviceRegion(countries[0])
+	case string:
+		return normalizeMedicalDeviceRegion(countries)
+	default:
+		return ""
+	}
+}
+
+func buildMedicalDeviceRegistrationInfo(medicalData map[string]any, declared bool, selected []string) ([]any, error) {
+	existing, err := medicalDeviceRegistrationInfo(medicalData)
+	if err != nil {
+		return nil, err
+	}
+	if !declared {
+		// Apple's No branch preserves existing regional rows; the app-level
+		// declaration and requirement status define the current answer, while
+		// historical regional details remain available for future edits.
+		if existing == nil {
+			return []any{}, nil
+		}
+		return existing, nil
+	}
+
+	selectedRegions := make(map[string]struct{}, len(selected))
+	for _, region := range selected {
+		selectedRegions[region] = struct{}{}
+	}
+	existingByRegion := make(map[string]map[string]any, len(existing))
+	for _, value := range existing {
+		region := medicalDeviceRegistrationRegion(value)
+		row, ok := value.(map[string]any)
+		if region == "" || !ok {
+			continue
+		}
+		if _, already := existingByRegion[region]; !already {
+			existingByRegion[region] = row
+		}
+	}
+
+	updated := make([]any, 0, len(medicalDeviceSupportedRegions))
+	for _, region := range medicalDeviceSupportedRegions {
+		row := cloneMedicalDeviceMap(existingByRegion[region])
+		if row == nil {
+			row = make(map[string]any)
+		}
+		row["countriesOrRegions"] = []string{region}
+		declaration := medicalDeviceDeclarationNo
+		if _, ok := selectedRegions[region]; ok {
+			declaration = medicalDeviceDeclarationYes
+		}
+		row["declaration"] = declaration
+		updated = append(updated, row)
+	}
+	return updated, nil
+}
+
+func medicalDevicePersistedAffirmativeRegions(form *medicalDeviceFormResponse) ([]string, error) {
+	formData, err := medicalDeviceFormObject(form)
+	if err != nil {
+		return nil, err
+	}
+	medicalData, _, err := medicalDeviceFormMedicalData(form, formData)
+	if err != nil {
+		return nil, err
+	}
+
+	rawRegistrationInfo, hasRegistrationInfo := medicalData["registrationInfo"]
+	if !hasRegistrationInfo {
+		regions := form.countriesOrRegions()
+		if len(regions) == 0 {
+			return nil, fmt.Errorf("medical device persisted region selections are missing")
+		}
+		return regions, nil
+	}
+	if rawRegistrationInfo == nil {
+		return []string{}, nil
+	}
+
+	registrationInfo, err := medicalDeviceRegistrationInfo(medicalData)
+	if err != nil {
+		return nil, err
+	}
+	seenDeclarations := make(map[string]string, len(registrationInfo))
+	regions := make([]string, 0, len(registrationInfo))
+	for _, value := range registrationInfo {
+		row, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("medical device registrationInfo contains a non-object region row")
+		}
+		region := medicalDeviceRegistrationRegion(row)
+		if region == "" {
+			return nil, fmt.Errorf("medical device registrationInfo contains a row without a country/region")
+		}
+		declaration, ok := row["declaration"].(string)
+		if !ok {
+			return nil, fmt.Errorf("medical device registrationInfo row for %q has no declaration", region)
+		}
+		declaration = strings.ToLower(strings.TrimSpace(declaration))
+		if declaration != medicalDeviceDeclarationYes && declaration != medicalDeviceDeclarationNo {
+			return nil, fmt.Errorf("medical device registrationInfo row for %q has unsupported declaration %q", region, declaration)
+		}
+		if previous, exists := seenDeclarations[region]; exists && previous != declaration {
+			return nil, fmt.Errorf("medical device registrationInfo has conflicting declarations for %q", region)
+		}
+		seenDeclarations[region] = declaration
+		if declaration == medicalDeviceDeclarationYes {
+			regions = append(regions, region)
+		}
+	}
+	slices.Sort(regions)
+	return slices.Compact(regions), nil
+}
+
+func medicalDeviceDeclarationRequestBody(form *medicalDeviceFormResponse, accountID, appID string, requirement *complianceRequirement, declared bool, selected []string) (map[string]any, bool, error) {
+	formData, err := medicalDeviceFormObject(form)
+	if err != nil {
+		return nil, false, err
+	}
+	medicalData, existingDeclaration, err := medicalDeviceFormMedicalData(form, formData)
+	if err != nil {
+		return nil, false, err
+	}
+
+	body := cloneMedicalDeviceMap(formData)
+	delete(body, "medicalDeviceData")
 	if declared {
-		return nil, fmt.Errorf("only false is currently supported for the regulated medical device declaration")
+		medicalData["declaration"] = medicalDeviceDeclarationYes
+	} else {
+		medicalData["declaration"] = medicalDeviceDeclarationNo
+	}
+
+	if !existingDeclaration {
+		body["countriesOrRegions"] = append([]string(nil), selected...)
+	} else {
+		registrationInfo, err := buildMedicalDeviceRegistrationInfo(medicalData, declared, selected)
+		if err != nil {
+			return nil, false, err
+		}
+		medicalData["registrationInfo"] = registrationInfo
+		if _, ok := body["countriesOrRegions"]; !ok {
+			if regions := form.countriesOrRegions(); len(regions) > 0 {
+				body["countriesOrRegions"] = regions
+			}
+		}
+	}
+
+	fillMedicalDeviceFormIdentity(body, accountID, appID, requirement)
+	body["medicalDeviceData"] = medicalData
+	return body, existingDeclaration, nil
+}
+
+func fillMedicalDeviceFormIdentity(body map[string]any, accountID, appID string, requirement *complianceRequirement) {
+	// Older form responses omitted these identity fields, while the captured
+	// UI payload includes them when present. Add them only as a compatibility
+	// fallback so opaque fields from form.data remain unchanged.
+	if _, ok := body["accountId"]; !ok {
+		body["accountId"] = strings.TrimSpace(accountID)
+	}
+	if _, ok := body["contentId"]; !ok {
+		body["contentId"] = strings.TrimSpace(appID)
+	}
+	if _, ok := body["requirementId"]; !ok {
+		body["requirementId"] = requirement.ID
+	}
+	if _, ok := body["requirementName"]; !ok {
+		body["requirementName"] = requirement.Name
+	}
+}
+
+// SetMedicalDeviceDeclaration sets the regulated medical device declaration.
+// The compatibility wrapper retains the existing method shape and defaults an
+// affirmative answer to Apple's captured EEA/GBR/USA region set.
+func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, appID string, declared bool) (*MedicalDeviceDeclarationResult, error) {
+	return c.SetMedicalDeviceDeclarationWithOptions(ctx, accountID, appID, declared, MedicalDeviceDeclarationOptions{})
+}
+
+// SetMedicalDeviceDeclarationWithOptions sets the app-level medical-device
+// answer using Apple's captured form contract. It does not attempt the
+// region-specific registration, support-information, or contact-information
+// subform; those fields must already be present and are preserved.
+func (c *Client) SetMedicalDeviceDeclarationWithOptions(ctx context.Context, accountID, appID string, declared bool, options MedicalDeviceDeclarationOptions) (*MedicalDeviceDeclarationResult, error) {
+	var selected []string
+	var err error
+	if declared || len(options.CountriesOrRegions) > 0 {
+		selected, err = normalizeMedicalDeviceRegions(options.CountriesOrRegions)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	requirement, form, err := c.medicalDeviceRequirementAndForm(ctx, accountID, appID)
@@ -241,7 +585,7 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 		return nil, err
 	}
 
-	if form.declaration() == medicalDeviceDeclarationNo && requirement.Status == medicalDeviceCollectedStatus {
+	if !declared && form.declaration() == medicalDeviceDeclarationNo && requirement.Status == medicalDeviceCollectedStatus {
 		return &MedicalDeviceDeclarationResult{
 			AppID:              strings.TrimSpace(appID),
 			RequirementID:      requirement.ID,
@@ -253,35 +597,73 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 			CountriesOrRegions: form.countriesOrRegions(),
 		}, nil
 	}
-
-	countriesOrRegions, err := medicalDeviceRegionsFromConstraints(form.Constraints)
-	if err != nil {
-		return nil, err
+	if !declared && form.declaration() == "" && len(options.CountriesOrRegions) == 0 {
+		selected, err = medicalDeviceRegionsFromConstraints(form.Constraints)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if declared && form.declaration() == medicalDeviceDeclarationYes {
+		persistedRegions, err := medicalDevicePersistedAffirmativeRegions(form)
+		if err != nil {
+			return nil, fmt.Errorf("medical device declaration region verification failed: %w", err)
+		}
+		if slices.Equal(persistedRegions, selected) {
+			return &MedicalDeviceDeclarationResult{
+				AppID:              strings.TrimSpace(appID),
+				RequirementID:      requirement.ID,
+				RequirementName:    requirement.Name,
+				Status:             requirement.Status,
+				FormID:             requirement.FormID,
+				Declared:           true,
+				Changed:            false,
+				CountriesOrRegions: persistedRegions,
+			}, nil
+		}
 	}
 
-	requestBody := map[string]any{
-		"accountId":          strings.TrimSpace(accountID),
-		"contentId":          strings.TrimSpace(appID),
-		"requirementId":      requirement.ID,
-		"requirementName":    requirement.Name,
-		"countriesOrRegions": countriesOrRegions,
-		"medicalDeviceData": map[string]string{
-			"declaration": medicalDeviceDeclarationNo,
-		},
+	requestBody, existingDeclaration, err := medicalDeviceDeclarationRequestBody(form, accountID, appID, requirement, declared, selected)
+	if err != nil {
+		return nil, err
 	}
 	path := "/ppm/complianceform/v1/accounts/" + url.PathEscape(strings.TrimSpace(accountID)) +
 		"/contents/" + url.PathEscape(strings.TrimSpace(appID)) +
 		"/requirements/" + url.PathEscape(requirement.ID) +
 		"/forms"
-	if _, err := c.doAppComplianceRequest(ctx, appID, http.MethodPost, path, requestBody); err != nil {
+	method := http.MethodPost
+	if existingDeclaration {
+		method = http.MethodPut
+	}
+	if _, err := c.doAppComplianceRequest(ctx, appID, method, path, requestBody); err != nil {
 		return nil, err
 	}
 
-	updatedRequirement := requirement
-	if updatedRequirements, err := c.listComplianceRequirements(ctx, accountID, appID); err == nil {
-		if refreshed := findComplianceRequirement(updatedRequirements, medicalDeviceRequirementName); refreshed != nil {
-			updatedRequirement = refreshed
+	updatedRequirement, updatedForm, err := c.medicalDeviceRequirementAndForm(ctx, accountID, appID)
+	if err != nil {
+		return nil, fmt.Errorf("medical device declaration verification failed: %w", err)
+	}
+	wantDeclaration := medicalDeviceDeclarationNo
+	if declared {
+		wantDeclaration = "yes"
+	}
+	if updatedForm.declaration() != wantDeclaration {
+		return nil, fmt.Errorf("medical device declaration verification failed: Apple returned %q, want %q", updatedForm.declaration(), wantDeclaration)
+	}
+	if !declared && updatedRequirement.Status != medicalDeviceCollectedStatus {
+		return nil, fmt.Errorf("medical device declaration verification failed: Apple returned status %q, want %q", updatedRequirement.Status, medicalDeviceCollectedStatus)
+	}
+	countriesOrRegions := updatedForm.countriesOrRegions()
+	if declared {
+		persistedRegions, err := medicalDevicePersistedAffirmativeRegions(updatedForm)
+		if err != nil {
+			return nil, fmt.Errorf("medical device declaration verification failed: %w", err)
 		}
+		if !slices.Equal(persistedRegions, selected) {
+			return nil, fmt.Errorf("medical device declaration verification failed: persisted regions %v, want %v", persistedRegions, selected)
+		}
+		countriesOrRegions = persistedRegions
+	} else if len(countriesOrRegions) == 0 {
+		countriesOrRegions = append([]string(nil), selected...)
 	}
 
 	return &MedicalDeviceDeclarationResult{
@@ -290,7 +672,7 @@ func (c *Client) SetMedicalDeviceDeclaration(ctx context.Context, accountID, app
 		RequirementName:    updatedRequirement.Name,
 		Status:             updatedRequirement.Status,
 		FormID:             updatedRequirement.FormID,
-		Declared:           false,
+		Declared:           declared,
 		Changed:            true,
 		CountriesOrRegions: countriesOrRegions,
 	}, nil

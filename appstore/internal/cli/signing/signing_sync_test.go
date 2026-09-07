@@ -32,15 +32,16 @@ func TestSigningSyncCommandLongHelpUsesOutputDirExample(t *testing.T) {
 	}
 }
 
-func TestSigningSyncPushHelpDocumentsDeviceTransition(t *testing.T) {
+func TestSigningSyncPushHelpPairsDeviceWithCreateMissing(t *testing.T) {
 	deviceFlag := syncPushCommand().FlagSet.Lookup("device")
 	if deviceFlag == nil {
 		t.Fatal("expected --device flag")
 	}
-	if !strings.Contains(deviceFlag.Usage, "--create-missing") ||
-		!strings.Contains(deviceFlag.Usage, "deprecated") ||
-		!strings.Contains(deviceFlag.Usage, "5.0.0") {
-		t.Fatalf("--device usage = %q, want the transition and rejection release", deviceFlag.Usage)
+	if !strings.Contains(deviceFlag.Usage, "--create-missing") {
+		t.Fatalf("--device usage = %q, want it to name --create-missing", deviceFlag.Usage)
+	}
+	if strings.Contains(deviceFlag.Usage, "deprecated") || strings.Contains(deviceFlag.Usage, "5.0.0") {
+		t.Fatalf("--device usage = %q, must not describe a finished transition", deviceFlag.Usage)
 	}
 }
 
@@ -287,11 +288,12 @@ func TestSigningSyncCaseCollisionFailsBeforeProfileCreatePOST(t *testing.T) {
 	}
 }
 
-func TestSigningSyncPushWarnsForDeviceWithoutCreateMissing(t *testing.T) {
+func TestSigningSyncPushRejectsDeviceWithoutCreateMissing(t *testing.T) {
+	t.Setenv(signingSyncPasswordEnvVar, "repository-password")
 	clientCalls := 0
 	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
 		clientCalls++
-		return nil, errors.New("client reached after validation")
+		return nil, errors.New("client must not be created")
 	}))
 
 	cmd := syncPushCommand()
@@ -303,7 +305,6 @@ func TestSigningSyncPushWarnsForDeviceWithoutCreateMissing(t *testing.T) {
 			"--bundle-id", "com.example.app",
 			"--profile-type", "IOS_APP_DEVELOPMENT",
 			"--repo", "git@github.com:team/certs.git",
-			"--password", "secret",
 			"--device", "DEVICE1",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -311,22 +312,23 @@ func TestSigningSyncPushWarnsForDeviceWithoutCreateMissing(t *testing.T) {
 		runErr = cmd.Run(context.Background())
 	})
 
-	if runErr == nil || runErr.Error() != "signing sync push: client reached after validation" {
-		t.Fatalf("unexpected error: %v", runErr)
+	if runErr == nil || runErr.Error() != deviceWithoutCreateMissingError {
+		t.Fatalf("error = %v, want %q", runErr, deviceWithoutCreateMissingError)
 	}
-	if errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("deprecated input must not return a usage error: %v", runErr)
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", runErr)
 	}
-	if clientCalls != 1 {
-		t.Fatalf("client factory calls = %d, want 1", clientCalls)
+	if clientCalls != 0 {
+		t.Fatalf("client factory calls = %d, want 0", clientCalls)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	wantWarning := "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0.\n" +
-		"Warning: --password and ASC_MATCH_PASSWORD are deprecated for signing sync; use --password-file or ASC_SIGNING_SYNC_PASSWORD. The legacy sources will be removed in 5.0.0.\n"
-	if stderr != wantWarning {
-		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	if stderr != "Error: "+deviceWithoutCreateMissingError+"\n" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "Cloning signing repo") {
+		t.Fatalf("stderr shows repository side effects: %q", stderr)
 	}
 }
 
@@ -412,89 +414,160 @@ func TestWriteDecryptedOutputFilePreservesExistingNonSensitiveMode(t *testing.T)
 
 func TestResolveSyncPasswordPrefersProtectedFileThenEnvironment(t *testing.T) {
 	t.Setenv(signingSyncPasswordEnvVar, "environment-password")
-	t.Setenv(matchPasswordEnvVar, "legacy-environment-password")
 	path := filepath.Join(t.TempDir(), "password")
 	if err := os.WriteFile(path, []byte("file-password\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	password, legacy, err := resolveSyncPassword(path, "legacy-flag-password")
+	password, err := resolveSyncPassword(path)
 	if err != nil {
 		t.Fatalf("resolveSyncPassword(file) error = %v", err)
 	}
-	if password != "file-password" || legacy {
-		t.Fatalf("file result = %q, legacy=%v", password, legacy)
+	if password != "file-password" {
+		t.Fatalf("file result = %q", password)
 	}
 
-	password, legacy, err = resolveSyncPassword("", "")
+	password, err = resolveSyncPassword("")
 	if err != nil {
 		t.Fatalf("resolveSyncPassword(env) error = %v", err)
 	}
-	if password != "environment-password" || legacy {
-		t.Fatalf("environment result = %q, legacy=%v", password, legacy)
+	if password != "environment-password" {
+		t.Fatalf("environment result = %q", password)
 	}
 
 	t.Setenv(signingSyncPasswordEnvVar, "")
-	password, legacy, err = resolveSyncPassword("", "legacy-flag-password")
-	if err != nil {
-		t.Fatalf("resolveSyncPassword(legacy) error = %v", err)
+	_, err = resolveSyncPassword("")
+	if err == nil || err.Error() != "--password-file is required (or set ASC_SIGNING_SYNC_PASSWORD)" {
+		t.Fatalf("resolveSyncPassword(missing) error = %v, want missing --password-file usage error", err)
 	}
-	if password != "legacy-flag-password" || !legacy {
-		t.Fatalf("legacy result = %q, legacy=%v", password, legacy)
-	}
-}
-
-func TestResolveSyncPasswordExplicitLegacyFlagWinsAmbientNewEnvironment(t *testing.T) {
-	t.Setenv(signingSyncPasswordEnvVar, "ambient-new-password")
-	password, legacy, err := resolveSyncPassword("", " explicit-legacy-password ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if password != "explicit-legacy-password" || !legacy {
-		t.Fatalf("password=%q legacy=%v", password, legacy)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", err)
 	}
 }
 
 func TestResolveSyncPasswordPreservesEnvironmentWhitespace(t *testing.T) {
 	t.Setenv(signingSyncPasswordEnvVar, "  environment password  ")
-	password, legacy, err := resolveSyncPassword("", "")
+	password, err := resolveSyncPassword("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if password != "  environment password  " || legacy {
-		t.Fatalf("password = %q, legacy=%v", password, legacy)
+	if password != "  environment password  " {
+		t.Fatalf("password = %q", password)
 	}
 
 	path := filepath.Join(t.TempDir(), "password")
 	if err := os.WriteFile(path, []byte("file password \n\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	password, legacy, err = resolveSyncPassword(path, "legacy")
+	password, err = resolveSyncPassword(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if password != "file password \n" || legacy {
-		t.Fatalf("file password = %q, legacy=%v", password, legacy)
+	if password != "file password \n" {
+		t.Fatalf("file password = %q", password)
 	}
 }
 
-func TestResolveSyncPasswordPreservesLegacyTrimCompatibility(t *testing.T) {
+func TestResolveSyncPasswordIgnoresLegacyMatchPasswordEnvironment(t *testing.T) {
 	t.Setenv(signingSyncPasswordEnvVar, "")
-	t.Setenv(matchPasswordEnvVar, "  legacy environment password  ")
-	password, legacy, err := resolveSyncPassword("", "")
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv("ASC_MATCH_PASSWORD", "legacy-environment-password")
+
+	password, err := resolveSyncPassword("")
+	if err == nil {
+		t.Fatalf("resolveSyncPassword() = %q, want missing --password-file usage error", password)
 	}
-	if password != "legacy environment password" || !legacy {
-		t.Fatalf("legacy environment password = %q, legacy=%v", password, legacy)
+	if err.Error() != "--password-file is required (or set ASC_SIGNING_SYNC_PASSWORD)" {
+		t.Fatalf("error = %q, want error naming only the supported sources", err.Error())
+	}
+	if strings.Contains(err.Error(), "ASC_MATCH_PASSWORD") || strings.Contains(err.Error(), "--password ") {
+		t.Fatalf("error = %q mentions removed legacy sources", err.Error())
+	}
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+}
+
+func TestSigningSyncIgnoresLegacyMatchPasswordEnvironmentWithoutWarning(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *ffcli.Command
+		args []string
+	}{
+		{
+			name: "push",
+			cmd:  syncPushCommand(),
+			args: []string{
+				"--bundle-id", "com.example.app",
+				"--profile-type", "IOS_APP_STORE",
+				"--repo", "git@example.com:team/signing.git",
+			},
+		},
+		{
+			name: "pull",
+			cmd:  syncPullCommand(),
+			args: []string{
+				"--repo", "git@example.com:team/signing.git",
+			},
+		},
 	}
 
-	password, legacy, err = resolveSyncPassword("", "  legacy flag password  ")
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(signingSyncPasswordEnvVar, "")
+			t.Setenv("ASC_MATCH_PASSWORD", "legacy-environment-password")
+			clientCalls := 0
+			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+				clientCalls++
+				return nil, errors.New("client must not be created")
+			}))
+			if err := tt.cmd.Parse(tt.args); err != nil {
+				t.Fatal(err)
+			}
+			var runErr error
+			stdout, stderr := captureOutput(t, func() {
+				runErr = tt.cmd.Run(context.Background())
+			})
+			if runErr == nil || runErr.Error() != "--password-file is required (or set ASC_SIGNING_SYNC_PASSWORD)" {
+				t.Fatalf("error = %v, want missing --password-file usage error", runErr)
+			}
+			if !errors.Is(runErr, flag.ErrHelp) {
+				t.Fatalf("error = %v, want usage error", runErr)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if !strings.HasPrefix(stderr, "Error: --password-file is required (or set ASC_SIGNING_SYNC_PASSWORD)\n") {
+				t.Fatalf("stderr = %q", stderr)
+			}
+			if strings.Contains(stderr, "Warning") || strings.Contains(stderr, "ASC_MATCH_PASSWORD") || strings.Contains(stderr, "deprecated") {
+				t.Fatalf("stderr mentions removed legacy sources: %q", stderr)
+			}
+			if strings.Contains(stderr, "Cloning signing repo") {
+				t.Fatalf("stderr shows repository side effects: %q", stderr)
+			}
+			if clientCalls != 0 {
+				t.Fatalf("client factory calls = %d, want 0", clientCalls)
+			}
+		})
 	}
-	if password != "legacy flag password" || !legacy {
-		t.Fatalf("legacy flag password = %q, legacy=%v", password, legacy)
+}
+
+func TestSigningSyncDoesNotDefineLegacyPasswordFlag(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cmd  *ffcli.Command
+	}{
+		{name: "push", cmd: syncPushCommand()},
+		{name: "pull", cmd: syncPullCommand()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.cmd.FlagSet.Lookup("password") != nil {
+				t.Fatalf("signing sync %s still defines the removed --password flag", tt.name)
+			}
+			if tt.cmd.FlagSet.Lookup("password-file") == nil {
+				t.Fatalf("signing sync %s is missing --password-file", tt.name)
+			}
+		})
 	}
 }
 
@@ -947,11 +1020,6 @@ func TestSigningSyncPushRejectsIdentityFlagConflictsBeforeSecretsOrClient(t *tes
 			args: []string{"--private-key", "key.pem"},
 			want: "--identity-sha256 is required with --private-key to select one App Store Connect certificate",
 		},
-		{
-			name: "password file and legacy password",
-			args: []string{"--password-file", "password", "--password", "legacy-password"},
-			want: "--password-file and --password are mutually exclusive",
-		},
 	}
 
 	for _, tt := range tests {
@@ -1005,7 +1073,6 @@ func TestSigningSyncRejectsBlankPasswordFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(signingSyncPasswordEnvVar, "environment-fallback-must-not-be-used")
-			t.Setenv(matchPasswordEnvVar, "legacy-fallback-must-not-be-used")
 			clientCalls := 0
 			t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
 				clientCalls++

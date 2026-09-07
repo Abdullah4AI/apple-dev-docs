@@ -65,7 +65,7 @@ var unknownChildTaskHints = map[string][]taskHint{
 		{task: "explain blockers", command: "asc review doctor --app APP_ID"},
 		{
 			task:    "submit for review",
-			command: "asc review submit --app APP_ID --version VERSION --build BUILD_ID --confirm",
+			command: "asc review submit --app APP_ID --version VERSION --build-id BUILD_ID --confirm",
 		},
 		{task: "past submissions", command: "asc review history --app APP_ID"},
 	},

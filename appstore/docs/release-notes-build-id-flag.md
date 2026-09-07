@@ -1,5 +1,9 @@
 # Canonical `--build-id` selector
 
+> Status: the hidden `--build` compatibility alias described below was removed
+> in 5.0.0 on every command in the table (and on `asc versions attach-build`).
+> `--build` is now an unknown flag; use `--build-id`. See `migrate-to-5-0.mdx`.
+
 Release 4.7.0 standardizes the build-ID selector across the remaining command
 paths that previously used `--build`. New automation should use
 `--build-id`; it is now the documented flag and appears in command help.

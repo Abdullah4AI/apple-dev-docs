@@ -1,5 +1,7 @@
 # Private signing identity sync
 
+> Status: the legacy `--password` flag and `ASC_MATCH_PASSWORD` fallbacks described below were removed in 5.0.0; `--password-file` and `ASC_SIGNING_SYNC_PASSWORD` are the only password sources. See `migrate-to-5-0.mdx`.
+
 ## Placement and invocation
 
 This change extends the existing experimental `asc signing sync push` command.

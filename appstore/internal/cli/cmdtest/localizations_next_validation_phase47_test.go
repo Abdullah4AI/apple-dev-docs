@@ -11,13 +11,6 @@ import (
 	"testing"
 )
 
-func expectedLocalizationsStderr(argsPrefix []string) string {
-	if len(argsPrefix) >= 2 && argsPrefix[0] == "beta-app-localizations" && argsPrefix[1] == "list" {
-		return betaAppLocalizationsListDeprecationWarning
-	}
-	return ""
-}
-
 // runLocalizationsInvalidNextURLCases exercises the shared --next validation
 // contract for the localization list surfaces.
 //
@@ -87,11 +80,7 @@ func runLocalizationsInvalidNextURLCases(
 			if errors.Is(runErr, flag.ErrHelp) {
 				t.Fatalf("expected a plain error for the deferred command, got a usage error: %v", runErr)
 			}
-			if wantWarning := expectedLocalizationsStderr(argsPrefix); wantWarning != "" {
-				if !strings.Contains(stderr, wantWarning) {
-					t.Fatalf("expected deprecation warning %q, got %q", wantWarning, stderr)
-				}
-			} else if stderr != "" {
+			if stderr != "" {
 				t.Fatalf("expected empty stderr, got %q", stderr)
 			}
 		})
@@ -159,11 +148,7 @@ func runLocalizationsPaginateFromNext(
 		}
 	})
 
-	if wantWarning := expectedLocalizationsStderr(argsPrefix); wantWarning != "" {
-		if !strings.Contains(stderr, wantWarning) {
-			t.Fatalf("expected deprecation warning %q, got %q", wantWarning, stderr)
-		}
-	} else if stderr != "" {
+	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 	for _, id := range wantIDs {

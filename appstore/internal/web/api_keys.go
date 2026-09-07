@@ -160,41 +160,107 @@ func (c *Client) ListAPIKeys(ctx context.Context) ([]APIKeyListItem, error) {
 	}
 	items := make([]APIKeyListItem, 0, nTeam+nIndividual)
 	if teamErr == nil {
-		for _, key := range teamKeys {
-			items = append(items, APIKeyListItem{
-				KeyID:       key.KeyID,
-				Name:        key.Name,
-				Kind:        APIKeyKindTeam,
-				Roles:       append([]string(nil), key.Roles...),
-				Active:      key.Active,
-				KeyType:     key.KeyType,
-				LastUsed:    key.LastUsed,
-				GeneratedBy: cloneKeyActor(key.GeneratedBy),
-				RevokedBy:   cloneKeyActor(key.RevokedBy),
-			})
-		}
+		items = append(items, teamAPIKeyListItems(teamKeys)...)
 	}
 	if individualErr == nil {
-		for _, key := range individualKeys {
-			item := APIKeyListItem{
-				KeyID:    key.KeyID,
-				Name:     key.Name,
-				Kind:     APIKeyKindIndividual,
-				Roles:    append([]string(nil), key.Roles...),
-				Active:   key.Active,
-				KeyType:  key.KeyType,
-				LastUsed: key.LastUsed,
-			}
-			if key.CreatedByActorID != "" {
-				item.GeneratedBy = &KeyActor{ID: key.CreatedByActorID}
-			}
-			if key.RevokedByActorID != "" {
-				item.RevokedBy = &KeyActor{ID: key.RevokedByActorID}
-			}
-			items = append(items, item)
-		}
+		items = append(items, individualAPIKeyListItems(individualKeys)...)
 	}
 	return items, nil
+}
+
+// ListAPIKeysByKind returns only the requested API-key family. Unlike
+// ListAPIKeys, it deliberately does not query the other family; callers use
+// this boundary before and after a destructive operation to verify the exact
+// resource kind they selected.
+func (c *Client) ListAPIKeysByKind(ctx context.Context, kind string) ([]APIKeyListItem, error) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case APIKeyKindTeam:
+		keys, err := c.listTeamKeys(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return teamAPIKeyListItems(keys), nil
+	case APIKeyKindIndividual:
+		keys, err := c.listIndividualKeys(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return individualAPIKeyListItems(keys), nil
+	default:
+		return nil, fmt.Errorf("api key type must be team or individual")
+	}
+}
+
+func teamAPIKeyListItems(keys []teamAPIKey) []APIKeyListItem {
+	items := make([]APIKeyListItem, 0, len(keys))
+	for _, key := range keys {
+		items = append(items, APIKeyListItem{
+			KeyID:       key.KeyID,
+			Name:        key.Name,
+			Kind:        APIKeyKindTeam,
+			Roles:       append([]string(nil), key.Roles...),
+			Active:      key.Active,
+			KeyType:     key.KeyType,
+			LastUsed:    key.LastUsed,
+			GeneratedBy: cloneKeyActor(key.GeneratedBy),
+			RevokedBy:   cloneKeyActor(key.RevokedBy),
+		})
+	}
+	return items
+}
+
+func individualAPIKeyListItems(keys []individualAPIKey) []APIKeyListItem {
+	items := make([]APIKeyListItem, 0, len(keys))
+	for _, key := range keys {
+		item := APIKeyListItem{
+			KeyID:    key.KeyID,
+			Name:     key.Name,
+			Kind:     APIKeyKindIndividual,
+			Roles:    append([]string(nil), key.Roles...),
+			Active:   key.Active,
+			KeyType:  key.KeyType,
+			LastUsed: key.LastUsed,
+		}
+		if key.CreatedByActorID != "" {
+			item.GeneratedBy = &KeyActor{ID: key.CreatedByActorID}
+		}
+		if key.RevokedByActorID != "" {
+			item.RevokedBy = &KeyActor{ID: key.RevokedByActorID}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// RevokeAPIKey marks one team or individual API key inactive using the
+// type-specific Iris web resource. The caller must preflight and verify the
+// key through ListAPIKeysByKind.
+func (c *Client) RevokeAPIKey(ctx context.Context, keyID, kind string) error {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return fmt.Errorf("api key id is required")
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind != APIKeyKindTeam && kind != APIKeyKindIndividual {
+		return fmt.Errorf("api key type must be team or individual")
+	}
+
+	request := map[string]any{
+		"data": map[string]any{
+			"id":   keyID,
+			"type": "apiKeys",
+			"attributes": map[string]any{
+				"isActive": false,
+			},
+		},
+	}
+	path := "/apiKeys/" + url.PathEscape(keyID)
+	if kind == APIKeyKindTeam {
+		_, err := c.doIrisV1Request(ctx, http.MethodPatch, path, request)
+		return err
+	}
+	_, err := c.doIrisV2Request(ctx, http.MethodPatch, path, request)
+	return err
 }
 
 // DownloadAPIKey downloads and decodes the one-time P8 for an API key.

@@ -81,7 +81,6 @@ func EncryptionDeclarationsListCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	builds := fs.String("build-id", "", "Filter by build IDs (comma-separated)")
-	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	fields := fs.String("fields", "", "Fields to include: "+strings.Join(encryptionDeclarationFieldList(), ", "))
 	documentFields := fs.String("document-fields", "", "Document fields to include: "+strings.Join(encryptionDocumentFieldList(), ", "))
 	include := fs.String("include", "", "Include relationships: "+strings.Join(encryptionDeclarationIncludeList(), ", "))
@@ -104,9 +103,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuilds.Apply(builds); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("encryption declarations list: --limit must be between 1 and 200")
 			}
@@ -546,7 +542,6 @@ func EncryptionDeclarationsAssignBuildsCommand() *ffcli.Command {
 
 	declarationID := fs.String("id", "", "Encryption declaration ID (required)")
 	builds := shared.BindOnceCSVFlag(fs, "build-id", "Build IDs to assign (comma-separated)")
-	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -561,18 +556,13 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			buildValue := builds.String()
-			if err := legacyBuilds.Apply(&buildValue); err != nil {
-				return err
-			}
-
 			declarationValue := strings.TrimSpace(*declarationID)
 			if declarationValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
 				return shared.MissingRequiredUsageError("--id")
 			}
 
-			buildIDs := shared.SplitCSV(buildValue)
+			buildIDs := shared.SplitCSV(builds.String())
 			if len(buildIDs) == 0 {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")
 				return shared.MissingRequiredUsageError("--build-id")

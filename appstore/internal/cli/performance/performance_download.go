@@ -22,7 +22,6 @@ func PerformanceDownloadCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	buildID := fs.String("build-id", "", "Build ID to download metrics for")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	diagnosticID := fs.String("diagnostic-id", "", "Diagnostic signature ID to download logs for")
 	platform := fs.String("platform", "", "Platform filter (IOS)")
 	metricType := fs.String("metric-type", "", "Metric types (comma-separated: "+strings.Join(perfPowerMetricTypeList(), ", ")+")")
@@ -45,10 +44,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			appFlag := strings.TrimSpace(*appID)
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			trimmedDiagnosticID := strings.TrimSpace(*diagnosticID)

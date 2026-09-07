@@ -3,11 +3,15 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 )
 
 const (
@@ -50,6 +54,24 @@ type DeveloperBundleIDCapabilityEnableResult struct {
 	Changed    bool   `json:"changed"`
 	Status     string `json:"status"`
 }
+
+// DeveloperBundleIDCapabilityDisableRequest disables one supported Developer
+// Portal-only capability on an existing Bundle ID resource.
+type DeveloperBundleIDCapabilityDisableRequest struct {
+	BundleID   string
+	Capability string
+}
+
+// DeveloperBundleIDCapabilityUnverifiedError is returned when a capability
+// PATCH may have been applied but the requested disabled state could not be
+// proven. Callers should inspect the Bundle ID before retrying.
+type DeveloperBundleIDCapabilityUnverifiedError struct {
+	Err error
+}
+
+func (e *DeveloperBundleIDCapabilityUnverifiedError) Error() string { return e.Err.Error() }
+
+func (e *DeveloperBundleIDCapabilityUnverifiedError) Unwrap() error { return e.Err }
 
 type developerCapabilityMetadataResponse struct {
 	Data []struct {
@@ -181,6 +203,227 @@ func (c *Client) EnableDeveloperBundleIDCapability(ctx context.Context, req Deve
 	}, nil
 }
 
+// DisableDeveloperBundleIDCapability disables a supported Developer
+// Portal-only Bundle ID capability and verifies the resulting graph. The
+// private endpoint does not provide a reliable mutation response body, so a
+// successful PATCH is accepted only after a fresh exact-resource read proves
+// that no matching capability remains enabled.
+func (c *Client) DisableDeveloperBundleIDCapability(ctx context.Context, req DeveloperBundleIDCapabilityDisableRequest) (*asc.DeveloperBundleIDCapabilityDisableResult, error) {
+	normalized, err := normalizeDeveloperBundleIDCapabilityEnableRequest(DeveloperBundleIDCapabilityEnableRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	req.BundleID = normalized.BundleID
+	req.Capability = normalized.Capability
+	if err := c.ensureDeveloperPortalSession(ctx); err != nil {
+		return nil, err
+	}
+
+	metadata, err := c.loadDeveloperCapabilityMetadata(ctx, req.BundleID)
+	if err != nil {
+		return nil, err
+	}
+	capabilityMetadata, ok := findDeveloperCapability(metadata, req.Capability)
+	if !ok {
+		return nil, fmt.Errorf("capability %q is not available in Developer Portal for this account", req.Capability)
+	}
+	if !capabilityMetadata.Editable {
+		return nil, fmt.Errorf("capability %q is not editable in Developer Portal for this account", req.Capability)
+	}
+
+	current, err := c.loadDeveloperBundleIDExact(ctx, req.BundleID)
+	if err != nil {
+		return nil, err
+	}
+	before, err := developerBundleIDCapabilityDisableState(current, req.Capability)
+	if err != nil {
+		return nil, err
+	}
+	if !before.hasEnabled() {
+		return &asc.DeveloperBundleIDCapabilityDisableResult{
+			BundleID:   req.BundleID,
+			Capability: req.Capability,
+			Enabled:    false,
+			Changed:    false,
+			Status:     "already-disabled",
+		}, nil
+	}
+
+	payload, alreadyDisabled, err := buildDeveloperBundleIDCapabilityPatchRequestForState(current, DeveloperBundleIDCapabilityEnableRequest(req), false, false)
+	if err != nil {
+		return nil, err
+	}
+	if alreadyDisabled {
+		return &asc.DeveloperBundleIDCapabilityDisableResult{
+			BundleID:   req.BundleID,
+			Capability: req.Capability,
+			Enabled:    false,
+			Changed:    false,
+			Status:     "already-disabled",
+		}, nil
+	}
+	teamID := c.developerPortalTeamID()
+	if teamID == "" {
+		return nil, fmt.Errorf("developer portal team is not selected; %s", developerPortalAuthHint)
+	}
+	payload, err = addDeveloperPortalTeamID(payload, teamID)
+	if err != nil {
+		return nil, err
+	}
+	csrf, csrfTS := c.developerCSRFTokens()
+	if csrf == "" || csrfTS == "" {
+		return nil, fmt.Errorf("missing Developer Portal CSRF headers; %s", developerPortalAuthHint)
+	}
+
+	path := "/bundleIds/" + url.PathEscape(req.BundleID)
+	_, writeErr := c.doDeveloperPortalRequest(ctx, http.MethodPatch, path, payload, developerPortalHeaders(req.BundleID), true)
+	if writeErr == nil {
+		verified, verifyErr := c.loadDeveloperBundleIDExact(ctx, req.BundleID)
+		if verifyErr != nil {
+			return nil, newDeveloperBundleIDUnverifiedError("Developer Portal accepted disabling %q but verification failed: %v", req.Capability, verifyErr)
+		}
+		after, stateErr := developerBundleIDCapabilityDisableState(verified, req.Capability)
+		if stateErr != nil {
+			return nil, newDeveloperBundleIDUnverifiedError("Developer Portal accepted disabling %q but verification failed: %v", req.Capability, stateErr)
+		}
+		if !after.isDisabled() || !before.retainsNonTargetResources(after) || (!after.sameTargetIDs(before) && !after.targetsRemoved(before)) {
+			return nil, newDeveloperBundleIDUnverifiedError("Developer Portal accepted disabling %q but verification did not prove the same target resources are disabled or that Apple removed all target resources", req.Capability)
+		}
+		return developerBundleIDCapabilityDisableResult(req), nil
+	}
+
+	if !isAmbiguousDeveloperBundleIDCapabilityWriteFailure(writeErr) {
+		return nil, writeErr
+	}
+	verified, verifyErr := c.loadDeveloperBundleIDExact(ctx, req.BundleID)
+	if verifyErr != nil {
+		return nil, newDeveloperBundleIDUnverifiedError("disabling %q may have been applied but verification also failed: %v", req.Capability, verifyErr)
+	}
+	after, stateErr := developerBundleIDCapabilityDisableState(verified, req.Capability)
+	if stateErr != nil {
+		return nil, newDeveloperBundleIDUnverifiedError("disabling %q may have been applied but verification failed: %v", req.Capability, stateErr)
+	}
+	switch {
+	case after.isDisabled() && before.retainsNonTargetResources(after) && (after.sameTargetIDs(before) || after.targetsRemoved(before)):
+		return developerBundleIDCapabilityDisableResult(req), nil
+	default:
+		return nil, newDeveloperBundleIDUnverifiedError("disabling %q may have been applied but verification did not prove the same target resources are disabled or that Apple removed all target resources (write error: %v)", req.Capability, writeErr)
+	}
+}
+
+func developerBundleIDCapabilityDisableResult(req DeveloperBundleIDCapabilityDisableRequest) *asc.DeveloperBundleIDCapabilityDisableResult {
+	return &asc.DeveloperBundleIDCapabilityDisableResult{
+		BundleID:   req.BundleID,
+		Capability: req.Capability,
+		Enabled:    false,
+		Changed:    true,
+		Status:     "disabled",
+	}
+}
+
+func (c *Client) loadDeveloperBundleIDExact(ctx context.Context, bundleID string) (developerBundleIDResponse, error) {
+	response, err := c.loadDeveloperBundleID(ctx, bundleID)
+	if err != nil {
+		return developerBundleIDResponse{}, err
+	}
+	if response.Data.ID != bundleID {
+		return developerBundleIDResponse{}, fmt.Errorf("cannot safely update Bundle ID %q: Developer Portal returned resource %q instead", bundleID, response.Data.ID)
+	}
+	return response, nil
+}
+
+type developerBundleIDCapabilityDisableSnapshot struct {
+	EnabledByID map[string]bool
+	ResourceIDs map[string]struct{}
+}
+
+func (s developerBundleIDCapabilityDisableSnapshot) hasEnabled() bool {
+	for _, enabled := range s.EnabledByID {
+		if enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func (s developerBundleIDCapabilityDisableSnapshot) isDisabled() bool { return !s.hasEnabled() }
+
+func (s developerBundleIDCapabilityDisableSnapshot) sameTargetIDs(other developerBundleIDCapabilityDisableSnapshot) bool {
+	if len(s.EnabledByID) != len(other.EnabledByID) {
+		return false
+	}
+	for id := range s.EnabledByID {
+		if _, ok := other.EnabledByID[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (s developerBundleIDCapabilityDisableSnapshot) retainsNonTargetResources(other developerBundleIDCapabilityDisableSnapshot) bool {
+	for id := range s.ResourceIDs {
+		if _, target := s.EnabledByID[id]; target {
+			continue
+		}
+		if _, retained := other.ResourceIDs[id]; !retained {
+			return false
+		}
+	}
+	return true
+}
+
+func (s developerBundleIDCapabilityDisableSnapshot) targetsRemoved(other developerBundleIDCapabilityDisableSnapshot) bool {
+	return len(s.EnabledByID) == 0 && len(other.EnabledByID) > 0
+}
+
+func developerBundleIDCapabilityDisableState(current developerBundleIDResponse, capabilityID string) (developerBundleIDCapabilityDisableSnapshot, error) {
+	capabilities, err := developerBundleIDCapabilitiesForDisable(current)
+	if err != nil {
+		return developerBundleIDCapabilityDisableSnapshot{}, err
+	}
+	state := developerBundleIDCapabilityDisableSnapshot{
+		EnabledByID: make(map[string]bool),
+		ResourceIDs: make(map[string]struct{}, len(capabilities)),
+	}
+	for _, capability := range capabilities {
+		if strings.TrimSpace(capability.ID) == "" {
+			return developerBundleIDCapabilityDisableSnapshot{}, fmt.Errorf("cannot safely verify Bundle ID capability graph without a resource id")
+		}
+		state.ResourceIDs[capability.ID] = struct{}{}
+		id, err := developerBundleIDCapabilityID(capability)
+		if err != nil {
+			return developerBundleIDCapabilityDisableSnapshot{}, err
+		}
+		if id != capabilityID {
+			continue
+		}
+		if strings.TrimSpace(capability.ID) == "" {
+			return developerBundleIDCapabilityDisableSnapshot{}, fmt.Errorf("cannot safely update Bundle ID capability %q without a resource id", capabilityID)
+		}
+		enabled, present, err := developerBundleIDCapabilityEnabledValue(capability)
+		if err != nil {
+			return developerBundleIDCapabilityDisableSnapshot{}, err
+		}
+		if !present {
+			return developerBundleIDCapabilityDisableSnapshot{}, fmt.Errorf("bundle ID capability %q resource %q is missing an enabled state", capabilityID, capability.ID)
+		}
+		state.EnabledByID[capability.ID] = enabled
+	}
+	return state, nil
+}
+
+func newDeveloperBundleIDUnverifiedError(format string, args ...any) error {
+	return &DeveloperBundleIDCapabilityUnverifiedError{Err: fmt.Errorf(format+"; no automatic retry was sent; inspect the Bundle ID before retrying", args...)}
+}
+
+func isAmbiguousDeveloperBundleIDCapabilityWriteFailure(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == http.StatusRequestTimeout || apiErr.Status >= http.StatusInternalServerError
+	}
+	return isAmbiguousDeveloperPortalWriteFailure(err) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 func (c *Client) loadDeveloperCapabilityMetadata(ctx context.Context, bundleID string) (developerCapabilityMetadataResponse, error) {
 	query := make(url.Values)
 	query.Set("filter[capabilityType]", "capability,service")
@@ -225,6 +468,14 @@ func (c *Client) loadDeveloperBundleID(ctx context.Context, bundleID string) (de
 }
 
 func buildDeveloperBundleIDCapabilityPatchRequest(current developerBundleIDResponse, req DeveloperBundleIDCapabilityEnableRequest) (developerBundleIDPatchRequest, bool, error) {
+	return buildDeveloperBundleIDCapabilityPatchRequestForState(current, req, true, true)
+}
+
+// buildDeveloperBundleIDCapabilityPatchRequestForState builds the shared
+// capability graph patch. The enable path keeps its historical first-target
+// duplicate behavior; disabling updates every matching enabled resource and
+// never synthesizes or drops a disabled resource.
+func buildDeveloperBundleIDCapabilityPatchRequestForState(current developerBundleIDResponse, req DeveloperBundleIDCapabilityEnableRequest, desiredEnabled, addIfMissing bool) (developerBundleIDPatchRequest, bool, error) {
 	capabilities, err := developerBundleIDCapabilities(current)
 	if err != nil {
 		return developerBundleIDPatchRequest{}, false, err
@@ -233,6 +484,8 @@ func buildDeveloperBundleIDCapabilityPatchRequest(current developerBundleIDRespo
 	capabilityIDs := make([]string, len(capabilities))
 	targetIndex := -1
 	targetEnabled := false
+	hasTarget := false
+	hasEnabledTarget := false
 	for index, capability := range capabilities {
 		capabilityID, err := developerBundleIDCapabilityID(capability)
 		if err != nil {
@@ -242,16 +495,35 @@ func buildDeveloperBundleIDCapabilityPatchRequest(current developerBundleIDRespo
 		if capabilityID != req.Capability {
 			continue
 		}
-		enabled, err := developerBundleIDCapabilityEnabled(capability)
-		if err != nil {
-			return developerBundleIDPatchRequest{}, false, err
+		hasTarget = true
+		var enabled bool
+		if desiredEnabled {
+			enabled, err = developerBundleIDCapabilityEnabled(capability)
+			if err != nil {
+				return developerBundleIDPatchRequest{}, false, err
+			}
+		} else {
+			var present bool
+			enabled, present, err = developerBundleIDCapabilityEnabledValue(capability)
+			if err != nil {
+				return developerBundleIDPatchRequest{}, false, err
+			}
+			if !present {
+				return developerBundleIDPatchRequest{}, false, fmt.Errorf("bundle ID capability %q resource %q is missing an enabled state", req.Capability, capability.ID)
+			}
+		}
+		if enabled {
+			hasEnabledTarget = true
 		}
 		if targetIndex == -1 || (enabled && !targetEnabled) {
 			targetIndex = index
 			targetEnabled = enabled
 		}
 	}
-	if targetEnabled {
+	if desiredEnabled && targetEnabled {
+		return developerBundleIDPatchRequest{}, true, nil
+	}
+	if !desiredEnabled && (!hasTarget || !hasEnabledTarget) {
 		return developerBundleIDPatchRequest{}, true, nil
 	}
 
@@ -261,17 +533,34 @@ func buildDeveloperBundleIDCapabilityPatchRequest(current developerBundleIDRespo
 			updated = append(updated, capability)
 			continue
 		}
-		if index != targetIndex {
+		if desiredEnabled {
+			if index != targetIndex {
+				continue
+			}
+			var err error
+			capability.Attributes, err = setDeveloperCapabilityEnabledValue(capability.Attributes, desiredEnabled)
+			if err != nil {
+				return developerBundleIDPatchRequest{}, false, err
+			}
+			updated = append(updated, capability)
 			continue
 		}
-		var err error
-		capability.Attributes, err = setDeveloperCapabilityEnabled(capability.Attributes)
+		enabled, present, err := developerBundleIDCapabilityEnabledValue(capability)
 		if err != nil {
 			return developerBundleIDPatchRequest{}, false, err
 		}
+		if !present {
+			return developerBundleIDPatchRequest{}, false, fmt.Errorf("bundle ID capability %q resource %q is missing an enabled state", req.Capability, capability.ID)
+		}
+		if enabled {
+			capability.Attributes, err = setDeveloperCapabilityEnabledValue(capability.Attributes, desiredEnabled)
+			if err != nil {
+				return developerBundleIDPatchRequest{}, false, err
+			}
+		}
 		updated = append(updated, capability)
 	}
-	if targetIndex == -1 {
+	if targetIndex == -1 && addIfMissing {
 		updated = append(updated, newDeveloperBundleIDCapability(req.Capability))
 	}
 
@@ -405,6 +694,79 @@ func developerBundleIDCapabilities(current developerBundleIDResponse) ([]develop
 	return capabilities, nil
 }
 
+// developerBundleIDCapabilitiesForDisable requires the included capability
+// graph used by the Developer Portal response. The endpoint's selected fields
+// omit data.relationships in live responses, so a present included array is
+// the completeness boundary for disable verification.
+func developerBundleIDCapabilitiesForDisable(current developerBundleIDResponse) ([]developerResource, error) {
+	if current.Included == nil {
+		return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: included data is missing")
+	}
+
+	var relationshipReferences []developerResource
+	rawRelationship, hasRelationship := current.Data.Relationships["bundleIdCapabilities"]
+	if hasRelationship {
+		var relationship struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(rawRelationship, &relationship); err != nil {
+			return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: invalid relationship: %w", err)
+		}
+		if value := strings.TrimSpace(string(relationship.Data)); value == "" || value == "null" {
+			return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: relationship data is missing")
+		}
+		if err := json.Unmarshal(relationship.Data, &relationshipReferences); err != nil {
+			return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: invalid relationship data: %w", err)
+		}
+		for _, reference := range relationshipReferences {
+			if reference.Type != "bundleIdCapabilities" || strings.TrimSpace(reference.ID) == "" {
+				return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: relationship contains an invalid resource reference")
+			}
+		}
+	}
+
+	for _, resource := range current.Included {
+		if resource.Type == "bundleIdCapabilities" && strings.TrimSpace(resource.ID) == "" {
+			return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: included resource has no id")
+		}
+	}
+
+	if _, err := indexDeveloperCapabilityResources(current.Included); err != nil {
+		return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: %w", err)
+	}
+	if hasRelationship {
+		referenced := make(map[string]struct{}, len(relationshipReferences))
+		for _, reference := range relationshipReferences {
+			referenced[reference.ID] = struct{}{}
+		}
+		for _, resource := range current.Included {
+			if resource.Type != "bundleIdCapabilities" {
+				continue
+			}
+			if _, ok := referenced[resource.ID]; !ok {
+				return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: included capability %q is not referenced", resource.ID)
+			}
+		}
+	}
+
+	capabilities, err := developerBundleIDCapabilities(current)
+	if err != nil {
+		return nil, err
+	}
+	if len(relationshipReferences) > 0 {
+		resolved := make(map[string]struct{}, len(capabilities))
+		for _, capability := range capabilities {
+			resolved[capability.ID] = struct{}{}
+		}
+		for _, reference := range relationshipReferences {
+			if _, ok := resolved[reference.ID]; !ok {
+				return nil, fmt.Errorf("cannot safely verify Bundle ID capability graph: relationship resource %q is incomplete", reference.ID)
+			}
+		}
+	}
+	return capabilities, nil
+}
+
 func developerBundleIDCapabilityID(resource developerResource) (string, error) {
 	raw, ok := resource.Relationships["capability"]
 	if !ok {
@@ -442,8 +804,26 @@ func developerBundleIDCapabilityEnabled(resource developerResource) (bool, error
 	return enabled, nil
 }
 
-func setDeveloperCapabilityEnabled(raw json.RawMessage) (json.RawMessage, error) {
-	return setDeveloperCapabilityEnabledValue(raw, true)
+func developerBundleIDCapabilityEnabledValue(resource developerResource) (bool, bool, error) {
+	if len(resource.Attributes) == 0 {
+		return false, false, fmt.Errorf("bundle ID capability %q is missing attributes", resource.ID)
+	}
+	var attributes map[string]json.RawMessage
+	if err := json.Unmarshal(resource.Attributes, &attributes); err != nil {
+		return false, false, fmt.Errorf("failed to parse Bundle ID capability %q attributes: %w", resource.ID, err)
+	}
+	raw, ok := attributes["enabled"]
+	if !ok {
+		return false, false, nil
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return false, true, fmt.Errorf("failed to parse Bundle ID capability %q enabled state: value is null", resource.ID)
+	}
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return false, true, fmt.Errorf("failed to parse Bundle ID capability %q enabled state: %w", resource.ID, err)
+	}
+	return enabled, true, nil
 }
 
 func setDeveloperCapabilityEnabledValue(raw json.RawMessage, enabled bool) (json.RawMessage, error) {

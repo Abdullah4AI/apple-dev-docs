@@ -54,7 +54,7 @@ func TestBuildsUpdateSetsUsesNonExemptEncryption(t *testing.T) {
 	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"builds", "update",
-			"--build", "build-99",
+			"--build-id", "build-99",
 			"--uses-non-exempt-encryption=false",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -86,7 +86,7 @@ func TestBuildsUpdateRejectsInvalidUsesNonExemptEncryptionValue(t *testing.T) {
 	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"builds", "update",
-			"--build", "build-99",
+			"--build-id", "build-99",
 			"--uses-non-exempt-encryption=maybe",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)
@@ -156,7 +156,7 @@ func TestBuildsUpdateTreatsAlreadySetValueAsNoOp(t *testing.T) {
 	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"builds", "update",
-			"--build", "build-99",
+			"--build-id", "build-99",
 			"--uses-non-exempt-encryption=false",
 		}); err != nil {
 			t.Fatalf("parse error: %v", err)

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,32 @@ import (
 	"testing"
 	"time"
 )
+
+func TestWithSessionStoreLockFailsClosedWhenLockUnavailable(t *testing.T) {
+	previous := sessionSharedLockRoot
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sessionSharedLockRoot = func() string { return blocked }
+	t.Cleanup(func() { sessionSharedLockRoot = previous })
+	called := false
+	err := withSessionStoreLock(func() error { called = true; return nil })
+	if !errors.Is(err, errSessionStoreLockUnavailable) || called {
+		t.Fatalf("expected fail-closed lock error, called=%v err=%v", called, err)
+	}
+}
+
+func TestWithSessionStoreLockFailsClosedWhenRootUnavailable(t *testing.T) {
+	previous := sessionSharedLockRoot
+	sessionSharedLockRoot = func() string { return "" }
+	t.Cleanup(func() { sessionSharedLockRoot = previous })
+	called := false
+	err := withSessionStoreLock(func() error { called = true; return nil })
+	if !errors.Is(err, errSessionStoreLockUnavailable) || called {
+		t.Fatalf("expected fail-closed root error, called=%v err=%v", called, err)
+	}
+}
 
 // The lock is what makes a compare-and-delete and a persist mutually
 // exclusive, so overlapping holders must be impossible.
@@ -49,6 +76,57 @@ func TestWithSessionEntryLockExcludesConcurrentHolders(t *testing.T) {
 	}
 }
 
+// DeleteAllSessions must share the cache-local barrier with file-backed
+// persistence. Holding that barrier here makes the regression deterministic:
+// a delete-all that does not participate in the transaction returns before
+// the holder is released.
+func TestDeleteAllSessionsWaitsForFileMutationLock(t *testing.T) {
+	t.Setenv(webSessionCacheEnabledEnv, "1")
+	t.Setenv(webSessionBackendEnv, "file")
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "web-cache"))
+
+	key := webSessionCacheKey("user@example.com")
+	if err := writeSessionToFile(key, persistedSession{
+		Version:   webSessionCacheVersion,
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("writeSessionToFile error: %v", err)
+	}
+
+	release, ok := acquireRequiredSessionCacheGlobalLock()
+	if !ok {
+		t.Fatal("expected the file-cache global lock to be acquirable")
+	}
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- DeleteAllSessions()
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("DeleteAllSessions completed while the file mutation lock was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	released = true
+	if err := <-done; err != nil {
+		t.Fatalf("DeleteAllSessions error: %v", err)
+	}
+	if _, ok, err := readSessionFromFile(key); err != nil {
+		t.Fatalf("readSessionFromFile error: %v", err)
+	} else if ok {
+		t.Fatal("expected DeleteAllSessions to remove the file-backed session")
+	}
+}
+
 // Two processes on the keychain backend can be configured with different cache
 // directories and still share one global keychain store, so at least one anchor
 // must not depend on the cache directory.
@@ -74,6 +152,62 @@ func TestSessionEntryLockSharesAnAnchorAcrossCacheDirs(t *testing.T) {
 	if !strings.HasPrefix(first[1], shared) {
 		t.Fatalf("expected the shared anchor under %q, got %q", shared, first[1])
 	}
+}
+
+// The keychain backend stores every account in one aggregate item. Its store
+// lock therefore needs an anchor that remains stable when callers choose
+// different cache directories.
+func TestSessionGlobalLockSharesAnAnchorAcrossCacheDirs(t *testing.T) {
+	shared := t.TempDir()
+	withStubbedSessionSharedLockRoot(t, shared)
+
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "cache-a"))
+	first := sessionGlobalLockPaths()
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "cache-b"))
+	second := sessionGlobalLockPaths()
+
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("expected two store anchors per configuration, got %v and %v", first, second)
+	}
+	if first[0] == second[0] {
+		t.Fatalf("expected the cache-directory store anchor to differ, got %q twice", first[0])
+	}
+	if first[1] != second[1] {
+		t.Fatalf("expected a cache-directory-independent store anchor, got %q and %q", first[1], second[1])
+	}
+	if !strings.HasPrefix(first[1], shared) {
+		t.Fatalf("expected the shared store anchor under %q, got %q", shared, first[1])
+	}
+}
+
+// A process using a different cache directory and account must still wait on
+// the stable store anchor before changing the shared keychain aggregate.
+func TestSessionGlobalLockExcludesDifferentCacheDirs(t *testing.T) {
+	withStubbedSessionSharedLockRoot(t, t.TempDir())
+	withShortSessionLockWait(t, 100*time.Millisecond)
+
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "cache-a"))
+	release := acquireSessionGlobalLock()
+
+	t.Setenv(webSessionCacheDirEnv, filepath.Join(t.TempDir(), "cache-b"))
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		acquireSessionGlobalLock()()
+		done <- time.Since(start)
+	}()
+
+	select {
+	case waited := <-done:
+		if waited < sessionLockWaitTimeout {
+			release()
+			t.Fatalf("expected the shared store anchor to hold off the second acquisition, it returned after %s", waited)
+		}
+	case <-time.After(10 * time.Second):
+		release()
+		t.Fatal("the second acquisition never returned")
+	}
+	release()
 }
 
 func TestSessionEntryLockSharedAnchorIgnoresEnvironmentOverrides(t *testing.T) {

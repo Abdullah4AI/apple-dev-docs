@@ -236,7 +236,7 @@ func TestIAPContentGetFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
 	}
 }
 
-func TestIAPLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
+func TestIAPContentViewFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
 	setupStableSelectorAuth(t)
 	t.Setenv("ASC_APP_ID", "")
 	t.Setenv("ASC_TIMEOUT", "10ms")
@@ -252,11 +252,11 @@ func TestIAPLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T
 		case "/v1/apps/app-123/inAppPurchasesV2":
 			<-req.Context().Done()
 			return nil, req.Context().Err()
-		case "/v2/inAppPurchases/2024/inAppPurchaseLocalizations":
+		case "/v2/inAppPurchases/2024/content":
 			if err := req.Context().Err(); err != nil {
-				t.Fatalf("expected fresh localizations context after lookup timeout, got %v", err)
+				t.Fatalf("expected fresh content context after lookup timeout, got %v", err)
 			}
-			return selectorJSONResponse(`{"data":[]}`), nil
+			return selectorJSONResponse(`{"data":{"type":"inAppPurchaseContents","id":"content-2024"}}`), nil
 		default:
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
 			return nil, nil
@@ -264,27 +264,25 @@ func TestIAPLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T
 	})
 
 	stdout, stderr, runErr := runRootCommand(t, []string{
-		"iap", "localizations", "list",
+		"iap", "content", "view",
 		"--app", "app-123",
 		"--iap-id", "2024",
 	})
 	if runErr != nil {
 		t.Fatalf("expected nil error, got %v", runErr)
 	}
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
-	const wantWarning = "Warning: `asc iap localizations list` is deprecated by App Store Connect API 4.4.1. Use `asc iap versions localizations list --version-id \"IAP_VERSION_ID\"`."
-	if got := strings.TrimSpace(stderr); got != wantWarning {
-		t.Fatalf("expected only deprecation warning %q, got %q", wantWarning, stderr)
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 	if requests != 2 {
-		t.Fatalf("expected lookup timeout followed by localizations fetch, got %d requests", requests)
+		t.Fatalf("expected lookup timeout followed by content fetch, got %d requests", requests)
 	}
-	if !strings.Contains(stdout, `"data"`) {
+	if !strings.Contains(stdout, `"content-2024"`) {
 		t.Fatalf("expected JSON output, got %q", stdout)
 	}
 }
 
-func TestIAPLocalizationsListDoesNotSuppressNumericAmbiguity(t *testing.T) {
+func TestIAPContentViewDoesNotSuppressNumericAmbiguity(t *testing.T) {
 	setupStableSelectorAuth(t)
 	t.Setenv("ASC_APP_ID", "")
 
@@ -311,7 +309,7 @@ func TestIAPLocalizationsListDoesNotSuppressNumericAmbiguity(t *testing.T) {
 				t.Fatalf("unexpected lookup query: %s", req.URL.RawQuery)
 				return nil, nil
 			}
-		case "/v2/inAppPurchases/2024/inAppPurchaseLocalizations":
+		case "/v2/inAppPurchases/2024/content":
 			t.Fatal("expected ambiguity to stop before direct numeric ID fetch")
 			return nil, nil
 		default:
@@ -321,7 +319,7 @@ func TestIAPLocalizationsListDoesNotSuppressNumericAmbiguity(t *testing.T) {
 	})
 
 	_, _, runErr := runRootCommand(t, []string{
-		"iap", "localizations", "list",
+		"iap", "content", "view",
 		"--app", "app-123",
 		"--iap-id", "2024",
 	})
@@ -459,7 +457,7 @@ func TestSubscriptionPromotedPurchaseViewResolvesStableSelectorWithAppFlag(t *te
 	}
 }
 
-func TestSubscriptionLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
+func TestSubscriptionVersionsListFallsBackToNumericIDAfterLookupTimeout(t *testing.T) {
 	setupStableSelectorAuth(t)
 	t.Setenv("ASC_APP_ID", "")
 	t.Setenv("ASC_TIMEOUT", "10ms")
@@ -475,9 +473,9 @@ func TestSubscriptionLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *
 		case "/v1/apps/app-123/subscriptionGroups":
 			<-req.Context().Done()
 			return nil, req.Context().Err()
-		case "/v1/subscriptions/2024/subscriptionLocalizations":
+		case "/v1/subscriptions/2024/versions":
 			if err := req.Context().Err(); err != nil {
-				t.Fatalf("expected fresh localizations context after lookup timeout, got %v", err)
+				t.Fatalf("expected fresh versions context after lookup timeout, got %v", err)
 			}
 			return selectorJSONResponse(`{"data":[]}`), nil
 		default:
@@ -487,20 +485,18 @@ func TestSubscriptionLocalizationsListFallsBackToNumericIDAfterLookupTimeout(t *
 	})
 
 	stdout, stderr, runErr := runRootCommand(t, []string{
-		"subscriptions", "localizations", "list",
+		"subscriptions", "versions", "list",
 		"--app", "app-123",
 		"--subscription-id", "2024",
 	})
 	if runErr != nil {
 		t.Fatalf("expected nil error, got %v", runErr)
 	}
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
-	const wantWarning = "Warning: `asc subscriptions localizations list` is deprecated by App Store Connect API 4.4.1. Use `asc subscriptions versions localizations list --version-id \"SUBSCRIPTION_VERSION_ID\"`."
-	if got := strings.TrimSpace(stderr); got != wantWarning {
-		t.Fatalf("expected only deprecation warning %q, got %q", wantWarning, stderr)
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 	if requests != 2 {
-		t.Fatalf("expected lookup timeout followed by localizations fetch, got %d requests", requests)
+		t.Fatalf("expected lookup timeout followed by versions fetch, got %d requests", requests)
 	}
 	if !strings.Contains(stdout, `"data"`) {
 		t.Fatalf("expected JSON output, got %q", stdout)
@@ -1042,7 +1038,7 @@ func TestStableSelectorMissingAppContextShowsUsageError(t *testing.T) {
 }
 
 func TestStableSelectorHelpMentionsStableIdentifiers(t *testing.T) {
-	iapUsage := usageForCommand(t, "iap", "images", "create")
+	iapUsage := usageForCommand(t, "iap", "content", "view")
 	if !strings.Contains(iapUsage, "In-app purchase ID, product ID, or exact current name") {
 		t.Fatalf("expected iap help to mention stable selectors, got %q", iapUsage)
 	}

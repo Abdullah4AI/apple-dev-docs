@@ -27,32 +27,6 @@ func TestTestFlightUsageErrorDiagnosticsPreserveContracts(t *testing.T) {
 		wantParam  string
 	}{
 		{
-			name:       "deprecated external testing true",
-			command:    TestFlightBetaDetailsUpdateCommand,
-			args:       []string{"--external-testing=true"},
-			wantError:  `--external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`,
-			wantStderr: "Warning: `--external-testing` is deprecated and cannot be applied safely; App Store Connect does not support editing `externalBuildState`.\nError: --external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id \"BUILD_ID\" --group \"GROUP_ID\" --submit --confirm.\n",
-			wantCode:   shared.DiagnosticInvalidInput,
-			wantParam:  "--external-testing",
-		},
-		{
-			name:       "deprecated external testing false",
-			command:    TestFlightBetaDetailsUpdateCommand,
-			args:       []string{"--external-testing=false"},
-			wantError:  `--external-testing=false cannot identify which beta groups to remove. Use asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm.`,
-			wantStderr: "Warning: `--external-testing` is deprecated and cannot be applied safely; App Store Connect does not support editing `externalBuildState`.\nError: --external-testing=false cannot identify which beta groups to remove. Use asc builds remove-groups --build-id \"BUILD_ID\" --group \"GROUP_ID\" --confirm.\n",
-			wantCode:   shared.DiagnosticInvalidInput,
-			wantParam:  "--external-testing",
-		},
-		{
-			name:       "legacy build alias conflict",
-			command:    BetaTestersExportCommand,
-			args:       []string{"--build-id", "build-1", "--build", "build-2"},
-			wantError:  "--build conflicts with --build-id; use only --build-id",
-			wantStderr: "Error: --build conflicts with --build-id; use only --build-id\n",
-			wantCode:   shared.DiagnosticConflictingInput,
-		},
-		{
 			name:       "export group and build conflict",
 			command:    BetaTestersExportCommand,
 			args:       []string{"--group", "group-1", "--build-id", "build-1"},

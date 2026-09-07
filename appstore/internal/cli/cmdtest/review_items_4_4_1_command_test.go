@@ -79,7 +79,7 @@ func TestReviewListsOwnerlessNextPaginateAllPages(t *testing.T) {
 					t.Fatalf("exit code = %d, want %d", code, cmd.ExitSuccess)
 				}
 			})
-			if got := stripDeprecatedCommandWarnings(stderr); strings.TrimSpace(got) != "" {
+			if strings.TrimSpace(stderr) != "" {
 				t.Fatalf("stderr = %q, want empty", stderr)
 			}
 			if requestCount != 2 || !strings.Contains(stdout, test.firstID) || !strings.Contains(stdout, test.secondID) {
@@ -135,7 +135,7 @@ func TestRunReviewItemsAddSupports441SubscriptionVersionTypes(t *testing.T) {
 					t.Fatalf("exit code = %d, want %d", code, cmd.ExitSuccess)
 				}
 			})
-			if got := stripDeprecatedCommandWarnings(stderr); strings.TrimSpace(got) != "" {
+			if strings.TrimSpace(stderr) != "" {
 				t.Fatalf("stderr = %q, want empty", stderr)
 			}
 			var response asc.ReviewSubmissionItemResponse

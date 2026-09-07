@@ -249,7 +249,6 @@ func TestSigningSyncIdentityPushPullPublicRoundTrip(t *testing.T) {
 	}
 	setupAuth(t)
 	t.Setenv("ASC_SIGNING_SYNC_PASSWORD", "")
-	t.Setenv("ASC_MATCH_PASSWORD", "")
 	t.Setenv("GIT_AUTHOR_NAME", "ASC Test")
 	t.Setenv("GIT_AUTHOR_EMAIL", "asc-test@example.invalid")
 	t.Setenv("GIT_COMMITTER_NAME", "ASC Test")

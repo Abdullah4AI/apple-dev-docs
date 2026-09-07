@@ -43,7 +43,7 @@ func TestSandboxListNormalizesTerritoryFilter(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"tester-usa"`) {
 		t.Fatalf("expected USA tester in output, got %q", stdout)
 	}
@@ -87,7 +87,7 @@ func TestSandboxListAllowsEmptyTerritoryFilter(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"tester-usa"`) || !strings.Contains(stdout, `"id":"tester-fra"`) {
 		t.Fatalf("expected unfiltered tester output, got %q", stdout)
 	}
@@ -102,7 +102,7 @@ func TestSandboxListKeepsTerritoryFilterAcrossPagination(t *testing.T) {
 		`{"type":"sandboxTesters","id":"tester-fra","attributes":{"territory":"FRA"}}`,
 	)
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if len(requests) != 2 {
 		t.Fatalf("expected two paginated requests, got %d (%v)", len(requests), requests)
 	}
@@ -123,7 +123,7 @@ func TestSandboxListKeepsEmailFilterAcrossPagination(t *testing.T) {
 		`{"type":"sandboxTesters","id":"tester-other","attributes":{"email":"other@example.com"}}`,
 	)
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if len(requests) != 2 {
 		t.Fatalf("expected two paginated requests, got %d (%v)", len(requests), requests)
 	}
@@ -145,7 +145,7 @@ func TestSandboxListKeepsFilterAcrossNextPagination(t *testing.T) {
 		`{"type":"sandboxTesters","id":"tester-fra","attributes":{"territory":"FRA"}}`,
 	)
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if len(requests) != 2 {
 		t.Fatalf("expected two paginated requests, got %d (%v)", len(requests), requests)
 	}

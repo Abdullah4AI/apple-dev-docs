@@ -282,9 +282,14 @@ func TestSubscriptionsHelpShowsCanonicalCommerceSubcommands(t *testing.T) {
 		return
 	}
 	reviewUsage := reviewCmd.UsageFunc(reviewCmd)
-	for _, expected := range []string{"screenshots", "app-store-screenshot", "submit", "submit-group"} {
+	for _, expected := range []string{"screenshots", "app-store-screenshot"} {
 		if !usageListsSubcommand(reviewUsage, expected) {
 			t.Fatalf("expected subscriptions review help to list %s, got %q", expected, reviewUsage)
+		}
+	}
+	for _, removed := range []string{"submit", "submit-group"} {
+		if usageListsSubcommand(reviewUsage, removed) {
+			t.Fatalf("expected subscriptions review help to drop removed %s shim, got %q", removed, reviewUsage)
 		}
 	}
 
@@ -433,7 +438,7 @@ func TestCanonicalWrapperErrorsUseCanonicalPaths(t *testing.T) {
 	}
 }
 
-func TestSubscriptionsDocsOnlyMentionDeprecatedIntroductoryOfferAliasInMigrationNote(t *testing.T) {
+func TestSubscriptionsDocsOnlyMentionRemovedIntroductoryOfferAliasAsRejected(t *testing.T) {
 	docsPath := filepath.Join("..", "..", "..", "commands", "subscriptions.mdx")
 	docs, err := os.ReadFile(docsPath)
 	if err != nil {
@@ -441,12 +446,15 @@ func TestSubscriptionsDocsOnlyMentionDeprecatedIntroductoryOfferAliasInMigration
 	}
 
 	content := string(docs)
-	const deprecatedAlias = "--territory ALL"
-	if got := strings.Count(content, deprecatedAlias); got != 1 {
-		t.Fatalf("expected subscriptions docs to mention deprecated alias once in the migration note, got %d occurrences", got)
+	const removedAlias = "--territory ALL"
+	if got := strings.Count(content, removedAlias); got != 1 {
+		t.Fatalf("expected subscriptions docs to mention the removed alias once as rejected input, got %d occurrences", got)
 	}
-	if !strings.Contains(content, "`--territory ALL` remains accepted as a deprecated compatibility spelling") {
-		t.Fatal("expected subscriptions docs to retain the deprecated alias migration note")
+	if !strings.Contains(content, "`--territory ALL` is rejected as\nan invalid territory") {
+		t.Fatal("expected subscriptions docs to describe --territory ALL as rejected")
+	}
+	if strings.Contains(content, "remains accepted as a deprecated compatibility spelling") {
+		t.Fatal("subscriptions docs still present --territory ALL as an accepted compatibility spelling")
 	}
 }
 

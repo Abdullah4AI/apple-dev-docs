@@ -37,8 +37,10 @@ Use ` + "`asc web apps create`" + ` as the canonical app-creation command.
 			WebAppsCompatibilityCommand(),
 			WebAppsDistributionCommand(),
 			WebAppsHistoryCommand(),
+			WebAppsTransferCommand(),
 			WebAppsDeclarationsCommand(),
 			WebAppsMedicalDeviceCommand(),
+			WebAppsTaxCategoryCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -243,7 +245,6 @@ func WebAppsCreateCommand() *ffcli.Command {
 
 	appleID := fs.String("apple-id", "", "Apple Account email (required when no cache is available)")
 	password := fs.String("password", "", "Apple Account password (temporary compatibility flag; will prompt if not provided)")
-	twoFactorCode := bindDeprecatedTwoFactorCodeFlag(fs)
 	twoFactorCodeCommand := fs.String("two-factor-code-command", "", "Shell command that prints the 2FA code to stdout if verification is required")
 	autoRename := fs.Bool("auto-rename", true, "Retry with unique name suffix if app name is already taken")
 	access := fs.String("access", "", "App access after create: full or limited")
@@ -275,7 +276,6 @@ Authentication:
     - temporary direct-password compatibility flag during the apps-create deprecation window
   Two-factor verification can use --two-factor-code-command
   or %s if a fresh login is required.
-  The legacy --two-factor-code flag still works as a deprecated compatibility alias.
   If you already have a cached web session, --apple-id can be omitted.
 
 Bundle ID preflight:
@@ -298,7 +298,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			warnDeprecatedTwoFactorCodeFlag(*twoFactorCode)
 			return RunAppsCreate(ctx, AppsCreateRunOptions{
 				Name:                 *name,
 				BundleID:             *bundleID,
@@ -309,7 +308,6 @@ Examples:
 				CompanyName:          *companyName,
 				AppleID:              *appleID,
 				Password:             *password,
-				TwoFactorCode:        *twoFactorCode,
 				TwoFactorCodeCommand: *twoFactorCodeCommand,
 				AutoRename:           *autoRename,
 				Access:               *access,

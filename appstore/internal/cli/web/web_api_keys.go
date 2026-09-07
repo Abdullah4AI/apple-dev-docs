@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,12 @@ var (
 	}
 	listWebAPIKeysFn = func(ctx context.Context, client *webcore.Client) ([]webcore.APIKeyListItem, error) {
 		return client.ListAPIKeys(ctx)
+	}
+	listWebAPIKeysByKindFn = func(ctx context.Context, client *webcore.Client, kind string) ([]webcore.APIKeyListItem, error) {
+		return client.ListAPIKeysByKind(ctx, kind)
+	}
+	revokeWebAPIKeyFn = func(ctx context.Context, client *webcore.Client, keyID, kind string) error {
+		return client.RevokeAPIKey(ctx, keyID, kind)
 	}
 	waitWebAPIKeyRetryFn = waitForWebAPIKeyRetry
 )
@@ -66,6 +73,8 @@ Examples:
   asc web api-keys list --output json
   asc web api-keys view --key-id KEY_ID
   asc web api-keys create --name "Release automation"
+  asc web api-keys create-individual --user-id USER_UUID --output-dir ~/.asc/keys --confirm
+  asc web api-keys revoke --key-id KEY_ID --type team --confirm
 
 `,
 		FlagSet:   fs,
@@ -74,6 +83,8 @@ Examples:
 			WebAPIKeysListCommand(),
 			WebAPIKeysViewCommand(),
 			WebAPIKeysCreateCommand(),
+			WebAPIKeysCreateIndividualCommand(),
+			WebAPIKeysRevokeCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -213,6 +224,184 @@ Examples:
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
+}
+
+const (
+	webAPIKeyRevokeStatusRevoked         = "revoked"
+	webAPIKeyRevokeStatusAlreadyInactive = "already_inactive"
+)
+
+// WebAPIKeysRevokeCommand revokes one team or individual API key.
+func WebAPIKeysRevokeCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("web api-keys revoke", flag.ExitOnError)
+
+	keyID := fs.String("key-id", "", "API key ID")
+	kind := fs.String("type", "", "API key type: team or individual")
+	confirm := fs.Bool("confirm", false, "Confirm revoking this API key")
+	authFlags := bindWebSessionFlags(fs)
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "revoke",
+		ShortUsage: "asc web api-keys revoke --key-id KEY_ID --type team|individual --confirm [flags]",
+		ShortHelp:  "Revoke a team or individual App Store Connect API key via a web session.",
+		LongHelp: `WEB SESSION WORKFLOWS
+
+Revoke one visible App Store Connect API key using the cached Apple Account web
+session. The command first loads only the requested key type and fails closed
+unless exactly one matching key is present. An already inactive key is a
+verified no-op. An active key is revoked with one type-specific web request and
+the same key list is reloaded to verify that it is inactive.
+
+The operation requires --confirm. Key material is never printed. Use the
+opaque ID returned by "asc web api-keys list" and pass --type team or
+--type individual explicitly because the two key families use different web
+hosts.
+
+Examples:
+  asc web api-keys revoke --key-id KEY_ID --type team --confirm
+  asc web api-keys revoke --key-id KEY_ID --type individual --confirm --output json
+
+`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageError("web api-keys revoke does not accept positional arguments")
+			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return shared.UsageError(err.Error())
+			}
+
+			resolvedKeyID := strings.TrimSpace(*keyID)
+			if resolvedKeyID == "" {
+				return shared.UsageError("--key-id is required")
+			}
+			resolvedKind, err := normalizeWebAPIKeyKind(*kind)
+			if err != nil {
+				return shared.UsageError(err.Error())
+			}
+			if !*confirm {
+				return shared.UsageError("--confirm is required")
+			}
+
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
+			if err != nil {
+				return err
+			}
+			client := newWebAPIKeyClientFn(session)
+
+			var before []webcore.APIKeyListItem
+			err = withWebSpinner("Loading API key before revocation", func() error {
+				var listErr error
+				before, listErr = listWebAPIKeysByKindFn(requestCtx, client, resolvedKind)
+				return listErr
+			})
+			if err != nil {
+				return withWebAuthHint(err, "web api-keys revoke")
+			}
+			selected, err := findWebAPIKeyForRevoke(before, resolvedKeyID, resolvedKind)
+			if err != nil {
+				return err
+			}
+			if !selected.Active {
+				return shared.PrintOutput(&asc.WebAPIKeyRevokeResult{
+					KeyID:   resolvedKeyID,
+					Kind:    resolvedKind,
+					Changed: false,
+					Active:  false,
+					Status:  webAPIKeyRevokeStatusAlreadyInactive,
+				}, *output.Output, *output.Pretty)
+			}
+
+			err = withWebSpinner("Revoking App Store Connect API key", func() error {
+				return revokeWebAPIKeyFn(requestCtx, client, resolvedKeyID, resolvedKind)
+			})
+			if err != nil {
+				if isUnknownWebAPIKeyRevokeError(err) {
+					return unknownWebAPIKeyRevokeError(err, "the revoke request")
+				}
+				return withWebAuthHint(err, "web api-keys revoke")
+			}
+
+			var after []webcore.APIKeyListItem
+			err = withWebSpinner("Verifying API key revocation", func() error {
+				var listErr error
+				after, listErr = listWebAPIKeysByKindFn(requestCtx, client, resolvedKind)
+				return listErr
+			})
+			if err != nil {
+				return unknownWebAPIKeyRevokeError(err, "post-state verification")
+			}
+			verified, err := findWebAPIKeyForRevoke(after, resolvedKeyID, resolvedKind)
+			if err != nil {
+				return unknownWebAPIKeyRevokeError(err, "post-state verification")
+			}
+			if verified.Active {
+				return unknownWebAPIKeyRevokeError(
+					fmt.Errorf("key %q remains active", resolvedKeyID),
+					"post-state verification",
+				)
+			}
+
+			return shared.PrintOutput(&asc.WebAPIKeyRevokeResult{
+				KeyID:   resolvedKeyID,
+				Kind:    resolvedKind,
+				Changed: true,
+				Active:  false,
+				Status:  webAPIKeyRevokeStatusRevoked,
+			}, *output.Output, *output.Pretty)
+		},
+	}
+}
+
+func isUnknownWebAPIKeyRevokeError(err error) bool {
+	var apiErr *webcore.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status >= http.StatusInternalServerError
+	}
+	return true
+}
+
+func unknownWebAPIKeyRevokeError(err error, phase string) error {
+	return fmt.Errorf(
+		"web api-keys revoke outcome is unknown after %s; no automatic retry was sent: %w",
+		phase,
+		withWebAuthHint(err, "web api-keys revoke"),
+	)
+}
+
+func normalizeWebAPIKeyKind(value string) (string, error) {
+	kind := strings.ToLower(strings.TrimSpace(value))
+	switch kind {
+	case webcore.APIKeyKindTeam, webcore.APIKeyKindIndividual:
+		return kind, nil
+	default:
+		return "", fmt.Errorf("--type must be team or individual")
+	}
+}
+
+func findWebAPIKeyForRevoke(keys []webcore.APIKeyListItem, keyID, kind string) (webcore.APIKeyListItem, error) {
+	var selected webcore.APIKeyListItem
+	found := false
+	for _, key := range keys {
+		if strings.TrimSpace(key.KeyID) != keyID {
+			continue
+		}
+		if strings.TrimSpace(key.Kind) != kind {
+			return webcore.APIKeyListItem{}, fmt.Errorf("web api-keys revoke failed: key %q was listed as type %q, not %q", keyID, key.Kind, kind)
+		}
+		if found {
+			return webcore.APIKeyListItem{}, fmt.Errorf("web api-keys revoke failed: key %q appeared more than once in the %s key list", keyID, kind)
+		}
+		selected = key
+		found = true
+	}
+	if !found {
+		return webcore.APIKeyListItem{}, fmt.Errorf("web api-keys revoke failed: key %q of type %q was not found", keyID, kind)
+	}
+	return selected, nil
 }
 
 func webAPIKeyListItemFromClient(key webcore.APIKeyListItem) asc.WebAPIKeyListItem {

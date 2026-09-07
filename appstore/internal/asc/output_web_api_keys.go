@@ -43,6 +43,42 @@ type WebAPIKeyGetResult struct {
 	RevokingDate   string   `json:"revokingDate,omitempty"`
 }
 
+// WebAPIKeyCreateIndividualResult is the non-secret receipt from creating an
+// individual API key through a web session. The private and public key bytes
+// are deliberately not part of this output contract.
+type WebAPIKeyCreateIndividualResult struct {
+	KeyID      string `json:"keyId"`
+	UserID     string `json:"userId"`
+	P8Path     string `json:"p8Path"`
+	Active     bool   `json:"active"`
+	Registered bool   `json:"registered"`
+}
+
+func webAPIKeyCreateIndividualRows(result *WebAPIKeyCreateIndividualResult) ([]string, [][]string) {
+	headers := []string{"Key ID", "User ID", "Active", "Registered", "P8 Path"}
+	if result == nil {
+		return headers, nil
+	}
+	return headers, [][]string{{
+		result.KeyID,
+		result.UserID,
+		fmt.Sprintf("%t", result.Active),
+		fmt.Sprintf("%t", result.Registered),
+		result.P8Path,
+	}}
+}
+
+// WebAPIKeyRevokeResult is the receipt for a verified API-key revocation.
+// Changed is false when the selected key was already inactive and no write was
+// sent.
+type WebAPIKeyRevokeResult struct {
+	KeyID   string `json:"keyId"`
+	Kind    string `json:"kind"`
+	Changed bool   `json:"changed"`
+	Active  bool   `json:"active"`
+	Status  string `json:"status"`
+}
+
 func webAPIKeysListRows(result *WebAPIKeysListResult) ([]string, [][]string) {
 	headers := []string{"Key ID", "Name", "Kind", "Roles", "Active"}
 	if result == nil {
@@ -71,5 +107,19 @@ func webAPIKeyGetRows(result *WebAPIKeyGetResult) ([]string, [][]string) {
 		result.IssuerID,
 		strings.Join(result.Roles, ", "),
 		fmt.Sprintf("%t", result.Active),
+	}}
+}
+
+func webAPIKeyRevokeRows(result *WebAPIKeyRevokeResult) ([]string, [][]string) {
+	headers := []string{"Key ID", "Kind", "Changed", "Active", "Status"}
+	if result == nil {
+		return headers, nil
+	}
+	return headers, [][]string{{
+		result.KeyID,
+		result.Kind,
+		fmt.Sprintf("%t", result.Changed),
+		fmt.Sprintf("%t", result.Active),
+		result.Status,
 	}}
 }

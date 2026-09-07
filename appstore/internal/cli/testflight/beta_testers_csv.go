@@ -34,7 +34,7 @@ func BetaTestersExportCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	outputPath := fs.String("output", "", "Output CSV file path (required)")
 	group := fs.String("group", "", "Beta group name or ID to filter (optional)")
-	buildID, legacyBuildID := bindBuildIDFlag(fs, "Build ID to filter (optional)")
+	buildID := fs.String("build-id", "", "Build ID to filter (optional)")
 	email := fs.String("email", "", "Filter by tester email (optional)")
 	firstName := fs.String("first-name", "", "Filter by tester first name (exact match, optional)")
 	lastName := fs.String("last-name", "", "Filter by tester last name (exact match, optional)")
@@ -65,9 +65,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildID, legacyBuildID); err != nil {
-				return err
-			}
 			if strings.TrimSpace(*group) != "" && strings.TrimSpace(*buildID) != "" {
 				return shared.WithDiagnostic(
 					shared.UsageError("--group cannot be combined with --build-id"),

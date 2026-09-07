@@ -64,8 +64,12 @@ including the setuid, setgid and sticky bits, and the owning user and group,
 because a `chmod` of a special bit or a `chown` changes neither the ordinary
 permission bits nor the modification time. `preserveMetadata` would otherwise
 carry drifted ownership onto the replacement and silently drop the special
-bits. Access-control lists and extended attributes are copied from the
-identity-retained descriptor but are not yet part of the compared snapshot.
+bits. `preserveMetadata` deliberately preserves those special bits: after ACL/xattr copying and content writes, the complete source mode is reapplied immediately before publication. Access-control lists and extended attributes are copied from the
+identity-retained descriptor and are included in the bounded strict identity
+snapshot. Darwin and Linux strict verification re-reads descriptor-backed ACL
+and xattr digests before any entry move; legacy `FileInfo` adapters retain
+their prior compatibility boundary, and platforms without the descriptor
+metadata facilities do not claim this stronger check.
 
 The historical `os.FileInfo` methods remain compatibility adapters and do not
 inherit the strict 8 MiB input-snapshot limit. The existing `WithInfo` forms

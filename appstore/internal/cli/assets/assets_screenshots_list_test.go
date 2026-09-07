@@ -251,11 +251,13 @@ func TestExecuteScreenshotListCommandValidatesPlatformBeforeAuth(t *testing.T) {
 	}
 }
 
-func TestAssetsScreenshotsListCommandAcceptsLocalizationIDAlias(t *testing.T) {
+func TestAssetsScreenshotsListCommandDoesNotDefineLocalizationIDAlias(t *testing.T) {
 	cmd := AssetsScreenshotsListCommand()
-	cmd.FlagSet.SetOutput(io.Discard)
-	if err := cmd.FlagSet.Parse([]string{"--localization-id", "loc-1"}); err != nil {
-		t.Fatalf("parse alias: %v", err)
+	if cmd.FlagSet.Lookup("localization-id") != nil {
+		t.Fatal("--localization-id alias should not be defined; only --version-localization is supported")
+	}
+	if cmd.FlagSet.Lookup("version-localization") == nil {
+		t.Fatal("--version-localization flag not found")
 	}
 }
 

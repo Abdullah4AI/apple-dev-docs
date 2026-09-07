@@ -233,3 +233,24 @@ func TestSetMedicalDeviceDeclarationSkipsWhenAlreadyDeclared(t *testing.T) {
 		t.Fatalf("unexpected requirement metadata: %#v", got)
 	}
 }
+
+func TestSetMedicalDeviceDeclarationSkipsWhenAlreadyDeclaredWithoutConstraints(t *testing.T) {
+	server := medicalDeclarationServer(t, `{
+		"data":[{"medicalDeviceData":{"declaration":"no"},"countriesOrRegions":["USA"]}]
+	}`)
+	defer server.Close()
+
+	got, err := testWebClient(server).SetMedicalDeviceDeclaration(context.Background(), "account-123", "app-123", false)
+	if err != nil {
+		t.Fatalf("SetMedicalDeviceDeclaration() error = %v", err)
+	}
+	if got.Changed {
+		t.Fatal("expected changed=false when the declaration already matches")
+	}
+	if got.Declared {
+		t.Fatalf("expected declared false, got true")
+	}
+	if strings.Join(got.CountriesOrRegions, ",") != "USA" {
+		t.Fatalf("expected existing country selection USA, got %#v", got.CountriesOrRegions)
+	}
+}

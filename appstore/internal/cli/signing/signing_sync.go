@@ -25,7 +25,6 @@ import (
 )
 
 const (
-	matchPasswordEnvVar       = "ASC_MATCH_PASSWORD"
 	signingSyncPasswordEnvVar = "ASC_SIGNING_SYNC_PASSWORD"
 	maxEncryptedSigningFiles  = 256
 	maxEncryptedSigningBytes  = 128 << 20
@@ -87,49 +86,25 @@ Examples:
 	}
 }
 
-func resolvePassword(flagValue string) (string, error) {
-	password := strings.TrimSpace(flagValue)
-	if password != "" {
-		return password, nil
-	}
-	password = strings.TrimSpace(os.Getenv(matchPasswordEnvVar))
-	if password != "" {
-		return password, nil
-	}
-	return "", shared.UsageError("--password is required (or set ASC_MATCH_PASSWORD)")
-}
-
-func resolveSyncPassword(passwordFile, legacyFlagValue string) (password string, legacy bool, err error) {
+func resolveSyncPassword(passwordFile string) (string, error) {
 	if passwordFile != "" && strings.TrimSpace(passwordFile) == "" {
-		return "", false, shared.UsageError("--password-file must not be empty")
+		return "", shared.UsageError("--password-file must not be empty")
 	}
 	if strings.TrimSpace(passwordFile) != "" {
 		data, readErr := readProtectedSecretFile(passwordFile, "signing sync password")
 		if readErr != nil {
-			return "", false, readErr
+			return "", readErr
 		}
-		password = trimPasswordFileNewline(string(data))
+		password := trimPasswordFileNewline(string(data))
 		if password == "" {
-			return "", false, shared.UsageError("signing sync password file is empty")
+			return "", shared.UsageError("signing sync password file is empty")
 		}
-		return password, false, nil
+		return password, nil
 	}
-	if strings.TrimSpace(legacyFlagValue) != "" {
-		password, err = resolvePassword(legacyFlagValue)
-		return password, true, err
+	if password := os.Getenv(signingSyncPasswordEnvVar); password != "" {
+		return password, nil
 	}
-	if password = os.Getenv(signingSyncPasswordEnvVar); password != "" {
-		return password, false, nil
-	}
-	password, err = resolvePassword(legacyFlagValue)
-	if err != nil {
-		return "", false, shared.UsageError("--password-file is required (or set ASC_SIGNING_SYNC_PASSWORD; legacy --password and ASC_MATCH_PASSWORD remain available through 4.x)")
-	}
-	return password, err == nil, err
-}
-
-func warnLegacySyncPassword() {
-	fmt.Fprintln(os.Stderr, "Warning: --password and ASC_MATCH_PASSWORD are deprecated for signing sync; use --password-file or ASC_SIGNING_SYNC_PASSWORD. The legacy sources will be removed in 5.0.0.")
+	return "", shared.UsageError("--password-file is required (or set ASC_SIGNING_SYNC_PASSWORD)")
 }
 
 func trimPasswordFileNewline(password string) string {
@@ -165,11 +140,10 @@ func syncPushCommand() *ffcli.Command {
 	targetsFile := fs.String("targets-file", "", "[experimental] Command-root-relative JSON file containing 1-32 bundle targets (mutually exclusive with --bundle-id)")
 	profileType := fs.String("profile-type", "", "Profile type: IOS_APP_STORE, IOS_APP_DEVELOPMENT, etc. (required)")
 	repoURL := fs.String("repo", "", "Git repo URL for encrypted storage (required)")
-	password := fs.String("password", "", "Deprecated: encryption password (or ASC_MATCH_PASSWORD env); use --password-file")
-	passwordFile := fs.String("password-file", "", "[experimental] Protected file containing the repository encryption password")
+	passwordFile := fs.String("password-file", "", "[experimental] Protected file containing the repository encryption password (or set ASC_SIGNING_SYNC_PASSWORD)")
 	branch := fs.String("branch", "main", "Git branch")
 	certType := fs.String("certificate-type", "", "Certificate type filter (optional)")
-	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (required with --create-missing for development profiles; deprecated and ignored without it until 5.0.0)")
+	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (requires --create-missing; required for development profiles)")
 	createMissing := fs.Bool("create-missing", false, "Create missing profiles")
 	identityPath := fs.String("identity", "", "[experimental] Protected PKCS#12 signing identity file")
 	privateKeyPath := fs.String("private-key", "", "[experimental] Protected RSA or EC private key PEM file")
@@ -220,7 +194,9 @@ func syncPushCommand() *ffcli.Command {
 			if repo == "" {
 				return shared.UsageError("--repo is required")
 			}
-			warnDeviceWithoutCreateMissing(*deviceIDs, *createMissing)
+			if err := rejectDeviceWithoutCreateMissing(*deviceIDs, *createMissing); err != nil {
+				return err
+			}
 			if *createMissing && isDevelopmentProfile(profType) && strings.TrimSpace(*deviceIDs) == "" {
 				return shared.UsageError("--device is required for development profiles with --create-missing")
 			}
@@ -242,16 +218,9 @@ func syncPushCommand() *ffcli.Command {
 			if fingerprintErr != nil {
 				return shared.UsageError(fingerprintErr.Error())
 			}
-			if strings.TrimSpace(*passwordFile) != "" && *password != "" {
-				return shared.UsageError("--password-file and --password are mutually exclusive")
-			}
-
-			pass, legacyPassword, err := resolveSyncPassword(*passwordFile, *password)
+			pass, err := resolveSyncPassword(*passwordFile)
 			if err != nil {
 				return err
-			}
-			if legacyPassword {
-				warnLegacySyncPassword()
 			}
 
 			var identity *signingIdentity
@@ -497,8 +466,7 @@ func syncPullCommand() *ffcli.Command {
 	bundleID := fs.String("bundle-id", "", "[experimental] Decrypt only one bundle target (requires --profile-type; mutually exclusive with --targets-file)")
 	targetsFile := fs.String("targets-file", "", "[experimental] Decrypt only the 1-32 bundle targets in a root-relative JSON file (requires --profile-type; mutually exclusive with --bundle-id)")
 	profileType := fs.String("profile-type", "", "[experimental] Profile type for --bundle-id or --targets-file")
-	password := fs.String("password", "", "Deprecated: decryption password (or ASC_MATCH_PASSWORD env); use --password-file")
-	passwordFile := fs.String("password-file", "", "[experimental] Protected file containing the repository encryption password")
+	passwordFile := fs.String("password-file", "", "[experimental] Protected file containing the repository encryption password (or set ASC_SIGNING_SYNC_PASSWORD)")
 	branch := fs.String("branch", "main", "Git branch")
 	outputDir := fs.String("output-dir", "./signing", "Output directory for decrypted files")
 	output := shared.BindOutputFlags(fs)
@@ -564,15 +532,9 @@ func syncPullCommand() *ffcli.Command {
 					return shared.UsageError(readErr.Error())
 				}
 			}
-			if strings.TrimSpace(*passwordFile) != "" && *password != "" {
-				return shared.UsageError("--password-file and --password are mutually exclusive")
-			}
-			pass, legacyPassword, err := resolveSyncPassword(*passwordFile, *password)
+			pass, err := resolveSyncPassword(*passwordFile)
 			if err != nil {
 				return err
-			}
-			if legacyPassword {
-				warnLegacySyncPassword()
 			}
 
 			outDir := strings.TrimSpace(*outputDir)

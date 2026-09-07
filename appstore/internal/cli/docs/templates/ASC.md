@@ -229,7 +229,6 @@ Use `asc <command> --help` for subcommands and flags.
 - `ASC_STOREKIT_BYPASS_KEYCHAIN` - Disable StoreKit keychain usage and use config-backed storage
 - Web password environment variable (`ASC_WEB` + `_PASSWORD`) - Password source for `asc web auth login` and `asc web apps create`
 - `ASC_WEB_SESSION_CACHE`, `ASC_WEB_SESSION_CACHE_DIR`, `ASC_WEB_SESSION_CACHE_BACKEND` - Web-session cache controls for web flows
-- `ASC_IRIS_SESSION_CACHE`, `ASC_IRIS_SESSION_CACHE_DIR` - Deprecated legacy app-create cache settings; imported into the web session cache during the transition window
 - `ASC_SPINNER_DISABLED` - Disable interactive stderr spinner
 - `ASC_SKILLS_AUTO_CHECK` - Automatic skills update checks (`true`/`1`/`yes`/`y`/`on` enables, `false`/`0`/`no`/`n`/`off` disables; default enabled)
 

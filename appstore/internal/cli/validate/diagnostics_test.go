@@ -77,7 +77,7 @@ func TestValidationFailuresExposeStructuredDiagnostics(t *testing.T) {
 			} {
 				return ValidateCommand()
 			},
-			args:      []string{"--app", "app-1", "testflight", "--build", "build-1"},
+			args:      []string{"--app", "app-1", "testflight", "--build-id", "build-1"},
 			wantError: "--app must be passed after the validate subcommand name",
 			wantCode:  shared.DiagnosticInvalidInput,
 			wantParam: "",

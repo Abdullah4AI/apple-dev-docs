@@ -116,7 +116,7 @@ func TestFlightSyncPullCommand() *ffcli.Command {
 	includeBuilds := fs.Bool("include-builds", false, "Include builds and group assignments")
 	includeTesters := fs.Bool("include-testers", false, "Include testers and group memberships")
 	groupFilter := fs.String("group", "", "Filter to a specific beta group (name or ID)")
-	buildFilter, legacyBuildFilter := bindBuildIDFlag(fs, "Filter to build ID(s), comma-separated")
+	buildFilter := fs.String("build-id", "", "Filter to build ID(s), comma-separated")
 	testerFilter := fs.String("tester", "", "Filter to tester ID(s) or emails, comma-separated")
 	pretty := shared.BindPrettyJSONFlag(fs)
 
@@ -133,9 +133,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildFilter, legacyBuildFilter); err != nil {
-				return err
-			}
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintf(os.Stderr, "Error: --app is required (or set ASC_APP_ID)\n\n")

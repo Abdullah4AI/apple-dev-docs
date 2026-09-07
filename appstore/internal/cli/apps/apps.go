@@ -178,7 +178,6 @@ func AppsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps view", flag.ExitOnError)
 
 	id := fs.String("id", "", "App Store Connect app ID")
-	legacyAppID := shared.BindDeprecatedStringFlagAlias(fs, "app", "id")
 	appInfoFields := fs.String("app-info-fields", "", "Sparse fields for included app info records: kidsAgeBand (deprecated by Apple; prefer asc age-rating view)")
 	iapFields := fs.String("iap-fields", "", "Sparse fields for included in-app purchases: versions")
 	subscriptionGroupFields := fs.String("subscription-group-fields", "", "Sparse fields for included subscription groups: versions")
@@ -197,9 +196,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyAppID.Apply(id); err != nil {
-				return err
-			}
 			idValue := strings.TrimSpace(*id)
 			if idValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")

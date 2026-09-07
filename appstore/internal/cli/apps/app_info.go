@@ -57,7 +57,6 @@ func AppsInfoViewCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
 	infoID := fs.String("info-id", "", "App Info ID (optional override)")
-	legacyAppInfoID := fs.String("app-info", "", "Deprecated alias for --info-id")
 	versionID := fs.String("version-id", "", "App Store version ID (optional override)")
 	version := fs.String("version", "", "App Store version string (optional)")
 	platform := fs.String("platform", "", "Platform: IOS, MAC_OS, TV_OS, VISION_OS (required with --version)")
@@ -92,10 +91,7 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			infoIDValue, err := resolveInfoIDFlags(*infoID, *legacyAppInfoID, "--app-info")
-			if err != nil {
-				return shared.UsageError(err.Error())
-			}
+			infoIDValue := strings.TrimSpace(*infoID)
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("--limit must be between 1 and 200")
 			}
@@ -474,18 +470,6 @@ Examples:
 			return nil
 		},
 	}
-}
-
-func resolveInfoIDFlags(infoID, legacyValue, legacyFlagName string) (string, error) {
-	infoIDValue := strings.TrimSpace(infoID)
-	legacyValue = strings.TrimSpace(legacyValue)
-	if infoIDValue != "" && legacyValue != "" && infoIDValue != legacyValue {
-		return "", fmt.Errorf("--info-id and %s are mutually exclusive", legacyFlagName)
-	}
-	if infoIDValue != "" {
-		return infoIDValue, nil
-	}
-	return legacyValue, nil
 }
 
 func runAppInfoSetSingleLocale(

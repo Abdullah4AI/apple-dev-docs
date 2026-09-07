@@ -70,6 +70,43 @@ type appDeleteRequest struct {
 	} `json:"data"`
 }
 
+// RestoreApp marks an app as available again.
+func (c *Client) RestoreApp(ctx context.Context, appID string) (*AppResponse, error) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil, fmt.Errorf("app id is required")
+	}
+	req := map[string]any{"data": map[string]any{"type": "apps", "id": appID, "attributes": map[string]any{"removed": false}}}
+	body, err := c.doRequest(ctx, "PATCH", fmt.Sprintf("/apps/%s", url.PathEscape(appID)), req)
+	if err != nil {
+		return nil, err
+	}
+	var result AppResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse app response: %w", err)
+	}
+	return &result, nil
+}
+
+// SetUserAppPermission grants or revokes access for all siloable users.
+func (c *Client) SetUserAppPermission(ctx context.Context, appID, access string) error {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return fmt.Errorf("app id is required")
+	}
+	operation := "REVOKE"
+	mode := strings.ToLower(strings.TrimSpace(access))
+	if mode != "limited" && mode != "full" {
+		return fmt.Errorf("access must be limited or full")
+	}
+	if mode == "full" {
+		operation = "GRANT"
+	}
+	req := map[string]any{"data": map[string]any{"type": "userAppPermissions", "attributes": map[string]any{"appAdamId": appID, "operationType": operation, "userOperationType": "ALL_SILOABLE_USERS"}}}
+	_, err := c.doRequest(ctx, "POST", "/userAppPermissions", req)
+	return err
+}
+
 func normalizeCreateAttrs(attrs AppCreateAttributes) (AppCreateAttributes, error) {
 	attrs.Name = strings.TrimSpace(attrs.Name)
 	attrs.SKU = strings.TrimSpace(attrs.SKU)

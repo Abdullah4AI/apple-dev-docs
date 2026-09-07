@@ -1,5 +1,9 @@
 # Auth logout confirmation migration
 
+> Status: the compatibility window described below closed in 5.0.0. `asc auth
+> logout` without `--confirm` is now a usage error before any credential is
+> removed. See `migrate-to-5-0.mdx`.
+
 `asc auth logout` now accepts `--confirm` so scripts can migrate before
 confirmation becomes mandatory in 5.0.0. New invocations should name the target
 explicitly:

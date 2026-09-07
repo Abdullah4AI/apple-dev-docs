@@ -92,7 +92,7 @@ func BetaTestersListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID env)")
-	buildID, legacyBuildID := bindBuildIDFlag(fs, "Build ID to filter")
+	buildID := fs.String("build-id", "", "Build ID to filter")
 	group := fs.String("group", "", "Beta group name or ID to filter")
 	email := fs.String("email", "", "Filter by tester email")
 	firstName := fs.String("first-name", "", "Filter by tester first name (exact match)")
@@ -138,9 +138,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildID, legacyBuildID); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.WithDiagnostic(
 					shared.UsageErrorCtx(ctx, "beta-testers list: --limit must be between 1 and 200"),
@@ -685,7 +682,7 @@ func BetaTestersAddBuildsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("add-builds", flag.ExitOnError)
 
 	id := fs.String("id", "", "Beta tester ID")
-	buildIDs, legacyBuildIDs := bindBuildIDFlag(fs, "Comma-separated build IDs")
+	buildIDs := fs.String("build-id", "", "Comma-separated build IDs")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -700,9 +697,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildIDs, legacyBuildIDs); err != nil {
-				return err
-			}
 			testerID := strings.TrimSpace(*id)
 			if testerID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")
@@ -748,7 +742,7 @@ func BetaTestersRemoveBuildsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("remove-builds", flag.ExitOnError)
 
 	id := fs.String("id", "", "Beta tester ID")
-	buildIDs, legacyBuildIDs := bindBuildIDFlag(fs, "Comma-separated build IDs")
+	buildIDs := fs.String("build-id", "", "Comma-separated build IDs")
 	confirm := fs.Bool("confirm", false, "Confirm removal")
 	output := shared.BindOutputFlags(fs)
 
@@ -764,9 +758,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildIDs, legacyBuildIDs); err != nil {
-				return err
-			}
 			testerID := strings.TrimSpace(*id)
 			if testerID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --id is required")

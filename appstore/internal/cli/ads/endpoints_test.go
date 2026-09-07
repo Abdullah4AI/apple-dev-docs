@@ -376,12 +376,22 @@ func TestPlatformNegativeKeywordResourceFlagsAreSemantic(t *testing.T) {
 		}
 	}
 
-	legacy := findCommand(root, "v5", "campaign-negative-keywords", "view")
-	if legacy == nil {
-		t.Fatal("missing deprecated v5 campaign-negative-keywords view command")
-	}
-	if legacy.FlagSet.Lookup("negative-keyword") == nil || legacy.FlagSet.Lookup("keyword") == nil {
-		t.Fatal("deprecated v5 negative keyword command must keep --keyword as a compatibility alias")
+	// 5.0.0 removed the CLI-side hidden --keyword alias; the deprecated v5
+	// tree itself stays (Apple-retirement warnings are owned elsewhere).
+	for _, path := range [][]string{
+		{"v5", "campaign-negative-keywords", "view"},
+		{"v5", "ad-group-negative-keywords", "view"},
+	} {
+		legacy := findCommand(root, path...)
+		if legacy == nil {
+			t.Fatalf("missing deprecated %s command", strings.Join(path, " "))
+		}
+		if legacy.FlagSet.Lookup("negative-keyword") == nil {
+			t.Fatalf("%s missing --negative-keyword", strings.Join(path, " "))
+		}
+		if legacy.FlagSet.Lookup("keyword") != nil {
+			t.Fatalf("%s still registers the removed --keyword alias", strings.Join(path, " "))
+		}
 	}
 }
 

@@ -251,7 +251,6 @@ func TestSubscriptionGroupGetEndpointsExposeVersionsQuerySurface(t *testing.T) {
 func TestSubscriptionGroupVersionsDecodeAcrossSharedResponseShapes(t *testing.T) {
 	groupResource := `{"type":"subscriptionGroups","id":"group-1","attributes":{"referenceName":"Premium"},"relationships":{"versions":{"data":[{"type":"subscriptionGroupVersions","id":"version-1"}]}}}`
 	groupResponse := `{"data":` + groupResource + `}`
-	includedGroupResponse := `{"data":{"type":"subscriptionGroupLocalizations","id":"loc-1"},"included":[` + groupResource + `]}`
 	appResponse := `{"data":{"type":"apps","id":"app-1"},"included":[` + groupResource + `]}`
 	updatedName := "Updated"
 
@@ -305,16 +304,6 @@ func TestSubscriptionGroupVersionsDecodeAcrossSharedResponseShapes(t *testing.T)
 					t.Fatal(err)
 				}
 				return resp.Data.Relationships
-			},
-		},
-		{
-			name: "legacy localization included group", method: http.MethodGet, path: "/v1/subscriptionGroupLocalizations/loc-1", responseBody: includedGroupResponse,
-			call: func(t *testing.T, c *Client) json.RawMessage {
-				resp, err := c.GetSubscriptionGroupLocalization(context.Background(), "loc-1")
-				if err != nil {
-					t.Fatal(err)
-				}
-				return decodeIncludedGroup(t, resp.Included)
 			},
 		},
 		{

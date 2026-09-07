@@ -26,7 +26,6 @@ type AppsCreateRunOptions struct {
 
 	AppleID              string
 	Password             string
-	TwoFactorCode        string
 	TwoFactorCodeCommand string
 
 	AutoRename bool
@@ -79,7 +78,6 @@ func trimAppsCreateRunOptions(opts AppsCreateRunOptions) AppsCreateRunOptions {
 	opts.Version = strings.TrimSpace(opts.Version)
 	opts.CompanyName = strings.TrimSpace(opts.CompanyName)
 	opts.AppleID = strings.TrimSpace(opts.AppleID)
-	opts.TwoFactorCode = strings.TrimSpace(opts.TwoFactorCode)
 	opts.TwoFactorCodeCommand = strings.TrimSpace(opts.TwoFactorCodeCommand)
 	opts.Output = strings.TrimSpace(opts.Output)
 	opts.Access = strings.TrimSpace(opts.Access)
@@ -390,7 +388,7 @@ func RunAppsCreate(ctx context.Context, opts AppsCreateRunOptions) error {
 		ctx,
 		opts.AppleID,
 		opts.Password,
-		opts.TwoFactorCode,
+		"",
 		opts.TwoFactorCodeCommand,
 	)
 	if err != nil {

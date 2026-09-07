@@ -17,12 +17,15 @@ import (
 	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-const deviceWithoutCreateMissingDeprecationWarning = "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0."
+const deviceWithoutCreateMissingError = "--device requires --create-missing because device IDs are only applied to profiles this command creates"
 
-func warnDeviceWithoutCreateMissing(deviceIDs string, createMissing bool) {
+// rejectDeviceWithoutCreateMissing fails before any App Store Connect call when
+// device IDs were supplied but could never be applied.
+func rejectDeviceWithoutCreateMissing(deviceIDs string, createMissing bool) error {
 	if !createMissing && strings.TrimSpace(deviceIDs) != "" {
-		fmt.Fprintln(os.Stderr, deviceWithoutCreateMissingDeprecationWarning)
+		return shared.UsageError(deviceWithoutCreateMissingError)
 	}
+	return nil
 }
 
 // SigningFetchCommand returns the signing fetch subcommand.
@@ -32,7 +35,7 @@ func SigningFetchCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (optional, or ASC_APP_ID env)")
 	bundleID := fs.String("bundle-id", "", "Bundle identifier (e.g., com.example.app) - required")
 	profileType := fs.String("profile-type", "", "Profile type: IOS_APP_STORE, IOS_APP_DEVELOPMENT, MAC_APP_STORE, etc. (required)")
-	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (required with --create-missing for development profiles; deprecated and ignored without it until 5.0.0)")
+	deviceIDs := fs.String("device", "", "Device ID(s), comma-separated (requires --create-missing; required for development profiles)")
 	certType := fs.String("certificate-type", "", "Certificate type filter (optional)")
 	outputPath := fs.String("output", "./signing", "Output directory for signing files")
 	createMissing := fs.Bool("create-missing", false, "Create missing profiles")
@@ -49,8 +52,7 @@ and writes them to the output directory.
 
 With --create-missing, it will create a new profile if none exist for the
 specified configuration. Devices are only applied to profiles this command
-creates. In 4.x, passing --device without --create-missing prints a deprecation
-warning and ignores the device IDs; 5.0.0 will reject that combination.
+creates, so --device without --create-missing is rejected with a usage error.
 
 Examples:
   asc signing fetch --bundle-id com.example.app --profile-type IOS_APP_STORE --output ./signing
@@ -71,7 +73,9 @@ Examples:
 				return shared.MissingRequiredUsageError("--profile-type")
 			}
 			profType = strings.ToUpper(profType)
-			warnDeviceWithoutCreateMissing(*deviceIDs, *createMissing)
+			if err := rejectDeviceWithoutCreateMissing(*deviceIDs, *createMissing); err != nil {
+				return err
+			}
 			if *createMissing && isDevelopmentProfile(profType) && strings.TrimSpace(*deviceIDs) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --device is required for development profiles")
 				return shared.MissingRequiredUsageError("--device")

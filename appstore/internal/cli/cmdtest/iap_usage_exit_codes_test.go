@@ -40,21 +40,6 @@ func TestIAPInputValidationReturnsUsageExitCode(t *testing.T) {
 			wantErr: "iap list: --next must be a valid URL: " + malformedNextURLParseError,
 		},
 		{
-			name:    "localizations list limit above maximum",
-			args:    []string{"iap", "localizations", "list", "--iap-id", "IAP_ID", "--limit", "201"},
-			wantErr: "iap localizations list: --limit must be between 1 and 200",
-		},
-		{
-			name:    "localizations list invalid next",
-			args:    []string{"iap", "localizations", "list", "--iap-id", "IAP_ID", "--next", "http://api.appstoreconnect.apple.com/v1/x"},
-			wantErr: "iap localizations list: --next must be an App Store Connect URL",
-		},
-		{
-			name:    "images list limit above maximum",
-			args:    []string{"iap", "images", "list", "--iap-id", "IAP_ID", "--limit", "201"},
-			wantErr: "iap images list: --limit must be between 1 and 200",
-		},
-		{
 			name:    "offer-codes list limit above maximum",
 			args:    []string{"iap", "offer-codes", "list", "--iap-id", "IAP_ID", "--limit", "201"},
 			wantErr: "iap offer-codes list: --limit must be between 1 and 200",

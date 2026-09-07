@@ -164,11 +164,6 @@ func TestAppsPublicValidationErrors(t *testing.T) {
 			wantErr: "--app is required",
 		},
 		{
-			name:    "view conflicting app aliases",
-			args:    []string{"apps", "public", "view", "--app", "123", "--id", "456"},
-			wantErr: "--app and --id are mutually exclusive",
-		},
-		{
 			name:    "view invalid app id",
 			args:    []string{"apps", "public", "view", "--app", "abc"},
 			wantErr: "--app must be a numeric App Store app ID",
@@ -548,8 +543,8 @@ func TestAppsPublicRejectsSignedAppIDsBeforeRequest(t *testing.T) {
 			args: []string{"apps", "public", "prices", "--app", "+123"},
 		},
 		{
-			name: "descriptions negative alias",
-			args: []string{"apps", "public", "descriptions", "--id", "-123"},
+			name: "descriptions negative app",
+			args: []string{"apps", "public", "descriptions", "--app", "-123"},
 		},
 	}
 
@@ -569,103 +564,34 @@ func TestAppsPublicRejectsSignedAppIDsBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestAppsPublicAliasIsSilentAndMatchesCanonical(t *testing.T) {
+func TestAppsPublicLegacyIDFlagIsUnknown(t *testing.T) {
 	t.Setenv("ASC_BYPASS_KEYCHAIN", "1")
-	t.Setenv("ASC_KEY_ID", "poison")
-	t.Setenv("ASC_ISSUER_ID", "poison")
-	t.Setenv("ASC_PRIVATE_KEY_PATH", "/nonexistent")
-	t.Setenv("ASC_PRIVATE_KEY", "poison")
-	t.Setenv("ASC_PRIVATE_KEY_B64", "poison")
 
 	originalTransport := http.DefaultTransport
 	t.Cleanup(func() {
 		http.DefaultTransport = originalTransport
 	})
-
-	lookupBody := `{
-		"resultCount": 1,
-		"results": [{
-			"trackId": 123,
-			"trackName": "Alpha",
-			"bundleId": "com.example.alpha",
-			"trackViewUrl": "https://apps.apple.com/us/app/alpha/id123",
-			"artworkUrl512": "https://example.com/icon.png",
-			"sellerName": "Alpha Inc",
-			"primaryGenreName": "Games",
-			"genres": ["Games", "Action"],
-			"version": "1.0.0",
-			"description": "Alpha description",
-			"price": 0,
-			"formattedPrice": "Free",
-			"currency": "USD",
-			"averageUserRating": 4.5,
-			"userRatingCount": 12,
-			"averageUserRatingForCurrentVersion": 4.4,
-			"userRatingCountForCurrentVersion": 11
-		}]
-	}`
-
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/lookup" {
-			t.Fatalf("expected /lookup, got %s", req.URL.Path)
-		}
-		if got := req.URL.Query().Get("id"); got != "123" {
-			t.Fatalf("expected id=123, got %q", got)
-		}
-		if got := req.URL.Query().Get("country"); got != "us" {
-			t.Fatalf("expected country=us, got %q", got)
-		}
-		if got := req.URL.Query().Get("entity"); got != "software" {
-			t.Fatalf("expected entity=software, got %q", got)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(lookupBody)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
+		t.Fatalf("removed --id alias must fail before any request: %s", req.URL.String())
+		return nil, errors.New("unexpected request")
 	})
 
-	canonicalStdout, canonicalStderr, canonicalErr := runCommand(t, []string{"apps", "public", "view", "--app", "123", "--output", "json"})
-	aliasStdout, aliasStderr, aliasErr := runCommand(t, []string{"apps", "public", "view", "--id", "123", "--output", "json"})
-	matchingStdout, matchingStderr, matchingErr := runCommand(t, []string{"apps", "public", "view", "--app", "123", "--id", "123", "--output", "json"})
+	root := RootCommand("1.2.3")
+	for _, name := range []string{"view", "prices", "descriptions"} {
+		t.Run(name, func(t *testing.T) {
+			command := findSubcommand(root, "apps", "public", name)
+			if command == nil {
+				t.Fatalf("apps public %s not found", name)
+			}
+			if command.FlagSet.Lookup("app") == nil {
+				t.Fatalf("apps public %s: canonical --app flag not found", name)
+			}
+			if command.FlagSet.Lookup("id") != nil {
+				t.Fatalf("apps public %s: removed --id alias is still registered", name)
+			}
 
-	if canonicalErr != nil {
-		t.Fatalf("canonical run error: %v", canonicalErr)
-	}
-	if aliasErr != nil {
-		t.Fatalf("alias run error: %v", aliasErr)
-	}
-	if matchingErr != nil {
-		t.Fatalf("matching alias run error: %v", matchingErr)
-	}
-	if canonicalStderr != "" {
-		t.Fatalf("expected canonical stderr to be empty, got %q", canonicalStderr)
-	}
-	if aliasStderr != "" {
-		t.Fatalf("expected alias stderr to be empty, got %q", aliasStderr)
-	}
-	if matchingStderr != "" {
-		t.Fatalf("expected matching alias stderr to be empty, got %q", matchingStderr)
-	}
-	if canonicalStdout != aliasStdout {
-		t.Fatalf("expected canonical and alias outputs to match, canonical=%q alias=%q", canonicalStdout, aliasStdout)
-	}
-	if canonicalStdout != matchingStdout {
-		t.Fatalf("expected canonical and matching alias outputs to match, canonical=%q matching=%q", canonicalStdout, matchingStdout)
-	}
-
-	var payload itunes.App
-	if err := json.Unmarshal([]byte(canonicalStdout), &payload); err != nil {
-		t.Fatalf("unmarshal view payload: %v", err)
-	}
-	if payload.Country != "US" {
-		t.Fatalf("Country = %q, want US", payload.Country)
-	}
-	if payload.CountryName != "United States" {
-		t.Fatalf("CountryName = %q, want United States", payload.CountryName)
+			assertUsageExit(t, []string{"apps", "public", name, "--id", "123", "--output", "json"}, "Error: unknown flag `--id` for `asc apps public "+name+"`")
+		})
 	}
 }
 

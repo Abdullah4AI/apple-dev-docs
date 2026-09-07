@@ -327,7 +327,6 @@ func VersionsViewCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("versions view", flag.ExitOnError)
 
 	versionID := fs.String("version-id", "", "App Store version ID")
-	legacyID := shared.BindDeprecatedStringFlagAlias(fs, "id", "version-id")
 	appID := fs.String("app", "", "[experimental] App Store Connect app ID (or ASC_APP_ID)")
 	versionString := fs.String("version", "", "[experimental] Version string used with --app")
 	platform := fs.String("platform", "IOS", "[experimental] Platform used with --app and --version: IOS, MAC_OS, TV_OS, VISION_OS")
@@ -352,15 +351,12 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyID.Apply(versionID); err != nil {
-				return err
-			}
 			trimmedID := strings.TrimSpace(*versionID)
 			directIDRequested := false
 			lookupRequested := false
 			fs.Visit(func(parsed *flag.Flag) {
 				switch parsed.Name {
-				case "id", "version-id":
+				case "version-id":
 					directIDRequested = true
 				case "app", "version", "platform":
 					lookupRequested = true
@@ -620,7 +616,6 @@ func VersionsUpdateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("versions update", flag.ExitOnError)
 
 	versionID := fs.String("version-id", "", "App Store version ID (required)")
-	legacyID := shared.BindDeprecatedStringFlagAlias(fs, "id", "version-id")
 	copyright := fs.String("copyright", "", "Copyright text (e.g., '2026 My Company')")
 	releaseType := fs.String("release-type", "", "Release type: MANUAL, AFTER_APPROVAL, SCHEDULED")
 	earliestReleaseDate := fs.String("earliest-release-date", "", "Earliest release date (ISO 8601, e.g., 2026-02-01T08:00:00+00:00)")
@@ -662,9 +657,6 @@ Examples:
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
 			if err := shared.RejectPositionalArgs(args); err != nil {
-				return err
-			}
-			if err := legacyID.Apply(versionID); err != nil {
 				return err
 			}
 			if strings.TrimSpace(*versionID) == "" {
@@ -795,7 +787,6 @@ func VersionsAttachBuildCommand() *ffcli.Command {
 
 	versionID := fs.String("version-id", "", "App Store version ID (required)")
 	buildID := fs.String("build-id", "", "Build ID to attach (required)")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -814,9 +805,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
 			if strings.TrimSpace(*versionID) == "" {
 				fmt.Fprintln(os.Stderr, "Error: --version-id is required")
 				return shared.MissingRequiredUsageError("--version-id")

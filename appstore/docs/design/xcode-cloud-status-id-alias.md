@@ -1,5 +1,7 @@
 # Xcode Cloud status ID alias
 
+> Status: the `--id` alias described below was removed in 5.0.0; `asc xcode-cloud status` accepts only `--run-id`. See `migrate-to-5-0.mdx`.
+
 ## Decision
 
 `asc xcode-cloud status` keeps `--run-id` as its canonical build-run selector

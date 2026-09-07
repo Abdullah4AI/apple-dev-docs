@@ -353,16 +353,12 @@ Timeouts:
 				)
 			}
 
-			legacyAllTerritories := territoryProvided && strings.EqualFold(territoryID, "ALL")
-			useAllTerritories := *allTerritories || legacyAllTerritories
+			useAllTerritories := *allTerritories
 			if useAllTerritories && strings.TrimSpace(*pricePoint) != "" {
-				fmt.Fprintln(os.Stderr, "Error: --price-point cannot be used with --all-territories or --territory ALL")
+				fmt.Fprintln(os.Stderr, "Error: --price-point cannot be used with --all-territories")
 				return flag.ErrHelp
 			}
-			if legacyAllTerritories {
-				fmt.Fprintln(os.Stderr, "Warning: `--territory ALL` is deprecated. Use `--all-territories`.")
-				territoryID = ""
-			} else if territoryProvided {
+			if territoryProvided {
 				territoryID, err = ascterritory.Normalize(territoryID)
 				if err != nil {
 					return subscriptionIntroductoryOfferSelectorUsageError(shared.UsageErrorInvalidValue, err.Error())

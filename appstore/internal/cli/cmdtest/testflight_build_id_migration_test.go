@@ -1,190 +1,104 @@
 package cmdtest
 
 import (
-	"context"
-	"errors"
-	"flag"
 	"io"
-	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-const testFlightLegacyBuildWarning = "Warning: `--build` is deprecated. Use `--build-id`."
-
-func runTestFlightBuildIDCommand(t *testing.T, args []string) (string, string, error) {
-	t.Helper()
-
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
-
-	var runErr error
-	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse(args); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		runErr = root.Run(context.Background())
-	})
-
-	return stdout, stderr, runErr
+// buildIDOnlyCommands lists the TestFlight and build-selector commands whose
+// hidden `--build` alias was removed in 5.0.0. Only `--build-id` remains.
+var buildIDOnlyCommands = [][]string{
+	{"testflight", "review", "submit"},
+	{"testflight", "review", "submissions", "list"},
+	{"testflight", "distribution", "view"},
+	{"testflight", "notifications", "send"},
+	{"testflight", "testers", "list"},
+	{"testflight", "testers", "export"},
+	{"testflight", "testers", "add-builds"},
+	{"testflight", "testers", "remove-builds"},
+	{"testflight", "config", "export"},
+	{"testflight", "crashes", "list"},
+	{"testflight", "feedback", "list"},
+	{"builds", "info"},
+	{"builds", "wait"},
+	{"builds", "dsyms"},
+	{"builds", "expire"},
+	{"builds", "update"},
+	{"builds", "add-groups"},
+	{"builds", "remove-groups"},
+	{"builds", "individual-testers", "list"},
+	{"builds", "individual-testers", "add"},
+	{"builds", "individual-testers", "remove"},
+	{"builds", "metrics", "beta-usages"},
+	{"builds", "icons", "list"},
+	{"builds", "links", "view"},
+	{"builds", "app", "view"},
+	{"builds", "pre-release-version", "view"},
+	{"builds", "beta-app-review-submission", "view"},
+	{"builds", "build-beta-detail", "view"},
+	{"builds", "app-encryption-declaration", "view"},
+	{"builds", "test-notes", "list"},
+	{"builds", "test-notes", "view"},
+	{"builds", "test-notes", "create"},
+	{"builds", "test-notes", "update"},
+	{"builds", "test-notes", "delete"},
+	{"publish", "testflight"},
+	{"validate", "testflight"},
+	{"release", "stage"},
+	{"build-localizations", "list"},
+	{"build-localizations", "create"},
+	{"build-bundles", "list"},
+	{"performance", "metrics", "view"},
+	{"performance", "diagnostics", "list"},
+	{"performance", "download"},
 }
 
-func TestTestFlightBuildIDAliasConflictErrors(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "review submit conflicting build values",
-			args: []string{"testflight", "review", "submit", "--build-id", "BUILD_CANON", "--build", "BUILD_LEGACY", "--confirm"},
-		},
-		{
-			name: "beta testers add-builds conflicting build values",
-			args: []string{"testflight", "testers", "add-builds", "--id", "TESTER_ID", "--build-id", "BUILD_CANON", "--build", "BUILD_LEGACY"},
-		},
-		{
-			name: "config export conflicting build values",
-			args: []string{"testflight", "config", "export", "--app", "APP_ID", "--output", "./testflight.yaml", "--include-builds", "--build-id", "BUILD_CANON", "--build", "BUILD_LEGACY"},
-		},
-	}
+func TestBuildIDOnlyCommandsDoNotRegisterLegacyBuildAlias(t *testing.T) {
+	root := RootCommand("1.2.3")
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			stdout, stderr, runErr := runTestFlightBuildIDCommand(t, test.args)
-			if !errors.Is(runErr, flag.ErrHelp) {
-				t.Fatalf("expected ErrHelp, got %v", runErr)
+	for _, path := range buildIDOnlyCommands {
+		t.Run(strings.Join(path, " "), func(t *testing.T) {
+			command := findSubcommand(root, path...)
+			if command == nil {
+				t.Fatalf("command %q not found", strings.Join(path, " "))
 			}
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
+			if command.FlagSet.Lookup("build-id") == nil {
+				t.Fatalf("canonical flag --build-id not registered on %q", strings.Join(path, " "))
 			}
-			if !strings.Contains(stderr, "Error: --build conflicts with --build-id; use only --build-id") {
-				t.Fatalf("expected conflicting build selector error, got %q", stderr)
+			if command.FlagSet.Lookup("build") != nil {
+				t.Fatalf("removed alias --build must not be registered on %q", strings.Join(path, " "))
 			}
-			if strings.Contains(stderr, testFlightLegacyBuildWarning) {
-				t.Fatalf("expected conflict to fail before deprecation warning, got %q", stderr)
+			if command.FlagSet.Lookup("newest") != nil {
+				t.Fatalf("removed alias --newest must not be registered on %q", strings.Join(path, " "))
 			}
 		})
 	}
 }
 
-func TestTestFlightReviewSubmissionsListBuildAliasWarnsAndMatchesCanonical(t *testing.T) {
-	setupAuth(t)
-	t.Setenv("ASC_APP_ID", "")
-	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+func TestTestFlightGroupsViewRejectsRemovedGroupIDAlias(t *testing.T) {
+	root := RootCommand("1.2.3")
+	root.FlagSet.SetOutput(io.Discard)
 
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
-	requestCount := 0
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestCount++
-		if req.Method != http.MethodGet {
-			t.Fatalf("expected GET, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/betaAppReviewSubmissions" {
-			t.Fatalf("expected path /v1/betaAppReviewSubmissions, got %s", req.URL.Path)
-		}
-		query := req.URL.Query()
-		if query.Get("filter[build]") != "build-1" {
-			t.Fatalf("expected build filter build-1, got %q", query.Get("filter[build]"))
-		}
-		body := `{"data":[{"type":"betaAppReviewSubmissions","id":"submission-1","attributes":{"betaReviewState":"WAITING_FOR_REVIEW","submittedDate":"2024-01-01T00:00:00Z"}}]}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
-	})
-
-	canonicalStdout, canonicalStderr, canonicalErr := runTestFlightBuildIDCommand(t, []string{
-		"testflight", "review", "submissions", "list", "--build-id", "build-1", "--output", "json",
-	})
-	if canonicalErr != nil {
-		t.Fatalf("canonical run error: %v", canonicalErr)
+	command := findSubcommand(root, "testflight", "groups", "view")
+	if command == nil {
+		t.Fatal("testflight groups view not found")
 	}
-	if canonicalStderr != "" {
-		t.Fatalf("expected empty canonical stderr, got %q", canonicalStderr)
+	if command.FlagSet.Lookup("id") == nil {
+		t.Fatal("canonical flag --id not registered on testflight groups view")
+	}
+	if command.FlagSet.Lookup("group-id") != nil {
+		t.Fatal("removed alias --group-id must not be registered on testflight groups view")
 	}
 
-	aliasStdout, aliasStderr, aliasErr := runTestFlightBuildIDCommand(t, []string{
-		"testflight", "review", "submissions", "list", "--build", "build-1", "--output", "json",
-	})
-	if aliasErr != nil {
-		t.Fatalf("alias run error: %v", aliasErr)
-	}
-	if canonicalStdout != aliasStdout {
-		t.Fatalf("expected identical stdout, canonical=%q alias=%q", canonicalStdout, aliasStdout)
-	}
-	if !strings.Contains(aliasStderr, testFlightLegacyBuildWarning) {
-		t.Fatalf("expected legacy build warning, got %q", aliasStderr)
-	}
-	if requestCount != 2 {
-		t.Fatalf("expected two requests, got %d", requestCount)
-	}
+	assertRemovedFlagIsUnknown(t, []string{"testflight", "groups", "view", "--group-id", "group-1"}, "--group-id")
 }
 
-func TestTestFlightBetaTestersAddBuildsAliasWarnsAndMatchesCanonical(t *testing.T) {
-	setupAuth(t)
-	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
-
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
-	requestCount := 0
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestCount++
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", req.Method)
-		}
-		if req.URL.Path != "/v1/betaTesters/tester-1/relationships/builds" {
-			t.Fatalf("expected beta tester builds relationship path, got %s", req.URL.Path)
-		}
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		bodyText := string(body)
-		if !strings.Contains(bodyText, `"id":"build-1"`) || !strings.Contains(bodyText, `"id":"build-2"`) {
-			t.Fatalf("expected both build IDs in body, got %q", bodyText)
-		}
-		return &http.Response{
-			StatusCode: http.StatusNoContent,
-			Body:       io.NopCloser(strings.NewReader("")),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
-	})
-
-	canonicalStdout, canonicalStderr, canonicalErr := runTestFlightBuildIDCommand(t, []string{
-		"testflight", "testers", "add-builds", "--id", "tester-1", "--build-id", "build-1,build-2", "--output", "json",
-	})
-	if canonicalErr != nil {
-		t.Fatalf("canonical run error: %v", canonicalErr)
-	}
-	if strings.Contains(canonicalStderr, testFlightLegacyBuildWarning) {
-		t.Fatalf("did not expect canonical warning, got %q", canonicalStderr)
-	}
-
-	aliasStdout, aliasStderr, aliasErr := runTestFlightBuildIDCommand(t, []string{
-		"testflight", "testers", "add-builds", "--id", "tester-1", "--build", "build-1,build-2", "--output", "json",
-	})
-	if aliasErr != nil {
-		t.Fatalf("alias run error: %v", aliasErr)
-	}
-	if canonicalStdout != aliasStdout {
-		t.Fatalf("expected identical stdout, canonical=%q alias=%q", canonicalStdout, aliasStdout)
-	}
-	if !strings.Contains(aliasStderr, testFlightLegacyBuildWarning) {
-		t.Fatalf("expected legacy build warning, got %q", aliasStderr)
-	}
-	if !strings.Contains(aliasStderr, "Successfully added tester tester-1 to 2 build(s)") {
-		t.Fatalf("expected success message in stderr, got %q", aliasStderr)
-	}
-	if requestCount != 2 {
-		t.Fatalf("expected two requests, got %d", requestCount)
+func TestBuildIDOnlyCommandsRejectLegacyBuildAliasAsUnknownFlag(t *testing.T) {
+	for _, path := range buildIDOnlyCommands {
+		t.Run(strings.Join(path, " "), func(t *testing.T) {
+			args := append(append([]string{}, path...), "--build", "BUILD_123")
+			assertRemovedFlagIsUnknown(t, args, "--build")
+		})
 	}
 }

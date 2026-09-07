@@ -17,6 +17,10 @@ var setWebMedicalDeviceDeclarationFn = func(ctx context.Context, client *webcore
 	return client.SetMedicalDeviceDeclaration(ctx, accountID, appID, declared)
 }
 
+var setWebMedicalDeviceDeclarationWithOptionsFn = func(ctx context.Context, client *webcore.Client, accountID, appID string, declared bool, options webcore.MedicalDeviceDeclarationOptions) (*webcore.MedicalDeviceDeclarationResult, error) {
+	return client.SetMedicalDeviceDeclarationWithOptions(ctx, accountID, appID, declared, options)
+}
+
 // WebAppsMedicalDeviceCommand returns the regulated medical device command group.
 func WebAppsMedicalDeviceCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("web apps medical-device", flag.ExitOnError)
@@ -31,10 +35,13 @@ Manage the regulated medical device declaration exposed in App Store Connect
 under App Information -> App Store Regulations & Permits.
 
 Use ` + "`view`" + ` to read the stored declaration and ` + "`set`" + ` to answer it.
+Use ` + "`region set`" + ` to update one detailed regional answer after the
+app-level declaration is already "yes".
 
-Writing currently automates only the common "No" path. If your app is actually a
-regulated medical device, continue using the App Store Connect web UI until the
-full undocumented "Yes" write contract is captured safely.
+Writing supports the app-level "Yes" or "No" answer and the captured region
+selection for the medical-device form. The regional command accepts only the
+captured registration and localized support fields; contact information is
+read from the existing form, preserved, and never supplied by the CLI.
 
 `,
 		FlagSet:   fs,
@@ -42,6 +49,7 @@ full undocumented "Yes" write contract is captured safely.
 		Subcommands: []*ffcli.Command{
 			WebAppsMedicalDeviceViewCommand(),
 			WebAppsMedicalDeviceSetCommand(),
+			WebAppsMedicalDeviceRegionCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -55,26 +63,31 @@ func WebAppsMedicalDeviceSetCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	var declared shared.OptionalBool
-	fs.Var(&declared, "declared", "Set regulated medical device declaration: false")
+	fs.Var(&declared, "declared", "Set regulated medical device declaration: true or false")
+	countriesOrRegions := fs.String("countries-or-regions", "", "Comma-separated medical-device regions: EEA,GBR,USA (default: all)")
+	confirm := fs.Bool("confirm", false, "Confirm saving an affirmative regulated medical-device declaration")
 	authFlags := bindWebSessionFlags(fs)
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "set",
-		ShortUsage: "asc web apps medical-device set --app APP_ID --declared false [flags]",
+		ShortUsage: "asc web apps medical-device set --app APP_ID --declared true|false [--confirm] [flags]",
 		ShortHelp:  "Set regulated medical device declaration via web API.",
 		LongHelp: `WEB SESSION WORKFLOWS
 
 Set the regulated medical device declaration through Apple web-session compliance-form web endpoint used by App Store Connect.
 
-Only the "No" path is currently supported, which covers the common case for
-apps that are not regulated medical devices.
+The app-level "Yes" path uses Apple's captured web form contract and accepts
+the EEA, GBR, and USA region selection. Region-specific registration,
+support-information, and contact-information fields are preserved when
+present, but are not entered by this command.
 
 The stored declaration is read first; when it already matches, no write is sent
 and the receipt reports ` + "`changed: false`" + `.
 
 Examples:
   asc web apps medical-device set --app "6748252780" --declared false
+  asc web apps medical-device set --app "6748252780" --declared true --countries-or-regions "EEA,GBR" --confirm
 
 `,
 		FlagSet:   fs,
@@ -89,10 +102,33 @@ Examples:
 				return shared.UsageError("--app is required (or set ASC_APP_ID)")
 			}
 			if !declared.IsSet() {
-				return shared.UsageError("--declared is required (supported value: false)")
+				return shared.UsageError("--declared is required (supported values: true, false)")
 			}
-			if declared.Value() {
-				return shared.UsageError("--declared true is not yet supported; only false is currently supported")
+
+			regionsProvided := false
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "countries-or-regions" {
+					regionsProvided = true
+				}
+			})
+			if regionsProvided && strings.TrimSpace(*countriesOrRegions) == "" {
+				return shared.UsageError("--countries-or-regions must not be empty")
+			}
+
+			var selectedRegions []string
+			if regionsProvided {
+				if !declared.Value() {
+					return shared.UsageError("--countries-or-regions requires --declared true")
+				}
+				values := strings.Split(*countriesOrRegions, ",")
+				var err error
+				selectedRegions, err = webcore.NormalizeMedicalDeviceDeclarationRegions(values)
+				if err != nil {
+					return shared.UsageError(err.Error())
+				}
+			}
+			if declared.Value() && !*confirm {
+				return shared.UsageError("--confirm is required")
 			}
 
 			accountID, client, requestCtx, cancel, err := resolveWebComplianceClient(ctx, authFlags, "web apps medical-device set")
@@ -104,7 +140,11 @@ Examples:
 			var result *webcore.MedicalDeviceDeclarationResult
 			err = withWebSpinner("Saving regulated medical device declaration", func() error {
 				var err error
-				result, err = setWebMedicalDeviceDeclarationFn(requestCtx, client, accountID, resolvedAppID, false)
+				if declared.Value() || len(selectedRegions) > 0 {
+					result, err = setWebMedicalDeviceDeclarationWithOptionsFn(requestCtx, client, accountID, resolvedAppID, declared.Value(), webcore.MedicalDeviceDeclarationOptions{CountriesOrRegions: selectedRegions})
+				} else {
+					result, err = setWebMedicalDeviceDeclarationFn(requestCtx, client, accountID, resolvedAppID, false)
+				}
 				return err
 			})
 			if err != nil {

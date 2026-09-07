@@ -32,9 +32,50 @@ func TestExperimentalCommandsHaveStabilityLabel(t *testing.T) {
 		{[]string{"signing", "reconcile", "plan"}},
 		{[]string{"signing", "reconcile", "apply"}},
 		{[]string{"apps", "rename"}},
+		{[]string{"web", "apps", "transfer"}},
+		{[]string{"web", "apps", "transfer", "status"}},
 		{[]string{"web", "agreements"}},
 		{[]string{"web", "agreements", "status"}},
 		{[]string{"web", "agreements", "accept"}},
+		{[]string{"web", "auth", "export"}},
+		{[]string{"web", "auth", "import"}},
+		{[]string{"web", "bundle-ids", "list"}},
+		{[]string{"web", "bundle-ids", "view"}},
+		{[]string{"web", "service-ids"}},
+		{[]string{"web", "service-ids", "list"}},
+		{[]string{"web", "service-ids", "view"}},
+		{[]string{"web", "service-ids", "create"}},
+		{[]string{"web", "service-ids", "rename"}},
+		{[]string{"web", "service-ids", "delete"}},
+		{[]string{"web", "review", "reply"}},
+		{[]string{"web", "review", "drafts"}},
+		{[]string{"web", "review", "drafts", "create"}},
+		{[]string{"web", "review", "drafts", "update"}},
+		{[]string{"web", "review", "drafts", "delete"}},
+		{[]string{"web", "website-push-ids"}},
+		{[]string{"web", "website-push-ids", "list"}},
+		{[]string{"web", "website-push-ids", "view"}},
+		{[]string{"web", "website-push-ids", "create"}},
+		{[]string{"web", "website-push-ids", "delete"}},
+		{[]string{"web", "icloud-containers"}},
+		{[]string{"web", "icloud-containers", "list"}},
+		{[]string{"web", "finance"}},
+		{[]string{"web", "finance", "transaction-tax"}},
+		{[]string{"web", "finance", "transaction-tax", "download"}},
+		{[]string{"web", "iap"}},
+		{[]string{"web", "iap", "tax-category"}},
+		{[]string{"web", "iap", "tax-category", "list"}},
+		{[]string{"web", "iap", "tax-category", "view"}},
+		{[]string{"web", "iap", "tax-category", "set"}},
+		{[]string{"web", "iap", "tax-category", "reset"}},
+		{[]string{"web", "apps", "distribution", "users"}},
+		{[]string{"web", "apps", "distribution", "users", "list"}},
+		{[]string{"web", "apps", "distribution", "users", "create"}},
+		{[]string{"web", "apps", "distribution", "users", "delete"}},
+		{[]string{"web", "xcode-cloud", "scm"}},
+		{[]string{"web", "xcode-cloud", "scm", "providers"}},
+		{[]string{"web", "xcode-cloud", "scm", "providers", "list"}},
+		{[]string{"web", "xcode-cloud", "scm", "connection-status"}},
 	}
 
 	for _, tc := range cases {
@@ -65,11 +106,57 @@ func TestWebCommandsDoNotHaveExperimentalStabilityLabel(t *testing.T) {
 		t.Fatal("command [web] not found")
 	}
 	assertCommandDoesNotMentionExperimental(t, webCmd, []string{"web"})
+	allowed := map[string]struct{}{
+		"web apps transfer":           {},
+		"web apps transfer status":    {},
+		"web auth export":             {},
+		"web auth import":             {},
+		"web bundle-ids list":         {},
+		"web bundle-ids view":         {},
+		"web service-ids":             {},
+		"web service-ids list":        {},
+		"web service-ids view":        {},
+		"web service-ids create":      {},
+		"web service-ids rename":      {},
+		"web service-ids delete":      {},
+		"web review reply":            {},
+		"web review drafts":           {},
+		"web review drafts create":    {},
+		"web review drafts update":    {},
+		"web review drafts delete":    {},
+		"web website-push-ids":        {},
+		"web website-push-ids list":   {},
+		"web website-push-ids view":   {},
+		"web website-push-ids create": {},
+		"web website-push-ids delete": {},
+
+		"web icloud-containers":                {},
+		"web icloud-containers list":           {},
+		"web finance":                          {},
+		"web finance transaction-tax":          {},
+		"web finance transaction-tax download": {},
+		"web iap":                              {},
+		"web iap tax-category":                 {},
+		"web iap tax-category list":            {},
+		"web iap tax-category view":            {},
+		"web iap tax-category set":             {},
+		"web iap tax-category reset":           {},
+		"web apps distribution users":          {},
+		"web apps distribution users list":     {},
+		"web apps distribution users create":   {},
+		"web apps distribution users delete":   {},
+
+		"web xcode-cloud":                       {},
+		"web xcode-cloud scm":                   {},
+		"web xcode-cloud scm providers":         {},
+		"web xcode-cloud scm providers list":    {},
+		"web xcode-cloud scm connection-status": {},
+	}
 	for _, sub := range webCmd.Subcommands {
 		if sub.Name == "agreements" {
 			continue
 		}
-		assertCommandTreeDoesNotMentionExperimental(t, sub, []string{"web", sub.Name})
+		assertCommandTreeDoesNotMentionExperimentalExcept(t, sub, []string{"web", sub.Name}, allowed)
 	}
 }
 
@@ -83,13 +170,14 @@ func TestWebCommandsDoNotHaveEndpointWarningLabels(t *testing.T) {
 	assertCommandTreeDoesNotMentionEndpointWarnings(t, webCmd, []string{"web"})
 }
 
-func assertCommandTreeDoesNotMentionExperimental(t *testing.T, cmd *ffcli.Command, path []string) {
+func assertCommandTreeDoesNotMentionExperimentalExcept(t *testing.T, cmd *ffcli.Command, path []string, allowed map[string]struct{}) {
 	t.Helper()
 
-	assertCommandDoesNotMentionExperimental(t, cmd, path)
-
+	if _, ok := allowed[strings.Join(path, " ")]; !ok {
+		assertCommandDoesNotMentionExperimental(t, cmd, path)
+	}
 	for _, sub := range cmd.Subcommands {
-		assertCommandTreeDoesNotMentionExperimental(t, sub, append(path, sub.Name))
+		assertCommandTreeDoesNotMentionExperimentalExcept(t, sub, append(path, sub.Name), allowed)
 	}
 }
 

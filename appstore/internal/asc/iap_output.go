@@ -71,20 +71,6 @@ func inAppPurchaseDeleteResultRows(result *InAppPurchaseDeleteResult) ([]string,
 	return headers, rows
 }
 
-func inAppPurchaseImagesRows(resp *InAppPurchaseImagesResponse) ([]string, [][]string) {
-	headers := []string{"ID", "File Name", "File Size", "State"}
-	rows := make([][]string, 0, len(resp.Data))
-	for _, item := range resp.Data {
-		rows = append(rows, []string{
-			item.ID,
-			item.Attributes.FileName,
-			fmt.Sprintf("%d", item.Attributes.FileSize),
-			item.Attributes.State,
-		})
-	}
-	return headers, rows
-}
-
 func inAppPurchaseImagesV2Rows(resp *InAppPurchaseImagesV2Response) ([]string, [][]string) {
 	headers := []string{"ID", "File Name", "File Size", "State"}
 	rows := make([][]string, 0, len(resp.Data))

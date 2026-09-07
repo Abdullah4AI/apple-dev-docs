@@ -1,5 +1,7 @@
 # Subscription introductory-offer territory selector
 
+> Status: the `--territory ALL` compatibility spelling described below was removed in 5.0.0; `ALL` is now validated like any other territory value. Use `--all-territories`. See `migrate-to-5-0.mdx`.
+
 ## Decision
 
 `asc subscriptions offers introductory create` requires exactly one territory

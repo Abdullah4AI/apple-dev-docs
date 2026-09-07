@@ -73,7 +73,7 @@ func runGameCenterAchievementsInvalidNextURLCases(
 					t.Fatalf("expected stderr to contain %q, got %q", test.wantErr, stderr)
 				}
 			} else {
-				assertOnlyDeprecatedCommandWarnings(t, stderr)
+				assertEmptyStderr(t, stderr)
 			}
 		})
 	}
@@ -140,7 +140,7 @@ func runGameCenterAchievementsPaginateFromNext(
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	for _, id := range wantIDs {
 		needle := `"id":"` + id + `"`
 		if !strings.Contains(stdout, needle) {

@@ -49,7 +49,6 @@ func BuildLocalizationsListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	locale := fs.String("locale", "", "Filter by locale(s), comma-separated")
 	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
 	next := fs.String("next", "", "Fetch next page using a links.next URL")
@@ -69,9 +68,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("build-localizations list: --limit must be between 1 and 200")
 			}
@@ -183,7 +179,6 @@ func BuildLocalizationsCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	locale := fs.String("locale", "", "Locale (e.g., en-US)")
 	whatsNew := fs.String("whats-new", "", "Release notes (whats new), up to 4000 characters")
 	output := shared.BindOutputFlags(fs)
@@ -203,10 +198,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			build := strings.TrimSpace(*buildID)
 			if build == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")

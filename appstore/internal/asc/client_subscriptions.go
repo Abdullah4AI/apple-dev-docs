@@ -701,43 +701,6 @@ func (c *Client) GetSubscriptionAvailabilityAvailableTerritoriesRelationships(ct
 	return &response, nil
 }
 
-// GetSubscriptionGroupSubscriptionGroupLocalizationsRelationships retrieves localization linkages for a subscription group.
-//
-// Deprecated: Use GetSubscriptionGroupVersionLocalizationsRelationships with a subscription group version ID.
-func (c *Client) GetSubscriptionGroupSubscriptionGroupLocalizationsRelationships(ctx context.Context, groupID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	groupID = strings.TrimSpace(groupID)
-	if query.nextURL == "" && groupID == "" {
-		return nil, fmt.Errorf("groupID is required")
-	}
-
-	path := fmt.Sprintf("/v1/subscriptionGroups/%s/relationships/subscriptionGroupLocalizations", groupID)
-	if query.nextURL != "" {
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("subscriptionGroupLocalizationsRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response LinkagesResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
-}
-
 // GetSubscriptionGroupSubscriptionsRelationships retrieves subscription linkages for a subscription group.
 func (c *Client) GetSubscriptionGroupSubscriptionsRelationships(ctx context.Context, groupID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
 	query := &linkagesQuery{}
@@ -787,43 +750,6 @@ func (c *Client) GetSubscriptionAppStoreReviewScreenshotRelationship(ctx context
 	}
 
 	var response SubscriptionAppStoreReviewScreenshotLinkageResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
-}
-
-// GetSubscriptionImagesRelationships retrieves image linkages for a subscription.
-//
-// Deprecated: Use GetSubscriptionVersionImagesRelationships with a subscription version ID.
-func (c *Client) GetSubscriptionImagesRelationships(ctx context.Context, subID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	subID = strings.TrimSpace(subID)
-	if query.nextURL == "" && subID == "" {
-		return nil, fmt.Errorf("subscription ID is required")
-	}
-
-	path := fmt.Sprintf("/v1/subscriptions/%s/relationships/images", subID)
-	if query.nextURL != "" {
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("subscriptionImagesRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response LinkagesResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -1103,43 +1029,6 @@ func (c *Client) GetSubscriptionSubscriptionAvailabilityRelationship(ctx context
 	}
 
 	var response SubscriptionSubscriptionAvailabilityLinkageResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &response, nil
-}
-
-// GetSubscriptionSubscriptionLocalizationsRelationships retrieves subscription localization linkages for a subscription.
-//
-// Deprecated: Use GetSubscriptionVersionLocalizationsRelationships with a subscription version ID.
-func (c *Client) GetSubscriptionSubscriptionLocalizationsRelationships(ctx context.Context, subID string, opts ...LinkagesOption) (*LinkagesResponse, error) {
-	query := &linkagesQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-
-	subID = strings.TrimSpace(subID)
-	if query.nextURL == "" && subID == "" {
-		return nil, fmt.Errorf("subscription ID is required")
-	}
-
-	path := fmt.Sprintf("/v1/subscriptions/%s/relationships/subscriptionLocalizations", subID)
-	if query.nextURL != "" {
-		if err := validateNextURL(query.nextURL); err != nil {
-			return nil, fmt.Errorf("subscriptionSubscriptionLocalizationsRelationships: %w", err)
-		}
-		path = query.nextURL
-	} else if queryString := buildLinkagesQuery(query); queryString != "" {
-		path += "?" + queryString
-	}
-
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response LinkagesResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}

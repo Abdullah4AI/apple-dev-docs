@@ -58,7 +58,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			resolvedAppID, err := resolvePublicAppID(*appID, "")
+			resolvedAppID, err := resolvePublicAppID(*appID)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				return flag.ErrHelp

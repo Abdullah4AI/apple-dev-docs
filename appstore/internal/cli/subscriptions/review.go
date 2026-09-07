@@ -45,20 +45,6 @@ Examples:
 				"app-store-screenshot",
 				"Inspect the App Store review screenshot for a subscription.",
 			),
-			shared.DeprecatedCommand(wrapSubscriptionsCommand(
-				SubscriptionsSubmitCommand(),
-				"asc subscriptions submit",
-				"asc subscriptions review submit",
-				"submit",
-				"Submit a subscription for review.",
-			), "asc subscriptions review submit", `asc review items add --submission "SUBMISSION_ID" --item-type subscriptionVersions --item-id "SUBSCRIPTION_VERSION_ID"`),
-			shared.DeprecatedCommand(wrapSubscriptionsCommand(
-				SubscriptionsGroupsSubmitCommand(),
-				"asc subscriptions groups submit",
-				"asc subscriptions review submit-group",
-				"submit-group",
-				"Submit a subscription group for review.",
-			), "asc subscriptions review submit-group", `asc review items add --submission "SUBMISSION_ID" --item-type subscriptionGroupVersions --item-id "GROUP_VERSION_ID"`),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp

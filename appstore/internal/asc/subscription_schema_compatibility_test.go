@@ -25,16 +25,7 @@ func TestLegacySubscriptionResponsesPreserveVersionAndPricePointRelationships(t 
 			},
 		},
 		{
-			name:        "legacy image create and update",
-			primaryType: ResourceTypeSubscriptionImages,
-			decode: func(payload []byte) (json.RawMessage, error) {
-				var response SubscriptionImageResponse
-				err := json.Unmarshal(payload, &response)
-				return response.Included, err
-			},
-		},
-		{
-			name:        "legacy localization create and update",
+			name:        "legacy localization create",
 			primaryType: ResourceTypeSubscriptionLocalizations,
 			decode: func(payload []byte) (json.RawMessage, error) {
 				var response SubscriptionLocalizationResponse
@@ -66,15 +57,6 @@ func TestLegacySubscriptionResponsesPreserveVersionAndPricePointRelationships(t 
 			primaryType: ResourceTypeSubscriptionOfferCodes,
 			decode: func(payload []byte) (json.RawMessage, error) {
 				var response SubscriptionOfferCodeResponse
-				err := json.Unmarshal(payload, &response)
-				return response.Included, err
-			},
-		},
-		{
-			name:        "submission create",
-			primaryType: ResourceTypeSubscriptionSubmissions,
-			decode: func(payload []byte) (json.RawMessage, error) {
-				var response SubscriptionSubmissionResponse
 				err := json.Unmarshal(payload, &response)
 				return response.Included, err
 			},

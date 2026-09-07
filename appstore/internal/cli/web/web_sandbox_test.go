@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"net/http"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -223,5 +227,445 @@ func TestWebSandboxCreateWrapsAuthErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "web sandbox create failed: web session is unauthorized or expired") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWebSandboxDeleteRequiresConfirmBeforeResolvingSession(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+
+	resolveCalls := 0
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		resolveCalls++
+		return &webcore.AuthSession{}, "cache", nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-resource-id"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureWebCommandOutput(t, func() {
+		err := cmd.Exec(context.Background(), nil)
+		if err == nil || !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("expected missing confirm error, got %v", err)
+		}
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--confirm is required") {
+		t.Fatalf("expected confirm diagnostic, got %q", stderr)
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("session resolver calls = %d, want 0", resolveCalls)
+	}
+}
+
+func TestWebSandboxDeleteRefusesFamilyMemberBeforeMutation(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := true
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 1,
+			Accounts:      []webcore.SandboxAccount{{ID: "family-id", IsInFamily: &family}},
+		}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "family-id", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "family member") {
+		t.Fatalf("expected family-member refusal, got %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1", listCalls)
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("delete calls = %d, want 0", deleteCalls)
+	}
+}
+
+func TestWebSandboxDeletePreflightsDeletesAndVerifies(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listResults := []*webcore.SandboxAccountListResponse{
+		{
+			TotalAccounts: 2,
+			Accounts: []webcore.SandboxAccount{
+				{ID: "tester-one", IsInFamily: &family},
+				{ID: "tester-two", IsInFamily: &family},
+			},
+		},
+		{TotalAccounts: 0, Accounts: []webcore.SandboxAccount{}},
+	}
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		if listCalls >= len(listResults) {
+			t.Fatalf("unexpected list call %d", listCalls+1)
+		}
+		result := listResults[listCalls]
+		listCalls++
+		return result, nil
+	}
+	var deletedIDs []string
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deletedIDs = append([]string(nil), ids...)
+		return nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one,tester-two,tester-one", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureWebCommandOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("Exec() error: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !reflect.DeepEqual(deletedIDs, []string{"tester-one", "tester-two"}) {
+		t.Fatalf("deleted IDs = %#v", deletedIDs)
+	}
+	if listCalls != 2 {
+		t.Fatalf("list calls = %d, want 2", listCalls)
+	}
+	var result asc.WebSandboxDeleteResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode output: %v; stdout=%q", err, stdout)
+	}
+	if !result.Deleted || !reflect.DeepEqual(result.IDs, []string{"tester-one", "tester-two"}) {
+		t.Fatalf("unexpected delete result: %+v", result)
+	}
+}
+
+func TestWebSandboxDeleteRefusesIncompleteListBeforeMutation(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 2,
+			Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+		}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "only 1 of 2") {
+		t.Fatalf("expected incomplete-list refusal, got %v", err)
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("delete calls = %d, want 0", deleteCalls)
+	}
+}
+
+func TestWebSandboxDeleteReportsUnknownTransportOutcome(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 1,
+			Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+		}, nil
+	}
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		return errors.New("request failed: context deadline exceeded")
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("expected unknown-outcome error, got %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1 after ambiguous delete", listCalls)
+	}
+}
+
+func TestWebSandboxDeleteTreatsServerErrorAsUnknownOutcome(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 1,
+			Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+		}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return &webcore.APIError{Status: 500}
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("expected unknown-outcome error for server failure, got %v", err)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleteCalls)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1; command must not retry or verify after ambiguous delete", listCalls)
+	}
+}
+
+func TestWebSandboxDeleteTreatsRequestTimeoutAsUnknownOutcome(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 1,
+			Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+		}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return &webcore.APIError{Status: http.StatusRequestTimeout}
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("expected unknown-outcome error for request timeout, got %v", err)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleteCalls)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1; command must not retry or verify after ambiguous delete", listCalls)
+	}
+}
+
+func TestWebSandboxDeleteTreatsVisibleAccountAfterDeleteAsUnknownOutcome(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		return &webcore.SandboxAccountListResponse{
+			TotalAccounts: 1,
+			Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+		}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err := cmd.Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("expected unknown-outcome error for still-visible account, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "tester-one") {
+		t.Fatalf("expected still-visible account ID in error, got %v", err)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleteCalls)
+	}
+	if listCalls != 2 {
+		t.Fatalf("list calls = %d, want 2 for postcondition verification", listCalls)
+	}
+}
+
+func TestWebSandboxDeleteReportsVerifiedStatusWhenOutputFails(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origList := listWebSandboxAccountsFn
+	origDelete := deleteWebSandboxAccountsFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		listWebSandboxAccountsFn = origList
+		deleteWebSandboxAccountsFn = origDelete
+	})
+
+	resolveSessionFn = func(ctx context.Context, appleID, password, twoFactorCode string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(session *webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	family := false
+	listCalls := 0
+	listWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client) (*webcore.SandboxAccountListResponse, error) {
+		listCalls++
+		if listCalls == 1 {
+			return &webcore.SandboxAccountListResponse{
+				TotalAccounts: 1,
+				Accounts:      []webcore.SandboxAccount{{ID: "tester-one", IsInFamily: &family}},
+			}, nil
+		}
+		return &webcore.SandboxAccountListResponse{TotalAccounts: 0, Accounts: []webcore.SandboxAccount{}}, nil
+	}
+	deleteCalls := 0
+	deleteWebSandboxAccountsFn = func(ctx context.Context, client *webcore.Client, ids []string) error {
+		deleteCalls++
+		return nil
+	}
+
+	cmd := WebSandboxDeleteCommand()
+	if err := cmd.FlagSet.Parse([]string{"--id", "tester-one", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	oldStdout := os.Stdout
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	if err := wOut.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	os.Stdout = wOut
+	gotErr := cmd.Exec(context.Background(), nil)
+	os.Stdout = oldStdout
+	_ = rOut.Close()
+
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "completed and verified") {
+		t.Fatalf("expected verified-status output error, got %v", gotErr)
+	}
+	if !strings.Contains(gotErr.Error(), "tester-one") || !strings.Contains(gotErr.Error(), "do not retry") {
+		t.Fatalf("expected ID and no-retry guidance, got %v", gotErr)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleteCalls)
+	}
+	if listCalls != 2 {
+		t.Fatalf("list calls = %d, want 2 for postcondition verification", listCalls)
 	}
 }

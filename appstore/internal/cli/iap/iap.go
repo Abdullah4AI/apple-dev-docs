@@ -68,13 +68,10 @@ Examples:
 			IAPSetupCommand(),
 			IAPUpdateCommand(),
 			IAPDeleteCommand(),
-			IAPLocalizationsCommand(),
-			IAPImagesCommand(),
 			IAPReviewScreenshotsCommand(),
 			IAPPromotedPurchasesCommand(),
 			IAPContentCommand(),
 			IAPOfferCodesCommand(),
-			IAPSubmitCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
@@ -541,129 +538,6 @@ Examples:
 			return shared.PrintOutput(result, *output.Output, *output.Pretty)
 		},
 	}
-}
-
-// IAPLocalizationsCommand returns the iap localizations command group.
-func IAPLocalizationsCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "localizations",
-		ShortUsage: "asc iap localizations <subcommand> [flags]",
-		ShortHelp:  "Manage deprecated product-scoped IAP localizations.",
-		LongHelp: `Manage deprecated product-scoped in-app purchase localizations.
-
-Use version-scoped localizations for new workflows.
-
-Examples:
-  asc iap versions localizations list --version-id "IAP_VERSION_ID"`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Subcommands: []*ffcli.Command{
-			IAPLocalizationsListCommand(),
-			IAPLocalizationsCreateCommand(),
-			IAPLocalizationsUpdateCommand(),
-			IAPLocalizationsDeleteCommand(),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}
-
-// IAPLocalizationsListCommand returns the localizations list subcommand.
-func IAPLocalizationsListCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("localizations list", flag.ExitOnError)
-
-	iapID := fs.String("iap-id", "", "In-app purchase ID, product ID, or exact current name")
-	legacyID := fs.String("id", "", "In-app purchase ID, product ID, or exact current name (deprecated)")
-	appID := addIAPLookupAppFlag(fs)
-	limit := fs.Int("limit", 0, "Maximum results per page (1-200)")
-	next := fs.String("next", "", "Fetch next page using a links.next URL")
-	paginate := fs.Bool("paginate", false, "Automatically fetch all pages (aggregate results)")
-	iapFields := fs.String("iap-fields", "", "fields[inAppPurchases] for included in-app purchases (comma-separated)")
-	output := shared.BindOutputFlags(fs)
-
-	return shared.DeprecatedCommand(&ffcli.Command{
-		Name:       "list",
-		ShortUsage: "asc iap localizations list [flags]",
-		ShortHelp:  "List in-app purchase localizations.",
-		LongHelp: `List in-app purchase localizations.
-
-Examples:
-  asc iap localizations list --iap-id "IAP_ID"
-  asc iap localizations list --iap-id "IAP_ID" --paginate`,
-		FlagSet:   fs,
-		UsageFunc: shared.DefaultUsageFunc,
-		Exec: func(ctx context.Context, args []string) error {
-			if err := rejectIAPVersionNextFlagConflicts(fs, *next, "iap localizations list", "iap-fields"); err != nil {
-				return err
-			}
-			resolvedID := strings.TrimSpace(*iapID)
-			if resolvedID == "" {
-				resolvedID = strings.TrimSpace(*legacyID)
-			}
-			if resolvedID == "" && strings.TrimSpace(*next) == "" {
-				fmt.Fprintln(os.Stderr, "Error: --iap-id is required")
-				return shared.MissingRequiredUsageError("--iap-id")
-			}
-			if *limit != 0 && (*limit < 1 || *limit > 200) {
-				return shared.UsageError("iap localizations list: --limit must be between 1 and 200")
-			}
-			if err := shared.ValidateNextURL(*next); err != nil {
-				return shared.UsageErrorf("iap localizations list: %v", err)
-			}
-			fieldValues, err := shared.NormalizeSelection(*iapFields, iapVersionIAPFields, "--iap-fields")
-			if err != nil {
-				return shared.UsageError("iap localizations list: " + err.Error())
-			}
-
-			client, err := shared.GetASCClient()
-			if err != nil {
-				return fmt.Errorf("iap localizations list: %w", err)
-			}
-
-			if strings.TrimSpace(*next) == "" {
-				resolvedID, err = resolveIAPLookupIDWithTimeout(ctx, client, *appID, resolvedID)
-				if err != nil {
-					return err
-				}
-			}
-
-			requestCtx, cancel := shared.ContextWithTimeout(ctx)
-			defer cancel()
-
-			opts := []asc.IAPLocalizationsOption{
-				asc.WithIAPLocalizationsLimit(*limit),
-				asc.WithIAPLocalizationsNextURL(*next),
-				asc.WithIAPLocalizationsIAPFields(fieldValues),
-			}
-
-			if *paginate {
-				paginateOpts := append(opts, asc.WithIAPLocalizationsLimit(200))
-				firstPage, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, paginateOpts...) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
-				if err != nil {
-					return fmt.Errorf("iap localizations list: failed to fetch: %w", err)
-				}
-
-				resp, err := asc.PaginateAll(requestCtx, firstPage, func(ctx context.Context, nextURL string) (asc.PaginatedResponse, error) {
-					return client.GetInAppPurchaseLocalizations(ctx, resolvedID, asc.WithIAPLocalizationsNextURL(nextURL)) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
-				})
-				if err != nil {
-					return fmt.Errorf("iap localizations list: %w", err)
-				}
-
-				return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-			}
-
-			resp, err := client.GetInAppPurchaseLocalizations(requestCtx, resolvedID, opts...) //nolint:staticcheck // Compatibility path retained during the App Store Connect API 4.4.1 deprecation window.
-			if err != nil {
-				return fmt.Errorf("iap localizations list: failed to fetch: %w", err)
-			}
-
-			return shared.PrintOutput(resp, *output.Output, *output.Pretty)
-		},
-	}, "asc iap localizations list", `asc iap versions localizations list --version-id "IAP_VERSION_ID"`)
 }
 
 func normalizeIAPType(value string) (string, error) {

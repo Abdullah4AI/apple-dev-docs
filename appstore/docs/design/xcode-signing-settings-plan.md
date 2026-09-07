@@ -80,6 +80,27 @@ shared with an unselected consumer, the planner adds a narrow target/config
 override instead of broadening the mutation. Missing settings are added at the
 selected target/configuration level.
 
+Build-setting references are expanded against the explicit pbxproj and
+xcconfig layers first. Only when no layer assigns the referenced name does the
+resolver fall back to the implicit context Xcode derives from the project's own
+location, so an existing assignment always keeps Xcode's precedence. The
+supported implicit variables are:
+
+- `SRCROOT`, `SOURCE_ROOT`, and `PROJECT_DIR`: the directory containing the
+  selected `.xcodeproj`;
+- `PROJECT_FILE_PATH`: the absolute path of the selected `.xcodeproj`;
+- `PROJECT_NAME`: that bundle's name without its extension; and
+- `TARGET_NAME`: the target owning the configuration being resolved. It is
+  undefined for a project-level configuration, which no single target owns.
+
+Every other implicit Xcode variable requires a build context and stays
+unresolved. `CONFIGURATION`, `PLATFORM_NAME`, `SDKROOT`,
+`EFFECTIVE_PLATFORM_NAME`, and `BUILT_PRODUCTS_DIR` are examples: this command
+never invokes `xcodebuild`, so guessing them would misreport which file the
+plan inventoried. A resolved implicit path is still subject to the same rooted,
+no-follow containment and artifact-alias checks as a literal path, so it cannot
+name a file outside the selected project root without being reported.
+
 Conditional-only, divergent, unresolved, malformed, ambiguous, or missing
 values are blockers. No unsupported expression is guessed or flattened.
 External xcconfig writes are refused by default. `--allow-external-xcconfig`

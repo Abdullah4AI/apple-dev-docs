@@ -185,10 +185,13 @@ func TestPreOrdersCommand_FlagDefinitions(t *testing.T) {
 	}
 
 	enableCmd := PreOrdersEnableCommand()
-	for _, name := range []string{"app", "territory", "release-date", "available-in-new-territories", "output", "pretty"} {
+	for _, name := range []string{"app", "territory", "release-date", "output", "pretty"} {
 		if enableCmd.FlagSet.Lookup(name) == nil {
 			t.Errorf("enable: expected flag --%s to be defined", name)
 		}
+	}
+	if enableCmd.FlagSet.Lookup("available-in-new-territories") != nil {
+		t.Error("enable: removed --available-in-new-territories flag should not be defined")
 	}
 
 	updateCmd := PreOrdersUpdateCommand()

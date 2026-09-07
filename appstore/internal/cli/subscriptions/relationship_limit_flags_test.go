@@ -20,7 +20,7 @@ type relationshipLimitCommandCase struct {
 	command   func() *ffcli.Command
 	baseArgs  []string
 	canonical []string
-	legacy    []string
+	removed   []string
 }
 
 func relationshipLimitCommandCases() []relationshipLimitCommandCase {
@@ -28,22 +28,22 @@ func relationshipLimitCommandCases() []relationshipLimitCommandCase {
 		{
 			name: "subscriptions list", command: SubscriptionsListCommand,
 			baseArgs:  []string{"--group-id", "group-1"},
-			canonical: []string{"versions-limit"}, legacy: []string{"version-limit"},
+			canonical: []string{"versions-limit"}, removed: []string{"version-limit"},
 		},
 		{
 			name: "subscriptions view", command: SubscriptionsGetCommand,
 			baseArgs:  []string{"--id", "sub-1"},
-			canonical: []string{"versions-limit"}, legacy: []string{"version-limit"},
+			canonical: []string{"versions-limit"}, removed: []string{"version-limit"},
 		},
 		{
 			name: "subscription versions list", command: SubscriptionsVersionsListCommand,
 			baseArgs:  []string{"--subscription-id", "sub-1"},
-			canonical: []string{"images-limit", "localizations-limit"}, legacy: []string{"image-limit", "localization-limit"},
+			canonical: []string{"images-limit", "localizations-limit"}, removed: []string{"image-limit", "localization-limit"},
 		},
 		{
 			name: "subscription versions view", command: SubscriptionsVersionsViewCommand,
 			baseArgs:  []string{"--id", "version-1"},
-			canonical: []string{"images-limit", "localizations-limit"}, legacy: []string{"image-limit", "localization-limit"},
+			canonical: []string{"images-limit", "localizations-limit"}, removed: []string{"image-limit", "localization-limit"},
 		},
 	}
 }
@@ -71,27 +71,47 @@ func captureRelationshipLimitStderr(t *testing.T, fn func()) string {
 	return <-done
 }
 
-func TestSubscriptionRelationshipLimitsExposePluralCanonicalFlags(t *testing.T) {
+// The singular relationship-limit spellings were removed in 5.0.0. Only the
+// plural canonical flags remain bound, so the removed spellings fall through to
+// the generic unknown-flag parse error.
+func TestSubscriptionRelationshipLimitsExposeOnlyPluralCanonicalFlags(t *testing.T) {
 	for _, test := range relationshipLimitCommandCases() {
 		t.Run(test.name, func(t *testing.T) {
 			cmd := test.command()
 			usage := shared.DefaultUsageFunc(cmd)
 			for index, canonical := range test.canonical {
-				legacy := test.legacy[index]
+				removed := test.removed[index]
 				if cmd.FlagSet.Lookup(canonical) == nil {
 					t.Fatalf("expected --%s", canonical)
 				}
 				if !strings.Contains(usage, "--"+canonical) {
 					t.Fatalf("canonical help does not contain --%s: %q", canonical, usage)
 				}
-				if cmd.FlagSet.Lookup(legacy) == nil {
-					t.Fatalf("expected hidden compatibility --%s", legacy)
+				if cmd.FlagSet.Lookup(removed) != nil {
+					t.Fatalf("removed alias --%s is still bound", removed)
 				}
-				if strings.Contains(usage, "--"+legacy) {
-					t.Fatalf("canonical help exposes deprecated --%s: %q", legacy, usage)
+				if strings.Contains(usage, "--"+removed) {
+					t.Fatalf("canonical help still mentions removed --%s: %q", removed, usage)
 				}
 			}
 		})
+	}
+}
+
+func TestSubscriptionRelationshipLimitRemovedAliasesFailToParse(t *testing.T) {
+	for _, test := range relationshipLimitCommandCases() {
+		for _, removed := range test.removed {
+			t.Run(test.name+" "+removed, func(t *testing.T) {
+				cmd := test.command()
+				cmd.FlagSet.Init(cmd.FlagSet.Name(), flag.ContinueOnError)
+				cmd.FlagSet.SetOutput(io.Discard)
+				args := append(append([]string{}, test.baseArgs...), "--"+removed, "7")
+				err := cmd.FlagSet.Parse(args)
+				if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -"+removed) {
+					t.Fatalf("Parse() error = %v, want unknown flag -%s", err, removed)
+				}
+			})
+		}
 	}
 }
 
@@ -123,59 +143,6 @@ func TestSubscriptionRelationshipLimitsCanonicalFlagsReachClientSetup(t *testing
 	}
 }
 
-func TestSubscriptionRelationshipLimitAliasesWarnOnce(t *testing.T) {
-	isolateSubscriptionsAuthEnv(t)
-	for _, test := range relationshipLimitCommandCases() {
-		for index, legacy := range test.legacy {
-			canonical := test.canonical[index]
-			t.Run(test.name+" "+legacy, func(t *testing.T) {
-				cmd := test.command()
-				args := append(append([]string{}, test.baseArgs...), "--"+legacy, "7")
-				if err := cmd.FlagSet.Parse(args); err != nil {
-					t.Fatalf("Parse() error: %v", err)
-				}
-				stderr := captureRelationshipLimitStderr(t, func() {
-					err := cmd.Exec(context.Background(), nil)
-					if err == nil {
-						t.Fatal("expected isolated client setup to fail")
-					}
-					if errors.Is(err, flag.ErrHelp) {
-						t.Fatalf("deprecated alias failed transition validation: %v", err)
-					}
-				})
-				warning := "Warning: `--" + legacy + "` is deprecated. Use `--" + canonical + "`."
-				if got := strings.Count(stderr, warning); got != 1 {
-					t.Fatalf("warning count = %d, want 1; stderr=%q", got, stderr)
-				}
-			})
-		}
-	}
-}
-
-func TestSubscriptionRelationshipLimitAliasesConflictWithCanonicalFlags(t *testing.T) {
-	for _, test := range relationshipLimitCommandCases() {
-		for index, legacy := range test.legacy {
-			canonical := test.canonical[index]
-			t.Run(test.name+" "+legacy, func(t *testing.T) {
-				cmd := test.command()
-				args := append(append([]string{}, test.baseArgs...), "--"+canonical, "7", "--"+legacy, "7")
-				if err := cmd.FlagSet.Parse(args); err != nil {
-					t.Fatalf("Parse() error: %v", err)
-				}
-				stderr := captureRelationshipLimitStderr(t, func() {
-					err := cmd.Exec(context.Background(), nil)
-					if !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), "--"+legacy+" conflicts with --"+canonical) {
-						t.Fatalf("Exec() error = %v, want alias conflict usage error", err)
-					}
-				})
-				if got := strings.Count(stderr, "Warning: `--"+legacy+"` is deprecated."); got != 1 {
-					t.Fatalf("warning count = %d, want 1; stderr=%q", got, stderr)
-				}
-			})
-		}
-	}
-}
-
 func TestSubscriptionRelationshipLimitsRejectInvalidCanonicalValues(t *testing.T) {
 	for _, test := range relationshipLimitCommandCases() {
 		for _, canonical := range test.canonical {
@@ -194,41 +161,31 @@ func TestSubscriptionRelationshipLimitsRejectInvalidCanonicalValues(t *testing.T
 	}
 }
 
-func TestSubscriptionRelationshipLimitAliasesConflictWithOpaqueNext(t *testing.T) {
+func TestSubscriptionRelationshipLimitsConflictWithOpaqueNext(t *testing.T) {
 	tests := []struct {
 		name      string
 		command   func() *ffcli.Command
-		legacy    string
 		canonical string
 	}{
-		{name: "subscription versions", command: SubscriptionsListCommand, legacy: "version-limit", canonical: "versions-limit"},
-		{name: "version images", command: SubscriptionsVersionsListCommand, legacy: "image-limit", canonical: "images-limit"},
-		{name: "version localizations", command: SubscriptionsVersionsListCommand, legacy: "localization-limit", canonical: "localizations-limit"},
+		{name: "subscription versions", command: SubscriptionsListCommand, canonical: "versions-limit"},
+		{name: "version images", command: SubscriptionsVersionsListCommand, canonical: "images-limit"},
+		{name: "version localizations", command: SubscriptionsVersionsListCommand, canonical: "localizations-limit"},
 	}
 	for _, test := range tests {
-		for _, spelling := range []struct {
-			name         string
-			flag         string
-			warningCount int
-		}{
-			{name: "canonical", flag: test.canonical},
-			{name: "deprecated alias", flag: test.legacy, warningCount: 1},
-		} {
-			t.Run(test.name+" "+spelling.name, func(t *testing.T) {
-				cmd := test.command()
-				if err := cmd.FlagSet.Parse([]string{"--next", "https://api.appstoreconnect.apple.com/v1/example?cursor=next", "--" + spelling.flag, "7"}); err != nil {
-					t.Fatalf("Parse() error: %v", err)
-				}
-				stderr := captureRelationshipLimitStderr(t, func() {
-					err := cmd.Exec(context.Background(), nil)
-					if !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), "--next cannot be combined with --"+test.canonical) {
-						t.Fatalf("Exec() error = %v, want canonical opaque-next conflict", err)
-					}
-				})
-				if got := strings.Count(stderr, "Warning: `--"+test.legacy+"` is deprecated."); got != spelling.warningCount {
-					t.Fatalf("warning count = %d, want %d; stderr=%q", got, spelling.warningCount, stderr)
+		t.Run(test.name, func(t *testing.T) {
+			cmd := test.command()
+			if err := cmd.FlagSet.Parse([]string{"--next", "https://api.appstoreconnect.apple.com/v1/example?cursor=next", "--" + test.canonical, "7"}); err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			stderr := captureRelationshipLimitStderr(t, func() {
+				err := cmd.Exec(context.Background(), nil)
+				if !errors.Is(err, flag.ErrHelp) || !strings.Contains(err.Error(), "--next cannot be combined with --"+test.canonical) {
+					t.Fatalf("Exec() error = %v, want canonical opaque-next conflict", err)
 				}
 			})
-		}
+			if strings.Contains(stderr, "Warning:") {
+				t.Fatalf("unexpected warning: %q", stderr)
+			}
+		})
 	}
 }

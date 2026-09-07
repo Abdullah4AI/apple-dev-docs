@@ -934,6 +934,8 @@ Subcommands:
   list  List review submissions for an app
   show  Show one submission with threads/messages/rejections and auto-download screenshots
   threads  List every resolution center thread on an app, with optional draft messages
+  reply  Send a Resolution Center reply through a web session
+  drafts  Create, update, or delete an unsent Resolution Center draft
   subscriptions  Inspect and mutate next-version subscription review selection
   iaps  Attach non-renewing IAPs to the next app version review
 
@@ -944,11 +946,126 @@ Subcommands:
 			WebReviewListCommand(),
 			WebReviewShowCommand(),
 			WebReviewThreadsCommand(),
+			WebReviewReplyCommand(),
+			WebReviewDraftsCommand(),
 			WebReviewSubscriptionsCommand(),
 			WebReviewIAPsCommand(),
 		},
 		Exec: func(ctx context.Context, args []string) error {
 			return flag.ErrHelp
+		},
+	}
+}
+
+// WebReviewReplyCommand sends a Resolution Center reply through the
+// experimental Apple web-session API. It creates and sends one draft, then
+// verifies the resulting message with the existing read path.
+func WebReviewReplyCommand() *ffcli.Command {
+	fs := flag.NewFlagSet("web review reply", flag.ExitOnError)
+
+	threadID := fs.String("thread-id", "", "Resolution Center thread ID")
+	message := fs.String("message", "", "Reply message body")
+	confirm := fs.Bool("confirm", false, "[experimental] Confirm sending the reply")
+	authFlags := bindWebSessionFlags(fs)
+	output := shared.BindOutputFlags(fs)
+
+	return &ffcli.Command{
+		Name:       "reply",
+		ShortUsage: "asc web review reply --thread-id THREAD_ID --message MESSAGE --confirm [flags]",
+		ShortHelp:  "[experimental] Send a Resolution Center reply.",
+		LongHelp: `WEB SESSION WORKFLOWS
+
+Send one reply to an App Store Connect Resolution Center thread through the
+experimental Apple web-session API. The command creates one draft, sends it,
+and re-reads the thread to verify the created message. It never retries a send
+automatically because a failed response can follow a successful Apple write.
+
+Attachments are not supported by this command until Apple's attachment write
+contract is captured. The message body is never printed in the receipt or
+errors.
+
+Examples:
+  asc web review reply --thread-id "THREAD_ID" --message "We updated the demo account." --confirm
+  asc web review reply --thread-id "THREAD_ID" --message "Please retry." --confirm --output json`,
+		FlagSet:   fs,
+		UsageFunc: shared.DefaultUsageFunc,
+		Exec: func(ctx context.Context, args []string) error {
+			if len(args) > 0 {
+				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
+			}
+			if _, err := shared.ValidateOutputFormat(*output.Output, *output.Pretty); err != nil {
+				return shared.UsageError(err.Error())
+			}
+			trimmedThreadID := strings.TrimSpace(*threadID)
+			if trimmedThreadID == "" {
+				return shared.UsageError("--thread-id is required")
+			}
+			messageBody := *message
+			if strings.TrimSpace(messageBody) == "" {
+				return shared.UsageError("--message must not be empty")
+			}
+			if !*confirm {
+				return shared.UsageError("--confirm is required")
+			}
+
+			session, requestCtx, cancel, err := resolveWebSessionForCommand(ctx, authFlags)
+			defer cancel()
+			if err != nil {
+				return err
+			}
+			client := newWebClientFn(session)
+
+			var draft *webcore.ResolutionCenterDraftMessage
+			err = withWebSpinner("Creating Resolution Center reply draft", func() error {
+				var err error
+				draft, err = client.CreateResolutionCenterDraftMessage(requestCtx, trimmedThreadID, messageBody)
+				return err
+			})
+			if err != nil {
+				return webReviewMutationError(err, "web review reply")
+			}
+			if draft == nil || strings.TrimSpace(draft.ID) == "" {
+				return fmt.Errorf("web review reply failed: draft create returned no draft id; send was not attempted")
+			}
+
+			var sent *webcore.ResolutionCenterMessage
+			err = withWebSpinner("Sending Resolution Center reply", func() error {
+				var err error
+				sent, err = client.SendResolutionCenterDraftMessage(requestCtx, draft.ID)
+				return err
+			})
+			if err != nil {
+				return fmt.Errorf("web review reply failed: draft %s was created but send outcome is unknown; do not retry automatically: %w", draft.ID, err)
+			}
+			if sent == nil || strings.TrimSpace(sent.ID) == "" {
+				return fmt.Errorf("web review reply failed: send response returned no message id; send outcome may be ambiguous and must not be retried")
+			}
+
+			messages, err := client.ListResolutionCenterMessages(requestCtx, trimmedThreadID, false)
+			if err != nil {
+				return fmt.Errorf("web review reply failed: message %s was sent but post-read verification failed; do not retry automatically: %w", sent.ID, err)
+			}
+			verified := false
+			for _, candidate := range messages {
+				if strings.TrimSpace(candidate.ID) == strings.TrimSpace(sent.ID) {
+					verified = true
+					break
+				}
+			}
+			if !verified {
+				return fmt.Errorf("web review reply failed: message %s was sent but post-read did not return it; do not retry automatically", sent.ID)
+			}
+
+			result := &asc.WebReviewReplyResult{
+				ThreadID:  trimmedThreadID,
+				DraftID:   strings.TrimSpace(draft.ID),
+				MessageID: strings.TrimSpace(sent.ID),
+				Verified:  true,
+			}
+			if err := shared.PrintOutput(result, *output.Output, *output.Pretty); err != nil {
+				return fmt.Errorf("web review reply message %s was sent and verified, but receipt output failed; do not retry automatically: %w", result.MessageID, err)
+			}
+			return nil
 		},
 	}
 }
@@ -1282,4 +1399,13 @@ Selection:
 			return nil
 		},
 	}
+}
+
+func webReviewMutationError(err error, operation string) error {
+	hinted := withWebAuthHint(err, operation)
+	var apiErr *webcore.APIError
+	if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != http.StatusRequestTimeout {
+		return hinted
+	}
+	return fmt.Errorf("%w; mutation outcome may be unknown and may already have been applied; do not retry automatically", hinted)
 }

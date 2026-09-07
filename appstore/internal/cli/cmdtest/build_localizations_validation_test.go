@@ -24,7 +24,7 @@ func TestBuildLocalizationsRejectsOverlongWhatsNewBeforeAnyRequest(t *testing.T)
 	}{
 		{
 			name: "create",
-			args: []string{"build-localizations", "create", "--build", "build-1", "--locale", "en-US"},
+			args: []string{"build-localizations", "create", "--build-id", "build-1", "--locale", "en-US"},
 		},
 		{
 			name: "update",
@@ -106,7 +106,7 @@ func TestBuildLocalizationsAcceptsMultibyteWhatsNewAtLimit(t *testing.T) {
 	captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"build-localizations", "create",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--locale", "ja",
 			"--whats-new", whatsNew,
 		}); err != nil {

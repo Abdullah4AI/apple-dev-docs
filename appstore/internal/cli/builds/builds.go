@@ -26,7 +26,7 @@ func BuildsAddGroupsCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "add-groups",
-		ShortUsage: "asc builds add-groups (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --group GROUP_ID[,GROUP_ID...] [--submit --confirm]",
+		ShortUsage: "asc builds add-groups (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --group GROUP_ID[,GROUP_ID...] [--submit --confirm]",
 		ShortHelp:  "Add beta groups to a build for TestFlight distribution.",
 		LongHelp: `Add beta groups to a build for TestFlight distribution.
 
@@ -42,9 +42,6 @@ Examples:
 		Exec: func(ctx context.Context, args []string) error {
 			if len(args) > 0 {
 				return shared.UsageErrorf("unexpected argument(s): %s", strings.Join(args, " "))
-			}
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
 			}
 			if err := selectors.validate(); err != nil {
 				return err
@@ -179,7 +176,7 @@ func BuildsUpdateCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "update",
-		ShortUsage: "asc builds update (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --uses-non-exempt-encryption [true|false] [flags]",
+		ShortUsage: "asc builds update (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --uses-non-exempt-encryption [true|false] [flags]",
 		ShortHelp:  "Update build attributes.",
 		LongHelp: `Update build attributes such as encryption compliance.
 
@@ -190,9 +187,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}
@@ -250,7 +244,7 @@ func BuildsRemoveGroupsCommand() *ffcli.Command {
 
 	return &ffcli.Command{
 		Name:       "remove-groups",
-		ShortUsage: "asc builds remove-groups (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM]) --group GROUP_ID[,GROUP_ID...] --confirm",
+		ShortUsage: "asc builds remove-groups (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION]) --group GROUP_ID[,GROUP_ID...] --confirm",
 		ShortHelp:  "Remove beta groups from a build.",
 		LongHelp: `Remove beta groups from a build.
 
@@ -261,9 +255,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}

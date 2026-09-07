@@ -153,6 +153,146 @@ type CIWorkflowListResponse struct {
 	Items []CIWorkflow `json:"items"`
 }
 
+// CIVersionAlias is a product version alias from the Xcode Cloud web API.
+type CIVersionAlias struct {
+	ID                       string                     `json:"id"`
+	Name                     string                     `json:"name"`
+	Type                     string                     `json:"type"`
+	Locked                   bool                       `json:"locked"`
+	Build                    json.RawMessage            `json:"build"`
+	BuildName                string                     `json:"build_name"`
+	RelatedWorkflowSummaries []CIRelatedWorkflowSummary `json:"related_workflow_summaries,omitempty"`
+	BuildSupported           bool                       `json:"build_supported"`
+}
+
+// CIVersionAliasListResponse is the version-alias list envelope.
+type CIVersionAliasListResponse struct {
+	Items []CIVersionAlias `json:"items"`
+}
+
+// CIVersionAliasRequest is the exact four-field payload accepted by the
+// Xcode Cloud version-alias save endpoint.
+type CIVersionAliasRequest struct {
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	Build  json.RawMessage `json:"build"`
+	Locked bool            `json:"locked"`
+}
+
+func ciVersionAliasPath(teamID, productID, aliasID string) string {
+	return "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/configuration-options/version-aliases-v3/" + url.PathEscape(aliasID)
+}
+
+// GetCIVersionAliases returns up to 100 custom aliases for an Xcode Cloud product.
+func (c *Client) GetCIVersionAliases(ctx context.Context, teamID, productID string) (*CIVersionAliasListResponse, error) {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	if teamID == "" || productID == "" {
+		return nil, fmt.Errorf("team id and product id are required")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/configuration-options/version-aliases-v3?limit=100"
+	body, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result CIVersionAliasListResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode ci version aliases: %w", err)
+	}
+	return &result, nil
+}
+
+// GetCIVersionAlias returns one custom alias for an Xcode Cloud product.
+func (c *Client) GetCIVersionAlias(ctx context.Context, teamID, productID, aliasID string) (*CIVersionAlias, error) {
+	_, result, err := c.GetCIVersionAliasRaw(ctx, teamID, productID, aliasID)
+	return result, err
+}
+
+// GetCIVersionAliasRaw returns one custom alias and the unmodified JSON body
+// returned by the Xcode Cloud web API. The raw body is useful for read
+// commands because this private response can gain fields before the typed
+// client model does.
+func (c *Client) GetCIVersionAliasRaw(ctx context.Context, teamID, productID, aliasID string) (json.RawMessage, *CIVersionAlias, error) {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	aliasID = strings.TrimSpace(aliasID)
+	if teamID == "" || productID == "" || aliasID == "" {
+		return nil, nil, fmt.Errorf("team id, product id, and version alias id are required")
+	}
+	body, err := c.doRequest(ctx, "GET", ciVersionAliasPath(teamID, productID, aliasID), nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	var result CIVersionAlias
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode ci version alias: %w", err)
+	}
+	return append(json.RawMessage(nil), body...), &result, nil
+}
+
+// PutCIVersionAlias creates or updates one custom alias. The response body is
+// intentionally ignored because callers must re-read after the PUT; it is not
+// the verification boundary for a mutation.
+func (c *Client) PutCIVersionAlias(ctx context.Context, teamID, productID, aliasID string, request CIVersionAliasRequest) error {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	aliasID = strings.TrimSpace(aliasID)
+	if teamID == "" || productID == "" || aliasID == "" {
+		return fmt.Errorf("team id, product id, and version alias id are required")
+	}
+	_, err := c.doRequest(ctx, "PUT", ciVersionAliasPath(teamID, productID, aliasID), request)
+	return err
+}
+
+// DeleteCIVersionAlias deletes one custom alias for an Xcode Cloud product.
+func (c *Client) DeleteCIVersionAlias(ctx context.Context, teamID, productID, aliasID string) error {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	aliasID = strings.TrimSpace(aliasID)
+	if teamID == "" || productID == "" || aliasID == "" {
+		return fmt.Errorf("team id, product id, and version alias id are required")
+	}
+	_, err := c.doRequest(ctx, "DELETE", ciVersionAliasPath(teamID, productID, aliasID), nil)
+	return err
+}
+
+// CINextBuildNumber is the next build number configured for an Xcode Cloud product.
+type CINextBuildNumber struct {
+	NextBuildNumber int    `json:"next_build_number"`
+	TestFlightURL   string `json:"testflight_url,omitempty"`
+}
+
+func (c *Client) GetCINextBuildNumber(ctx context.Context, teamID, productID string) (*CINextBuildNumber, error) {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	if teamID == "" || productID == "" {
+		return nil, fmt.Errorf("team id and product id are required")
+	}
+	body, err := c.doRequest(ctx, "GET", "/teams/"+url.PathEscape(teamID)+"/products/"+url.PathEscape(productID)+"/next-build-number", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result CINextBuildNumber
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode ci next build number: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) SetCINextBuildNumber(ctx context.Context, teamID, productID string, value int) error {
+	teamID = strings.TrimSpace(teamID)
+	productID = strings.TrimSpace(productID)
+	if teamID == "" || productID == "" {
+		return fmt.Errorf("team id and product id are required")
+	}
+	if value <= 0 {
+		return fmt.Errorf("next build number must be greater than 0")
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/products/" + url.PathEscape(productID) + "/next-build-number?next_build_number=" + strconv.Itoa(value)
+	_, err := c.doRequest(ctx, "PUT", path, nil)
+	return err
+}
+
 func (m *CIMonthUsage) UnmarshalJSON(data []byte) error {
 	type alias struct {
 		Month          int  `json:"month"`

@@ -1,28 +1,36 @@
 package capabilities
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
 
 const taxCategoryCapabilityName = "App and In-App Purchase tax category"
 
-// Apple exposes tax category only in the App Store Connect web UI. The capability
-// registry must say so instead of leaving callers to discover the gap by failing
-// against the public API.
-func TestTaxCategoryIsReportedAsNotPublicAPI(t *testing.T) {
+// Both tax-category scopes are available through their web-session commands.
+func TestTaxCategoryIsReportedAsWebSession(t *testing.T) {
 	for _, capability := range capabilityRows() {
 		if capability.Capability != taxCategoryCapabilityName {
 			continue
 		}
-		if capability.Status != statusNotPublicAPI {
-			t.Fatalf("expected %q status %q, got %q", taxCategoryCapabilityName, statusNotPublicAPI, capability.Status)
+		if capability.Status != statusWebSession {
+			t.Fatalf("expected %q status %q, got %q", taxCategoryCapabilityName, statusWebSession, capability.Status)
 		}
 		if capability.Area != "monetization" {
 			t.Fatalf("expected %q area %q, got %q", taxCategoryCapabilityName, "monetization", capability.Area)
 		}
-		if len(capability.Commands) != 0 {
-			t.Fatalf("expected %q to advertise no CLI commands, got %v", taxCategoryCapabilityName, capability.Commands)
+		wantCommands := []string{
+			"asc web apps tax-category list",
+			"asc web apps tax-category view",
+			"asc web apps tax-category set",
+			"asc web iap tax-category list",
+			"asc web iap tax-category view",
+			"asc web iap tax-category set",
+			"asc web iap tax-category reset",
+		}
+		if !slices.Equal(capability.Commands, wantCommands) {
+			t.Fatalf("expected %q commands %v, got %v", taxCategoryCapabilityName, wantCommands, capability.Commands)
 		}
 		if strings.TrimSpace(capability.NextAction) == "" {
 			t.Fatalf("expected %q to carry a next action", taxCategoryCapabilityName)
@@ -36,14 +44,16 @@ func TestTaxCategoryIsReportedAsNotPublicAPI(t *testing.T) {
 	t.Fatalf("capability %q not found", taxCategoryCapabilityName)
 }
 
-// No registry row may claim a shipped tax-category command while the web-session
-// endpoint contract is still uncaptured.
-func TestNoCapabilityClaimsATaxCategoryCommand(t *testing.T) {
+func TestTaxCategoryCapabilityDistinguishesCatalogs(t *testing.T) {
 	for _, capability := range capabilityRows() {
-		for _, command := range capability.Commands {
-			if strings.Contains(strings.ToLower(command), "tax") {
-				t.Fatalf("unexpected tax command %q advertised by %q", command, capability.Capability)
-			}
+		if capability.Capability != taxCategoryCapabilityName {
+			continue
 		}
+		joined := strings.ToLower(strings.Join(capability.Notes, " "))
+		if !strings.Contains(joined, "addon") || !strings.Contains(joined, "application") {
+			t.Fatalf("expected %q notes to distinguish the ADDON and APPLICATION catalogs, got %v", taxCategoryCapabilityName, capability.Notes)
+		}
+		return
 	}
+	t.Fatalf("capability %q not found", taxCategoryCapabilityName)
 }

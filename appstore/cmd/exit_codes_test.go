@@ -779,7 +779,7 @@ func TestBuildsTestNotesUpdateConflictingFlagsExitCode(t *testing.T) {
 	binaryPath := buildASCBlackboxBinary(t)
 
 	runCmd := exec.Command(binaryPath, "builds", "test-notes", "update",
-		"--id", "loc-1", "--build", "build-1", "--whats-new", "test")
+		"--localization-id", "loc-1", "--build-id", "build-1", "--whats-new", "test")
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
 	output, err := runCmd.CombinedOutput()
 	if err == nil {
@@ -795,14 +795,46 @@ func TestBuildsTestNotesUpdateConflictingFlagsExitCode(t *testing.T) {
 	}
 
 	stderr := string(output)
-	if !strings.Contains(stderr, "Warning: `--build` is deprecated. Use `--build-id`.") {
-		t.Fatalf("expected legacy build warning, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "Warning: `--id` is deprecated. Use `--localization-id`.") {
-		t.Fatalf("expected legacy id warning, got %q", stderr)
+	if strings.Contains(stderr, "is deprecated") {
+		t.Fatalf("expected no deprecation warnings for canonical flags, got %q", stderr)
 	}
 	if !strings.Contains(stderr, "--localization-id cannot be combined with build selectors or --locale") {
 		t.Fatalf("expected conflict message, got %q", stderr)
+	}
+}
+
+func TestRemovedBuildSelectorAliasesExitUsage(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		flag string
+	}{
+		{name: "builds wait --build", args: []string{"builds", "wait", "--build", "BUILD_123"}, flag: "--build"},
+		{name: "builds wait --newest", args: []string{"builds", "wait", "--app", "APP_123", "--newest"}, flag: "--newest"},
+		{name: "builds list --app-id", args: []string{"builds", "list", "--app-id", "APP_123"}, flag: "--app-id"},
+		{name: "builds test-notes view --id", args: []string{"builds", "test-notes", "view", "--id", "loc-1"}, flag: "--id"},
+		{name: "testflight groups view --group-id", args: []string{"testflight", "groups", "view", "--group-id", "group-1"}, flag: "--group-id"},
+		{name: "testflight testers list --build", args: []string{"testflight", "testers", "list", "--build", "BUILD_123"}, flag: "--build"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resetReportFlags(t)
+
+			stdout, stderr := captureCommandOutput(t, func() {
+				if code := Run(test.args, "1.0.0"); code != ExitUsage {
+					t.Fatalf("Run() exit code = %d, want %d", code, ExitUsage)
+				}
+			})
+
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, "Error: unknown flag `"+test.flag+"`") {
+				t.Fatalf("expected unknown flag diagnostic for %s, got %q", test.flag, stderr)
+			}
+			if strings.Contains(stderr, "is deprecated") {
+				t.Fatalf("removed alias must not emit deprecation guidance, got %q", stderr)
+			}
+		})
 	}
 }
 
@@ -865,13 +897,13 @@ func TestBuildsExpiredFlagsInvalidBooleanExitCode(t *testing.T) {
 	}
 }
 
-func TestTestFlightExternalTestingInvalidBooleanExitCode(t *testing.T) {
+func TestTestFlightDistributionEditExternalTestingIsUnknownFlag(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		flag []string
 	}{
-		{name: "equals", flag: []string{"--external-testing=maybe"}},
-		{name: "space separated", flag: []string{"--external-testing", "maybe"}},
+		{name: "equals", flag: []string{"--external-testing=true"}},
+		{name: "space separated", flag: []string{"--external-testing", "true"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			resetReportFlags(t)
@@ -890,8 +922,11 @@ func TestTestFlightExternalTestingInvalidBooleanExitCode(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("expected empty stdout, got %q", stdout)
 			}
-			if !strings.Contains(stderr, "invalid boolean value") || !strings.Contains(stderr, "external-testing") {
-				t.Fatalf("expected invalid --external-testing boolean diagnostic, got %q", stderr)
+			if !strings.Contains(stderr, "Error: unknown flag `--external-testing`") {
+				t.Fatalf("expected unknown flag diagnostic for --external-testing, got %q", stderr)
+			}
+			if strings.Contains(stderr, "is deprecated") {
+				t.Fatalf("removed flag must not emit deprecation guidance, got %q", stderr)
 			}
 		})
 	}
@@ -1006,19 +1041,20 @@ func TestPublishAppStoreMissingMetadataDirExitCode(t *testing.T) {
 	}
 }
 
-func TestWebAuthLoginLegacyTwoFactorFlagExitCode(t *testing.T) {
+func TestWebAuthLoginRemovedTwoFactorFlagExitCode(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryPath := buildASCBlackboxBinary(t)
 
 	runCmd := exec.Command(
 		binaryPath,
 		"web", "auth", "login",
+		"--apple-id", "user@example.com",
 		"--two-factor-code", "123456",
 	)
 	runCmd.Env = isolatedCLITestEnv(filepath.Join(tmpDir, "config.json"))
 	output, err := runCmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected non-zero exit when apple-id is missing, got success output: %s", output)
+		t.Fatalf("expected non-zero exit for the removed --two-factor-code flag, got success output: %s", output)
 	}
 
 	var exitErr *exec.ExitError
@@ -1030,14 +1066,14 @@ func TestWebAuthLoginLegacyTwoFactorFlagExitCode(t *testing.T) {
 	}
 
 	stderr := string(output)
-	if !strings.Contains(stderr, "Warning: `--two-factor-code` is deprecated.") {
-		t.Fatalf("expected deprecated flag warning, got %q", stderr)
+	if !strings.Contains(stderr, "unknown flag `--two-factor-code` for `asc web auth login`") {
+		t.Fatalf("expected unknown-flag usage error, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "--apple-id is required when no cached web session is available") {
-		t.Fatalf("expected usage error after successful parsing, got %q", stderr)
+	if !strings.Contains(stderr, "--two-factor-code-command") {
+		t.Fatalf("expected --two-factor-code-command suggestion, got %q", stderr)
 	}
-	if strings.Contains(stderr, "flag provided but not defined: -two-factor-code") {
-		t.Fatalf("did not expect unknown flag parse failure, got %q", stderr)
+	if strings.Contains(stderr, "deprecated") {
+		t.Fatalf("did not expect deprecation wording for a removed flag, got %q", stderr)
 	}
 }
 
@@ -1141,7 +1177,6 @@ func TestWebAuthLoginPromptInterruptDoesNotFallBackToUsageError(t *testing.T) {
 		"ASC_WEB_SESSION_CACHE=1",
 		"ASC_WEB_SESSION_CACHE_BACKEND=file",
 		"ASC_WEB_SESSION_CACHE_DIR="+filepath.Join(tmpDir, "web-session-cache"),
-		"ASC_IRIS_SESSION_CACHE=0",
 	)
 
 	ptmx, err := pty.Start(runCmd)
@@ -1237,7 +1272,6 @@ func TestWebAuthLoginPromptInterruptSkipsSkillsAutoCheck(t *testing.T) {
 		"ASC_WEB_SESSION_CACHE=1",
 		"ASC_WEB_SESSION_CACHE_BACKEND=file",
 		"ASC_WEB_SESSION_CACHE_DIR="+filepath.Join(tmpDir, "web-session-cache"),
-		"ASC_IRIS_SESSION_CACHE=0",
 		"ASC_SKILLS_AUTO_CHECK=1",
 		"CI=",
 		"PATH="+scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"),

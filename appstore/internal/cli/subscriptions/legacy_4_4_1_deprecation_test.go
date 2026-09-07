@@ -10,63 +10,33 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
-func TestSubscriptionsLegacy441CommandsAreDeprecated(t *testing.T) {
+// The App Store Connect API 4.4.1 product-scoped command families were removed
+// in 5.0.0. Their parents must no longer register them anywhere in the tree.
+func TestSubscriptionsLegacy441CommandsAreNotRegistered(t *testing.T) {
 	tests := []struct {
-		name        string
-		command     func() *ffcli.Command
-		oldCommand  string
-		replacement string
+		name    string
+		parent  *ffcli.Command
+		removed []string
 	}{
-		{"images list", SubscriptionsImagesListCommand, "asc subscriptions images list", "asc subscriptions versions images list --version-id \"SUBSCRIPTION_VERSION_ID\""},
-		{"images view", SubscriptionsImagesGetCommand, "asc subscriptions images view", "asc subscriptions versions images view --id \"IMAGE_ID\""},
-		{"images create", SubscriptionsImagesCreateCommand, "asc subscriptions images create", "asc subscriptions versions images upload --version-id \"SUBSCRIPTION_VERSION_ID\" --file \"./image.png\""},
-		{"images update", SubscriptionsImagesUpdateCommand, "asc subscriptions images update", "asc subscriptions versions images upload --version-id \"SUBSCRIPTION_VERSION_ID\" --file \"./image.png\""},
-		{"images delete", SubscriptionsImagesDeleteCommand, "asc subscriptions images delete", "asc subscriptions versions images delete --id \"IMAGE_ID\" --confirm"},
-		{"localizations list", SubscriptionsLocalizationsListCommand, "asc subscriptions localizations list", "asc subscriptions versions localizations list --version-id \"SUBSCRIPTION_VERSION_ID\""},
-		{"localizations view", SubscriptionsLocalizationsGetCommand, "asc subscriptions localizations view", "asc subscriptions versions localizations view --id \"LOCALIZATION_ID\""},
-		{"localizations create", SubscriptionsLocalizationsCreateCommand, "asc subscriptions localizations create", "asc subscriptions versions localizations create --version-id \"SUBSCRIPTION_VERSION_ID\" --name \"NAME\" --locale \"LOCALE\""},
-		{"localizations update", SubscriptionsLocalizationsUpdateCommand, "asc subscriptions localizations update", "asc subscriptions versions localizations update --id \"LOCALIZATION_ID\" --name \"NAME\""},
-		{"localizations delete", SubscriptionsLocalizationsDeleteCommand, "asc subscriptions localizations delete", "asc subscriptions versions localizations delete --id \"LOCALIZATION_ID\" --confirm"},
-		{"localizations sync", SubscriptionsLocalizationsSyncCommand, "asc subscriptions localizations sync", "asc subscriptions versions localizations"},
-		{"group localizations list", SubscriptionsGroupsLocalizationsListCommand, "asc subscriptions groups localizations list", "asc subscriptions groups versions localizations list --version-id \"GROUP_VERSION_ID\""},
-		{"group localizations view", SubscriptionsGroupsLocalizationsGetCommand, "asc subscriptions groups localizations view", "asc subscriptions groups versions localizations view --id \"LOCALIZATION_ID\""},
-		{"group localizations create", SubscriptionsGroupsLocalizationsCreateCommand, "asc subscriptions groups localizations create", "asc subscriptions groups versions localizations create --version-id \"GROUP_VERSION_ID\" --name \"NAME\" --locale \"LOCALE\""},
-		{"group localizations update", SubscriptionsGroupsLocalizationsUpdateCommand, "asc subscriptions groups localizations update", "asc subscriptions groups versions localizations update --id \"LOCALIZATION_ID\" --name \"NAME\""},
-		{"group localizations delete", SubscriptionsGroupsLocalizationsDeleteCommand, "asc subscriptions groups localizations delete", "asc subscriptions groups versions localizations delete --id \"LOCALIZATION_ID\" --confirm"},
-		{"group localizations sync", SubscriptionsGroupsLocalizationsSyncCommand, "asc subscriptions groups localizations sync", "asc subscriptions groups versions localizations"},
-		{"submit", subscriptionsReviewSubmitCommandForTest, "asc subscriptions review submit", "asc review items add --submission \"SUBMISSION_ID\" --item-type subscriptionVersions --item-id \"SUBSCRIPTION_VERSION_ID\""},
-		{"group submit", subscriptionsReviewSubmitGroupCommandForTest, "asc subscriptions review submit-group", "asc review items add --submission \"SUBMISSION_ID\" --item-type subscriptionGroupVersions --item-id \"GROUP_VERSION_ID\""},
+		{"subscriptions", SubscriptionsCommand(), []string{"localizations", "images", "submit"}},
+		{"groups", SubscriptionsGroupsCommand(), []string{"localizations", "submit"}},
+		{"review", SubscriptionsReviewCommand(), []string{"submit", "submit-group"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := tt.command()
-			if !strings.HasPrefix(cmd.ShortHelp, "DEPRECATED:") {
-				t.Fatalf("ShortHelp = %q, want DEPRECATED prefix", cmd.ShortHelp)
-			}
-			if !strings.Contains(cmd.LongHelp, tt.replacement) {
-				t.Fatalf("LongHelp = %q, want replacement %q", cmd.LongHelp, tt.replacement)
-			}
-
-			stderr := captureSubscriptionsLegacy441Stderr(t, func() {
-				_ = cmd.Exec(context.Background(), nil)
-			})
-			if strings.Count(stderr, "Warning:") != 1 {
-				t.Fatalf("stderr = %q, want exactly one warning", stderr)
-			}
-			if !strings.Contains(stderr, "`"+tt.oldCommand+"`") || !strings.Contains(stderr, "`"+tt.replacement+"`") {
-				t.Fatalf("stderr = %q, want old command %q and replacement %q", stderr, tt.oldCommand, tt.replacement)
+			for _, sub := range tt.parent.Subcommands {
+				if sub == nil {
+					continue
+				}
+				for _, removed := range tt.removed {
+					if sub.Name == removed {
+						t.Fatalf("%s still registers removed subcommand %q", tt.name, removed)
+					}
+				}
 			}
 		})
 	}
-}
-
-func subscriptionsReviewSubmitCommandForTest() *ffcli.Command {
-	return SubscriptionsReviewCommand().Subcommands[2]
-}
-
-func subscriptionsReviewSubmitGroupCommandForTest() *ffcli.Command {
-	return SubscriptionsReviewCommand().Subcommands[3]
 }
 
 func captureSubscriptionsLegacy441Stderr(t *testing.T, run func()) string {
@@ -120,16 +90,13 @@ func TestSubscriptions441ParentHelpPromotesVersionScopedResources(t *testing.T) 
 		replacement string
 	}{
 		{"subscriptions", SubscriptionsCommand(), "asc subscriptions review submit", "asc review items add"},
-		{"localizations", SubscriptionsLocalizationsCommand(), "asc subscriptions localizations list", "asc subscriptions versions localizations list"},
-		{"images", SubscriptionsImagesCommand(), "asc subscriptions images list", "asc subscriptions versions images list"},
-		{"group localizations", SubscriptionsGroupsLocalizationsCommand(), "asc subscriptions groups localizations list", "asc subscriptions groups versions localizations list"},
 		{"review", SubscriptionsReviewCommand(), "asc subscriptions review submit", "asc review items add"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if strings.Contains(tt.command.LongHelp, tt.legacy) {
-				t.Fatalf("LongHelp still teaches deprecated command %q: %q", tt.legacy, tt.command.LongHelp)
+				t.Fatalf("LongHelp still teaches removed command %q: %q", tt.legacy, tt.command.LongHelp)
 			}
 			if !strings.Contains(tt.command.LongHelp, tt.replacement) {
 				t.Fatalf("LongHelp = %q, want replacement %q", tt.command.LongHelp, tt.replacement)
@@ -143,18 +110,6 @@ func TestSubscriptions441ParentHelpPromotesVersionScopedResources(t *testing.T) 
 	}
 	if !strings.Contains(setup.LongHelp, "deprecated v1") {
 		t.Fatalf("setup LongHelp lacks localization migration guidance: %q", setup.LongHelp)
-	}
-}
-
-func TestSubscriptions441ExperimentalSyncHelpPreservesBothLifecycleLabels(t *testing.T) {
-	commands := []*ffcli.Command{
-		SubscriptionsLocalizationsSyncCommand(),
-		SubscriptionsGroupsLocalizationsSyncCommand(),
-	}
-	for _, cmd := range commands {
-		if !strings.HasPrefix(cmd.ShortHelp, "DEPRECATED: [experimental] ") {
-			t.Fatalf("%s ShortHelp = %q, want deprecation and experimental labels", cmd.ShortUsage, cmd.ShortHelp)
-		}
 	}
 }
 

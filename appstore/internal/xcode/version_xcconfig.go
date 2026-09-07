@@ -41,6 +41,41 @@ type xcconfigDocument struct {
 	includes    []xcconfigInclude
 }
 
+// xcconfigSourceGraphLimitError reports that a bounded collector found a new
+// source after its configured file budget was exhausted. The typed error lets
+// signing-plan consumers distinguish an incomplete source graph from an
+// ordinary read or parse failure, including when the error is wrapped while a
+// configuration is being attributed to a target.
+type xcconfigSourceGraphLimitError struct {
+	path  string
+	limit int
+	err   error
+}
+
+func (e *xcconfigSourceGraphLimitError) Error() string {
+	message := fmt.Sprintf("signing plan source graph contains more than %d files", e.limit)
+	if e.path != "" {
+		message = fmt.Sprintf("%s at %s", message, e.path)
+	}
+	if e.err != nil {
+		return fmt.Sprintf("%s: %v", message, e.err)
+	}
+	return message
+}
+
+func (e *xcconfigSourceGraphLimitError) Unwrap() error {
+	return e.err
+}
+
+func newXCConfigSourceGraphLimitError(path string, limit int, err error) error {
+	return &xcconfigSourceGraphLimitError{path: path, limit: limit, err: err}
+}
+
+func isXCConfigSourceGraphLimitError(err error) bool {
+	var limitErr *xcconfigSourceGraphLimitError
+	return errors.As(err, &limitErr)
+}
+
 type xcconfigResolvedValue struct {
 	value            string
 	path             string
@@ -66,7 +101,7 @@ func parseXCConfig(data []byte) (xcconfigDocument, error) {
 		line := lines[index]
 		body := strings.TrimSuffix(line, "\n")
 		body = strings.TrimSuffix(body, "\r")
-		masked, nextInBlock := maskXCConfigComments(body, inBlockComment)
+		masked, nextInBlock, nextQuote := maskXCConfigCommentsState(body, inBlockComment, 0)
 		inBlockComment = nextInBlock
 
 		if matches := xcconfigIncludePattern.FindStringSubmatch(masked); matches != nil {
@@ -87,13 +122,18 @@ func parseXCConfig(data []byte) (xcconfigDocument, error) {
 		valueStart, valueEnd := indices[12], indices[13]
 		joined := body[valueStart:valueEnd]
 		endIndex := index
+		continuationInBlock := nextInBlock
+		continuationQuote := nextQuote
 		logical, _ := maskXCConfigComments(joined, false)
 		value, quote, err := parseXCConfigValue(logical)
 		for err != nil && xcconfigValueHasLineContinuation(joined) && endIndex+1 < len(lines) {
 			endIndex++
 			nextBody := strings.TrimSuffix(lines[endIndex], "\n")
 			nextBody = strings.TrimSuffix(nextBody, "\r")
-			joined = trimXCConfigLineContinuation(joined) + nextBody
+			nextMasked, nextContinuationInBlock, nextContinuationQuote := maskXCConfigCommentsState(nextBody, continuationInBlock, continuationQuote)
+			joined = trimXCConfigLineContinuation(joined) + nextMasked
+			continuationInBlock = nextContinuationInBlock
+			continuationQuote = nextContinuationQuote
 			logical, _ = maskXCConfigComments(joined, false)
 			value, quote, err = parseXCConfigValue(logical)
 		}
@@ -113,6 +153,7 @@ func parseXCConfig(data []byte) (xcconfigDocument, error) {
 			valueEnd:      valueEnd,
 			continued:     endIndex > index || xcconfigValueHasLineContinuation(masked[valueStart:valueEnd]),
 		})
+		inBlockComment = continuationInBlock
 		index = endIndex
 	}
 
@@ -239,8 +280,12 @@ func splitLinesPreservingEndings(value string) []string {
 }
 
 func maskXCConfigComments(line string, inBlockComment bool) (string, bool) {
+	masked, nextInBlock, _ := maskXCConfigCommentsState(line, inBlockComment, 0)
+	return masked, nextInBlock
+}
+
+func maskXCConfigCommentsState(line string, inBlockComment bool, inQuote byte) (string, bool, byte) {
 	masked := []byte(line)
-	inQuote := byte(0)
 	escaped := false
 
 	for index := 0; index < len(masked); index++ {
@@ -290,7 +335,7 @@ func maskXCConfigComments(line string, inBlockComment bool) (string, bool) {
 			inBlockComment = true
 		}
 	}
-	return string(masked), inBlockComment
+	return string(masked), inBlockComment, inQuote
 }
 
 func xcconfigBaseKey(key string) string {
@@ -328,7 +373,7 @@ func collectStableXCConfigFiles(root string) ([]string, error) {
 	if xcconfigUsesIdentityTraversal() {
 		identify = os.Stat
 	}
-	return collectXCConfigFilesWithHooksAndIdentity(root, os.ReadFile, nil, nil, nil, identify)
+	return collectXCConfigFilesWithHooksAndIdentity(root, os.ReadFile, identify)
 }
 
 // collectXCConfigFilesWithReader walks an xcconfig include graph using the
@@ -351,7 +396,7 @@ func collectXCConfigFilesWithHooks(
 	onPath func(string),
 	onError func(string, error),
 ) ([]string, error) {
-	return collectXCConfigFilesWithHooksAndIdentity(root, read, authorize, onPath, onError, nil)
+	return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(root, read, authorize, onPath, onError, nil, nil)
 }
 
 // collectXCConfigFilesWithHooksAndIdentity is the signing-specific collector
@@ -362,12 +407,9 @@ func collectXCConfigFilesWithHooks(
 func collectXCConfigFilesWithHooksAndIdentity(
 	root string,
 	read func(string) ([]byte, error),
-	authorize func(string) error,
-	onPath func(string),
-	onError func(string, error),
 	identify func(string) (os.FileInfo, error),
 ) ([]string, error) {
-	return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(root, read, authorize, onPath, onError, identify, nil)
+	return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(root, read, nil, nil, nil, identify, nil)
 }
 
 // collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing is the
@@ -385,6 +427,218 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 	identify func(string) (os.FileInfo, error),
 	onOptionalMissing func(string),
 ) ([]string, error) {
+	return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(root, read, authorize, onPath, onError, identify, onOptionalMissing, 0, nil)
+}
+
+// xcconfigSourceBudget tracks successfully collected source identities across
+// multiple configuration roots. A signing plan may visit the same root once
+// per target/configuration, so the budget must count each source only once at
+// plan scope while still preserving separate traversals for hard links whose
+// relative includes can resolve differently.
+type xcconfigSourceBudget struct {
+	entries      []xcconfigSourceBudgetEntry
+	byPath       map[string][]int
+	byFoldedPath map[string][]int
+	roots        map[string]xcconfigSourceBudgetRoot
+}
+
+type xcconfigSourceBudgetEntry struct {
+	path string
+	info os.FileInfo
+}
+
+// xcconfigSourceBudgetRoot is a completed collection that can be replayed for
+// another configuration referring to the same lexical root. Keep the path
+// events so signing-plan hooks retain their per-configuration observations,
+// while avoiding another stat/read/parse traversal of the source graph.
+type xcconfigSourceBudgetRoot struct {
+	paths           []string
+	pathEvents      []string
+	optionalMissing []string
+	maxFiles        int
+}
+
+func (b *xcconfigSourceBudget) root(path string, maxFiles int) (xcconfigSourceBudgetRoot, bool) {
+	if b == nil || b.roots == nil {
+		return xcconfigSourceBudgetRoot{}, false
+	}
+	root, ok := b.roots[normalizeSigningLexicalPath(path)]
+	return root, ok && root.maxFiles == maxFiles
+}
+
+func (b *xcconfigSourceBudget) cacheRoot(path string, root xcconfigSourceBudgetRoot) {
+	if b == nil {
+		return
+	}
+	if b.roots == nil {
+		b.roots = make(map[string]xcconfigSourceBudgetRoot)
+	}
+	root.paths = append([]string(nil), root.paths...)
+	root.pathEvents = append([]string(nil), root.pathEvents...)
+	root.optionalMissing = append([]string(nil), root.optionalMissing...)
+	b.roots[normalizeSigningLexicalPath(path)] = root
+}
+
+func (b *xcconfigSourceBudget) contains(path string, info os.FileInfo) bool {
+	if b == nil {
+		return false
+	}
+	path = normalizeSigningLexicalPath(path)
+	containsEntry := func(indexes []int) bool {
+		for _, index := range indexes {
+			entry := b.entries[index]
+			if entry.path == path {
+				if info == nil || entry.info == nil {
+					// A collector without identity support can still establish
+					// duplicate lexical sources. Signing traversal normally has an
+					// identity, so two replaced files at one path remain distinct.
+					return true
+				}
+				if os.SameFile(info, entry.info) {
+					return true
+				}
+				continue
+			}
+			if info != nil && entry.info != nil && signingPathCaseEquivalent(entry.path, path) && os.SameFile(info, entry.info) {
+				return true
+			}
+		}
+		return false
+	}
+	if b.byPath != nil {
+		if containsEntry(b.byPath[path]) {
+			return true
+		}
+	} else {
+		for index := range b.entries {
+			if containsEntry([]int{index}) {
+				return true
+			}
+		}
+	}
+	foldedPath := strings.ToLower(path)
+	if b.byFoldedPath != nil {
+		return containsEntry(b.byFoldedPath[foldedPath])
+	}
+	for index, entry := range b.entries {
+		if strings.ToLower(entry.path) == foldedPath && containsEntry([]int{index}) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *xcconfigSourceBudget) count() int {
+	if b == nil {
+		return 0
+	}
+	return len(b.entries)
+}
+
+func (b *xcconfigSourceBudget) add(path string, info os.FileInfo) bool {
+	if b == nil || b.contains(path, info) {
+		return false
+	}
+	if b.byPath == nil {
+		b.byPath = make(map[string][]int)
+	}
+	if b.byFoldedPath == nil {
+		b.byFoldedPath = make(map[string][]int)
+	}
+	path = normalizeSigningLexicalPath(path)
+	index := len(b.entries)
+	b.entries = append(b.entries, xcconfigSourceBudgetEntry{
+		path: path,
+		info: info,
+	})
+	b.byPath[path] = append(b.byPath[path], index)
+	b.byFoldedPath[strings.ToLower(path)] = append(b.byFoldedPath[strings.ToLower(path)], index)
+	return true
+}
+
+// collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit is the
+// bounded form used by signing-plan generation. optionalProbe is consulted
+// only for an optional include encountered after maxFiles sources have already
+// been collected. It must perform a no-follow existence check after the caller
+// has authorized the path; os.ErrNotExist means the optional include remains
+// absent and does not consume the budget, while any other result is treated as
+// a present or indeterminate source and fails with a typed limit error.
+func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimit(
+	root string,
+	read func(string) ([]byte, error),
+	authorize func(string) error,
+	onPath func(string),
+	onError func(string, error),
+	identify func(string) (os.FileInfo, error),
+	onOptionalMissing func(string),
+	maxFiles int,
+	optionalProbe func(string) (os.FileInfo, error),
+) ([]string, error) {
+	return collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
+		root, read, authorize, onPath, onError, identify, onOptionalMissing, maxFiles, optionalProbe, nil,
+	)
+}
+
+// collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget is
+// the bounded collector with an optional plan-wide source budget. A nil
+// budget retains the historical per-collection bound used by callers outside
+// signing-plan generation.
+func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
+	root string,
+	read func(string) ([]byte, error),
+	authorize func(string) error,
+	onPath func(string),
+	onError func(string, error),
+	identify func(string) (os.FileInfo, error),
+	onOptionalMissing func(string),
+	maxFiles int,
+	optionalProbe func(string) (os.FileInfo, error),
+	budget *xcconfigSourceBudget,
+) ([]string, error) {
+	if budget != nil {
+		if cached, ok := budget.root(root, maxFiles); ok {
+			for _, path := range cached.pathEvents {
+				if onPath != nil {
+					onPath(path)
+				}
+				if authorize != nil {
+					if err := authorize(path); err != nil {
+						if onError != nil {
+							onError(path, err)
+						}
+						return nil, err
+					}
+				}
+			}
+			for _, path := range cached.optionalMissing {
+				if optionalProbe == nil {
+					if onError != nil {
+						onError(path, os.ErrNotExist)
+					}
+					if onOptionalMissing != nil {
+						onOptionalMissing(path)
+					}
+					continue
+				}
+				_, probeErr := optionalProbe(path)
+				if errors.Is(probeErr, os.ErrNotExist) {
+					if onError != nil {
+						onError(path, probeErr)
+					}
+					if onOptionalMissing != nil {
+						onOptionalMissing(path)
+					}
+					continue
+				}
+				err := newXCConfigSourceGraphLimitError(path, maxFiles, probeErr)
+				if onError != nil {
+					onError(path, err)
+				}
+				return nil, err
+			}
+			return append([]string(nil), cached.paths...), nil
+		}
+	}
 	seen := make(map[string]bool)
 	type collectedIdentity struct {
 		path string
@@ -392,6 +646,8 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 	}
 	var collected []collectedIdentity
 	var paths []string
+	var pathEvents []string
+	var optionalMissing []string
 	traversalKey := func(path string) string {
 		// With an identity callback, preserve the exact spelling. Identity
 		// checks below can safely coalesce an alias only after the platform's
@@ -403,10 +659,13 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 		}
 		return signingLexicalPathKey(path)
 	}
-	var visit func(string, map[string][]os.FileInfo) (error, bool)
-	visit = func(path string, stack map[string][]os.FileInfo) (error, bool) {
+	var visit func(string, map[string][]os.FileInfo, bool) (error, bool)
+	visit = func(path string, stack map[string][]os.FileInfo, optional bool) (error, bool) {
 		path = filepath.Clean(path)
 		pathKey := traversalKey(path)
+		if budget != nil {
+			pathEvents = append(pathEvents, path)
+		}
 		if onPath != nil {
 			onPath(path)
 		}
@@ -466,6 +725,35 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 				}
 			}
 		}
+		newBudgetSource := budget == nil || !budget.contains(path, identity)
+		collectedCount := len(paths)
+		if budget != nil {
+			collectedCount = budget.count()
+		}
+		if maxFiles > 0 && newBudgetSource && collectedCount >= maxFiles {
+			if optional && optionalProbe != nil {
+				_, probeErr := optionalProbe(path)
+				if errors.Is(probeErr, os.ErrNotExist) {
+					if onError != nil {
+						onError(path, probeErr)
+					}
+					return probeErr, true
+				}
+				// A nil probe error, a non-nil file, or any other probe error
+				// proves that this is not a safely absent optional include. The
+				// source budget must win before the content reader is reached.
+				err := newXCConfigSourceGraphLimitError(path, maxFiles, probeErr)
+				if onError != nil {
+					onError(path, err)
+				}
+				return err, false
+			}
+			err := newXCConfigSourceGraphLimitError(path, maxFiles, nil)
+			if onError != nil {
+				onError(path, err)
+			}
+			return err, false
+		}
 		data, err := read(path)
 		if err != nil {
 			if onError != nil {
@@ -494,6 +782,9 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 		if identity != nil {
 			collected = append(collected, collectedIdentity{path: path, info: identity})
 		}
+		if budget != nil {
+			budget.add(path, identity)
+		}
 		nextStack := make(map[string][]os.FileInfo, len(stack)+1)
 		for key, infos := range stack {
 			nextStack[key] = append([]os.FileInfo(nil), infos...)
@@ -513,9 +804,15 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 			// checks. In particular, never stat an include before the authorization
 			// hook has accepted its lexical path. Optional missing includes are the
 			// one intentional not-exist case and are ignored after that check.
-			childErr, missingTarget := visit(includePath, nextStack)
+			childErr, missingTarget := visit(includePath, nextStack, include.optional)
 			if childErr != nil {
+				if isXCConfigSourceGraphLimitError(childErr) {
+					return childErr, false
+				}
 				if include.optional && missingTarget {
+					if budget != nil {
+						optionalMissing = append(optionalMissing, includePath)
+					}
 					if onOptionalMissing != nil {
 						onOptionalMissing(includePath)
 					}
@@ -532,8 +829,16 @@ func collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
 		}
 		return nil, false
 	}
-	if err, _ := visit(root, make(map[string][]os.FileInfo)); err != nil {
+	if err, _ := visit(root, make(map[string][]os.FileInfo), false); err != nil {
 		return nil, err
+	}
+	if budget != nil {
+		budget.cacheRoot(root, xcconfigSourceBudgetRoot{
+			paths:           paths,
+			pathEvents:      pathEvents,
+			optionalMissing: optionalMissing,
+			maxFiles:        maxFiles,
+		})
 	}
 	return paths, nil
 }
@@ -589,8 +894,19 @@ func resolveXCConfigSettingWithBaseReaderAndIdentity(
 	stat func(string) (os.FileInfo, error),
 	identify func(string) (os.FileInfo, error),
 ) (xcconfigResolvedValue, error) {
+	return resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(root, setting, base, read, stat, identify, nil)
+}
+
+func resolveXCConfigSettingWithBaseReaderAndIdentityAndLookup(
+	root, setting string,
+	base xcconfigResolvedValue,
+	read func(string) ([]byte, error),
+	stat func(string) (os.FileInfo, error),
+	identify func(string) (os.FileInfo, error),
+	lookup func(string) (string, bool),
+) (xcconfigResolvedValue, error) {
 	resolved, conditional, err := resolveXCConfigSettingStateWithReaderAndIdentity(
-		root, setting, base, read, stat, identify, nil,
+		root, setting, base, read, stat, identify, nil, lookup,
 	)
 	if err != nil {
 		return xcconfigResolvedValue{}, err
@@ -622,6 +938,31 @@ func resolveXCConfigSettingWithBaseReaderAndIdentity(
 	return resolved, nil
 }
 
+// expandXCConfigLookupReferences expands only references supplied by lookup.
+// Unsupported or unresolved references stay intact so divergence checks remain
+// conservative rather than guessing a build-context value.
+func expandXCConfigLookupReferences(value string, lookup func(string) (string, bool)) string {
+	if lookup == nil {
+		return value
+	}
+	for iteration := 0; iteration < 32; iteration++ {
+		match := signingReferencePattern.FindStringSubmatchIndex(value)
+		if match == nil || match[4] >= 0 || match[8] >= 0 {
+			return value
+		}
+		nameStart, nameEnd := match[2], match[3]
+		if nameStart < 0 {
+			nameStart, nameEnd = match[6], match[7]
+		}
+		replacement, ok := lookup(value[nameStart:nameEnd])
+		if !ok {
+			return value
+		}
+		value = value[:match[0]] + replacement + value[match[1]:]
+	}
+	return value
+}
+
 // xcconfigAssignmentObserver receives each matching assignment in the same
 // include/event order used by the resolver, including assignments that the
 // resolver later skips because a lower or earlier value wins. Security-
@@ -640,9 +981,10 @@ func resolveXCConfigSettingStateWithReaderAndIdentity(
 	stat func(string) (os.FileInfo, error),
 	identify func(string) (os.FileInfo, error),
 	observe xcconfigAssignmentObserver,
+	lookup func(string) (string, bool),
 ) (xcconfigResolvedValue, bool, error) {
 	return resolveXCConfigSettingRecursiveWithReaderAndIdentity(
-		filepath.Clean(root), setting, make(map[string]bool), nil, base, read, stat, identify, observe,
+		filepath.Clean(root), setting, make(map[string]bool), nil, base, read, stat, identify, observe, lookup,
 	)
 }
 
@@ -661,6 +1003,7 @@ func resolveXCConfigSettingRecursiveWithReaderAndIdentity(
 	stat func(string) (os.FileInfo, error),
 	identify func(string) (os.FileInfo, error),
 	observe xcconfigAssignmentObserver,
+	lookup func(string) (string, bool),
 ) (xcconfigResolvedValue, bool, error) {
 	path = filepath.Clean(path)
 	pathKey := signingLexicalPathKey(path)
@@ -726,7 +1069,7 @@ func resolveXCConfigSettingRecursiveWithReaderAndIdentity(
 				}
 				return xcconfigResolvedValue{}, false, fmt.Errorf("read xcconfig include %s: %w", includePath, err)
 			}
-			included, _, err := resolveXCConfigSettingRecursiveWithReaderAndIdentity(includePath, setting, nextStack, nextStackPaths, resolved, read, stat, identify, observe)
+			included, _, err := resolveXCConfigSettingRecursiveWithReaderAndIdentity(includePath, setting, nextStack, nextStackPaths, resolved, read, stat, identify, observe, lookup)
 			if err != nil {
 				return xcconfigResolvedValue{}, false, err
 			}
@@ -741,12 +1084,42 @@ func resolveXCConfigSettingRecursiveWithReaderAndIdentity(
 		if observe != nil {
 			observe(path, *assignment)
 		}
+		if !resolved.found && lookup != nil {
+			if implicit, ok := lookup(setting); ok {
+				// An implicit value is a lower-layer value, not a replacement
+				// for the conditional assignments already seen in this file.
+				// Keep explicit conditionals so the caller can reject a
+				// divergent SDK-specific value, while a conditional default
+				// remains shadowed by the implicit value just like ?= would be
+				// by any other lower-layer assignment.
+				conditionals := make([]xcconfigConditionalValue, 0, len(resolved.conditionals))
+				for _, conditional := range resolved.conditionals {
+					if conditional.operator != "?=" {
+						conditionals = append(conditionals, conditional)
+					}
+				}
+				resolved = xcconfigResolvedValue{
+					value:        implicit,
+					path:         "<implicit>",
+					found:        true,
+					exact:        true,
+					conditionals: conditionals,
+				}
+			}
+		}
 		if assignment.key != setting {
+			selector := signingXCConfigSelectorIdentity(assignment.key)
+			inheritedValue := resolved.value
+			for index := len(resolved.conditionals) - 1; index >= 0; index-- {
+				if signingXCConfigSelectorIdentity(resolved.conditionals[index].key) == selector {
+					inheritedValue = resolved.conditionals[index].value
+					break
+				}
+			}
 			if assignment.operator == "?=" && resolved.found {
 				continue
 			}
 			if assignment.operator == "=" {
-				selector := signingXCConfigSelectorIdentity(assignment.key)
 				filtered := make([]xcconfigConditionalValue, 0, len(resolved.conditionals))
 				for _, existing := range resolved.conditionals {
 					if signingXCConfigSelectorIdentity(existing.key) == selector {
@@ -756,9 +1129,17 @@ func resolveXCConfigSettingRecursiveWithReaderAndIdentity(
 				}
 				resolved.conditionals = filtered
 			}
+			conditionalValue := assignment.value
+			if resolved.found {
+				if strings.Contains(conditionalValue, "$(inherited)") || strings.Contains(conditionalValue, "${inherited}") {
+					conditionalValue = strings.ReplaceAll(conditionalValue, "$(inherited)", inheritedValue)
+					conditionalValue = strings.ReplaceAll(conditionalValue, "${inherited}", inheritedValue)
+				}
+				conditionalValue = expandXCConfigLookupReferences(conditionalValue, lookup)
+			}
 			resolved.conditionals = append(resolved.conditionals, xcconfigConditionalValue{
 				key:      assignment.key,
-				value:    assignment.value,
+				value:    conditionalValue,
 				operator: assignment.operator,
 				path:     path,
 			})

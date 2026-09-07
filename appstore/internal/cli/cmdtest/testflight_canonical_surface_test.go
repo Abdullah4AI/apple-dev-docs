@@ -1233,7 +1233,7 @@ func TestTopLevelPreReleaseVersionsRemoved(t *testing.T) {
 	}
 }
 
-func TestRemovedPreReleaseVersionsCommandsShowMigrationGuidance(t *testing.T) {
+func TestRemovedPreReleaseVersionsSubcommandsAreUnknownCommands(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string

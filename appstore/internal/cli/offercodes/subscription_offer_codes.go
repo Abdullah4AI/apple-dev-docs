@@ -140,7 +140,6 @@ func OfferCodesCreateCommand() *ffcli.Command {
 	fs.Var(&numberOfPeriods, "number-of-periods", "Number of periods (required)")
 	autoRenewEnabled := fs.String("auto-renew-enabled", "", "Auto-renew enabled (true/false)")
 	prices := fs.String("prices", "", "Offer code prices (required): TERRITORY entries for FREE_TRIAL or TERRITORY:PRICE_POINT_ID entries for paid modes; territory accepts alpha-2, alpha-3, or exact English country name")
-	priceIDs := fs.String("price-id", "", "Deprecated: use --prices")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -212,9 +211,6 @@ Examples:
 			}
 
 			pricesValue := strings.TrimSpace(*prices)
-			if pricesValue == "" {
-				pricesValue = strings.TrimSpace(*priceIDs)
-			}
 			priceEntries, err := parseOfferCodePrices(pricesValue, offerModeValue)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err.Error())

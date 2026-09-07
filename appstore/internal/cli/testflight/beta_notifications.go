@@ -39,7 +39,7 @@ Examples:
 func BetaNotificationsCreateCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 
-	buildID, legacyBuildID := bindBuildIDFlag(fs, "Build ID")
+	buildID := fs.String("build-id", "", "Build ID")
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
@@ -53,9 +53,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := applyLegacyBuildIDAlias(buildID, legacyBuildID); err != nil {
-				return err
-			}
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			if trimmedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")

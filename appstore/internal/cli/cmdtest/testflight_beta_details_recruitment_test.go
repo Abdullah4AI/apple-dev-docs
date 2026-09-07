@@ -188,7 +188,7 @@ func TestTestFlightDistributionEditOutput(t *testing.T) {
 	}
 }
 
-func TestTestFlightDistributionEditExternalTestingDeprecation(t *testing.T) {
+func TestTestFlightDistributionEditRejectsRemovedExternalTestingFlag(t *testing.T) {
 	clientFactoryCalled := false
 	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
 		clientFactoryCalled = true
@@ -196,54 +196,29 @@ func TestTestFlightDistributionEditExternalTestingDeprecation(t *testing.T) {
 	}))
 
 	tests := []struct {
-		name      string
-		args      []string
-		wantError string
+		name string
+		args []string
 	}{
 		{
-			name:      "enable",
-			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=true"},
-			wantError: `Error: --external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`,
+			name: "enable",
+			args: []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=true"},
 		},
 		{
-			name:      "disable",
-			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=false"},
-			wantError: `Error: --external-testing=false cannot identify which beta groups to remove. Use asc builds remove-groups --build-id "BUILD_ID" --group "GROUP_ID" --confirm.`,
+			name: "disable",
+			args: []string{"testflight", "distribution", "edit", "--id", "detail-1", "--external-testing=false"},
 		},
 		{
-			name:      "mixed with supported update",
-			args:      []string{"testflight", "distribution", "edit", "--id", "detail-1", "--auto-notify", "--external-testing=true"},
-			wantError: `Error: --external-testing=true cannot select a beta group or safely infer review submission. Use asc builds add-groups --build-id "BUILD_ID" --group "GROUP_ID" --submit --confirm.`,
+			name: "mixed with supported update",
+			args: []string{"testflight", "distribution", "edit", "--id", "detail-1", "--auto-notify", "--external-testing", "true"},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			clientFactoryCalled = false
-			root := RootCommand("1.2.3")
-			root.FlagSet.SetOutput(io.Discard)
-
-			stdout, stderr := captureOutput(t, func() {
-				if err := root.Parse(test.args); err != nil {
-					t.Fatalf("parse error: %v", err)
-				}
-				if err := root.Run(context.Background()); !errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("expected usage error, got %v", err)
-				}
-			})
-
-			if stdout != "" {
-				t.Fatalf("expected empty stdout, got %q", stdout)
-			}
-			const warning = "Warning: `--external-testing` is deprecated and cannot be applied safely; App Store Connect does not support editing `externalBuildState`."
-			if !strings.Contains(stderr, warning) {
-				t.Fatalf("expected deprecation warning %q, got %q", warning, stderr)
-			}
-			if !strings.Contains(stderr, test.wantError) {
-				t.Fatalf("expected migration error %q, got %q", test.wantError, stderr)
-			}
+			assertRemovedFlagIsUnknown(t, test.args, "--external-testing")
 			if clientFactoryCalled {
-				t.Fatal("expected deprecated flag to fail before client creation or HTTP")
+				t.Fatal("expected removed flag to fail before client creation or HTTP")
 			}
 		})
 	}

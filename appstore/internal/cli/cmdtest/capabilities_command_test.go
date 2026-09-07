@@ -57,10 +57,15 @@ func TestRun_CapabilitiesJSONReportsKnownGaps(t *testing.T) {
 	}
 
 	assertCapability(t, resp, "App Store release submission", "cli-supported", "asc publish appstore --submit")
+	assertCapability(t, resp, "Developer Portal Website Push ID reads", "web-session", "asc web website-push-ids list")
+	assertCapability(t, resp, "Developer Portal Website Push ID reads", "web-session", "asc web website-push-ids view")
+	assertCapability(t, resp, "Developer Portal Website Push ID lifecycle", "web-session", "asc web website-push-ids create")
+	assertCapability(t, resp, "Developer Portal Website Push ID lifecycle", "web-session", "asc web website-push-ids delete")
 	assertCapability(t, resp, "App creation", "web-session", "asc web apps create")
 	assertCapability(t, resp, "Initial app availability bootstrap", "partial", "asc pricing availability create")
 	assertCapability(t, resp, "Initial app availability bootstrap", "partial", "asc web apps availability create")
 	assertCapability(t, resp, "App distribution method inspection", "web-session", "asc web apps distribution view")
+	assertCapability(t, resp, "App distribution method inspection", "web-session", "asc web apps distribution set")
 	assertCapability(t, resp, "Last-compatible version settings", "cli-supported", "asc versions list --paginate --output json")
 	assertCapability(t, resp, "Last-compatible version settings", "cli-supported", "asc versions update --downloadable")
 	assertCapability(t, resp, "App Store version status history", "web-session", "asc web apps history")
@@ -80,7 +85,7 @@ func TestRun_CapabilitiesJSONReportsKnownGaps(t *testing.T) {
 	assertCapability(t, resp, "Subscription sale availability and pricing web workflows", "web-session", "asc web subscriptions")
 	assertCapability(t, resp, "App Store Connect analytics web dashboards", "web-session", "asc web analytics")
 	assertCapability(t, resp, "Xcode Cloud usage and web workflow management", "web-session", "asc web xcode-cloud")
-	assertCapability(t, resp, "Transaction tax reports", "not-public-api", "")
+	assertCapability(t, resp, "Transaction tax reports", "web-session", "asc web finance transaction-tax download")
 	assertCapability(t, resp, "Subscriptions and in-app purchases", "cli-supported", "asc review items add")
 	assertMonetizationVersionWorkflow(t, resp)
 }

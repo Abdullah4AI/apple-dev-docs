@@ -23,58 +23,6 @@ func TestPrintTable_InAppPurchaseImagesV2(t *testing.T) {
 	}
 }
 
-func TestPrintTable_InAppPurchaseImages(t *testing.T) {
-	resp := &InAppPurchaseImagesResponse{
-		Data: []Resource[InAppPurchaseImageAttributes]{
-			{
-				ID: "img-1",
-				Attributes: InAppPurchaseImageAttributes{
-					FileName: "image.png",
-					FileSize: 123,
-					State:    "UPLOAD_COMPLETE",
-				},
-			},
-		},
-	}
-
-	output := captureStdout(t, func() error {
-		return PrintTable(resp)
-	})
-
-	if !strings.Contains(output, "File Name") || !strings.Contains(output, "State") {
-		t.Fatalf("expected header in output, got: %s", output)
-	}
-	if !strings.Contains(output, "image.png") {
-		t.Fatalf("expected file name in output, got: %s", output)
-	}
-}
-
-func TestPrintMarkdown_InAppPurchaseImages(t *testing.T) {
-	resp := &InAppPurchaseImagesResponse{
-		Data: []Resource[InAppPurchaseImageAttributes]{
-			{
-				ID: "img-1",
-				Attributes: InAppPurchaseImageAttributes{
-					FileName: "image.png",
-					FileSize: 123,
-					State:    "UPLOAD_COMPLETE",
-				},
-			},
-		},
-	}
-
-	output := captureStdout(t, func() error {
-		return PrintMarkdown(resp)
-	})
-
-	if !strings.Contains(output, "ID") || !strings.Contains(output, "File Name") {
-		t.Fatalf("expected markdown header, got: %s", output)
-	}
-	if !strings.Contains(output, "UPLOAD_COMPLETE") {
-		t.Fatalf("expected state in output, got: %s", output)
-	}
-}
-
 func TestPrintTable_InAppPurchaseLocalization(t *testing.T) {
 	resp := &InAppPurchaseLocalizationResponse{
 		Data: Resource[InAppPurchaseLocalizationAttributes]{

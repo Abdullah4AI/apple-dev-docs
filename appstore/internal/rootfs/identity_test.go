@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -1047,6 +1048,43 @@ func TestReplaceFileIfSamePreservesHardLinkAndMetadata(t *testing.T) {
 	}
 }
 
+func TestReplaceFileIfSamePreservesSpecialBits(t *testing.T) {
+	requireStrictIdentityPlatform(t)
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS clears setuid/setgid during rooted replacement; Linux CI covers special-bit preservation")
+	}
+	dir := t.TempDir()
+	root := mustRoot(t, dir)
+	t.Cleanup(func() { _ = root.Close() })
+	path := filepath.Join(dir, "special.txt")
+	want := os.FileMode(0o755) | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+	if err := os.WriteFile(path, []byte("original"), want); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mask := os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+	if initial.Mode()&mask != want {
+		t.Skipf("filesystem does not preserve special mode bits: got %v", initial.Mode()&mask)
+	}
+	identity, err := root.CaptureFile("special.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.ReplaceFileIfSame("special.txt", identity, []byte("replacement"), 0o600, true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode() & mask; got != want {
+		t.Fatalf("mode = %v, want %v", got, want)
+	}
+}
+
 func TestReplaceFileIfSameRejectsHardLinkAddedAfterCapture(t *testing.T) {
 	requireStrictIdentityPlatform(t)
 	dir := t.TempDir()
@@ -1868,8 +1906,8 @@ func TestRemoveFileIfSameIdentityRejectsInPlaceQuarantineWrite(t *testing.T) {
 	if !errors.Is(err, ErrQuarantineCleanupUncertain) {
 		t.Fatalf("RemoveFileIfSameIdentity() error = %v, want ErrQuarantineCleanupUncertain", err)
 	}
-	if errors.Is(err, ErrFileIdentityRemoved) {
-		t.Fatalf("RemoveFileIfSameIdentity() error = %v, must not claim the file was removed", err)
+	if !errors.Is(err, ErrFileIdentityRemoved) {
+		t.Fatalf("RemoveFileIfSameIdentity() error = %v, want removed sentinel while canonical path is absent", err)
 	}
 	if !wrote {
 		t.Fatal("quarantine removal seam was not invoked")
@@ -1883,5 +1921,113 @@ func TestRemoveFileIfSameIdentityRejectsInPlaceQuarantineWrite(t *testing.T) {
 	}
 	if got := mustRead(t, matches[0]); got != concurrent {
 		t.Fatalf("preserved quarantine content = %q, want the concurrent edit %q", got, concurrent)
+	}
+}
+
+func TestRemoveFileIfSameIdentityReportsRemovedAfterQuarantineCleanupFailure(t *testing.T) {
+	requireStrictIdentityPlatform(t)
+	dir := t.TempDir()
+	root := mustRoot(t, dir)
+	t.Cleanup(func() { _ = root.Close() })
+	path := filepath.Join(dir, "receipt.json")
+	if err := os.WriteFile(path, []byte("receipt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := root.CaptureFile("receipt.json")
+	if err != nil {
+		t.Fatalf("CaptureFile() error = %v", err)
+	}
+	var quarantineName string
+	root.beforeConditionalQuarantineRemovalForTest = func(parent *os.Root, name string) {
+		quarantineName = name
+		file, openErr := parent.OpenFile(name, os.O_WRONLY, 0)
+		if openErr != nil {
+			t.Fatalf("open quarantined file: %v", openErr)
+		}
+		if chmodErr := file.Chmod(0o640); chmodErr != nil {
+			_ = file.Close()
+			t.Fatalf("change quarantined file mode: %v", chmodErr)
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			t.Fatalf("close changed quarantine: %v", closeErr)
+		}
+	}
+
+	err = root.RemoveFileIfSameIdentity("receipt.json", identity)
+	if !errors.Is(err, ErrQuarantineCleanupUncertain) {
+		t.Fatalf("RemoveFileIfSameIdentity() error = %v, want quarantine uncertainty", err)
+	}
+	if !errors.Is(err, ErrFileIdentityRemoved) {
+		t.Fatalf("RemoveFileIfSameIdentity() error = %v, want removed sentinel after canonical absence", err)
+	}
+	if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination after cleanup failure = %v, want absent", statErr)
+	}
+	if quarantineName == "" {
+		t.Fatal("quarantine cleanup hook did not capture the random name")
+	}
+	quarantinePath := filepath.Join(dir, quarantineName)
+	quarantineInfo, statErr := os.Stat(quarantinePath)
+	if statErr != nil {
+		t.Fatalf("stat preserved quarantine: %v", statErr)
+	}
+	if got := quarantineInfo.Mode().Perm(); got != 0o640 {
+		t.Fatalf("preserved quarantine mode = %o, want changed mode 640", got)
+	}
+	if !strings.Contains(err.Error(), quarantineName) {
+		t.Fatalf("cleanup error = %v, want quarantine name %q", err, quarantineName)
+	}
+}
+
+func TestRemoveFileIfSameIdentityDoesNotReportRemovedWhenCleanupReplacementAppears(t *testing.T) {
+	requireStrictIdentityPlatform(t)
+	dir := t.TempDir()
+	root := mustRoot(t, dir)
+	t.Cleanup(func() { _ = root.Close() })
+	path := filepath.Join(dir, "receipt.json")
+	if err := os.WriteFile(path, []byte("receipt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "replacement"), []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := root.CaptureFile("receipt.json")
+	if err != nil {
+		t.Fatalf("CaptureFile() error = %v", err)
+	}
+	var quarantineName string
+	root.beforeConditionalQuarantineRemovalForTest = func(parent *os.Root, name string) {
+		quarantineName = name
+		file, openErr := parent.OpenFile(name, os.O_WRONLY, 0)
+		if openErr != nil {
+			t.Fatalf("open quarantined file: %v", openErr)
+		}
+		if chmodErr := file.Chmod(0o640); chmodErr != nil {
+			_ = file.Close()
+			t.Fatalf("change quarantined file mode: %v", chmodErr)
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			t.Fatalf("close changed quarantine: %v", closeErr)
+		}
+		if renameErr := parent.Rename("replacement", "receipt.json"); renameErr != nil {
+			t.Fatalf("install replacement receipt: %v", renameErr)
+		}
+	}
+
+	err = root.RemoveFileIfSameIdentity("receipt.json", identity)
+	if !errors.Is(err, ErrQuarantineCleanupUncertain) {
+		t.Fatalf("RemoveFileIfSameIdentity() error = %v, want quarantine uncertainty", err)
+	}
+	if errors.Is(err, ErrFileIdentityRemoved) {
+		t.Fatalf("RemoveFileIfSameIdentity() error = %v, must not claim the replacement was removed", err)
+	}
+	if got := mustRead(t, path); got != "replacement" {
+		t.Fatalf("replacement receipt = %q, want preserved replacement", got)
+	}
+	if quarantineName == "" {
+		t.Fatal("quarantine cleanup hook did not capture the random name")
+	}
+	if got := mustRead(t, filepath.Join(dir, quarantineName)); got != "receipt" {
+		t.Fatalf("preserved quarantine = %q, want original receipt", got)
 	}
 }

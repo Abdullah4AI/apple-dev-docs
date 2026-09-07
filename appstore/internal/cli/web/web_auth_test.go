@@ -480,8 +480,12 @@ func TestPromptTwoFactorCodeInteractiveWithoutTTYReturnsSupportedAutomationHint(
 	if !strings.Contains(err.Error(), webTwoFactorCodeCommandEnv) {
 		t.Fatalf("expected env hint in error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "--"+deprecatedTwoFactorCodeFlagName) {
-		t.Fatalf("expected deprecated compatibility flag hint in error, got %v", err)
+	want := "2fa required: run in a terminal for an interactive prompt, pass --two-factor-code-command, or set " + webTwoFactorCodeCommandEnv
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+	if strings.Contains(err.Error(), "deprecated") || strings.Contains(err.Error(), "--two-factor-code ") {
+		t.Fatalf("error still teaches the removed --two-factor-code alias: %v", err)
 	}
 }
 
@@ -756,7 +760,7 @@ func TestLoginWithOptionalTwoFactorReturnsPromptError(t *testing.T) {
 		return "", nil
 	}
 	promptTwoFactorCodeFn = func() (string, error) {
-		return "", errors.New("2fa required: run in a terminal for an interactive prompt, pass --two-factor-code-command, set " + webTwoFactorCodeCommandEnv + ", or re-run with deprecated --" + deprecatedTwoFactorCodeFlagName)
+		return "", errors.New("2fa required: run in a terminal for an interactive prompt, pass --two-factor-code-command, or set " + webTwoFactorCodeCommandEnv)
 	}
 	submitTwoFactorCodeFn = func(ctx context.Context, session *webcore.AuthSession, code string) error {
 		t.Fatal("did not expect submit when prompt fails")
@@ -770,8 +774,8 @@ func TestLoginWithOptionalTwoFactorReturnsPromptError(t *testing.T) {
 	if !strings.Contains(err.Error(), "--two-factor-code-command") || !strings.Contains(err.Error(), webTwoFactorCodeCommandEnv) {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--"+deprecatedTwoFactorCodeFlagName) {
-		t.Fatalf("expected deprecated compatibility flag hint in error, got %v", err)
+	if strings.Contains(err.Error(), "deprecated") || strings.Contains(err.Error(), "--two-factor-code ") {
+		t.Fatalf("error still teaches the removed --two-factor-code alias: %v", err)
 	}
 }
 

@@ -2,7 +2,6 @@ package cmdtest
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
@@ -134,84 +133,5 @@ func assertUsageExitCode(t *testing.T, args []string, wantErr string) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	assertUsageErrorStderr(t, trimDeprecationWarnings(stderr), wantErr)
-}
-
-// trimDeprecationWarnings drops the leading deprecation warning lines a
-// deprecated command or flag alias emits before its diagnostic, so the
-// usage-error assertion sees the same stderr shape for deprecated and current
-// commands. Only lines matching the documented deprecation form recognized by
-// isDeprecatedCommandWarning are removed, so an unrelated warning still
-// reaches the assertion. Only the leading block is considered; an unexpected
-// warning after the diagnostic still fails the assertion.
-func trimDeprecationWarnings(stderr string) string {
-	for {
-		line, rest, found := strings.Cut(stderr, "\n")
-		if !isDeprecatedCommandWarning(strings.TrimSpace(line)) {
-			return stderr
-		}
-		if !found {
-			return ""
-		}
-		stderr = rest
-	}
-}
-
-// TestTrimDeprecationWarningsKeepsUnrelatedWarnings locks the narrow contract
-// of trimDeprecationWarnings: it removes only the documented deprecation
-// warning lines, so an unrelated leading warning still reaches the usage-error
-// assertion instead of being silently swallowed.
-func TestTrimDeprecationWarningsKeepsUnrelatedWarnings(t *testing.T) {
-	t.Parallel()
-
-	const diagnostic = "Error: game-center achievements list: --limit must be between 1 and 200\n"
-
-	tests := []struct {
-		name   string
-		stderr string
-		want   string
-	}{
-		{
-			name:   "no warnings",
-			stderr: diagnostic,
-			want:   diagnostic,
-		},
-		{
-			name:   "deprecated flag alias warning is dropped",
-			stderr: "Warning: `--id` is deprecated. Use `--localization-id`.\n" + diagnostic,
-			want:   diagnostic,
-		},
-		{
-			name: "deprecated command warning is dropped",
-			stderr: "Warning: `asc iap localizations update` is deprecated by App Store Connect API 4.4.1. " +
-				"Use `asc iap versions localizations update`.\n" + diagnostic,
-			want: diagnostic,
-		},
-		{
-			name:   "unrelated warning is kept",
-			stderr: "Warning: something else happened\n" + diagnostic,
-			want:   "Warning: something else happened\n" + diagnostic,
-		},
-		{
-			name: "unrelated warning after a deprecation warning is kept",
-			stderr: "Warning: `--id` is deprecated. Use `--localization-id`.\n" +
-				"Warning: something else happened\n" + diagnostic,
-			want: "Warning: something else happened\n" + diagnostic,
-		},
-		{
-			name:   "trailing deprecation warning without a newline",
-			stderr: "Warning: `--id` is deprecated. Use `--localization-id`.",
-			want:   "",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := trimDeprecationWarnings(test.stderr); got != test.want {
-				t.Fatalf("trimDeprecationWarnings(%q) = %q, want %q", test.stderr, got, test.want)
-			}
-		})
-	}
+	assertUsageErrorStderr(t, stderr, wantErr)
 }

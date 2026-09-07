@@ -196,6 +196,8 @@ type FileIdentity struct {
 	data              []byte
 	path              string
 	multipleHardLinks bool
+	metadata          fileIdentityMetadata
+	metadataCaptured  bool
 }
 
 // Info returns the captured file metadata snapshot. The snapshot is useful for
@@ -363,6 +365,10 @@ func (identity *rootIdentity) releaseFile(file *os.File) error {
 }
 
 func (identity *rootIdentity) retainIdentity(file *os.File, info os.FileInfo, data []byte, path string) (*FileIdentity, error) {
+	return identity.retainIdentityWithMetadata(file, info, data, path, fileIdentityMetadata{}, false)
+}
+
+func (identity *rootIdentity) retainIdentityWithMetadata(file *os.File, info os.FileInfo, data []byte, path string, metadata fileIdentityMetadata, metadataCaptured bool) (*FileIdentity, error) {
 	if file == nil || info == nil {
 		if file != nil {
 			_ = file.Close()
@@ -388,6 +394,8 @@ func (identity *rootIdentity) retainIdentity(file *os.File, info os.FileInfo, da
 		data:              bytes.Clone(data),
 		path:              filepath.Clean(path),
 		multipleHardLinks: multipleHardLinks,
+		metadata:          metadata,
+		metadataCaptured:  metadataCaptured,
 	}, nil
 }
 
@@ -423,6 +431,15 @@ func (identity *FileIdentity) validateOwner(owner *rootIdentity) error {
 	}
 	if currentMultipleLinks != identity.multipleHardLinks {
 		return fmt.Errorf("%w: file hard-link state changed", ErrFileIdentityChanged)
+	}
+	if identity.metadataCaptured {
+		currentMetadata, err := captureFileIdentityMetadata(identity.file)
+		if err != nil {
+			return errors.Join(ErrFileIdentityChanged, fmt.Errorf("capture current file identity metadata: %w", err))
+		}
+		if !sameFileIdentityMetadata(identity.metadata, currentMetadata) {
+			return fmt.Errorf("%w: file ACL or extended attributes changed", ErrFileIdentityChanged)
+		}
 	}
 	return nil
 }
@@ -1220,6 +1237,10 @@ func (r Root) CaptureFileLimited(name string, limit int64) (*FileIdentity, error
 	if err != nil {
 		return nil, fmt.Errorf("inspect captured file links: %w", err)
 	}
+	initialMetadata, err := captureFileIdentityMetadata(file)
+	if err != nil {
+		return nil, fmt.Errorf("capture file identity metadata: %w", err)
+	}
 	readSnapshot := func() ([]byte, error) {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return nil, err
@@ -1244,6 +1265,10 @@ func (r Root) CaptureFileLimited(name string, limit int64) (*FileIdentity, error
 	if err != nil {
 		return nil, err
 	}
+	middleMetadata, err := captureFileIdentityMetadata(file)
+	if err != nil {
+		return nil, fmt.Errorf("recapture file identity metadata: %w", err)
+	}
 	verifiedData, err := readSnapshot()
 	if err != nil {
 		return nil, err
@@ -1251,6 +1276,10 @@ func (r Root) CaptureFileLimited(name string, limit int64) (*FileIdentity, error
 	finalInfo, err := file.Stat()
 	if err != nil {
 		return nil, err
+	}
+	finalMetadata, err := captureFileIdentityMetadata(file)
+	if err != nil {
+		return nil, fmt.Errorf("recapture final file identity metadata: %w", err)
 	}
 	finalMultipleLinks, err := hasMultipleHardLinks(file, finalInfo)
 	if err != nil {
@@ -1260,13 +1289,20 @@ func (r Root) CaptureFileLimited(name string, limit int64) (*FileIdentity, error
 	if err != nil {
 		return nil, errors.Join(ErrFileIdentityChanged, err)
 	}
+	rootedMetadata, err := captureFileIdentityMetadata(file)
+	if err != nil {
+		return nil, fmt.Errorf("recapture rooted file identity metadata: %w", err)
+	}
 	if rootedInfo.Mode()&os.ModeSymlink != 0 || !rootedInfo.Mode().IsRegular() ||
 		!sameFileIdentitySnapshot(info, middleInfo) || !sameFileIdentitySnapshot(middleInfo, finalInfo) ||
 		!sameFileIdentitySnapshot(finalInfo, rootedInfo) || initialMultipleLinks != finalMultipleLinks ||
+		!sameFileIdentityMetadata(initialMetadata, middleMetadata) ||
+		!sameFileIdentityMetadata(middleMetadata, finalMetadata) ||
+		!sameFileIdentityMetadata(finalMetadata, rootedMetadata) ||
 		!bytes.Equal(data, verifiedData) || finalInfo.Size() != int64(len(verifiedData)) {
 		return nil, fmt.Errorf("%w: %q changed during identity capture", ErrFileIdentityChanged, resolved)
 	}
-	identity, err := r.selectedIdentity.retainIdentity(file, finalInfo, verifiedData, resolved)
+	identity, err := r.selectedIdentity.retainIdentityWithMetadata(file, finalInfo, verifiedData, resolved, finalMetadata, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1328,6 +1364,15 @@ func (r Root) CheckFileIdentity(name string, expected *FileIdentity) error {
 	latestMultipleLinks, latestLinksErr := hasMultipleHardLinks(file, latest)
 	if latestLinksErr != nil {
 		return errors.Join(ErrFileIdentityChanged, latestLinksErr, file.Close())
+	}
+	if expected.metadataCaptured {
+		latestMetadata, metadataErr := captureFileIdentityMetadata(file)
+		if metadataErr != nil {
+			return errors.Join(ErrFileIdentityChanged, fmt.Errorf("capture file identity metadata after verification: %w", metadataErr), file.Close())
+		}
+		if !sameFileIdentityMetadata(expected.metadata, latestMetadata) {
+			return errors.Join(ErrFileIdentityChanged, fmt.Errorf("file ACL or extended attributes changed after verification"), file.Close())
+		}
 	}
 	if latest.Mode()&os.ModeSymlink != 0 || !latest.Mode().IsRegular() ||
 		!sameFileIdentitySnapshot(info, latest) || latestMultipleLinks != expected.multipleHardLinks {
@@ -1519,6 +1564,11 @@ func (r Root) writeFromPreservingMetadata(
 	if err != nil {
 		return 0, err
 	}
+	if metadataSource != nil {
+		if err := restoreReplacementMode(temporary, metadataInfo); err != nil {
+			return 0, err
+		}
+	}
 	if err := temporary.Sync(); err != nil {
 		return 0, err
 	}
@@ -1696,6 +1746,22 @@ func (r Root) CheckCreateNewFile(name string) error {
 	return fmt.Errorf("%q already exists: %w", resolved, os.ErrExist)
 }
 
+// CheckCreateNewFileAtomic verifies that name can be published with an atomic
+// no-replace rename, then removes the probe file it created. The probe uses the
+// same rooted publication path as CreateNewFileAtomic and never falls back to
+// exclusive creation. Callers should pass an unpredictable temporary name.
+func (r Root) CheckCreateNewFileAtomic(name string, perm os.FileMode) error {
+	if err := r.CheckCreateNewFile(name); err != nil {
+		return err
+	}
+	info, err := r.CreateNewFileAtomicWithInfo(name, nil, perm)
+	if info != nil {
+		cleanupErr := r.RemoveFileIfSame(name, info, nil)
+		return errors.Join(err, cleanupErr)
+	}
+	return err
+}
+
 // RemoveFileIfSame is the compatibility adapter for callers that still have a
 // metadata snapshot. New transaction code must use RemoveFileIfSameIdentity;
 // this historical path keeps its snapshot and fallback semantics unchanged.
@@ -1806,8 +1872,26 @@ func (r Root) RemoveFileIfSameIdentity(name string, expected *FileIdentity) (res
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Join(err, r.restoreExpectedQuarantine(parent, quarantineName, base, expected, err))
 	}
-	if err := r.removeExpectedIdentityQuarantine(parent, quarantineName, expected); err != nil {
-		return err
+	if cleanupErr := r.removeExpectedIdentityQuarantine(parent, quarantineName, expected); cleanupErr != nil {
+		// Cleanup deliberately leaves the quarantine in place when its final
+		// identity check is uncertain. A fresh observation of the canonical
+		// pathname distinguishes a removed receipt, which permits callers to
+		// roll back earlier writes, from a replacement that must be preserved.
+		_, destinationErr := parent.Lstat(base)
+		switch {
+		case destinationErr == nil:
+			return errors.Join(
+				fmt.Errorf("%w: destination was replaced while cleaning up the expected file", ErrFileIdentityChanged),
+				cleanupErr,
+			)
+		case errors.Is(destinationErr, os.ErrNotExist):
+			return errors.Join(ErrFileIdentityRemoved, cleanupErr)
+		default:
+			return errors.Join(
+				cleanupErr,
+				fmt.Errorf("verify destination after quarantine cleanup: %w", destinationErr),
+			)
+		}
 	}
 	removed = true
 	syncErr := r.syncConditionalParentDirectory(parent)
@@ -2052,6 +2136,7 @@ func (r Root) writeFileIfSame(
 		return nil, errors.Join(err, restoreQuarantine(quarantineName))
 	}
 	var temporaryInfo os.FileInfo
+	var temporaryMetadata fileIdentityMetadata
 	temporaryDone := false
 	temporaryClosed := false
 	temporaryRetained := false
@@ -2107,6 +2192,11 @@ func (r Root) writeFileIfSame(
 	if written != int64(len(data)) {
 		return nil, errors.Join(io.ErrShortWrite, restoreQuarantine(quarantineName))
 	}
+	if preserveMetadata {
+		if err := restoreReplacementMode(temporary, quarantineInfo); err != nil {
+			return nil, errors.Join(err, restoreQuarantine(quarantineName))
+		}
+	}
 	if err := temporary.Sync(); err != nil {
 		return nil, errors.Join(err, restoreQuarantine(quarantineName))
 	}
@@ -2116,6 +2206,12 @@ func (r Root) writeFileIfSame(
 	}
 	if !temporaryInfo.Mode().IsRegular() {
 		return nil, errors.Join(fmt.Errorf("staging file is not regular"), restoreQuarantine(quarantineName))
+	}
+	if strictIdentity {
+		temporaryMetadata, err = captureFileIdentityMetadata(temporary)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("capture staged file identity metadata: %w", err), restoreQuarantine(quarantineName))
+		}
 	}
 	// Ordinary non-identity writes do not return a publication identity, so
 	// close the staging descriptor before publication. If that close fails,
@@ -2177,7 +2273,7 @@ func (r Root) writeFileIfSame(
 		if !retainPublishedIdentity || temporaryRetained || temporaryClosed || runtime.GOOS == "windows" || r.simulateWindowsCloseForTest {
 			return nil
 		}
-		installed, retainErr := r.selectedIdentity.retainIdentity(temporary, temporaryInfo, retainedData, resolved)
+		installed, retainErr := r.selectedIdentity.retainIdentityWithMetadata(temporary, temporaryInfo, retainedData, resolved, temporaryMetadata, strictIdentity)
 		if retainErr != nil {
 			temporaryClosed = true
 			return fmt.Errorf("retain staged file identity: %w", retainErr)
@@ -2240,6 +2336,14 @@ func (r Root) writeFileIfSame(
 		_ = publishedFile.Close()
 		return postPublicationIdentityFailure(fmt.Errorf("published file is not regular"))
 	}
+	var publishedMetadata fileIdentityMetadata
+	if strictIdentity {
+		publishedMetadata, err = captureFileIdentityMetadata(publishedFile)
+		if err != nil {
+			_ = publishedFile.Close()
+			return postPublicationIdentityFailure(fmt.Errorf("capture published file identity metadata: %w", err))
+		}
+	}
 	if (strictIdentity && !sameFileIdentitySnapshot(temporaryInfo, publishedStat)) ||
 		(!strictIdentity && !os.SameFile(temporaryInfo, publishedStat)) {
 		_ = publishedFile.Close()
@@ -2248,6 +2352,10 @@ func (r Root) writeFileIfSame(
 			changedErr = fmt.Errorf("%w: published file identity changed during publication", ErrFileIdentityChanged)
 		}
 		return postPublicationIdentityFailure(changedErr)
+	}
+	if strictIdentity && !sameFileIdentityMetadata(temporaryMetadata, publishedMetadata) {
+		_ = publishedFile.Close()
+		return postPublicationIdentityFailure(fmt.Errorf("%w: published file ACL or extended attributes changed during publication", ErrFileIdentityChanged))
 	}
 	var publishedContentErr error
 	var strictPublishedLinks bool
@@ -2289,6 +2397,13 @@ func (r Root) writeFileIfSame(
 	if err != nil {
 		return postPublicationIdentityFailure(fmt.Errorf("recheck published file: %w", err))
 	}
+	var latestMetadata fileIdentityMetadata
+	if strictIdentity {
+		latestMetadata, err = captureFileIdentityMetadata(publishedFile)
+		if err != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("capture published file identity metadata after publication: %w", err))
+		}
+	}
 	latestMatches := os.SameFile(publishedStat, latestInfo)
 	if strictIdentity {
 		latestMatches = sameFileIdentitySnapshot(publishedStat, latestInfo)
@@ -2299,6 +2414,9 @@ func (r Root) writeFileIfSame(
 			changedErr = fmt.Errorf("%w: published file identity changed after publication", ErrFileIdentityChanged)
 		}
 		return postPublicationIdentityFailure(changedErr)
+	}
+	if strictIdentity && !sameFileIdentityMetadata(publishedMetadata, latestMetadata) {
+		return postPublicationIdentityFailure(fmt.Errorf("%w: published file ACL or extended attributes changed after publication", ErrFileIdentityChanged))
 	}
 	if strictIdentity {
 		// The final entry check must validate the complete retained snapshot, not
@@ -2314,12 +2432,18 @@ func (r Root) writeFileIfSame(
 		if linksErr != nil {
 			return postPublicationIdentityFailure(fmt.Errorf("inspect published file links after content verification: %w", linksErr))
 		}
+		finalPublishedMetadata, metadataErr := captureFileIdentityMetadata(publishedFile)
+		if metadataErr != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: capture published file identity metadata after content verification: %w", ErrFileIdentityChanged, metadataErr))
+		}
 		stagedLinks, linksErr := hasMultipleHardLinks(temporary, temporaryInfo)
 		if linksErr != nil {
 			return postPublicationIdentityFailure(fmt.Errorf("inspect staged file links after content verification: %w", linksErr))
 		}
 		if !sameFileIdentitySnapshot(publishedStat, finalPublishedInfo) ||
-			!sameFileIdentitySnapshot(finalPublishedInfo, latestInfo) || finalLinks != stagedLinks {
+			!sameFileIdentitySnapshot(finalPublishedInfo, latestInfo) || finalLinks != stagedLinks ||
+			!sameFileIdentityMetadata(publishedMetadata, finalPublishedMetadata) ||
+			!sameFileIdentityMetadata(finalPublishedMetadata, latestMetadata) {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file metadata changed after content verification", ErrFileIdentityChanged))
 		}
 		if _, seekErr := publishedFile.Seek(0, io.SeekStart); seekErr != nil {
@@ -2346,6 +2470,13 @@ func (r Root) writeFileIfSame(
 		if finalRootedInfo.Mode()&os.ModeSymlink != 0 || !finalRootedInfo.Mode().IsRegular() ||
 			!sameFileIdentitySnapshot(finalPublishedInfo, finalRootedInfo) || rootedLinks != finalLinks {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file changed after final content verification", ErrFileIdentityChanged))
+		}
+		finalRootedMetadata, metadataErr := captureFileIdentityMetadata(publishedFile)
+		if metadataErr != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: capture final published file identity metadata: %w", ErrFileIdentityChanged, metadataErr))
+		}
+		if !sameFileIdentityMetadata(finalPublishedMetadata, finalRootedMetadata) {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: published file ACL or extended attributes changed after final content verification", ErrFileIdentityChanged))
 		}
 		strictPublishedLinks = finalLinks
 		publishedInfo = finalPublishedInfo
@@ -2404,10 +2535,18 @@ func (r Root) writeFileIfSame(
 				publicationCleanupErr,
 			)
 		}
-		if finalRootedInfo.Mode()&os.ModeSymlink != 0 || !finalRootedInfo.Mode().IsRegular() ||
-			!sameFileIdentitySnapshot(publishedInfo, finalRootedInfo) || rootedLinks != strictPublishedLinks {
+		finalMetadata, metadataErr := captureFileIdentityMetadata(temporary)
+		if metadataErr != nil {
 			return publishedInfo, errors.Join(
-				fmt.Errorf("%w: published file changed before conditional write completed", ErrFileIdentityChanged),
+				fmt.Errorf("%w: capture final published file identity metadata: %w", ErrFileIdentityChanged, metadataErr),
+				publicationCleanupErr,
+			)
+		}
+		if finalRootedInfo.Mode()&os.ModeSymlink != 0 || !finalRootedInfo.Mode().IsRegular() ||
+			!sameFileIdentitySnapshot(publishedInfo, finalRootedInfo) || rootedLinks != strictPublishedLinks ||
+			!sameFileIdentityMetadata(temporaryMetadata, finalMetadata) {
+			return publishedInfo, errors.Join(
+				fmt.Errorf("%w: published file metadata changed before conditional write completed", ErrFileIdentityChanged),
 				publicationCleanupErr,
 			)
 		}
@@ -2469,6 +2608,16 @@ func (r Root) openExpectedIdentityRootedFile(parent *os.Root, name string, expec
 	if !sameFileOwnership(expected.info, info) {
 		return nil, nil, fmt.Errorf("%w: file ownership changed", ErrFileIdentityChanged)
 	}
+	var initialMetadata fileIdentityMetadata
+	if expected.metadataCaptured {
+		initialMetadata, err = captureFileIdentityMetadata(file)
+		if err != nil {
+			return nil, nil, errors.Join(ErrFileIdentityChanged, fmt.Errorf("capture current file identity metadata: %w", err))
+		}
+		if !sameFileIdentityMetadata(expected.metadata, initialMetadata) {
+			return nil, nil, fmt.Errorf("%w: file ACL or extended attributes changed", ErrFileIdentityChanged)
+		}
+	}
 	currentMultipleLinks, err := hasMultipleHardLinks(file, info)
 	if err != nil {
 		return nil, nil, fmt.Errorf("inspect current file links: %w", err)
@@ -2496,6 +2645,13 @@ func (r Root) openExpectedIdentityRootedFile(parent *os.Root, name string, expec
 	if err != nil {
 		return nil, nil, err
 	}
+	middleMetadata := initialMetadata
+	if expected.metadataCaptured {
+		middleMetadata, err = captureFileIdentityMetadata(file)
+		if err != nil {
+			return nil, nil, errors.Join(ErrFileIdentityChanged, fmt.Errorf("recapture current file identity metadata: %w", err))
+		}
+	}
 	verifiedContents, err := readExpected()
 	if err != nil {
 		return nil, nil, err
@@ -2504,12 +2660,21 @@ func (r Root) openExpectedIdentityRootedFile(parent *os.Root, name string, expec
 	if err != nil {
 		return nil, nil, err
 	}
+	finalMetadata := middleMetadata
+	if expected.metadataCaptured {
+		finalMetadata, err = captureFileIdentityMetadata(file)
+		if err != nil {
+			return nil, nil, errors.Join(ErrFileIdentityChanged, fmt.Errorf("recapture final file identity metadata: %w", err))
+		}
+	}
 	finalMultipleLinks, err := hasMultipleHardLinks(file, finalInfo)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reinspect current file links: %w", err)
 	}
 	if !sameFileIdentitySnapshot(info, middleInfo) || !sameFileIdentitySnapshot(middleInfo, finalInfo) ||
-		!bytes.Equal(verifiedContents, expected.data) || finalMultipleLinks != expected.multipleHardLinks {
+		!bytes.Equal(verifiedContents, expected.data) || finalMultipleLinks != expected.multipleHardLinks ||
+		(expected.metadataCaptured && (!sameFileIdentityMetadata(expected.metadata, middleMetadata) ||
+			!sameFileIdentityMetadata(middleMetadata, finalMetadata))) {
 		return nil, nil, fmt.Errorf("%w: file changed during identity verification", ErrFileIdentityChanged)
 	}
 	closeOnError = false
@@ -2781,7 +2946,7 @@ func (r Root) removeExpectedQuarantine(parent *os.Root, quarantineName string, e
 		_ = file.Close()
 		return fmt.Errorf("recheck quarantined file before removal: %w", err)
 	}
-	if !os.SameFile(info, latest) || latest.Mode().Perm() != info.Mode().Perm() {
+	if !os.SameFile(info, latest) || latest.Mode() != info.Mode() || latest.Mode() != expected.Mode() {
 		_ = file.Close()
 		return fmt.Errorf("quarantined file identity changed before removal")
 	}
@@ -2858,6 +3023,15 @@ func (r Root) removeExpectedIdentityQuarantine(parent *os.Root, quarantineName s
 	}
 	if !sameFileIdentitySnapshot(info, finalInfo) {
 		return uncertain("quarantined file metadata changed before removal", nil)
+	}
+	if expected.metadataCaptured {
+		finalMetadata, metadataErr := captureFileIdentityMetadata(file)
+		if metadataErr != nil {
+			return uncertain("capture quarantined file identity metadata before removal", metadataErr)
+		}
+		if !sameFileIdentityMetadata(expected.metadata, finalMetadata) {
+			return uncertain("quarantined file ACL or extended attributes changed before removal", nil)
+		}
 	}
 	finalMultipleLinks, err := hasMultipleHardLinks(file, finalInfo)
 	if err != nil {
@@ -3247,6 +3421,7 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 	stagingClosed := false
 	stagingRetained := false
 	var stagedInfo os.FileInfo
+	var stagedMetadata fileIdentityMetadata
 	retainedData := identityData
 	if !strictIdentity {
 		retainedData = nil
@@ -3276,7 +3451,7 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 		if !published || !retainPublishedIdentity || stagingClosed || stagingRetained || runtime.GOOS == "windows" || r.simulateWindowsCloseForTest {
 			return nil
 		}
-		identity, retainErr := r.selectedIdentity.retainIdentity(file, stagedInfo, retainedData, resolved)
+		identity, retainErr := r.selectedIdentity.retainIdentityWithMetadata(file, stagedInfo, retainedData, resolved, stagedMetadata, strictIdentity)
 		if retainErr != nil {
 			stagingClosed = true
 			return fmt.Errorf("retain staged file identity: %w", retainErr)
@@ -3368,6 +3543,12 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 	}
 	if !stagedInfo.Mode().IsRegular() {
 		return written, nil, fmt.Errorf("staged file %q is not regular", resolved)
+	}
+	if strictIdentity {
+		stagedMetadata, err = captureFileIdentityMetadata(file)
+		if err != nil {
+			return written, nil, fmt.Errorf("capture staged file %q identity metadata: %w", resolved, err)
+		}
 	}
 	// Ordinary writes do not return a publication identity, so close the
 	// staging descriptor before publication. If that close fails, no durable
@@ -3475,6 +3656,13 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 	if !publishedInfo.Mode().IsRegular() {
 		return postPublicationIdentityFailure(fmt.Errorf("opened published file %q is not regular", resolved))
 	}
+	var publishedMetadata fileIdentityMetadata
+	if strictIdentity {
+		publishedMetadata, err = captureFileIdentityMetadata(publishedFile)
+		if err != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("capture published file %q identity metadata: %w", resolved, err))
+		}
+	}
 	publishedMatches := os.SameFile(stagedInfo, publishedInfo)
 	if strictIdentity {
 		publishedMatches = sameFileIdentitySnapshot(stagedInfo, publishedInfo)
@@ -3484,6 +3672,9 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file %q identity changed before reopen", ErrFileIdentityChanged, resolved))
 		}
 		return postPublicationIdentityFailure(fmt.Errorf("published file %q identity changed before reopen", resolved))
+	}
+	if strictIdentity && !sameFileIdentityMetadata(stagedMetadata, publishedMetadata) {
+		return postPublicationIdentityFailure(fmt.Errorf("%w: published file %q ACL or extended attributes changed before reopen", ErrFileIdentityChanged, resolved))
 	}
 	if retainPublishedIdentity && !strictIdentity && !stagingRetained {
 		identity, retainErr := r.selectedIdentity.retainIdentity(publishedFile, publishedInfo, retainedData, resolved)
@@ -3520,6 +3711,13 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 	if latestInfo.Mode()&os.ModeSymlink != 0 || !latestInfo.Mode().IsRegular() {
 		return postPublicationIdentityFailure(fmt.Errorf("recheck published file %q is not regular", resolved))
 	}
+	var latestMetadata fileIdentityMetadata
+	if strictIdentity {
+		latestMetadata, err = captureFileIdentityMetadata(publishedFile)
+		if err != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("capture published file %q identity metadata after reopen: %w", resolved, err))
+		}
+	}
 	latestMatches := os.SameFile(publishedInfo, latestInfo)
 	if strictIdentity {
 		latestMatches = sameFileIdentitySnapshot(publishedInfo, latestInfo)
@@ -3529,6 +3727,9 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file %q identity changed after reopen", ErrFileIdentityChanged, resolved))
 		}
 		return postPublicationIdentityFailure(fmt.Errorf("published file %q identity changed after reopen", resolved))
+	}
+	if strictIdentity && !sameFileIdentityMetadata(publishedMetadata, latestMetadata) {
+		return postPublicationIdentityFailure(fmt.Errorf("%w: published file %q ACL or extended attributes changed after reopen", ErrFileIdentityChanged, resolved))
 	}
 	if strictIdentity {
 		// Revalidate the complete retained snapshot after the final content
@@ -3542,12 +3743,18 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 		if linksErr != nil {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: inspect published file links after content verification: %w", ErrFileIdentityChanged, linksErr))
 		}
+		finalPublishedMetadata, metadataErr := captureFileIdentityMetadata(publishedFile)
+		if metadataErr != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: capture published file %q identity metadata after content verification: %w", ErrFileIdentityChanged, resolved, metadataErr))
+		}
 		stagedLinks, linksErr := hasMultipleHardLinks(file, stagedInfo)
 		if linksErr != nil {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: inspect staged file links after content verification: %w", ErrFileIdentityChanged, linksErr))
 		}
 		if !sameFileIdentitySnapshot(publishedInfo, finalPublishedInfo) ||
-			!sameFileIdentitySnapshot(finalPublishedInfo, latestInfo) || finalLinks != stagedLinks {
+			!sameFileIdentitySnapshot(finalPublishedInfo, latestInfo) || finalLinks != stagedLinks ||
+			!sameFileIdentityMetadata(publishedMetadata, finalPublishedMetadata) ||
+			!sameFileIdentityMetadata(finalPublishedMetadata, latestMetadata) {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file metadata changed after content verification", ErrFileIdentityChanged))
 		}
 		if _, seekErr := publishedFile.Seek(0, io.SeekStart); seekErr != nil {
@@ -3574,6 +3781,13 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 		if finalRootedInfo.Mode()&os.ModeSymlink != 0 || !finalRootedInfo.Mode().IsRegular() ||
 			!sameFileIdentitySnapshot(finalPublishedInfo, finalRootedInfo) || rootedLinks != finalLinks {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file changed after final content verification", ErrFileIdentityChanged))
+		}
+		finalRootedMetadata, metadataErr := captureFileIdentityMetadata(publishedFile)
+		if metadataErr != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: capture final published file %q identity metadata: %w", ErrFileIdentityChanged, resolved, metadataErr))
+		}
+		if !sameFileIdentityMetadata(finalPublishedMetadata, finalRootedMetadata) {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: published file %q ACL or extended attributes changed after final content verification", ErrFileIdentityChanged, resolved))
 		}
 		strictPublishedLinks = finalLinks
 		publishedInfo = finalPublishedInfo
@@ -3609,8 +3823,13 @@ func (r Root) createNewFromWithInfo(name string, reader io.Reader, perm os.FileM
 		if linksErr != nil {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: inspect final rooted published-file links: %w", ErrFileIdentityChanged, linksErr))
 		}
+		finalRootedMetadata, metadataErr := captureFileIdentityMetadata(file)
+		if metadataErr != nil {
+			return postPublicationIdentityFailure(fmt.Errorf("%w: capture final published file identity metadata: %w", ErrFileIdentityChanged, metadataErr))
+		}
 		if finalRootedInfo.Mode()&os.ModeSymlink != 0 || !finalRootedInfo.Mode().IsRegular() ||
-			!sameFileIdentitySnapshot(publishedInfo, finalRootedInfo) || rootedLinks != strictPublishedLinks {
+			!sameFileIdentitySnapshot(publishedInfo, finalRootedInfo) || rootedLinks != strictPublishedLinks ||
+			!sameFileIdentityMetadata(stagedMetadata, finalRootedMetadata) {
 			return postPublicationIdentityFailure(fmt.Errorf("%w: published file changed before create completed", ErrFileIdentityChanged))
 		}
 	}

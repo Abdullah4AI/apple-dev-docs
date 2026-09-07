@@ -326,7 +326,7 @@ func TestRun_UsageValidationErrorsReturnExitUsage(t *testing.T) {
 		},
 		{
 			name:    "performance download mutually exclusive selectors",
-			args:    []string{"performance", "download", "--app", "APP_ID", "--build", "BUILD_ID"},
+			args:    []string{"performance", "download", "--app", "APP_ID", "--build-id", "BUILD_ID"},
 			wantErr: "mutually exclusive",
 		},
 		{

@@ -1,5 +1,7 @@
 # App Store Connect API 4.4.1 subscription group versions
 
+> Status: the product-scoped `asc subscriptions groups localizations` compatibility commands referenced below were removed in 5.0.0. See `migrate-to-5-0.mdx`.
+
 ## Placement and command shape
 
 Subscription group versions extend the existing `asc subscriptions groups`

@@ -64,7 +64,7 @@ func TestBuildLocalizationsCreateWarnsForIncompleteCreate(t *testing.T) {
 	stdout, stderr := captureOutput(t, func() {
 		if err := root.Parse([]string{
 			"build-localizations", "create",
-			"--build", "build-1",
+			"--build-id", "build-1",
 			"--locale", "en-US",
 			"--whats-new", "Bug fixes",
 		}); err != nil {

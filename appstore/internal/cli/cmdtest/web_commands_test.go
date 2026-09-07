@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	rootcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/cmd"
 	webcmd "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/web"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
@@ -300,7 +301,7 @@ func TestWebXcodeCloudWorkflowsCreateMissingRequiredFlags(t *testing.T) {
 	}
 }
 
-func TestWebAuthLoginExposesDeprecatedTwoFactorAliasWithoutPlaintextPasswordFlag(t *testing.T) {
+func TestWebAuthLoginOmitsPlaintextPasswordAndRemovedTwoFactorCodeFlags(t *testing.T) {
 	root := RootCommand("1.2.3")
 	cmd := findSubcommand(root, "web", "auth", "login")
 	if cmd == nil {
@@ -313,16 +314,14 @@ func TestWebAuthLoginExposesDeprecatedTwoFactorAliasWithoutPlaintextPasswordFlag
 	if cmd.FlagSet.Lookup("password-stdin") != nil {
 		t.Fatal("did not expect --password-stdin flag on web auth login")
 	}
-	twoFactorCodeFlag := cmd.FlagSet.Lookup("two-factor-code")
-	if twoFactorCodeFlag == nil {
-		t.Fatal("expected deprecated --two-factor-code flag on web auth login")
-		return
-	}
-	if !strings.Contains(twoFactorCodeFlag.Usage, "Deprecated:") {
-		t.Fatalf("expected deprecated help text for --two-factor-code, got %q", twoFactorCodeFlag.Usage)
+	if cmd.FlagSet.Lookup("two-factor-code") != nil {
+		t.Fatal("removed --two-factor-code alias is still registered on web auth login")
 	}
 	if cmd.FlagSet.Lookup("two-factor-code-command") == nil {
 		t.Fatal("expected --two-factor-code-command flag on web auth login")
+	}
+	if strings.Contains(cmd.LongHelp, "--two-factor-code ") || strings.Contains(cmd.LongHelp, "--two-factor-code\n") || strings.Contains(cmd.LongHelp, "deprecated") {
+		t.Fatalf("web auth login help still documents the removed --two-factor-code alias: %q", cmd.LongHelp)
 	}
 	for _, phrase := range []string{
 		"Phone-code fallback (including SMS):",
@@ -337,44 +336,49 @@ func TestWebAuthLoginExposesDeprecatedTwoFactorAliasWithoutPlaintextPasswordFlag
 	}
 }
 
-func TestWebAppsCreateExposesDeprecatedTwoFactorAlias(t *testing.T) {
-	root := RootCommand("1.2.3")
-	cmd := findSubcommand(root, "web", "apps", "create")
-	if cmd == nil {
-		t.Fatal("expected web apps create command")
-		return
-	}
-
-	twoFactorCodeFlag := cmd.FlagSet.Lookup("two-factor-code")
-	if twoFactorCodeFlag == nil {
-		t.Fatal("expected deprecated --two-factor-code flag on web apps create")
-		return
-	}
-	if !strings.Contains(twoFactorCodeFlag.Usage, "Deprecated:") {
-		t.Fatalf("expected deprecated help text for --two-factor-code, got %q", twoFactorCodeFlag.Usage)
-	}
-	if cmd.FlagSet.Lookup("two-factor-code-command") == nil {
-		t.Fatal("expected --two-factor-code-command flag on web apps create")
+func TestWebCommandsOmitRemovedTwoFactorCodeAlias(t *testing.T) {
+	for _, path := range [][]string{
+		{"web", "apps", "create"},
+		{"web", "sandbox", "create"},
+	} {
+		t.Run(strings.Join(path, " "), func(t *testing.T) {
+			root := RootCommand("1.2.3")
+			cmd := findSubcommand(root, path...)
+			if cmd == nil {
+				t.Fatalf("expected %s command", strings.Join(path, " "))
+				return
+			}
+			if cmd.FlagSet.Lookup("two-factor-code") != nil {
+				t.Fatalf("removed --two-factor-code alias is still registered on %s", strings.Join(path, " "))
+			}
+			if cmd.FlagSet.Lookup("two-factor-code-command") == nil {
+				t.Fatalf("expected --two-factor-code-command flag on %s", strings.Join(path, " "))
+			}
+			if strings.Contains(cmd.LongHelp, "--two-factor-code ") || strings.Contains(cmd.LongHelp, "deprecated compatibility alias") {
+				t.Fatalf("%s help still documents the removed --two-factor-code alias: %q", strings.Join(path, " "), cmd.LongHelp)
+			}
+		})
 	}
 }
 
-func TestWebSandboxCreateExposesDeprecatedTwoFactorAlias(t *testing.T) {
-	root := RootCommand("1.2.3")
-	cmd := findSubcommand(root, "web", "sandbox", "create")
-	if cmd == nil {
-		t.Fatal("expected web sandbox create command")
-		return
+func TestWebAuthLoginRejectsRemovedTwoFactorCodeFlagAsUnknown(t *testing.T) {
+	var code int
+	stdout, stderr := captureOutput(t, func() {
+		code = rootcmd.Run([]string{"web", "auth", "login", "--apple-id", "user@example.com", "--two-factor-code", "123456"}, "1.2.3")
+	})
+	if code != rootcmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d; stderr=%q", code, rootcmd.ExitUsage, stderr)
 	}
-
-	twoFactorCodeFlag := cmd.FlagSet.Lookup("two-factor-code")
-	if twoFactorCodeFlag == nil {
-		t.Fatal("expected deprecated --two-factor-code flag on web sandbox create")
-		return
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(twoFactorCodeFlag.Usage, "Deprecated:") {
-		t.Fatalf("expected deprecated help text for --two-factor-code, got %q", twoFactorCodeFlag.Usage)
+	if !strings.Contains(stderr, "unknown flag `--two-factor-code` for `asc web auth login`") {
+		t.Fatalf("stderr = %q, want unknown-flag diagnostic", stderr)
 	}
-	if cmd.FlagSet.Lookup("two-factor-code-command") == nil {
-		t.Fatal("expected --two-factor-code-command flag on web sandbox create")
+	if !strings.Contains(stderr, "--two-factor-code-command") {
+		t.Fatalf("stderr = %q, want --two-factor-code-command suggestion", stderr)
+	}
+	if strings.Contains(stderr, "deprecated") {
+		t.Fatalf("stderr still carries deprecation wording: %q", stderr)
 	}
 }

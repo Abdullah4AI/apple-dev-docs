@@ -142,11 +142,11 @@ func TestSigningFetchValidationErrors(t *testing.T) {
 	}
 }
 
-func TestSigningFetchWarnsForDeviceWithoutCreateMissing(t *testing.T) {
+func TestSigningFetchRejectsDeviceWithoutCreateMissing(t *testing.T) {
 	clientCalls := 0
 	t.Cleanup(shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
 		clientCalls++
-		return nil, errors.New("client reached after validation")
+		return nil, errors.New("client must not be created")
 	}))
 
 	cmd := SigningFetchCommand()
@@ -164,21 +164,23 @@ func TestSigningFetchWarnsForDeviceWithoutCreateMissing(t *testing.T) {
 		runErr = cmd.Run(context.Background())
 	})
 
-	if runErr == nil || runErr.Error() != "signing fetch: client reached after validation" {
-		t.Fatalf("unexpected error: %v", runErr)
+	if runErr == nil || runErr.Error() != deviceWithoutCreateMissingError {
+		t.Fatalf("error = %v, want %q", runErr, deviceWithoutCreateMissingError)
 	}
-	if errors.Is(runErr, flag.ErrHelp) {
-		t.Fatalf("deprecated input must not return a usage error: %v", runErr)
+	if !errors.Is(runErr, flag.ErrHelp) {
+		t.Fatalf("error = %v, want usage error", runErr)
 	}
-	if clientCalls != 1 {
-		t.Fatalf("client factory calls = %d, want 1", clientCalls)
+	if clientCalls != 0 {
+		t.Fatalf("client factory calls = %d, want 0", clientCalls)
 	}
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	wantWarning := "Warning: --device without --create-missing is deprecated and ignored because device IDs are only applied when creating a profile. Add --create-missing so they can be applied if a profile must be created. This combination will be rejected in 5.0.0.\n"
-	if stderr != wantWarning {
-		t.Fatalf("stderr = %q, want %q", stderr, wantWarning)
+	if stderr != "Error: "+deviceWithoutCreateMissingError+"\n" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "Warning:") || strings.Contains(stderr, "deprecated") {
+		t.Fatalf("stderr must not describe the rejected input as deprecated: %q", stderr)
 	}
 }
 
@@ -240,11 +242,14 @@ func TestSigningFetchHelpPairsDeviceWithCreateMissing(t *testing.T) {
 	if !strings.Contains(deviceFlag.Usage, "--create-missing") {
 		t.Fatalf("--device usage = %q, want it to name --create-missing", deviceFlag.Usage)
 	}
-	if !strings.Contains(deviceFlag.Usage, "deprecated") || !strings.Contains(deviceFlag.Usage, "5.0.0") {
-		t.Fatalf("--device usage = %q, want the transition and rejection release", deviceFlag.Usage)
+	if strings.Contains(deviceFlag.Usage, "deprecated") || strings.Contains(deviceFlag.Usage, "5.0.0") {
+		t.Fatalf("--device usage = %q, must not describe a finished transition", deviceFlag.Usage)
 	}
-	if !strings.Contains(cmd.LongHelp, "warning and ignores the device IDs; 5.0.0 will reject") {
-		t.Fatalf("long help must describe the --device transition, got %q", cmd.LongHelp)
+	if !strings.Contains(cmd.LongHelp, "--device without --create-missing is rejected") {
+		t.Fatalf("long help must state that --device requires --create-missing, got %q", cmd.LongHelp)
+	}
+	if strings.Contains(cmd.LongHelp, "5.0.0") || strings.Contains(cmd.LongHelp, "deprecation") {
+		t.Fatalf("long help must not describe a finished transition, got %q", cmd.LongHelp)
 	}
 
 	for _, line := range strings.Split(cmd.LongHelp, "\n") {

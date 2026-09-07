@@ -133,7 +133,7 @@ func TestSubscriptionsIntroductoryOffersCreateRequiresExactlyOneTerritorySelecto
 			wantErr:    "exactly one of --territory or --all-territories is required",
 		},
 		{
-			name:       "deprecated all alias and canonical selector",
+			name:       "removed all alias and canonical selector",
 			additional: []string{"--territory", "ALL", "--all-territories"},
 			wantErr:    "exactly one of --territory or --all-territories is required",
 		},
@@ -141,6 +141,11 @@ func TestSubscriptionsIntroductoryOffersCreateRequiresExactlyOneTerritorySelecto
 			name:       "invalid territory",
 			additional: []string{"--territory", "Atlantis"},
 			wantErr:    `territory "Atlantis" could not be mapped to an App Store Connect territory ID`,
+		},
+		{
+			name:       "removed all alias is an invalid territory",
+			additional: []string{"--territory", "ALL"},
+			wantErr:    `territory "ALL" could not be mapped to an App Store Connect territory ID`,
 		},
 	}
 
@@ -630,94 +635,6 @@ func TestSubscriptionsIntroductoryOffersCreateSingleTerritoryDryRunRendersRegist
 	}
 }
 
-func TestSubscriptionsIntroductoryOffersCreateDeprecatedAllAliasCreatesPerAvailabilityTerritory(t *testing.T) {
-	setupAuth(t)
-	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
-
-	originalTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-
-	postedTerritories := make([]string, 0, 2)
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/subscriptionAvailability":
-			return jsonHTTPResponse(http.StatusOK, `{"data":{"type":"subscriptionAvailabilities","id":"avail-1"}}`), nil
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptionAvailabilities/avail-1/availableTerritories":
-			return jsonHTTPResponse(http.StatusOK, `{"data":[{"type":"territories","id":"CAN"},{"type":"territories","id":"USA"}],"links":{}}`), nil
-		case req.Method == http.MethodGet && req.URL.Path == "/v1/subscriptions/8000000001/introductoryOffers":
-			return jsonHTTPResponse(http.StatusOK, `{"data":[],"links":{}}`), nil
-		case req.Method == http.MethodPost && req.URL.Path == "/v1/subscriptionIntroductoryOffers":
-			var payload struct {
-				Data struct {
-					Attributes struct {
-						Duration        string `json:"duration"`
-						OfferMode       string `json:"offerMode"`
-						NumberOfPeriods int    `json:"numberOfPeriods"`
-					} `json:"attributes"`
-					Relationships struct {
-						Territory struct {
-							Data struct {
-								ID string `json:"id"`
-							} `json:"data"`
-						} `json:"territory"`
-					} `json:"relationships"`
-				} `json:"data"`
-			}
-			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode payload: %v", err)
-			}
-			if payload.Data.Attributes.Duration != "ONE_MONTH" || payload.Data.Attributes.OfferMode != "FREE_TRIAL" || payload.Data.Attributes.NumberOfPeriods != 1 {
-				t.Fatalf("unexpected attributes: %+v", payload.Data.Attributes)
-			}
-			postedTerritories = append(postedTerritories, payload.Data.Relationships.Territory.Data.ID)
-			return jsonHTTPResponse(http.StatusCreated, `{"data":{"type":"subscriptionIntroductoryOffers","id":"intro-new"}}`), nil
-		default:
-			t.Fatalf("unexpected request: %s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
-			return nil, nil
-		}
-	})
-
-	root := RootCommand("1.2.3")
-	root.FlagSet.SetOutput(io.Discard)
-
-	var summary struct {
-		Total   int `json:"total"`
-		Created int `json:"created"`
-		Skipped int `json:"skipped"`
-		Failed  int `json:"failed"`
-	}
-	stdout, stderr := captureOutput(t, func() {
-		if err := root.Parse([]string{
-			"subscriptions", "offers", "introductory", "create",
-			"--subscription-id", "8000000001",
-			"--offer-duration", "ONE_MONTH",
-			"--offer-mode", "FREE_TRIAL",
-			"--number-of-periods", "1",
-			"--territory", "ALL",
-		}); err != nil {
-			t.Fatalf("parse error: %v", err)
-		}
-		if err := root.Run(context.Background()); err != nil {
-			t.Fatalf("run error: %v", err)
-		}
-	})
-	wantWarning := "Warning: `--territory ALL` is deprecated. Use `--all-territories`.\n"
-	if stderr != wantWarning {
-		t.Fatalf("expected stderr %q, got %q", wantWarning, stderr)
-	}
-	if err := json.Unmarshal([]byte(stdout), &summary); err != nil {
-		t.Fatalf("parse JSON summary: %v", err)
-	}
-	if summary.Total != 2 || summary.Created != 2 || summary.Skipped != 0 || summary.Failed != 0 {
-		t.Fatalf("unexpected summary: %+v", summary)
-	}
-	if got := strings.Join(postedTerritories, ","); got != "CAN,USA" {
-		t.Fatalf("expected POSTs for CAN,USA in availability order, got %s", got)
-	}
-}
-
 func TestSubscriptionsIntroductoryOffersCreateAllTerritoriesTimeoutStopsContinueOnError(t *testing.T) {
 	setupAuth(t)
 	t.Setenv("ASC_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -1029,7 +946,7 @@ func TestSubscriptionsIntroductoryOffersCreateAllTerritoriesRejectsConcreteTerri
 				"--all-territories",
 				"--price-point", "price-1",
 			},
-			wantErr: "Error: --price-point cannot be used with --all-territories or --territory ALL",
+			wantErr: "Error: --price-point cannot be used with --all-territories",
 		},
 	}
 

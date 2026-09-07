@@ -141,7 +141,7 @@ func startDetachedMaintenanceWorker() error {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 	command := exec.Command(executable, internalWorkerArg)
-	command.Env = setEnvironmentValue(os.Environ(), internalWorkerEnvVar, "1")
+	command.Env = maintenanceWorkerEnvironment(os.Environ())
 	configureDetachedProcess(command)
 
 	var diagnostic *os.File
@@ -180,6 +180,22 @@ func startDetachedMaintenanceWorker() error {
 		return fmt.Errorf("release worker: %w", err)
 	}
 	return nil
+}
+
+func maintenanceWorkerEnvironment(environment []string) []string {
+	return setEnvironmentValue(removeEnvironmentValue(environment, "ASC_WEB_SESSION"), internalWorkerEnvVar, "1")
+}
+
+func removeEnvironmentValue(environment []string, key string) []string {
+	result := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, key) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func setEnvironmentValue(environment []string, key, value string) []string {

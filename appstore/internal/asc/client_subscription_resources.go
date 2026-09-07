@@ -43,30 +43,6 @@ func (c *Client) GetSubscriptionLocalizations(ctx context.Context, subscriptionI
 	return &response, nil
 }
 
-// GetSubscriptionLocalization retrieves a subscription localization by ID.
-//
-// Deprecated: Use GetSubscriptionLocalizationV2.
-func (c *Client) GetSubscriptionLocalization(ctx context.Context, localizationID string, opts ...SubscriptionLocalizationOption) (*SubscriptionLocalizationResponse, error) {
-	query := &subscriptionRelatedFieldsQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-	path := fmt.Sprintf("/v1/subscriptionLocalizations/%s", strings.TrimSpace(localizationID))
-	if queryString := buildSubscriptionRelatedFieldsQuery("subscriptions", query); queryString != "" {
-		path += "?" + queryString
-	}
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionLocalizationResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
 // CreateSubscriptionLocalization creates a subscription localization.
 //
 // Deprecated: Use CreateSubscriptionLocalizationV2 with a subscription version ID.
@@ -108,45 +84,6 @@ func (c *Client) CreateSubscriptionLocalization(ctx context.Context, subscriptio
 	return &response, nil
 }
 
-// UpdateSubscriptionLocalization updates a subscription localization.
-//
-// Deprecated: Use UpdateSubscriptionLocalizationV2.
-func (c *Client) UpdateSubscriptionLocalization(ctx context.Context, localizationID string, attrs SubscriptionLocalizationUpdateAttributes) (*SubscriptionLocalizationResponse, error) {
-	payload := SubscriptionLocalizationUpdateRequest{
-		Data: SubscriptionLocalizationUpdateData{
-			Type:       ResourceTypeSubscriptionLocalizations,
-			ID:         strings.TrimSpace(localizationID),
-			Attributes: attrs,
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	path := fmt.Sprintf("/v1/subscriptionLocalizations/%s", strings.TrimSpace(localizationID))
-	data, err := c.do(ctx, http.MethodPatch, path, body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionLocalizationResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// DeleteSubscriptionLocalization deletes a subscription localization.
-//
-// Deprecated: Use DeleteSubscriptionLocalizationV2.
-func (c *Client) DeleteSubscriptionLocalization(ctx context.Context, localizationID string) error {
-	path := fmt.Sprintf("/v1/subscriptionLocalizations/%s", strings.TrimSpace(localizationID))
-	_, err := c.do(ctx, http.MethodDelete, path, nil)
-	return err
-}
-
 // GetSubscriptionImages retrieves subscription images for a subscription.
 //
 // Deprecated: Use GetSubscriptionVersionImages with a subscription version ID.
@@ -179,117 +116,6 @@ func (c *Client) GetSubscriptionImages(ctx context.Context, subscriptionID strin
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	return &response, nil
-}
-
-// GetSubscriptionImage retrieves a subscription image by ID.
-//
-// Deprecated: Use GetSubscriptionImageV2.
-func (c *Client) GetSubscriptionImage(ctx context.Context, imageID string, opts ...SubscriptionImageOption) (*SubscriptionImageResponse, error) {
-	query := &subscriptionRelatedFieldsQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-	path := fmt.Sprintf("/v1/subscriptionImages/%s", strings.TrimSpace(imageID))
-	if queryString := buildSubscriptionRelatedFieldsQuery("subscriptions", query); queryString != "" {
-		path += "?" + queryString
-	}
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionImageResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// CreateSubscriptionImage creates a subscription image.
-//
-// Deprecated: Use CreateSubscriptionImageV2 with a subscription version ID.
-func (c *Client) CreateSubscriptionImage(ctx context.Context, subscriptionID, fileName string, fileSize int64) (*SubscriptionImageResponse, error) {
-	subscriptionID = strings.TrimSpace(subscriptionID)
-	if subscriptionID == "" {
-		return nil, fmt.Errorf("subscription ID is required")
-	}
-	fileName = strings.TrimSpace(fileName)
-	if fileName == "" {
-		return nil, fmt.Errorf("file name is required")
-	}
-
-	payload := SubscriptionImageCreateRequest{
-		Data: SubscriptionImageCreateData{
-			Type: ResourceTypeSubscriptionImages,
-			Attributes: SubscriptionImageCreateAttributes{
-				FileName: fileName,
-				FileSize: fileSize,
-			},
-			Relationships: &SubscriptionImageRelationships{
-				Subscription: &Relationship{
-					Data: ResourceData{
-						Type: ResourceTypeSubscriptions,
-						ID:   subscriptionID,
-					},
-				},
-			},
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionImages", body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionImageResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// UpdateSubscriptionImage updates a subscription image.
-//
-// Deprecated: Use CreateSubscriptionImageV2 for a new upload and UpdateSubscriptionImageV2 to commit its upload state.
-func (c *Client) UpdateSubscriptionImage(ctx context.Context, imageID string, attrs SubscriptionImageUpdateAttributes) (*SubscriptionImageResponse, error) {
-	payload := SubscriptionImageUpdateRequest{
-		Data: SubscriptionImageUpdateData{
-			Type:       ResourceTypeSubscriptionImages,
-			ID:         strings.TrimSpace(imageID),
-			Attributes: attrs,
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	path := fmt.Sprintf("/v1/subscriptionImages/%s", strings.TrimSpace(imageID))
-	data, err := c.do(ctx, http.MethodPatch, path, body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionImageResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// DeleteSubscriptionImage deletes a subscription image.
-//
-// Deprecated: Use DeleteSubscriptionImageV2.
-func (c *Client) DeleteSubscriptionImage(ctx context.Context, imageID string) error {
-	path := fmt.Sprintf("/v1/subscriptionImages/%s", strings.TrimSpace(imageID))
-	_, err := c.do(ctx, http.MethodDelete, path, nil)
-	return err
 }
 
 // GetSubscriptionIntroductoryOffers retrieves introductory offers for a subscription.
@@ -1191,86 +1017,6 @@ func (c *Client) GetSubscriptionPricePointEqualizationsRelationships(ctx context
 	return &response, nil
 }
 
-// CreateSubscriptionSubmission creates a subscription submission.
-//
-// Deprecated: Create a subscription version and add it with CreateReviewSubmissionItem.
-func (c *Client) CreateSubscriptionSubmission(ctx context.Context, subscriptionID string) (*SubscriptionSubmissionResponse, error) {
-	subscriptionID = strings.TrimSpace(subscriptionID)
-	if subscriptionID == "" {
-		return nil, fmt.Errorf("subscription ID is required")
-	}
-
-	payload := SubscriptionSubmissionCreateRequest{
-		Data: SubscriptionSubmissionCreateData{
-			Type: ResourceTypeSubscriptionSubmissions,
-			Relationships: &SubscriptionSubmissionRelationships{
-				Subscription: &Relationship{
-					Data: ResourceData{
-						Type: ResourceTypeSubscriptions,
-						ID:   subscriptionID,
-					},
-				},
-			},
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionSubmissions", body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionSubmissionResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// CreateSubscriptionGroupSubmission creates a subscription group submission.
-//
-// Deprecated: Create a subscription group version and add it with CreateReviewSubmissionItem.
-func (c *Client) CreateSubscriptionGroupSubmission(ctx context.Context, groupID string) (*SubscriptionGroupSubmissionResponse, error) {
-	groupID = strings.TrimSpace(groupID)
-	if groupID == "" {
-		return nil, fmt.Errorf("group ID is required")
-	}
-
-	payload := SubscriptionGroupSubmissionCreateRequest{
-		Data: SubscriptionGroupSubmissionCreateData{
-			Type: ResourceTypeSubscriptionGroupSubmissions,
-			Relationships: &SubscriptionGroupSubmissionRelationships{
-				SubscriptionGroup: &Relationship{
-					Data: ResourceData{
-						Type: ResourceTypeSubscriptionGroups,
-						ID:   groupID,
-					},
-				},
-			},
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := c.do(ctx, http.MethodPost, "/v1/subscriptionGroupSubmissions", body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionGroupSubmissionResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
 // GetSubscriptionAppStoreReviewScreenshot retrieves a review screenshot by ID.
 func (c *Client) GetSubscriptionAppStoreReviewScreenshot(ctx context.Context, screenshotID string, opts ...SubscriptionAppStoreReviewScreenshotOption) (*SubscriptionAppStoreReviewScreenshotResponse, error) {
 	query := &subscriptionAppStoreReviewScreenshotQuery{}
@@ -1408,30 +1154,6 @@ func (c *Client) GetSubscriptionGroupLocalizations(ctx context.Context, groupID 
 	return &response, nil
 }
 
-// GetSubscriptionGroupLocalization retrieves a subscription group localization by ID.
-//
-// Deprecated: Use GetSubscriptionGroupLocalizationV2.
-func (c *Client) GetSubscriptionGroupLocalization(ctx context.Context, localizationID string, opts ...SubscriptionGroupLocalizationOption) (*SubscriptionGroupLocalizationResponse, error) {
-	query := &subscriptionRelatedFieldsQuery{}
-	for _, opt := range opts {
-		opt(query)
-	}
-	path := fmt.Sprintf("/v1/subscriptionGroupLocalizations/%s", strings.TrimSpace(localizationID))
-	if queryString := buildSubscriptionRelatedFieldsQuery("subscriptionGroups", query); queryString != "" {
-		path += "?" + queryString
-	}
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionGroupLocalizationResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
 // CreateSubscriptionGroupLocalization creates a subscription group localization.
 //
 // Deprecated: Use CreateSubscriptionGroupLocalizationV2 with a subscription group version ID.
@@ -1471,43 +1193,4 @@ func (c *Client) CreateSubscriptionGroupLocalization(ctx context.Context, groupI
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	return &response, nil
-}
-
-// UpdateSubscriptionGroupLocalization updates a subscription group localization.
-//
-// Deprecated: Use UpdateSubscriptionGroupLocalizationV2.
-func (c *Client) UpdateSubscriptionGroupLocalization(ctx context.Context, localizationID string, attrs SubscriptionGroupLocalizationUpdateAttributes) (*SubscriptionGroupLocalizationResponse, error) {
-	payload := SubscriptionGroupLocalizationUpdateRequest{
-		Data: SubscriptionGroupLocalizationUpdateData{
-			Type:       ResourceTypeSubscriptionGroupLocalizations,
-			ID:         strings.TrimSpace(localizationID),
-			Attributes: attrs,
-		},
-	}
-
-	body, err := BuildRequestBody(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	path := fmt.Sprintf("/v1/subscriptionGroupLocalizations/%s", strings.TrimSpace(localizationID))
-	data, err := c.do(ctx, http.MethodPatch, path, body)
-	if err != nil {
-		return nil, err
-	}
-
-	var response SubscriptionGroupLocalizationResponse
-	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	return &response, nil
-}
-
-// DeleteSubscriptionGroupLocalization deletes a subscription group localization.
-//
-// Deprecated: Use DeleteSubscriptionGroupLocalizationV2.
-func (c *Client) DeleteSubscriptionGroupLocalization(ctx context.Context, localizationID string) error {
-	path := fmt.Sprintf("/v1/subscriptionGroupLocalizations/%s", strings.TrimSpace(localizationID))
-	_, err := c.do(ctx, http.MethodDelete, path, nil)
-	return err
 }

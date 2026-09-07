@@ -1660,7 +1660,8 @@ Subcommands:
   catalog  List category/purpose/data-protection tokens for declaration authoring
   pull     Fetch current app data usage declarations as canonical JSON
   plan     Diff local declaration file against remote state
-  apply    Apply planned changes (never publishes automatically)
+  apply    Apply planned changes (does not call Apple's publish endpoint;
+          usage mutations may update published-state metadata)
   publish  Explicitly publish app data usage declarations
 
 `,
@@ -1948,7 +1949,8 @@ func WebPrivacyApplyCommand() *ffcli.Command {
 		LongHelp: `WEB SESSION WORKFLOWS
 
 Apply local declaration tuples to remote app data usages.
-This command never publishes automatically.
+This command never calls Apple's publish endpoint automatically, but applying
+usage mutations may still update Apple's published-state metadata.
 
 Declarations that contain UNKNOWN_OR_MISSING (unrepresentable remote data)
 are rejected before any create, update, or delete.

@@ -28,7 +28,6 @@ func ValidateTestFlightCommand() *ffcli.Command {
 
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	buildID := fs.String("build-id", "", "Build ID (required)")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	strict := fs.Bool("strict", false, "Treat warnings as errors (exit non-zero)")
 	output := shared.BindOutputFlags(fs)
 
@@ -50,10 +49,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			buildValue := strings.TrimSpace(*buildID)
 			if buildValue == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")

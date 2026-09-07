@@ -198,13 +198,14 @@ func signingResignFormatClaimValue(value any) string {
 }
 
 var signingResignIdentityEntitlementKeys = map[string]struct{}{
-	"application-identifier":                             {},
-	"com.apple.application-identifier":                   {},
-	"com.apple.developer.team-identifier":                {},
-	"get-task-allow":                                     {},
-	"keychain-access-groups":                             {},
-	"com.apple.developer.ubiquity-kvstore-identifier":    {},
-	"com.apple.developer.parent-application-identifiers": {},
+	"application-identifier":                                 {},
+	"com.apple.application-identifier":                       {},
+	"com.apple.developer.team-identifier":                    {},
+	"get-task-allow":                                         {},
+	"keychain-access-groups":                                 {},
+	"com.apple.developer.ubiquity-kvstore-identifier":        {},
+	"com.apple.developer.parent-application-identifiers":     {},
+	"com.apple.developer.associated-appclip-app-identifiers": {},
 }
 
 var signingResignIdentityEntitlementKeyOrder = []string{
@@ -215,6 +216,7 @@ var signingResignIdentityEntitlementKeyOrder = []string{
 	"keychain-access-groups",
 	"com.apple.developer.ubiquity-kvstore-identifier",
 	"com.apple.developer.parent-application-identifiers",
+	"com.apple.developer.associated-appclip-app-identifiers",
 }
 
 func buildSigningResignEntitlements(existing, profile map[string]any) (map[string]any, error) {
@@ -451,7 +453,8 @@ func signingResignOptionalIdentityEntitlementKey(key string) bool {
 	case "com.apple.application-identifier",
 		"keychain-access-groups",
 		"com.apple.developer.ubiquity-kvstore-identifier",
-		"com.apple.developer.parent-application-identifiers":
+		"com.apple.developer.parent-application-identifiers",
+		"com.apple.developer.associated-appclip-app-identifiers":
 		return true
 	default:
 		return false
@@ -463,9 +466,10 @@ func signingResignOptionalIdentityEntitlementKey(key string) bool {
 // profile value, wildcard or concrete, is a permission boundary; adopting it
 // verbatim could widen keychain, ubiquity, or parent-application access.
 var signingResignPreserveExistingIdentityKeys = map[string]struct{}{
-	"keychain-access-groups":                             {},
-	"com.apple.developer.ubiquity-kvstore-identifier":    {},
-	"com.apple.developer.parent-application-identifiers": {},
+	"keychain-access-groups":                                 {},
+	"com.apple.developer.ubiquity-kvstore-identifier":        {},
+	"com.apple.developer.parent-application-identifiers":     {},
+	"com.apple.developer.associated-appclip-app-identifiers": {},
 }
 
 // validateSigningResignExistingEntitlements checks the identity claims from
@@ -618,6 +622,11 @@ func signingResignEntitlementValuePermits(profileValue, signedValue any) bool {
 	profileList, profileIsList := signingResignEntitlementList(profileValue)
 	signedList, signedIsList := signingResignEntitlementList(signedValue)
 	if profileIsList && signedIsList {
+		for _, profileItem := range profileList {
+			if _, ok := profileItem.(string); !ok {
+				return false
+			}
+		}
 		for _, signedItem := range signedList {
 			permitted := false
 			for _, profileItem := range profileList {

@@ -19,7 +19,7 @@ func WebCommand() *ffcli.Command {
 	return &ffcli.Command{
 		Name:       "web",
 		ShortUsage: "asc web <subcommand> [flags]",
-		ShortHelp:  "Apple web-session workflows.",
+		ShortHelp:  "Apple web-session workflows, including finance report downloads.",
 		LongHelp: `WEB SESSION WORKFLOWS
 
 Use Apple web sessions for App Store Connect and Developer Portal workflows.
@@ -46,11 +46,16 @@ Examples:
 		Subcommands: []*ffcli.Command{
 			WebAuthCommand(),
 			WebAgreementsCommand(),
+			WebFinanceCommand(),
+			WebIAPCommand(),
 			WebAPIKeysCommand(),
 			WebSandboxCommand(),
 			WebAppsCommand(),
 			WebRemovedAppsCommand(),
 			WebBundleIDsCommand(),
+			WebServiceIDsCommand(),
+			WebWebsitePushIDsCommand(),
+			WebICloudContainersCommand(),
 			WebAppGroupsCommand(),
 			WebPrivacyCommand(),
 			WebReviewCommand(),

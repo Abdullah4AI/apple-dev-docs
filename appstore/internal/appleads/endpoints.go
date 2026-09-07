@@ -25,7 +25,6 @@ const (
 type ParamSpec struct {
 	Name         string
 	Flag         string
-	Aliases      []string
 	Type         ParamType
 	Required     bool
 	Repeated     bool
@@ -197,7 +196,7 @@ var (
 	campaignParam        = ParamSpec{Name: "campaignId", Flag: "campaign", Type: ParamInt, Required: true}
 	creativeParam        = ParamSpec{Name: "creativeId", Flag: "creative", Type: ParamInt, Required: true}
 	keywordParam         = ParamSpec{Name: "keywordId", Flag: "keyword", Type: ParamInt, Required: true}
-	negativeKeywordParam = ParamSpec{Name: "keywordId", Flag: "negative-keyword", Aliases: []string{"keyword"}, Type: ParamInt, Required: true}
+	negativeKeywordParam = ParamSpec{Name: "keywordId", Flag: "negative-keyword", Type: ParamInt, Required: true}
 	productPageParam     = ParamSpec{Name: "productPageId", Flag: "product-page", Type: ParamString, Required: true}
 	reasonParam          = ParamSpec{Name: "productPageReasonId", Flag: "reason", Type: ParamInt, Required: true}
 	reportParam          = ParamSpec{Name: "reportId", Flag: "report", Type: ParamInt, Required: true}

@@ -22,7 +22,7 @@ func TestChanged441IAPCommandsRejectPositionalArgsBeforeAuth(t *testing.T) {
 	}{
 		{name: "list", command: IAPListCommand, args: []string{"--app", "app-1", "unexpected"}},
 		{name: "view", command: IAPGetCommand, args: []string{"--id", "iap-1", "unexpected"}},
-		{name: "localization update", command: IAPLocalizationsUpdateCommand, args: []string{"--localization-id", "loc-1", "--name", "Name", "unexpected"}},
+		{name: "version localization update", command: IAPVersionLocalizationsUpdateCommand, args: []string{"--localization-id", "loc-1", "--name", "Name", "unexpected"}},
 	}
 
 	for _, test := range tests {

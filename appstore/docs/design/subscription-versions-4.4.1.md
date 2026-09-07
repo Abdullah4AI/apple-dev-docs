@@ -1,5 +1,7 @@
 # Subscription versions (App Store Connect API 4.4.1)
 
+> Status: the product-scoped v1 compatibility commands referenced below were removed in 5.0.0. See `migrate-to-5-0.mdx`.
+
 ## Placement and command shape
 
 The new version-scoped subscription resources live under the existing

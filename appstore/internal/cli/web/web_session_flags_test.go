@@ -5,30 +5,22 @@ import (
 	"errors"
 	"flag"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
-func TestBindWebSessionFlagsIncludesDeprecatedTwoFactorAlias(t *testing.T) {
+func TestBindWebSessionFlagsOmitsRemovedTwoFactorCodeAlias(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	flags := bindWebSessionFlags(fs)
 
-	if flags.twoFactorCode == nil {
-		t.Fatal("expected deprecated two-factor-code pointer to be populated")
+	if fs.Lookup("two-factor-code") != nil {
+		t.Fatal("removed --two-factor-code alias is still registered")
 	}
-
-	twoFactorCodeFlag := fs.Lookup(deprecatedTwoFactorCodeFlagName)
-	if twoFactorCodeFlag == nil {
-		t.Fatalf("expected --%s to be registered", deprecatedTwoFactorCodeFlagName)
-		return
+	if flags.twoFactorCodeCommand == nil {
+		t.Fatal("expected two-factor-code-command pointer to be populated")
 	}
-	if !strings.Contains(twoFactorCodeFlag.Usage, "Deprecated:") {
-		t.Fatalf("expected deprecated help text, got %q", twoFactorCodeFlag.Usage)
-	}
-
 	if fs.Lookup("two-factor-code-command") == nil {
 		t.Fatal("expected --two-factor-code-command to remain registered")
 	}
@@ -57,7 +49,6 @@ func TestResolveWebSessionForCommandPassesTwoFactorCodeCommand(t *testing.T) {
 
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo("osascript /tmp/get-apple-2fa-code.scpt"),
 	}
 
@@ -113,7 +104,6 @@ func TestResolveWebSessionForCommandSelectsProvider(t *testing.T) {
 	providerID := int64(123456)
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo(""),
 		providerID:           &providerID,
 		publicProviderID:     ptrTo("TEAM123"),
@@ -160,7 +150,6 @@ func TestResolveWebSessionForCommandDoesNotPersistBeforeProviderSelection(t *tes
 	providerID := int64(123456)
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo(""),
 		providerID:           &providerID,
 		publicProviderID:     ptrTo("TEAM123"),
@@ -292,7 +281,6 @@ func TestResolveWebSessionForCommandStartsRequestBudgetAfterAuthentication(t *te
 
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo(""),
 	}
 
@@ -343,7 +331,6 @@ func TestResolveWebSessionForCommandSelectsProviderOnRefreshedContext(t *testing
 	providerID := int64(123456)
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo(""),
 		providerID:           &providerID,
 	}
@@ -367,7 +354,6 @@ func TestResolveWebSessionForCommandRequestContextFollowsParentCancellation(t *t
 	parent, cancelParent := context.WithCancel(context.Background())
 	flags := webSessionFlags{
 		appleID:              ptrTo("user@example.com"),
-		twoFactorCode:        ptrTo(""),
 		twoFactorCodeCommand: ptrTo(""),
 	}
 

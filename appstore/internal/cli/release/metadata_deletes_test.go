@@ -258,7 +258,7 @@ func TestReleaseStageRejectsAllowDeletesWithoutMetadataDir(t *testing.T) {
 	if err := cmd.FlagSet.Parse([]string{
 		"--app", "APP_123",
 		"--version", "2.4.0",
-		"--build", "BUILD_123",
+		"--build-id", "BUILD_123",
 		"--copy-metadata-from", "2.3.2",
 		"--allow-deletes",
 		"--dry-run",

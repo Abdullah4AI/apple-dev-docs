@@ -113,7 +113,7 @@ func TestSandboxListPaginateFromNext(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"sandbox-next-1"`) || !strings.Contains(stdout, `"id":"sandbox-next-2"`) {
 		t.Fatalf("expected paginated sandbox testers in output, got %q", stdout)
 	}
@@ -444,7 +444,7 @@ func TestReviewsSummarizationsPaginateFromNextWithoutApp(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"summary-next-1"`) || !strings.Contains(stdout, `"id":"summary-next-2"`) {
 		t.Fatalf("expected paginated summarizations in output, got %q", stdout)
 	}

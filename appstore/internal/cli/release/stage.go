@@ -20,7 +20,6 @@ func ReleaseStageCommand() *ffcli.Command {
 	appID := fs.String("app", "", "App Store Connect app ID (or ASC_APP_ID)")
 	version := fs.String("version", "", "App Store version string (required)")
 	buildID := fs.String("build-id", "", "Build ID to attach (required)")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	metadataDir := fs.String("metadata-dir", "", "Metadata directory to apply")
 	allowDeletes := fs.Bool("allow-deletes", false, "Allow destructive delete operations when applying --metadata-dir (disables default locale fallback for missing locales)")
 	routingCoverageFile := fs.String("routing-coverage-file", "", "[experimental] Routing app coverage GeoJSON file to reconcile before readiness")
@@ -58,9 +57,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
 			if len(args) > 0 {
 				return shared.UsageError("release stage does not accept positional arguments")
 			}

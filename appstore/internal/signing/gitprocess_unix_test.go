@@ -190,7 +190,6 @@ exec "$ASC_GIT_HELPER_BINARY" -test.run=TestGitStoreGitHelperProcess -- "$@"
 	t.Setenv("ASC_GIT_HELPER_ENV_CAPTURE", environmentPath)
 	t.Setenv("ASC_GIT_HELPER_SUCCESS", successPath)
 	t.Setenv("ASC_SIGNING_SYNC_PASSWORD", "must-not-reach-git")
-	t.Setenv("ASC_MATCH_PASSWORD", "legacy-must-not-reach-git")
 	// A non-empty override avoids the local SSH configuration probe; the fake
 	// executable is the transport boundary under test.
 	t.Setenv("GIT_SSH_COMMAND", "true")
@@ -249,7 +248,7 @@ func writeGitHelperEnvironment(path string) {
 	if path == "" {
 		return
 	}
-	_ = os.WriteFile(path, []byte(os.Getenv("ASC_SIGNING_SYNC_PASSWORD")+"\n"+os.Getenv("ASC_MATCH_PASSWORD")), 0o600)
+	_ = os.WriteFile(path, []byte(os.Getenv("ASC_SIGNING_SYNC_PASSWORD")), 0o600)
 }
 
 func waitForGitHelperFile(t *testing.T, path string, ready chan<- struct{}) {

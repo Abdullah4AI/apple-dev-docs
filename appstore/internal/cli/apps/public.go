@@ -84,7 +84,6 @@ func AppsPublicViewCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps public view", flag.ExitOnError)
 
 	appID := fs.String("app", "", "Public App Store app ID")
-	legacyAppID := fs.String("id", "", "Deprecated alias for --app")
 	country := fs.String("country", "us", "Storefront country code (ISO alpha-2, e.g. us, gb, de)")
 	output := shared.BindOutputFlags(fs)
 
@@ -99,7 +98,7 @@ No authentication is required.
 Examples:
   asc apps public view --app "1479784361"
   asc apps public view --app "1479784361" --country de
-  asc apps public view --id "1479784361" --output markdown`,
+  asc apps public view --app "1479784361" --output markdown`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -108,7 +107,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			resolvedAppID, err := resolvePublicAppID(*appID, *legacyAppID)
+			resolvedAppID, err := resolvePublicAppID(*appID)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				return flag.ErrHelp
@@ -215,7 +214,6 @@ func AppsPublicPricesCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps public prices", flag.ExitOnError)
 
 	appID := fs.String("app", "", "Public App Store app ID")
-	legacyAppID := fs.String("id", "", "Deprecated alias for --app")
 	country := fs.String("country", "us", "Storefront country code (ISO alpha-2, e.g. us, gb, de)")
 	output := shared.BindOutputFlags(fs)
 
@@ -230,7 +228,7 @@ No authentication is required.
 Examples:
   asc apps public prices --app "1479784361"
   asc apps public prices --app "1479784361" --country jp
-  asc apps public prices --id "1479784361" --output markdown`,
+  asc apps public prices --app "1479784361" --output markdown`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -239,7 +237,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			resolvedAppID, err := resolvePublicAppID(*appID, *legacyAppID)
+			resolvedAppID, err := resolvePublicAppID(*appID)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				return flag.ErrHelp
@@ -287,7 +285,6 @@ func AppsPublicDescriptionsCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("apps public descriptions", flag.ExitOnError)
 
 	appID := fs.String("app", "", "Public App Store app ID")
-	legacyAppID := fs.String("id", "", "Deprecated alias for --app")
 	country := fs.String("country", "us", "Storefront country code (ISO alpha-2, e.g. us, gb, de)")
 	output := shared.BindOutputFlags(fs)
 
@@ -302,7 +299,7 @@ No authentication is required.
 Examples:
   asc apps public descriptions --app "1479784361"
   asc apps public descriptions --app "1479784361" --country fr
-  asc apps public descriptions --id "1479784361" --output table`,
+  asc apps public descriptions --app "1479784361" --output table`,
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
@@ -311,7 +308,7 @@ Examples:
 				return flag.ErrHelp
 			}
 
-			resolvedAppID, err := resolvePublicAppID(*appID, *legacyAppID)
+			resolvedAppID, err := resolvePublicAppID(*appID)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				return flag.ErrHelp
@@ -412,25 +409,15 @@ Examples:
 	}
 }
 
-func resolvePublicAppID(appID, alias string) (string, error) {
+func resolvePublicAppID(appID string) (string, error) {
 	appID = strings.TrimSpace(appID)
-	alias = strings.TrimSpace(alias)
-	if appID == "" && alias == "" {
+	if appID == "" {
 		return "", fmt.Errorf("--app is required")
 	}
-	if appID != "" && alias != "" && appID != alias {
-		return "", fmt.Errorf("--app and --id are mutually exclusive")
-	}
-	if appID != "" {
-		if err := validatePublicAppID(appID); err != nil {
-			return "", fmt.Errorf("--app must be a numeric App Store app ID")
-		}
-		return appID, nil
-	}
-	if err := validatePublicAppID(alias); err != nil {
+	if err := validatePublicAppID(appID); err != nil {
 		return "", fmt.Errorf("--app must be a numeric App Store app ID")
 	}
-	return alias, nil
+	return appID, nil
 }
 
 func validatePublicAppID(value string) error {

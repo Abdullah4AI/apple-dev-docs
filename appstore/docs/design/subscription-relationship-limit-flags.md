@@ -1,5 +1,7 @@
 # Subscription relationship limit flags
 
+> Status: the singular compatibility aliases (`--version-limit`, `--image-limit`, `--localization-limit`) described below were removed in 5.0.0; only the plural canonical flags remain. See `migrate-to-5-0.mdx`.
+
 ## Decision
 
 Subscription product and version reads use plural relationship names in both

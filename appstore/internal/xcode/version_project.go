@@ -1365,6 +1365,8 @@ func (project *structuredVersionProject) signingXCConfigConsumersWithOptionalMis
 	unauthorizedExternal := false
 	lexicalConfigPaths := make(map[string][]string)
 	observedPathsByRoot := make(map[string][]string)
+	var unselectedCollectionError error
+	sourceBudget := &xcconfigSourceBudget{}
 	addProtectedPath := func(path string) {
 		absolute := normalizeSigningLexicalPath(path)
 		for _, existing := range protectedConfigPaths {
@@ -1408,7 +1410,7 @@ func (project *structuredVersionProject) signingXCConfigConsumersWithOptionalMis
 		if xcconfigUsesIdentityTraversal() {
 			identify = signingXCConfigIdentityFn
 		}
-		files, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissing(
+		files, err := collectXCConfigFilesWithHooksAndIdentityAndOptionalMissingLimitWithBudget(
 			path,
 			func(filePath string) ([]byte, error) {
 				return signingXCConfigReadFileFn(filePath, signingPlanMaxBytes)
@@ -1452,6 +1454,9 @@ func (project *structuredVersionProject) signingXCConfigConsumersWithOptionalMis
 			},
 			identify,
 			addMissingOptionalInclude,
+			signingPlanMaxFiles,
+			signingXCConfigStatFileFn,
+			sourceBudget,
 		)
 		observedPathsByRoot[normalizeSigningLexicalPath(path)] = observedPaths
 		if err == nil {
@@ -1470,12 +1475,25 @@ func (project *structuredVersionProject) signingXCConfigConsumersWithOptionalMis
 		}
 		return nil, err
 	}
-	consumers, configFiles, identities, uncertain, err := project.xcconfigConsumersWithCollectorAndErrorHook(selectedIDs, collect, func(_ *versionConfiguration, err error) {
+	consumers, configFiles, identities, uncertain, err := project.xcconfigConsumersWithCollectorAndErrorHook(selectedIDs, collect, func(configuration *versionConfiguration, err error) {
 		var accessErr *signingXCConfigAccessError
 		if errors.As(err, &accessErr) {
 			addBlockedPath(accessErr.path)
 		}
+		if !selectedIDs[configuration.id] && isXCConfigSourceGraphLimitError(err) {
+			unselectedCollectionError = errors.Join(
+				unselectedCollectionError,
+				fmt.Errorf("resolve xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err),
+			)
+		}
 	})
+	// Unselected collection failures are normally represented by an uncertain
+	// consumer scope so stable target-level planning can continue. A source
+	// graph limit is different: the collector did not inventory the complete
+	// graph, so serializing any plan could omit a source that aliases an output
+	// artifact. Preserve this fatal cause for BuildSigningPlan even when the
+	// overflowing configuration was not selected.
+	err = errors.Join(err, unselectedCollectionError)
 	for _, configuration := range project.configurations {
 		if configuration.baseReferenceID == "" {
 			continue
@@ -1563,20 +1581,25 @@ func (project *structuredVersionProject) xcconfigConsumersWithCollectorAndIdenti
 			collected[normalizeSigningLexicalPath(absolute)] = true
 		}
 		for _, path := range files {
-			identity, err := identityIndex.identity(path, collected, identify)
-			if err != nil {
-				if selectedIDs[configuration.id] {
-					selectedError = errors.Join(selectedError, fmt.Errorf("identify xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err))
+			normalizedPath := normalizeSigningLexicalPath(path)
+			identity, ok := fileIdentities[normalizedPath]
+			if !ok {
+				identity, err = identityIndex.identity(path, collected, identify)
+				if err != nil {
+					if selectedIDs[configuration.id] {
+						selectedError = errors.Join(selectedError, fmt.Errorf("identify xcconfig for target %q configuration %q: %w", configuration.target, configuration.name, err))
+						continue
+					}
+					uncertainConsumers = true
 					continue
 				}
-				uncertainConsumers = true
-				continue
+				fileIdentities[normalizedPath] = identity
 			}
 			// Keep the operator spelling as the map key. Windows can enable
 			// case-sensitive semantics per directory, so lowercasing here would
 			// discard a distinct file before operation keys can use its proven
 			// identity.
-			fileIdentities[normalizeSigningLexicalPath(path)] = identity
+			fileIdentities[normalizedPath] = identity
 			if consumers[identity] == nil {
 				consumers[identity] = make(map[string]bool)
 			}
@@ -1813,7 +1836,10 @@ func readRegularVersionFileCompatibility(target *preparedVersionWrite) (os.FileI
 	return info, data, nil
 }
 
-var atomicWriteVersionFileFn = atomicWritePreparedVersionFile
+var (
+	atomicWriteVersionFileFn    = atomicWritePreparedVersionFile
+	afterVersionSourceCaptureFn func([]preparedVersionWrite) error
+)
 
 var atomicWriteVersionFileInfoFn = atomicWritePreparedVersionFileInfo
 
@@ -1895,6 +1921,24 @@ func commitVersionWritesWithCreateChecks(
 		}
 		return writes[left].path < writes[right].path
 	})
+	// Capture source identities on the transaction-owned entries before the
+	// commit loop starts copying them by value.  A strict write may arrive from
+	// a caller that has only prepared its byte snapshot; in that case the
+	// descriptor must be retained through publication and rollback rather than
+	// reopening the path (which permits unlink-and-recreate identity reuse).
+	for index := range writes {
+		if writes[index].createOnly || !writes[index].strictIdentity || writes[index].originalIdentity != nil || bytes.Equal(writes[index].original, writes[index].updated) {
+			continue
+		}
+		if _, _, err := readRegularVersionFile(&writes[index]); err != nil {
+			return fmt.Errorf("verify source before commit: %w", err)
+		}
+	}
+	if afterVersionSourceCaptureFn != nil {
+		if err := afterVersionSourceCaptureFn(writes); err != nil {
+			return err
+		}
+	}
 	var committed []preparedVersionWrite
 	for _, write := range writes {
 		if !write.createOnly && string(write.original) == string(write.updated) {

@@ -294,6 +294,21 @@ func stringAttr(attrs map[string]any, keys ...string) string {
 	return ""
 }
 
+func stringAttrPreserveWhitespace(attrs map[string]any, key string) string {
+	if attrs == nil {
+		return ""
+	}
+	value, ok := attrs[key]
+	if !ok {
+		return ""
+	}
+	typed, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return typed
+}
+
 func boolAttr(attrs map[string]any, keys ...string) bool {
 	if attrs == nil {
 		return false
@@ -667,13 +682,167 @@ func (c *Client) GetResolutionCenterDraftMessage(ctx context.Context, threadID s
 	return decodeResolutionCenterDraftMessage(resource, payload.Included, threadID, plainText), nil
 }
 
+func validateResolutionCenterMessageBody(messageBody string) (string, error) {
+	if strings.TrimSpace(messageBody) == "" {
+		return "", fmt.Errorf("message body is required")
+	}
+	return messageBody, nil
+}
+
+func decodeResolutionCenterWriteResource(responseBody []byte, operation, expectedType string) (jsonAPIResource, []jsonAPIResource, error) {
+	var payload jsonAPISingleResourcePayload
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return jsonAPIResource{}, nil, fmt.Errorf("failed to parse %s response: %w", operation, err)
+	}
+	trimmedData := bytes.TrimSpace(payload.Data)
+	if len(trimmedData) == 0 || bytes.Equal(trimmedData, []byte("null")) {
+		return jsonAPIResource{}, nil, fmt.Errorf("%s response did not include a resource", operation)
+	}
+	var resource jsonAPIResource
+	if err := json.Unmarshal(trimmedData, &resource); err != nil {
+		return jsonAPIResource{}, nil, fmt.Errorf("failed to parse %s response: %w", operation, err)
+	}
+	if strings.TrimSpace(resource.ID) == "" {
+		return jsonAPIResource{}, nil, fmt.Errorf("%s response did not include a resource id", operation)
+	}
+	if expectedType != "" && strings.TrimSpace(resource.Type) != expectedType {
+		return jsonAPIResource{}, nil, fmt.Errorf("%s response returned unexpected resource type", operation)
+	}
+	return resource, payload.Included, nil
+}
+
+// CreateResolutionCenterDraftMessage creates the unsent draft that Apple uses
+// as the source for a Resolution Center reply. The request shape mirrors the
+// App Store Connect web client; the caller must explicitly decide when to send
+// the resulting draft.
+func (c *Client) CreateResolutionCenterDraftMessage(ctx context.Context, threadID, messageBody string) (*ResolutionCenterDraftMessage, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil, fmt.Errorf("thread id is required")
+	}
+	messageBody, err := validateResolutionCenterMessageBody(messageBody)
+	if err != nil {
+		return nil, err
+	}
+
+	requestBody := map[string]any{
+		"data": map[string]any{
+			"type": "resolutionCenterDraftMessages",
+			"attributes": map[string]any{
+				"messageBody": messageBody,
+			},
+			"relationships": map[string]any{
+				"resolutionCenterThread": map[string]any{
+					"data": map[string]string{
+						"type": "resolutionCenterThreads",
+						"id":   threadID,
+					},
+				},
+			},
+		},
+	}
+	responseBody, err := c.doRequest(ctx, http.MethodPost, "/resolutionCenterDraftMessages", requestBody)
+	if err != nil {
+		return nil, err
+	}
+	resource, included, err := decodeResolutionCenterWriteResource(responseBody, "resolution center draft create", "resolutionCenterDraftMessages")
+	if err != nil {
+		return nil, err
+	}
+	return decodeResolutionCenterDraftMessage(resource, included, threadID, false), nil
+}
+
+// UpdateResolutionCenterDraftMessage updates an existing unsent Resolution
+// Center draft. It is intentionally separate from sending so callers cannot
+// accidentally turn a draft edit into a message.
+func (c *Client) UpdateResolutionCenterDraftMessage(ctx context.Context, draftID, messageBody string) (*ResolutionCenterDraftMessage, error) {
+	draftID = strings.TrimSpace(draftID)
+	if draftID == "" {
+		return nil, fmt.Errorf("draft id is required")
+	}
+	messageBody, err := validateResolutionCenterMessageBody(messageBody)
+	if err != nil {
+		return nil, err
+	}
+
+	requestBody := map[string]any{
+		"data": map[string]any{
+			"type": "resolutionCenterDraftMessages",
+			"id":   draftID,
+			"attributes": map[string]any{
+				"messageBody": messageBody,
+			},
+		},
+	}
+	responseBody, err := c.doRequest(ctx, http.MethodPatch, "/resolutionCenterDraftMessages/"+url.PathEscape(draftID), requestBody)
+	if err != nil {
+		return nil, err
+	}
+	resource, included, err := decodeResolutionCenterWriteResource(responseBody, "resolution center draft update", "resolutionCenterDraftMessages")
+	if err != nil {
+		return nil, err
+	}
+	threadID := ""
+	if ref := firstRelationshipRef(resource, "resolutionCenterThread"); ref != nil {
+		threadID = strings.TrimSpace(ref.ID)
+	}
+	return decodeResolutionCenterDraftMessage(resource, included, threadID, false), nil
+}
+
+// DeleteResolutionCenterDraftMessage removes an unsent Resolution Center
+// draft. There is deliberately no retry: a transport error can leave Apple's
+// mutation outcome ambiguous.
+func (c *Client) DeleteResolutionCenterDraftMessage(ctx context.Context, draftID string) error {
+	draftID = strings.TrimSpace(draftID)
+	if draftID == "" {
+		return fmt.Errorf("draft id is required")
+	}
+	_, err := c.doRequest(ctx, http.MethodDelete, "/resolutionCenterDraftMessages/"+url.PathEscape(draftID), nil)
+	return err
+}
+
+// SendResolutionCenterDraftMessage publishes a draft as a Resolution Center
+// message. The response must contain the created message resource and ID so a
+// caller can re-read and verify it. This method never retries because a failed
+// response may follow a successful server-side send.
+func (c *Client) SendResolutionCenterDraftMessage(ctx context.Context, draftID string) (*ResolutionCenterMessage, error) {
+	draftID = strings.TrimSpace(draftID)
+	if draftID == "" {
+		return nil, fmt.Errorf("draft id is required")
+	}
+
+	requestBody := map[string]any{
+		"data": map[string]any{
+			"type": "resolutionCenterMessages",
+			"relationships": map[string]any{
+				"createFromDraftMessage": map[string]any{
+					"data": map[string]string{
+						"type": "resolutionCenterDraftMessages",
+						"id":   draftID,
+					},
+				},
+			},
+		},
+	}
+	responseBody, err := c.doRequest(ctx, http.MethodPost, "/resolutionCenterMessages", requestBody)
+	if err != nil {
+		return nil, err
+	}
+	resource, included, err := decodeResolutionCenterWriteResource(responseBody, "resolution center message send", "resolutionCenterMessages")
+	if err != nil {
+		return nil, err
+	}
+	message := decodeResolutionCenterMessage(resource, buildIncludedMap(included), false)
+	return &message, nil
+}
+
 func decodeResolutionCenterDraftMessage(resource jsonAPIResource, included []jsonAPIResource, threadID string, plainText bool) *ResolutionCenterDraftMessage {
 	includedMap := buildIncludedMap(included)
 	draft := &ResolutionCenterDraftMessage{
 		ID:          strings.TrimSpace(resource.ID),
 		ThreadID:    strings.TrimSpace(threadID),
 		CreatedDate: stringAttr(resource.Attributes, "createdDate"),
-		MessageBody: stringAttr(resource.Attributes, "messageBody"),
+		MessageBody: stringAttrPreserveWhitespace(resource.Attributes, "messageBody"),
 		FromActor:   actorFromRef(firstRelationshipRef(resource, "fromActor"), includedMap),
 	}
 	if plainText {
@@ -703,32 +872,36 @@ func decodeResolutionCenterMessages(resources []jsonAPIResource, included []json
 	includedMap := buildIncludedMap(included)
 	messages := make([]ResolutionCenterMessage, 0, len(resources))
 	for _, resource := range resources {
-		message := ResolutionCenterMessage{
-			ID:          strings.TrimSpace(resource.ID),
-			CreatedDate: stringAttr(resource.Attributes, "createdDate"),
-			MessageBody: stringAttr(resource.Attributes, "messageBody"),
-		}
-		if plainText {
-			message.MessageBodyPlain = htmlToPlainText(message.MessageBody)
-		}
-		message.FromActor = actorFromRef(firstRelationshipRef(resource, "fromActor"), includedMap)
-		rejectionRefs := relationshipRefs(resource, "rejections")
-		if len(rejectionRefs) > 0 {
-			message.RejectionIDs = make([]string, 0, len(rejectionRefs))
-			for _, ref := range rejectionRefs {
-				message.RejectionIDs = append(message.RejectionIDs, strings.TrimSpace(ref.ID))
-			}
-		}
-		attachmentRefs := relationshipRefs(resource, "resolutionCenterMessageAttachments")
-		if len(attachmentRefs) > 0 {
-			message.AttachmentIDs = make([]string, 0, len(attachmentRefs))
-			for _, ref := range attachmentRefs {
-				message.AttachmentIDs = append(message.AttachmentIDs, strings.TrimSpace(ref.ID))
-			}
-		}
-		messages = append(messages, message)
+		messages = append(messages, decodeResolutionCenterMessage(resource, includedMap, plainText))
 	}
 	return messages
+}
+
+func decodeResolutionCenterMessage(resource jsonAPIResource, includedMap map[string]jsonAPIResource, plainText bool) ResolutionCenterMessage {
+	message := ResolutionCenterMessage{
+		ID:          strings.TrimSpace(resource.ID),
+		CreatedDate: stringAttr(resource.Attributes, "createdDate"),
+		MessageBody: stringAttr(resource.Attributes, "messageBody"),
+	}
+	if plainText {
+		message.MessageBodyPlain = htmlToPlainText(message.MessageBody)
+	}
+	message.FromActor = actorFromRef(firstRelationshipRef(resource, "fromActor"), includedMap)
+	rejectionRefs := relationshipRefs(resource, "rejections")
+	if len(rejectionRefs) > 0 {
+		message.RejectionIDs = make([]string, 0, len(rejectionRefs))
+		for _, ref := range rejectionRefs {
+			message.RejectionIDs = append(message.RejectionIDs, strings.TrimSpace(ref.ID))
+		}
+	}
+	attachmentRefs := relationshipRefs(resource, "resolutionCenterMessageAttachments")
+	if len(attachmentRefs) > 0 {
+		message.AttachmentIDs = make([]string, 0, len(attachmentRefs))
+		for _, ref := range attachmentRefs {
+			message.AttachmentIDs = append(message.AttachmentIDs, strings.TrimSpace(ref.ID))
+		}
+	}
+	return message
 }
 
 func (c *Client) listResolutionCenterMessagesPayload(ctx context.Context, threadID string) (jsonAPIListPayload, error) {

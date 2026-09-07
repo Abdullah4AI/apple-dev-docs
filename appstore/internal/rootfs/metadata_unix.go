@@ -20,16 +20,41 @@ func copyReplacementMetadata(destination, source *os.File, info os.FileInfo) err
 	if err := unix.Fchown(int(destination.Fd()), int(stat.Uid), int(stat.Gid)); err != nil {
 		return fmt.Errorf("preserve replacement ownership: %w", err)
 	}
-	if err := destination.Chmod(info.Mode().Perm()); err != nil {
-		return fmt.Errorf("preserve replacement permissions: %w", err)
-	}
-	// Apply ACLs after chmod so the mode update cannot rewrite the restored ACL
-	// mask on platforms where ACLs are independent filesystem metadata.
+	// Preserve the special mode bits as well as ordinary permissions. The
+	// replacement is written from the already-verified source descriptor, so
+	// dropping these bits would violate the preserveMetadata contract.
+	// Apply ACLs before the final mode update so the restored ACL mask cannot
+	// discard special permission bits.
 	if err := copyAccessControlList(destination, source); err != nil {
 		return err
 	}
 	if err := copyExtendedAttributes(destination, source); err != nil {
 		return err
+	}
+	// ACL restoration may update the mode mask, so apply the complete source
+	// mode last, including setuid, setgid, and sticky bits.
+	mode := uint32(stat.Mode) & 0o7777
+	if err := unix.Fchmod(int(destination.Fd()), mode); err != nil {
+		return fmt.Errorf("preserve replacement permissions: %w", err)
+	}
+	return nil
+}
+
+func restoreReplacementMode(destination *os.File, info os.FileInfo) error {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("inspect replacement mode: unsupported stat type %T", info.Sys())
+	}
+	want := uint32(stat.Mode) & 0o7777
+	if err := unix.Fchmod(int(destination.Fd()), want); err != nil {
+		return fmt.Errorf("preserve replacement permissions: %w", err)
+	}
+	var actual unix.Stat_t
+	if err := unix.Fstat(int(destination.Fd()), &actual); err != nil {
+		return fmt.Errorf("verify replacement permissions: %w", err)
+	}
+	if got := uint32(actual.Mode) & 0o7777; got != want {
+		return fmt.Errorf("verify replacement permissions: got mode %#o, want %#o", got, want)
 	}
 	return nil
 }

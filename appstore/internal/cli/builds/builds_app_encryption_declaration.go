@@ -38,12 +38,12 @@ Examples:
 func BuildsAppEncryptionDeclarationViewCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("app-encryption-declaration view", flag.ExitOnError)
 
-	selectors := bindBuildSelectorFlags(fs, buildSelectorFlagOptions{includeLegacyID: true})
+	selectors := bindBuildSelectorFlags(fs, buildSelectorFlagOptions{})
 	output := shared.BindOutputFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "view",
-		ShortUsage: "asc builds app-encryption-declaration view (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER [--version VERSION] [--platform PLATFORM])",
+		ShortUsage: "asc builds app-encryption-declaration view (--build-id BUILD_ID | --app APP --latest | --app APP --build-number BUILD_NUMBER --platform PLATFORM [--version VERSION])",
 		ShortHelp:  "View the encryption declaration for a build.",
 		LongHelp: `View the encryption declaration for a build.
 
@@ -53,9 +53,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := selectors.applyLegacyAliases(); err != nil {
-				return err
-			}
 			if err := selectors.validate(); err != nil {
 				return err
 			}

@@ -67,45 +67,6 @@ func TestIAPRelatedReadsPropagateVersionSparseFields441(t *testing.T) {
 			},
 		},
 		{
-			name:     "image detail",
-			path:     "/v1/inAppPurchaseImages/image-1",
-			response: `{"data":{"type":"inAppPurchaseImages","id":"image-1"}}`,
-			wantQuery: map[string]string{
-				"fields[inAppPurchases]": "versions",
-				"include":                "inAppPurchase",
-			},
-			invoke: func(ctx context.Context, client *Client) error {
-				_, err := client.GetInAppPurchaseImage(ctx, "image-1", WithIAPImageIAPFields([]string{"versions"}))
-				return err
-			},
-		},
-		{
-			name:     "images relationship",
-			path:     "/v2/inAppPurchases/iap-1/images",
-			response: `{"data":[]}`,
-			wantQuery: map[string]string{
-				"fields[inAppPurchases]": "versions",
-				"include":                "inAppPurchase",
-			},
-			invoke: func(ctx context.Context, client *Client) error {
-				_, err := client.GetInAppPurchaseImages(ctx, "iap-1", WithIAPImagesIAPFields([]string{"versions"}))
-				return err
-			},
-		},
-		{
-			name:     "localization detail",
-			path:     "/v1/inAppPurchaseLocalizations/localization-1",
-			response: `{"data":{"type":"inAppPurchaseLocalizations","id":"localization-1"}}`,
-			wantQuery: map[string]string{
-				"fields[inAppPurchases]": "versions",
-				"include":                "inAppPurchaseV2",
-			},
-			invoke: func(ctx context.Context, client *Client) error {
-				_, err := client.GetInAppPurchaseLocalization(ctx, "localization-1", WithIAPLocalizationIAPFields([]string{"versions"}))
-				return err
-			},
-		},
-		{
 			name:     "localizations relationship",
 			path:     "/v2/inAppPurchases/iap-1/inAppPurchaseLocalizations",
 			response: `{"data":[]}`,

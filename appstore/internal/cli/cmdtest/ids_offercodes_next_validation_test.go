@@ -113,7 +113,7 @@ func TestPassTypeIDsListPaginateFromNext(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"pass-next-1"`) || !strings.Contains(stdout, `"id":"pass-next-2"`) {
 		t.Fatalf("expected paginated pass type IDs in output, got %q", stdout)
 	}
@@ -221,7 +221,7 @@ func TestMerchantIDsListPaginateFromNext(t *testing.T) {
 		}
 	})
 
-	assertOnlyDeprecatedCommandWarnings(t, stderr)
+	assertEmptyStderr(t, stderr)
 	if !strings.Contains(stdout, `"id":"merchant-next-1"`) || !strings.Contains(stdout, `"id":"merchant-next-2"`) {
 		t.Fatalf("expected paginated merchant IDs in output, got %q", stdout)
 	}

@@ -195,3 +195,43 @@ func TestPrintMarkdown_NotarySubmissionLogs(t *testing.T) {
 		t.Fatalf("expected log URL in output, got: %s", output)
 	}
 }
+
+func TestPrintTable_NotarizationStapleResult(t *testing.T) {
+	result := &NotarizationStapleResult{
+		FilePath:  "/tmp/My App.dmg",
+		Operation: "staple",
+		Stapled:   true,
+		Validated: true,
+	}
+
+	output := captureStdout(t, func() error {
+		return PrintTable(result)
+	})
+
+	for _, want := range []string{"Operation", "File Path", "Stapled", "Validated", "staple", "/tmp/My App.dmg", "true"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output, got: %s", want, output)
+		}
+	}
+}
+
+func TestPrintMarkdown_NotarizationValidateResult(t *testing.T) {
+	result := &NotarizationValidateResult{
+		FilePath:  "/tmp/My App.pkg",
+		Operation: "validate",
+		Validated: true,
+	}
+
+	output := captureStdout(t, func() error {
+		return PrintMarkdown(result)
+	})
+
+	for _, want := range []string{"Operation", "File Path", "Validated", "validate", "/tmp/My App.pkg", "true"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in output, got: %s", want, output)
+		}
+	}
+	if strings.Contains(output, "Stapled") {
+		t.Fatalf("validate output unexpectedly contains Stapled column: %s", output)
+	}
+}

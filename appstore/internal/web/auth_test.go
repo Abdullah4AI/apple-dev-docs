@@ -123,6 +123,65 @@ func TestLogWebAuthHTTPRedactsSensitiveQueryValues(t *testing.T) {
 	}
 }
 
+func TestSanitizeWebAuthURLForLogRedactsTransactionTaxJobID(t *testing.T) {
+	const jobID = "txn-tax-job-secret-9f3c"
+	rawURL := "https://appstoreconnect.apple.com/WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/123/sapVendorNumbers/456/reports/" + jobID + "/status?year=2026&regionCurrencyIds=13%2C88&signature=secret"
+
+	got := sanitizeWebAuthURLForLog(rawURL)
+	for _, secret := range []string{jobID, "/providers/123/", "/sapVendorNumbers/456/", "13%2C88", "13,88", "secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized URL leaked Transaction Tax value %q: %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, "reports/%5BREDACTED%5D/status") {
+		t.Fatalf("sanitized URL did not redact Transaction Tax job path: %q", got)
+	}
+	if !strings.Contains(got, "providers/%5BREDACTED%5D") || !strings.Contains(got, "sapVendorNumbers/%5BREDACTED%5D") {
+		t.Fatalf("sanitized URL did not redact provider and SAP vendor path values: %q", got)
+	}
+	if !strings.Contains(got, "regionCurrencyIds=%5BREDACTED%5D") {
+		t.Fatalf("sanitized URL did not redact region currency IDs: %q", got)
+	}
+}
+
+func TestLogWebAuthHTTPRedactsTransactionTaxTransportError(t *testing.T) {
+	origLogger := webDebugLogger
+	origDebugEnabled := webDebugEnabledFn
+	t.Cleanup(func() {
+		webDebugLogger = origLogger
+		webDebugEnabledFn = origDebugEnabled
+	})
+
+	var logs bytes.Buffer
+	webDebugLogger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return attr
+		},
+	}))
+	webDebugEnabledFn = func() bool { return true }
+
+	const jobID = "txn-tax-job-secret-9f3c"
+	pollURL := "https://appstoreconnect.apple.com" + transactionTaxFinancePath + "/providers/123/sapVendorNumbers/456/reports/" + jobID + "/status"
+	req, err := http.NewRequest(http.MethodGet, pollURL, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp := &http.Response{StatusCode: http.StatusBadGateway, Header: make(http.Header)}
+	logWebAuthHTTP("iris_request", req, resp, nil, &url.Error{Op: "Get", URL: pollURL, Err: errors.New("poll transport secret")})
+
+	output := logs.String()
+	if strings.Contains(output, jobID) || strings.Contains(output, "poll transport secret") || strings.Contains(output, "/providers/123/") || strings.Contains(output, "/sapVendorNumbers/456/") {
+		t.Fatalf("Transaction Tax transport error leaked into debug output: %q", output)
+	}
+	if !strings.Contains(output, "stage=iris_request") || !strings.Contains(output, "status=502") || !strings.Contains(output, "transaction tax request failed") {
+		t.Fatalf("expected safe stage/status/error diagnostics, got %q", output)
+	}
+}
+
 func TestLogWebAuthHTTPNoopWhenDebugDisabled(t *testing.T) {
 	origLogger := webDebugLogger
 	origDebugEnabled := webDebugEnabledFn

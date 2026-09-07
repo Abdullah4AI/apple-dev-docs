@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
 	webcore "github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/web"
 )
 
@@ -458,6 +461,148 @@ func TestWebBundleIDCapabilitiesEnableHelpUsesSupportedLoginFlags(t *testing.T) 
 	}
 	if !strings.Contains(cmd.LongHelp, `asc web auth login --apple-id "user@example.com"`) {
 		t.Fatalf("enable help is missing the supported login command: %q", cmd.LongHelp)
+	}
+}
+
+func TestWebBundleIDCapabilitiesRegistersDisableWithSharedFlags(t *testing.T) {
+	var disable *ffcli.Command
+	for _, subcommand := range WebBundleIDCapabilitiesCommand().Subcommands {
+		if subcommand.Name == "disable" {
+			disable = subcommand
+			break
+		}
+	}
+	if disable == nil {
+		t.Fatal("capabilities command did not register disable")
+	}
+	for _, name := range []string{"bundle-id", "capability", "confirm", "developer-team", "output", "pretty"} {
+		if disable.FlagSet.Lookup(name) == nil {
+			t.Fatalf("disable command missing --%s", name)
+		}
+	}
+	if !strings.Contains(disable.LongHelp, "PRIVATE_CLOUD_COMPUTE") || !strings.Contains(disable.LongHelp, "--confirm") {
+		t.Fatalf("disable help does not document its contract: %q", disable.LongHelp)
+	}
+}
+
+func TestWebBundleIDCapabilitiesDisableValidatesBeforeSession(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	t.Cleanup(func() { resolveSessionFn = origResolveSession })
+	resolveSessionFn = func(context.Context, string, string, string) (*webcore.AuthSession, string, error) {
+		t.Fatal("session resolution must not run for invalid disable input")
+		return nil, "", nil
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing bundle id", args: []string{"--capability", "PRIVATE_CLOUD_COMPUTE", "--confirm"}, want: "--bundle-id is required"},
+		{name: "missing capability", args: []string{"--bundle-id", "bundle-1", "--confirm"}, want: "--capability is required"},
+		{name: "missing confirm", args: []string{"--bundle-id", "bundle-1", "--capability", "PRIVATE_CLOUD_COMPUTE"}, want: "--confirm is required"},
+		{name: "unsupported capability", args: []string{"--bundle-id", "bundle-1", "--capability", "ICLOUD", "--confirm"}, want: "unsupported Developer Portal capability"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := WebBundleIDCapabilitiesDisableCommand()
+			if err := cmd.FlagSet.Parse(tc.args); err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			stdout, stderr := captureWebCommandOutput(t, func() {
+				err := cmd.Exec(context.Background(), nil)
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("expected usage error, got %v", err)
+				}
+			})
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestWebBundleIDCapabilitiesDisablePrintsReceiptAndWarning(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origDisable := disableDeveloperBundleIDCapabilityFn
+	origPersist := persistWebSessionFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		disableDeveloperBundleIDCapabilityFn = origDisable
+		persistWebSessionFn = origPersist
+	})
+	resolveSessionFn = func(context.Context, string, string, string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(*webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	persistWebSessionFn = func(*webcore.AuthSession) error { return nil }
+	disableDeveloperBundleIDCapabilityFn = func(_ context.Context, _ *webcore.Client, req webcore.DeveloperBundleIDCapabilityDisableRequest) (*asc.DeveloperBundleIDCapabilityDisableResult, error) {
+		return &asc.DeveloperBundleIDCapabilityDisableResult{BundleID: req.BundleID, Capability: req.Capability, Changed: true, Status: "disabled"}, nil
+	}
+
+	cmd := WebBundleIDCapabilitiesDisableCommand()
+	if err := cmd.FlagSet.Parse([]string{"--bundle-id", "bundle-1", "--capability", "private_cloud_compute", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	stdout, stderr := captureWebCommandOutput(t, func() {
+		if err := cmd.Exec(context.Background(), nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if !strings.Contains(stdout, `"status":"disabled"`) || !strings.Contains(stdout, `"changed":true`) {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "invalidates existing provisioning profiles") {
+		t.Fatalf("stderr missing profile warning: %q", stderr)
+	}
+}
+
+func TestWebBundleIDCapabilitiesDisableUnverifiedPersistsAndPrintsNoReceipt(t *testing.T) {
+	origResolveSession := resolveSessionFn
+	origNewWebClient := newWebClientFn
+	origDisable := disableDeveloperBundleIDCapabilityFn
+	origPersist := persistWebSessionFn
+	t.Cleanup(func() {
+		resolveSessionFn = origResolveSession
+		newWebClientFn = origNewWebClient
+		disableDeveloperBundleIDCapabilityFn = origDisable
+		persistWebSessionFn = origPersist
+	})
+	resolveSessionFn = func(context.Context, string, string, string) (*webcore.AuthSession, string, error) {
+		return &webcore.AuthSession{}, "cache", nil
+	}
+	newWebClientFn = func(*webcore.AuthSession) *webcore.Client { return &webcore.Client{} }
+	disableDeveloperBundleIDCapabilityFn = func(context.Context, *webcore.Client, webcore.DeveloperBundleIDCapabilityDisableRequest) (*asc.DeveloperBundleIDCapabilityDisableResult, error) {
+		return nil, &webcore.DeveloperBundleIDCapabilityUnverifiedError{Err: errors.New("write may have been applied; no automatic retry was sent")}
+	}
+	persistCalls := 0
+	persistWebSessionFn = func(*webcore.AuthSession) error {
+		persistCalls++
+		return nil
+	}
+
+	cmd := WebBundleIDCapabilitiesDisableCommand()
+	if err := cmd.FlagSet.Parse([]string{"--bundle-id", "bundle-1", "--capability", "PRIVATE_CLOUD_COMPUTE", "--confirm", "--output", "json"}); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	var runErr error
+	stdout, stderr := captureWebCommandOutput(t, func() { runErr = cmd.Exec(context.Background(), nil) })
+	if runErr == nil || !strings.Contains(runErr.Error(), "no automatic retry was sent") {
+		t.Fatalf("error = %v, want unverified diagnostic", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected no success receipt on an unverified write, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "may have changed the App ID") || !strings.Contains(stderr, "can invalidate existing provisioning profiles") {
+		t.Fatalf("stderr missing possible-change warning: %q", stderr)
+	}
+	if persistCalls != 1 {
+		t.Fatalf("persist calls = %d, want 1", persistCalls)
 	}
 }
 

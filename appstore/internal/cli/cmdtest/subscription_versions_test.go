@@ -53,7 +53,7 @@ func TestSubscriptionVersionsListJSON(t *testing.T) {
 			"--state", "PREPARE_FOR_SUBMISSION", "--fields", "version,state",
 			"--subscription-fields", "name,productId", "--image-fields", "fileName,fileSize",
 			"--localization-fields", "name,locale", "--include", "localizations,images",
-			"--limit", "7", "--image-limit", "5", "--localization-limit", "6", "--output", "json",
+			"--limit", "7", "--images-limit", "5", "--localizations-limit", "6", "--output", "json",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -61,10 +61,8 @@ func TestSubscriptionVersionsListJSON(t *testing.T) {
 			t.Fatalf("run error: %v", err)
 		}
 	})
-	wantStderr := "Warning: `--image-limit` is deprecated. Use `--images-limit`.\n" +
-		"Warning: `--localization-limit` is deprecated. Use `--localizations-limit`.\n"
-	if stderr != wantStderr {
-		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 	var payload struct {
 		Data []struct {

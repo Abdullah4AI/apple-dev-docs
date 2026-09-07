@@ -40,7 +40,6 @@ func AppEncryptionDeclarationsListCommand() *ffcli.Command {
 
 	appID := fs.String("id", "", "App Store Connect app ID (or ASC_APP_ID)")
 	builds := fs.String("build-id", "", "Filter by build IDs (comma-separated)")
-	legacyBuilds := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	fields := fs.String("fields", "", "Fields to include: "+strings.Join(appEncryptionDeclarationFieldsList(), ", "))
 	documentFields := fs.String("document-fields", "", "Document fields to include: "+strings.Join(appEncryptionDeclarationDocumentFieldsList(), ", "))
 	include := fs.String("include", "", "Include relationships: "+strings.Join(appEncryptionDeclarationIncludeList(), ", "))
@@ -63,9 +62,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuilds.Apply(builds); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 200) {
 				return shared.UsageError("apps app-encryption-declarations list: --limit must be between 1 and 200")
 			}

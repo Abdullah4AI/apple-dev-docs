@@ -93,7 +93,7 @@ func TestPerformanceMetricsViewRejectsInvalidMetricType(t *testing.T) {
 
 	var runErr error
 	stdout, _ := captureOutput(t, func() {
-		if err := root.Parse([]string{"performance", "metrics", "view", "--build", "build-1", "--metric-type", "BOGUS"}); err != nil {
+		if err := root.Parse([]string{"performance", "metrics", "view", "--build-id", "build-1", "--metric-type", "BOGUS"}); err != nil {
 			t.Fatalf("parse error: %v", err)
 		}
 		runErr = root.Run(context.Background())

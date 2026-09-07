@@ -72,6 +72,10 @@ func copyReplacementMetadata(destination, source *os.File, info os.FileInfo) err
 	return nil
 }
 
+func restoreReplacementMode(destination *os.File, info os.FileInfo) error {
+	return destination.Chmod(info.Mode().Perm())
+}
+
 func shouldSetReplacementDACL(control windows.SECURITY_DESCRIPTOR_CONTROL, dacl *windows.ACL) (bool, error) {
 	if dacl == nil {
 		// SECURITY_DESCRIPTOR.DACL() returns (nil, _, nil) for a present NULL

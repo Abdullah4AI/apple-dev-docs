@@ -7,7 +7,6 @@ import (
 )
 
 type (
-	IAPImagesOption                   func(*iapImagesQuery)
 	IAPOfferCodesOption               func(*iapOfferCodesQuery)
 	IAPPricePointsOption              func(*iapPricePointsQuery)
 	IAPOfferCodeCustomCodesOption     func(*iapOfferCodeCustomCodesQuery)
@@ -17,12 +16,6 @@ type (
 	IAPPriceSchedulePricesOption      func(*iapPriceSchedulePricesQuery)
 	IAPPriceScheduleOption            func(*iapPriceScheduleQuery)
 )
-
-type iapImagesQuery struct {
-	listQuery
-	iapFields []string
-	include   []string
-}
 
 type iapOfferCodesQuery struct {
 	listQuery
@@ -69,32 +62,6 @@ type iapPriceScheduleQuery struct {
 	inAppPriceFields     []string
 	manualPricesLimit    int
 	automaticPricesLimit int
-}
-
-func WithIAPImagesLimit(limit int) IAPImagesOption {
-	return func(q *iapImagesQuery) {
-		if limit > 0 {
-			q.limit = limit
-		}
-	}
-}
-
-func WithIAPImagesNextURL(next string) IAPImagesOption {
-	return func(q *iapImagesQuery) {
-		if strings.TrimSpace(next) != "" {
-			q.nextURL = strings.TrimSpace(next)
-		}
-	}
-}
-
-// WithIAPImagesIAPFields sets fields[inAppPurchases] for included IAPs.
-func WithIAPImagesIAPFields(fields []string) IAPImagesOption {
-	return func(q *iapImagesQuery) { q.iapFields = normalizeUniqueList(fields) }
-}
-
-// WithIAPImagesInclude sets the exact image relationship include set.
-func WithIAPImagesInclude(include []string) IAPImagesOption {
-	return func(q *iapImagesQuery) { q.include = normalizeUniqueList(include) }
 }
 
 func WithIAPOfferCodesLimit(limit int) IAPOfferCodesOption {
@@ -311,14 +278,6 @@ func WithIAPPriceScheduleAutomaticPricesLimit(limit int) IAPPriceScheduleOption 
 			q.automaticPricesLimit = limit
 		}
 	}
-}
-
-func buildIAPImagesQuery(query *iapImagesQuery) string {
-	values := url.Values{}
-	addLimit(values, query.limit)
-	addCSV(values, "fields[inAppPurchases]", query.iapFields)
-	addCSV(values, "include", includeWhenFieldsSelected(query.include, "inAppPurchase", query.iapFields))
-	return values.Encode()
 }
 
 func buildIAPOfferCodesQuery(query *iapOfferCodesQuery) string {

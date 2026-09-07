@@ -47,7 +47,6 @@ func BuildBundlesListCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	limit := fs.Int("limit", 0, "Maximum included build bundles (1-50)")
 	output := shared.BindOutputFlags(fs)
 
@@ -63,9 +62,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
 			if *limit != 0 && (*limit < 1 || *limit > 50) {
 				return shared.UsageError("build-bundles list: --limit must be between 1 and 50")
 			}

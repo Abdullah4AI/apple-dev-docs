@@ -75,30 +75,3 @@ Examples:
 		},
 	}
 }
-
-// DeprecatedCertificatesRelationshipsAliasCommand preserves the legacy
-// relationships surface as a hidden compatibility alias.
-func DeprecatedCertificatesRelationshipsAliasCommand() *ffcli.Command {
-	fs := flag.NewFlagSet("relationships", flag.ExitOnError)
-
-	return &ffcli.Command{
-		Name:       "relationships",
-		ShortUsage: "asc certificates links <subcommand> [flags]",
-		ShortHelp:  "DEPRECATED: use `asc certificates links ...`.",
-		LongHelp:   "Deprecated compatibility alias for `asc certificates links ...`.",
-		FlagSet:    fs,
-		UsageFunc:  shared.DeprecatedUsageFunc,
-		Subcommands: []*ffcli.Command{
-			shared.DeprecatedAliasLeafCommand(
-				CertificatesRelationshipsPassTypeIDCommand(),
-				"pass-type-id",
-				"asc certificates links pass-type-id --id \"CERT_ID\"",
-				"asc certificates links pass-type-id",
-				"Warning: `asc certificates relationships pass-type-id` is deprecated. Use `asc certificates links pass-type-id`.",
-			),
-		},
-		Exec: func(ctx context.Context, args []string) error {
-			return flag.ErrHelp
-		},
-	}
-}

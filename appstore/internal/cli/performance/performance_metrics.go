@@ -103,7 +103,6 @@ func PerformanceMetricsGetCommand() *ffcli.Command {
 	fs := flag.NewFlagSet("metrics view", flag.ExitOnError)
 
 	buildID := fs.String("build-id", "", "Build ID to fetch metrics for")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	platform := fs.String("platform", "", "Platform filter (IOS)")
 	metricType := fs.String("metric-type", "", "Metric types (comma-separated: "+strings.Join(perfPowerMetricTypeList(), ", ")+")")
 	deviceType := fs.String("device-type", "", "Device types (comma-separated, e.g., iPhone15,2)")
@@ -121,10 +120,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			trimmedBuildID := strings.TrimSpace(*buildID)
 			if trimmedBuildID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --build-id is required")

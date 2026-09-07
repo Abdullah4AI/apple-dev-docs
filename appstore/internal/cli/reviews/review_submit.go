@@ -36,7 +36,6 @@ func ReviewSubmitCommand() *ffcli.Command {
 	version := fs.String("version", "", "App Store version string")
 	versionID := fs.String("version-id", "", "App Store version ID")
 	buildID := fs.String("build-id", "", "Build ID to attach")
-	legacyBuildID := shared.BindDeprecatedStringFlagAlias(fs, "build", "build-id")
 	platform := fs.String("platform", "IOS", "Platform: IOS, MAC_OS, TV_OS, VISION_OS")
 	confirm := fs.Bool("confirm", false, "Confirm submission (required unless --dry-run)")
 	dryRun := fs.Bool("dry-run", false, "Preview the review submission flow without mutating")
@@ -60,10 +59,6 @@ Examples:
 		FlagSet:   fs,
 		UsageFunc: shared.DefaultUsageFunc,
 		Exec: func(ctx context.Context, args []string) error {
-			if err := legacyBuildID.Apply(buildID); err != nil {
-				return err
-			}
-
 			resolvedAppID := shared.ResolveAppID(*appID)
 			if resolvedAppID == "" {
 				fmt.Fprintln(os.Stderr, "Error: --app is required (or set ASC_APP_ID)")

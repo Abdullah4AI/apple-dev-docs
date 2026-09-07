@@ -53,3 +53,35 @@ func TestWriteFilePreservingModePreservesExtendedAttributes(t *testing.T) {
 		t.Fatalf("extended attribute = %q, want %q", got, value)
 	}
 }
+
+func TestWriteFilePreservingModePreservesSpecialBits(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS clears setuid/setgid during rooted replacement; Linux CI covers special-bit preservation")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "special.txt")
+	mustWrite(t, path, "original")
+	want := os.FileMode(0o755) | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+	if err := os.Chmod(path, want); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	initial, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(initial) error = %v", err)
+	}
+	mask := os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+	if got := initial.Mode() & mask; got != want {
+		t.Skipf("filesystem does not preserve special mode bits (got %v, want %v)", got, want)
+	}
+	root := mustRoot(t, dir)
+	if err := root.WriteFilePreservingMode("special.txt", []byte("replacement"), 0o600); err != nil {
+		t.Fatalf("WriteFilePreservingMode() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode() & mask; got != want {
+		t.Fatalf("mode = %v (%#o), want %v (%#o)", got, uint32(got.Perm()), want, uint32(want.Perm()))
+	}
+}

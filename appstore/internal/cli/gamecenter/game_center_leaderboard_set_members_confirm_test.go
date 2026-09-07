@@ -7,9 +7,12 @@ import (
 	"testing"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/asc"
+	"github.com/Abdullah4AI/apple-developer-toolkit/appstore/internal/cli/shared"
 )
 
-func TestGameCenterLeaderboardSetMembersReplacementWarnsWithoutConfirmDuringCompatibilityWindow(t *testing.T) {
+func TestGameCenterLeaderboardSetMembersReplacementRejectsWithoutConfirmBeforeHTTP(t *testing.T) {
 	isolateGameCenterAuthEnv(t)
 
 	commands := map[string]func() *ffcli.Command{
@@ -20,6 +23,13 @@ func TestGameCenterLeaderboardSetMembersReplacementWarnsWithoutConfirmDuringComp
 	for name, newCommand := range commands {
 		for _, leaderboardIDs := range []string{"leaderboard-1", ""} {
 			t.Run(name+" ids="+leaderboardIDs, func(t *testing.T) {
+				factoryCalled := false
+				restore := shared.SetASCClientFactoryForTesting(func() (*asc.Client, error) {
+					factoryCalled = true
+					return nil, errors.New("poison client factory called")
+				})
+				t.Cleanup(restore)
+
 				cmd := newCommand()
 				if err := cmd.FlagSet.Parse([]string{
 					"--set-id", "set-1", "--leaderboard-ids", leaderboardIDs,
@@ -31,12 +41,17 @@ func TestGameCenterLeaderboardSetMembersReplacementWarnsWithoutConfirmDuringComp
 				stderr := captureGameCenterStderr(t, func() {
 					err = cmd.Exec(context.Background(), []string{})
 				})
-				if errors.Is(err, flag.ErrHelp) {
-					t.Fatalf("replacement without --confirm must remain compatible before 5.0.0, got %v", err)
+				if !errors.Is(err, flag.ErrHelp) {
+					t.Fatalf("replacement without --confirm must fail validation, got %v", err)
 				}
-				want := gameCenterReplacementConfirmWarning + "\n"
-				if stderr != want {
-					t.Fatalf("stderr = %q, want %q", stderr, want)
+				if err.Error() != "--confirm" {
+					t.Fatalf("error = %q, want missing parameter %q", err.Error(), "--confirm")
+				}
+				if stderr != "Error: --confirm is required\n" {
+					t.Fatalf("stderr = %q, want exact missing --confirm diagnostic", stderr)
+				}
+				if factoryCalled {
+					t.Fatal("client factory called before --confirm validation")
 				}
 			})
 		}
